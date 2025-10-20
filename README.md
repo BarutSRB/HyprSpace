@@ -1,6 +1,8 @@
 # HyprSpace a Heavily Enhanced Fork of AeroSpace
 
-<img src="./resources/Assets.xcassets/AppIcon.appiconset/icon.png" width="40%" align="right">
+<p align="center">
+  <img src="https://github.com/BarutSRB/HyprSpace/raw/289dfc3487dab445f60a846b1a86e2d98fd34d3b/CleanShot%202025-10-20%20at%2015.18.44%402x.png" width="100%">
+</p>
 
 **AeroSpace** is an i3-like tiling window manager for macOS
 
