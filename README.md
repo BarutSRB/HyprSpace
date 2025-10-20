@@ -49,9 +49,13 @@ A binary tree-based tiling layout inspired by Hyprland's dwindle algorithm.
 
 ### 📦 Download & Install
 
-1. **Download** [AeroSpace.dmg](../../releases/latest) from the latest release
+Choose your preferred installation method from the [latest release](../../releases/latest):
+
+#### Option 1: DMG Installer (Recommended)
+
+1. **Download** `AeroSpace-v*.dmg`
 2. **Open** the .dmg file
-3. **Drag** AeroSpace.app to your Applications folder
+3. **Drag** AeroSpace.app to the Applications folder
 4. **First Launch Only** - Bypass Gatekeeper:
    - **Right-click** AeroSpace.app → Select **"Open"**
    - Click **"Open"** in the security dialog
@@ -60,6 +64,29 @@ A binary tree-based tiling layout inspired by Hyprland's dwindle algorithm.
      xattr -cr /Applications/AeroSpace.app
      ```
 5. **Grant Accessibility Permissions** when prompted
+
+#### Option 2: ZIP Archive (Includes CLI & Extras)
+
+1. **Download** `AeroSpace-v*.zip`
+2. **Extract** the archive
+3. **Move** `AeroSpace.app` to your Applications folder
+4. **Optional - Install CLI:**
+   ```bash
+   # Copy CLI binary to a directory in your PATH
+   cp AeroSpace-v*/bin/aerospace /usr/local/bin/
+
+   # Copy man pages (optional)
+   cp AeroSpace-v*/manpage/*.1 /usr/local/share/man/man1/
+
+   # Copy shell completion (optional - choose your shell)
+   cp AeroSpace-v*/shell-completion/bash/_aerospace /usr/local/etc/bash_completion.d/
+   # OR for zsh:
+   cp AeroSpace-v*/shell-completion/zsh/_aerospace /usr/local/share/zsh/site-functions/
+   # OR for fish:
+   cp AeroSpace-v*/shell-completion/fish/aerospace.fish ~/.config/fish/completions/
+   ```
+5. **Bypass Gatekeeper** (same as Option 1, step 4)
+6. **Grant Accessibility Permissions** when prompted
 
 ### 🔧 Enable Features
 
@@ -186,13 +213,12 @@ cd AeroSpace
 # Build debug version
 ./build-debug.sh
 
-# Build release (self-signed)
-./build-release.sh --codesign-identity "-"
+# Build release (creates both .zip and .dmg)
+./build-release.sh
 
-# Create .dmg installer
-hdiutil create -volname "AeroSpace Installer" \
-  -srcfolder .release/AeroSpace.app \
-  -ov -format UDZO AeroSpace.dmg
+# Outputs:
+# - .release/AeroSpace-v*.zip (full package with CLI and extras)
+# - .release/AeroSpace-v*.dmg (app-only installer)
 ```
 
 **Requirements:**

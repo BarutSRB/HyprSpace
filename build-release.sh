@@ -3,7 +3,7 @@ cd "$(dirname "$0")"
 source ./script/setup.sh
 
 build_version="0.0.0-SNAPSHOT"
-codesign_identity="aerospace-codesign-certificate"
+codesign_identity="-"
 while test $# -gt 0; do
     case $1 in
         --build-version) build_version="$2"; shift 2;;
@@ -53,7 +53,9 @@ cp -r .build/apple/Products/Release/aerospace .release
 ### SIGN CLI ###
 ################
 
-codesign -s "$codesign_identity" .release/aerospace
+if [ "$codesign_identity" != "none" ]; then
+    codesign -s "$codesign_identity" .release/aerospace
+fi
 
 ################
 ### VALIDATE ###
@@ -102,8 +104,10 @@ check-universal-binary .release/aerospace
 check-contains-hash .release/AeroSpace.app/Contents/MacOS/AeroSpace
 check-contains-hash .release/aerospace
 
-codesign -v .release/AeroSpace.app
-codesign -v .release/aerospace
+if [ "$codesign_identity" != "none" ]; then
+    codesign -v .release/AeroSpace.app
+    codesign -v .release/aerospace
+fi
 
 ############
 ### PACK ###
@@ -117,6 +121,30 @@ cd .release
     cp -r AeroSpace.app "AeroSpace-v$build_version"
     zip -r "AeroSpace-v$build_version.zip" "AeroSpace-v$build_version"
 cd -
+
+#############
+### DMG ####
+#############
+
+# Create DMG with just the app for simple drag-to-Applications installation
+# Create a temporary directory for DMG contents
+temp_dmg_dir=".release/dmg-temp"
+rm -rf "$temp_dmg_dir" && mkdir -p "$temp_dmg_dir"
+
+# Copy app to temp directory
+cp -r .release/AeroSpace.app "$temp_dmg_dir/"
+
+# Create Applications symlink for easy installation
+ln -s /Applications "$temp_dmg_dir/Applications"
+
+# Create the DMG
+hdiutil create -volname "AeroSpace Installer" \
+    -srcfolder "$temp_dmg_dir" \
+    -ov -format UDZO \
+    ".release/AeroSpace-v$build_version.dmg"
+
+# Cleanup
+rm -rf "$temp_dmg_dir"
 
 #################
 ### Brew Cask ###
