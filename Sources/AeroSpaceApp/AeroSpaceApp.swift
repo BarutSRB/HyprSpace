@@ -11,6 +11,13 @@ struct AeroSpaceApp: App {
 
     init() {
         initAppBundle()
+        // CENTERED BAR FEATURE
+        Task { @MainActor in
+            CenteredBarManager.shared = CenteredBarManager()
+            if CenteredBarSettings.shared.enabled {
+                CenteredBarManager.shared?.setupCenteredBar(viewModel: TrayMenuModel.shared)
+            }
+        }
     }
 
     var body: some Scene {

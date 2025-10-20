@@ -60,6 +60,8 @@ public final class TrayMenuModel: ObservableObject {
         items.insert(mode, at: 0)
     }
     TrayMenuModel.shared.trayItems = items
+    // CENTERED BAR FEATURE
+    CenteredBarManager.shared?.update(viewModel: TrayMenuModel.shared)
 }
 
 struct WorkspaceViewModel: Hashable {

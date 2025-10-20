@@ -46,6 +46,90 @@ func getExperimentalUISettingsMenu(viewModel: TrayMenuModel) -> some View {
         ForEach(MenuBarStyle.allCases, id: \.id) { style in
             MenuBarStyleButton(style: style, color: color).environmentObject(viewModel)
         }
+
+        // CENTERED BAR FEATURE
+        Divider()
+        Text("Centered Workspace Bar:")
+        Button {
+            CenteredBarSettings.shared.enabled = !CenteredBarSettings.shared.enabled
+            CenteredBarManager.shared?.toggleCenteredBar(viewModel: viewModel)
+        } label: {
+            Toggle(isOn: .constant(CenteredBarSettings.shared.enabled)) {
+                Text("Enable centered workspace bar")
+            }
+        }
+
+        Button {
+            CenteredBarSettings.shared.showNumbers = !CenteredBarSettings.shared.showNumbers
+            if CenteredBarSettings.shared.enabled {
+                CenteredBarManager.shared?.update(viewModel: viewModel)
+            }
+        } label: {
+            Toggle(isOn: .constant(CenteredBarSettings.shared.showNumbers)) {
+                Text("Show workspace numbers")
+            }
+        }
+        .disabled(!CenteredBarSettings.shared.enabled)
+
+        // Window level selection
+        Text("Window Level:")
+        ForEach(CenteredBarWindowLevel.allCases) { level in
+            Button {
+                CenteredBarSettings.shared.windowLevel = level
+                if CenteredBarSettings.shared.enabled {
+                    CenteredBarManager.shared?.update(viewModel: viewModel)
+                }
+            } label: {
+                Toggle(isOn: .constant(CenteredBarSettings.shared.windowLevel == level)) {
+                    Text(level.title)
+                }
+            }
+        }
+        .disabled(!CenteredBarSettings.shared.enabled)
+
+        // Target display selection
+        Text("Target Display:")
+        ForEach(CenteredBarTargetDisplay.allCases) { target in
+            Button {
+                CenteredBarSettings.shared.targetDisplay = target
+                if CenteredBarSettings.shared.enabled {
+                    CenteredBarManager.shared?.update(viewModel: viewModel)
+                }
+            } label: {
+                Toggle(isOn: .constant(CenteredBarSettings.shared.targetDisplay == target)) {
+                    Text(target.title)
+                }
+            }
+        }
+        .disabled(!CenteredBarSettings.shared.enabled)
+
+        Divider()
+
+        // Notch-aware positioning
+        Button {
+            CenteredBarSettings.shared.notchAware = !CenteredBarSettings.shared.notchAware
+            if CenteredBarSettings.shared.enabled {
+                CenteredBarManager.shared?.update(viewModel: viewModel)
+            }
+        } label: {
+            Toggle(isOn: .constant(CenteredBarSettings.shared.notchAware)) {
+                Text("Notch-aware positioning (shift right of notch)")
+            }
+        }
+        .disabled(!CenteredBarSettings.shared.enabled)
+
+        // Deduplicate app icons
+        Button {
+            CenteredBarSettings.shared.deduplicateAppIcons = !CenteredBarSettings.shared.deduplicateAppIcons
+            if CenteredBarSettings.shared.enabled {
+                CenteredBarManager.shared?.update(viewModel: viewModel)
+            }
+        } label: {
+            Toggle(isOn: .constant(CenteredBarSettings.shared.deduplicateAppIcons)) {
+                Text("Deduplicate app icons (show badge with count)")
+            }
+        }
+        .disabled(!CenteredBarSettings.shared.enabled)
     } label: {
         Text("Experimental UI Settings (No stability guarantees)")
     }
