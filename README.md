@@ -14,7 +14,7 @@
 
 ## ✨ What's New in This Fork
 
-This fork enhances the original AeroSpace with **two powerful features** not available upstream:
+This fork enhances the original AeroSpace with **three powerful features** not available upstream:
 
 ### 🎯 Centered Workspace Bar
 A macOS integrated menu bar that displays workspace indicators and full GUI window icons **centered at the top of your screen**.
