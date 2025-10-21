@@ -49,6 +49,8 @@ extension TreeNode {
                         try await container.layoutAccordion(point, width: width, height: height, virtual: virtual, context)
                     case .dwindle:
                         try await container.layoutDwindle(point, width: width, height: height, virtual: virtual, context)
+                    case .scroll:
+                        try await container.layoutScroll(point, width: width, height: height, virtual: virtual, context)
                 }
             case .macosMinimizedWindowsContainer, .macosFullscreenWindowsContainer,
                  .macosPopupWindowsContainer, .macosHiddenAppsWindowsContainer:
@@ -250,6 +252,108 @@ extension TilingContainer {
                                                            topLeftY: virtual.topLeftY + virtual.height * splitRatio,
                                                            width: virtual.width, height: virtual.height * (1 - splitRatio)),
                                              context: context)
+        }
+    }
+
+    @MainActor
+    fileprivate func layoutScroll(_ point: CGPoint, width: CGFloat, height: CGFloat, virtual: Rect, _ context: LayoutContext) async throws {
+        guard !children.isEmpty else { return }
+
+        // Special case: single window uses full width
+        if children.count == 1 {
+            try await children[0].layoutRecursive(
+                point,
+                width: width,
+                height: height,
+                virtual: virtual,
+                context
+            )
+            return
+        }
+
+        // Carousel scroll layout (horizontal only):
+        // - Focused window: centered, 80% screen width
+        // - Peek effect: 10% of left/right neighbors visible at edges
+        // - Custom widths: preserved from previous layouts (if resized)
+
+        let focusedWidthRatio: CGFloat = 0.8
+        let defaultWindowWidth = width * focusedWidthRatio
+        let peekMargin = width * ((1.0 - focusedWidthRatio) / 2.0)
+
+        // Find the focused (most recent) window
+        let anchorNode = mostRecentChild ?? children[0]
+        guard let anchorIndex = children.firstIndex(where: { $0 === anchorNode }) else { return }
+
+        // Get window widths (custom if resized, otherwise default 80%)
+        let windowWidths: [CGFloat] = children.map { child in
+            if let virtualRect = child.lastAppliedLayoutVirtualRect {
+                return virtualRect.width
+            }
+            return defaultWindowWidth
+        }
+
+        // Calculate positions:
+        // Focused window is centered with peekMargin on left
+        let focusedX = point.x + peekMargin
+        var positions = Array(repeating: point.x, count: children.count)
+        positions[anchorIndex] = focusedX
+
+        // Position windows to the right of focused
+        var rightCursor = focusedX + windowWidths[anchorIndex]
+        if anchorIndex + 1 < children.count {
+            for index in (anchorIndex + 1)..<children.count {
+                positions[index] = rightCursor
+                rightCursor += windowWidths[index]
+            }
+        }
+
+        // Position windows to the left of focused
+        var leftCursor = focusedX
+        if anchorIndex > 0 {
+            for index in stride(from: anchorIndex - 1, through: 0, by: -1) {
+                leftCursor -= windowWidths[index]
+                positions[index] = leftCursor
+            }
+        }
+
+        // Virtual positions (gapless, for logical representation)
+        var virtualPositions = Array(repeating: virtual.topLeftX, count: children.count)
+        virtualPositions[anchorIndex] = virtual.topLeftX
+
+        var virtualRightCursor = virtual.topLeftX + windowWidths[anchorIndex]
+        if anchorIndex + 1 < children.count {
+            for index in (anchorIndex + 1)..<children.count {
+                virtualPositions[index] = virtualRightCursor
+                virtualRightCursor += windowWidths[index]
+            }
+        }
+
+        var virtualLeftCursor = virtual.topLeftX
+        if anchorIndex > 0 {
+            for index in stride(from: anchorIndex - 1, through: 0, by: -1) {
+                virtualLeftCursor -= windowWidths[index]
+                virtualPositions[index] = virtualLeftCursor
+            }
+        }
+
+        // Layout all windows
+        for (index, child) in children.enumerated() {
+            let childWidth = windowWidths[index]
+            let childPoint = CGPoint(x: positions[index], y: point.y)
+
+            try await child.layoutRecursive(
+                childPoint,
+                width: childWidth,
+                height: height,
+                virtual: Rect(
+                    topLeftX: virtualPositions[index],
+                    topLeftY: virtual.topLeftY,
+                    width: childWidth,
+                    height: virtual.height
+                ),
+                context
+            )
+            child.setWeight(.h, childWidth)
         }
     }
 }

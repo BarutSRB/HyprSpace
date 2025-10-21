@@ -4,7 +4,7 @@
 
 **AeroSpace** is an i3-like tiling window manager for macOS
 
-*This fork adds two exclusive features: **Centered Workspace Bar** + **Dwindle Layout***
+*This fork adds three exclusive features: **Centered Workspace Bar** + **Dwindle Layout** + **Niri Layout***
 
 [Download Latest Release](../../releases) • [Original AeroSpace](https://github.com/nikitabobko/AeroSpace) • [Report Issues](../../issues)
 
@@ -42,6 +42,23 @@ A binary tree-based tiling layout inspired by Hyprland's dwindle algorithm.
 - 🎯 Perfect for dynamic, organic workspace layouts
 
 **Inspired by:** [Hyprland](https://github.com/hyprwm/Hyprland)
+
+### 🎠 Niri Layout
+A carousel-style layout where the focused window is centered with neighboring windows peeking at the edges.
+
+**Features:**
+- 🎯 Focused window centered at 80% screen width
+- 👀 Peek effect: 10% margins show neighboring windows on left/right
+- 📏 Custom widths: Resize any window, custom sizes preserved
+- ➡️ Horizontal-first: Optimized for wide monitors
+- 🔄 Smooth focus-based carousel navigation
+- 🎨 Works great with minimal gaps for clean aesthetics
+
+**Config usage:** Use `layout scroll` in your .toml file
+
+**Perfect for:** Single-row workflows, presentation mode, MacBook displays
+
+**Inspired by:** [Niri Compositor](https://github.com/YaLTeR/niri)
 
 ---
 
@@ -164,6 +181,44 @@ cmd-shift-v = 'layout vertical'
 └─────────┘        └────┴────┘         └────┴────┘         └────┴────┘
 ```
 
+### Niri Layout Example
+
+```toml
+# ~/.aerospace.toml
+
+# Set Niri as default (great for horizontal workflows)
+default-root-container-layout = 'scroll'  # Note: uses 'scroll' in config
+
+[mode.main.binding]
+# Optimized for horizontal navigation
+cmd-h = 'focus left'
+cmd-l = 'focus right'
+
+# Resize focused window width (default 80%)
+cmd-shift-minus = 'resize smart -50'
+cmd-shift-equal = 'resize smart +50'
+
+# Toggle layouts
+cmd-shift-s = 'layout scroll'  # Niri layout
+cmd-shift-t = 'layout tiles'
+cmd-shift-d = 'layout dwindle'
+```
+
+**Niri Layout Visual:**
+```
+3 windows (focused on middle):
+┌──┬────────────────┬──┐
+│1 │       2        │3 │  ← Window 2 is focused (80% width)
+│  │   (focused)    │  │     Windows 1 & 3 peek at 10% each
+└──┴────────────────┴──┘
+
+After focusing right (cmd-l):
+┌──┬────────────────┬──┐
+│1 │       3        │4 │  ← Window 3 now centered
+│  │   (focused)    │  │     Carousel shifts smoothly
+└──┴────────────────┴──┘
+```
+
 ---
 
 ## Original AeroSpace Features
@@ -186,6 +241,7 @@ All original AeroSpace features are preserved:
 | **tiles** | ✅ | ✅ | Classic i3-style tiling |
 | **accordion** | ✅ | ✅ | One maximized, others stacked |
 | **dwindle** | ❌ | ✅ | Binary tree with alternating splits |
+| **niri** | ❌ | ✅ | Carousel with centered focused window (use `scroll` in config) |
 
 ---
 

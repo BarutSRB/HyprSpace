@@ -18,7 +18,7 @@ private func balance(_ parent: TilingContainer) {
     for child in parent.children {
         switch parent.layout {
             case .tiles, .dwindle: child.setWeight(parent.orientation, 1)
-            case .accordion: break // Do nothing
+            case .accordion, .scroll: break // Do nothing
         }
         if let child = child as? TilingContainer {
             balance(child)

@@ -59,6 +59,7 @@ enum Layout: String {
     case tiles
     case accordion
     case dwindle
+    case scroll
 }
 
 extension String {

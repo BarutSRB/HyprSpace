@@ -181,6 +181,17 @@ final class ConfigTest: XCTestCase {
         }
     }
 
+    func testParseScroll() {
+        let command = parseCommand("layout scroll h_scroll v_scroll").cmdOrNil
+        XCTAssertTrue(command is LayoutCommand)
+        assertEquals((command as! LayoutCommand).args.toggleBetween.val, [.scroll, .h_scroll, .v_scroll])
+
+        guard case .help = parseCommand("layout scroll -h") else {
+            XCTFail()
+            return
+        }
+    }
+
     func testSplitCommandAndFlattenContainersNormalization() {
         let (_, errors) = parseConfig(
             """

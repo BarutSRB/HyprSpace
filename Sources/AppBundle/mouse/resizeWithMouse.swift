@@ -67,11 +67,13 @@ private func resizeWithMouse(_ window: Window) async throws { // todo cover with
                         .filter {
                             let parent = $0.parent as? TilingContainer
                             let layout = parent?.layout
-                            return parent?.orientation == orientation && (layout == .tiles || layout == .dwindle)
+                            return parent?.orientation == orientation && (layout == .tiles || layout == .dwindle || layout == .scroll)
                         }
                         .forEach { $0.setWeight(orientation, $0.getWeightBeforeResize(orientation) + diff) }
-                    for sibling in parent.children[startIndex ..< pastTheEndIndex] {
-                        sibling.setWeight(orientation, sibling.getWeightBeforeResize(orientation) - siblingDiff)
+                    if parent.layout != .scroll {
+                        for sibling in parent.children[startIndex ..< pastTheEndIndex] {
+                            sibling.setWeight(orientation, sibling.getWeightBeforeResize(orientation) - siblingDiff)
+                        }
                     }
                 }
             }

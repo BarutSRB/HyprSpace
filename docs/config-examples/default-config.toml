@@ -17,7 +17,11 @@ enable-normalization-opposite-orientation-for-nested-containers = true
 # You can set 0 to disable the padding feature
 accordion-padding = 30
 
-# Possible values: tiles|accordion|dwindle
+# Possible values: tiles|accordion|dwindle|scroll
+# - tiles: Traditional tiling layout with adjustable splits
+# - accordion: Tabbed/stacked layout (h_accordion or v_accordion)
+# - dwindle: Binary tree layout inspired by Hyprland (automatic splits)
+# - scroll: Carousel layout with centered focused window and peek effect
 default-root-container-layout = 'tiles'
 
 # Possible values: horizontal|vertical|auto
@@ -94,6 +98,9 @@ automatically-unhide-macos-hidden-apps = false
     # See: https://nikitabobko.github.io/AeroSpace/commands#layout
     alt-slash = 'layout tiles horizontal vertical'
     alt-comma = 'layout accordion horizontal vertical'
+    # Uncomment to enable dwindle and scroll layouts:
+    # alt-period = 'layout dwindle'
+    # alt-shift-period = 'layout scroll'
 
     # See: https://nikitabobko.github.io/AeroSpace/commands#focus
     alt-h = 'focus left'

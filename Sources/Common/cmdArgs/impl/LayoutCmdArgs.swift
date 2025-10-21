@@ -21,7 +21,7 @@ public struct LayoutCmdArgs: CmdArgs {
     }
 
     public enum LayoutDescription: String, CaseIterable, Equatable, Sendable {
-        case accordion, tiles, dwindle
+        case accordion, tiles, dwindle, scroll
         case horizontal, vertical
         case h_accordion, v_accordion, h_tiles, v_tiles
         case tiling, floating
@@ -59,13 +59,13 @@ extension String {
     fileprivate func parseLayoutDescription() -> LayoutCmdArgs.LayoutDescription? {
         if let parsed = LayoutCmdArgs.LayoutDescription(rawValue: self) {
             return parsed
-        } else if self == "list" {
-            return .tiles
-        } else if self == "h_list" {
-            return .h_tiles
-        } else if self == "v_list" {
-            return .v_tiles
         }
-        return nil
+        switch self {
+            case "list": return .tiles
+            case "h_list": return .h_tiles
+            case "v_list": return .v_tiles
+            case "paper": return .scroll  // Alias for scroll layout
+            default: return nil
+        }
     }
 }
