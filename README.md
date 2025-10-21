@@ -1,7 +1,13 @@
 # HyprSpace a Heavily Enhanced Fork of AeroSpace
 
+**HYPRLAND**
 <p align="center">
   <img src="https://github.com/BarutSRB/HyprSpace/raw/289dfc3487dab445f60a846b1a86e2d98fd34d3b/CleanShot%202025-10-20%20at%2015.18.44%402x.png" width="100%">
+</p>
+
+**NIRI**
+<p align="center">
+  <img src="https://github.com/BarutSRB/HyprSpace/blob/a28fd688c620df39c69219043f29413e459ac0b8/CleanShot%202025-10-21%20at%2014.15.01.gif" width="100%">
 </p>
 
 **AeroSpace** is an i3-like tiling window manager for macOS
