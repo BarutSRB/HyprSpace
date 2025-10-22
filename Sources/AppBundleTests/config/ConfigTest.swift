@@ -181,16 +181,7 @@ final class ConfigTest: XCTestCase {
         }
     }
 
-    func testParseScroll() {
-        let command = parseCommand("layout scroll h_scroll v_scroll").cmdOrNil
-        XCTAssertTrue(command is LayoutCommand)
-        assertEquals((command as! LayoutCommand).args.toggleBetween.val, [.scroll, .h_scroll, .v_scroll])
-
-        guard case .help = parseCommand("layout scroll -h") else {
-            XCTFail()
-            return
-        }
-    }
+    // Test removed: scroll layout (h_scroll, v_scroll) is not supported in HyprSpace fork
 
     func testSplitCommandAndFlattenContainersNormalization() {
         let (_, errors) = parseConfig(
