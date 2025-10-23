@@ -1,10 +1,9 @@
 import AppKit
 import Common
 
+@MainActor
 public final class TrayMenuModel: ObservableObject {
-    @MainActor public static let shared = TrayMenuModel()
-
-    private init() {}
+    public static let shared = TrayMenuModel()
 
     @Published var trayText: String = ""
     @Published var trayItems: [TrayItem] = []
@@ -13,6 +12,83 @@ public final class TrayMenuModel: ObservableObject {
     @Published var workspaces: [WorkspaceViewModel] = []
     @Published var experimentalUISettings: ExperimentalUISettings = ExperimentalUISettings()
     @Published var sponsorshipMessage: String = sponsorshipPrompts.randomElement().orDie()
+
+    // CENTERED BAR FEATURE - Reactive properties for menu bindings
+    @Published var centeredBarEnabled: Bool {
+        didSet {
+            CenteredBarSettings.shared.enabled = centeredBarEnabled
+            if centeredBarEnabled {
+                CenteredBarManager.shared?.setupCenteredBar(viewModel: self)
+            } else {
+                CenteredBarManager.shared?.removeCenteredBar()
+            }
+        }
+    }
+
+    @Published var centeredBarShowNumbers: Bool {
+        didSet {
+            CenteredBarSettings.shared.showNumbers = centeredBarShowNumbers
+            if centeredBarEnabled {
+                CenteredBarManager.shared?.update(viewModel: self)
+            }
+        }
+    }
+
+    @Published var centeredBarWindowLevel: CenteredBarWindowLevel {
+        didSet {
+            CenteredBarSettings.shared.windowLevel = centeredBarWindowLevel
+            if centeredBarEnabled {
+                CenteredBarManager.shared?.update(viewModel: self)
+            }
+        }
+    }
+
+    @Published var centeredBarPosition: CenteredBarPosition {
+        didSet {
+            CenteredBarSettings.shared.position = centeredBarPosition
+            if centeredBarEnabled {
+                CenteredBarManager.shared?.update(viewModel: self)
+            }
+        }
+    }
+
+    @Published var centeredBarNotchAware: Bool {
+        didSet {
+            CenteredBarSettings.shared.notchAware = centeredBarNotchAware
+            if centeredBarEnabled {
+                CenteredBarManager.shared?.update(viewModel: self)
+            }
+        }
+    }
+
+    @Published var centeredBarDeduplicateIcons: Bool {
+        didSet {
+            CenteredBarSettings.shared.deduplicateAppIcons = centeredBarDeduplicateIcons
+            if centeredBarEnabled {
+                CenteredBarManager.shared?.update(viewModel: self)
+            }
+        }
+    }
+
+    @Published var centeredBarHideEmptyWorkspaces: Bool {
+        didSet {
+            CenteredBarSettings.shared.hideEmptyWorkspaces = centeredBarHideEmptyWorkspaces
+            if centeredBarEnabled {
+                CenteredBarManager.shared?.update(viewModel: self)
+            }
+        }
+    }
+
+    private init() {
+        // Initialize centered bar properties from UserDefaults
+        self.centeredBarEnabled = CenteredBarSettings.shared.enabled
+        self.centeredBarShowNumbers = CenteredBarSettings.shared.showNumbers
+        self.centeredBarWindowLevel = CenteredBarSettings.shared.windowLevel
+        self.centeredBarPosition = CenteredBarSettings.shared.position
+        self.centeredBarNotchAware = CenteredBarSettings.shared.notchAware
+        self.centeredBarDeduplicateIcons = CenteredBarSettings.shared.deduplicateAppIcons
+        self.centeredBarHideEmptyWorkspaces = CenteredBarSettings.shared.hideEmptyWorkspaces
+    }
 }
 
 @MainActor func updateTrayText() {

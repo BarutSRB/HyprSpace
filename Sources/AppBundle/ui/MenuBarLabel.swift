@@ -25,7 +25,13 @@ struct MenuBarLabel: View {
     }
 
     var body: some View {
-        if #available(macOS 14, *) { // https://github.com/nikitabobko/AeroSpace/issues/1122
+        if !viewModel.experimentalUISettings.showMenuBarWorkspaces {
+            // Show simple "H" label when workspace indicators are disabled
+            Text("H")
+                .font(.system(.body, design: .monospaced))
+                .bold()
+                .foregroundStyle(finalColor)
+        } else if #available(macOS 14, *) { // https://github.com/nikitabobko/AeroSpace/issues/1122
             let renderer = ImageRenderer(content: menuBarContent)
             if let cgImage = renderer.cgImage {
                 // Using scale: 1 results in a blurry image for unknown reasons

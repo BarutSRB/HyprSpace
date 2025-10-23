@@ -7,6 +7,7 @@ import SwiftUI
 struct CenteredBarView: View {
     @ObservedObject var viewModel: TrayMenuModel
     let barHeight: CGFloat
+    let monitor: Monitor? // nil for single-bar mode, specific monitor for per-monitor mode
     @Environment(\.colorScheme) var colorScheme: ColorScheme
 
     // Derived sizing from bar height
@@ -31,7 +32,7 @@ struct CenteredBarView: View {
 
     var body: some View {
         HStack(spacing: workspaceSpacing) {
-            ForEach(viewModel.centeredBarWorkspaces, id: \.workspace.name) { item in
+            ForEach(viewModel.centeredBarWorkspaces(for: monitor), id: \.workspace.name) { item in
                 WorkspaceItemView(
                     item: item,
                     iconSize: iconSize,
@@ -297,12 +298,31 @@ struct WindowInfo: Identifiable {
 // Extension to prepare data for centered bar
 @MainActor
 extension TrayMenuModel {
-    var centeredBarWorkspaces: [CenteredBarWorkspaceItem] {
+    func centeredBarWorkspaces(for monitor: Monitor? = nil) -> [CenteredBarWorkspaceItem] {
         let focus = focus
         let allWorkspaces = Workspace.all.sorted()
         let dedupeEnabled = CenteredBarSettings.shared.deduplicateAppIcons
+        let hideEmptyWorkspaces = CenteredBarSettings.shared.hideEmptyWorkspaces
 
-        return allWorkspaces.map { workspace in
+        // Filter workspaces by monitor if specified
+        var filteredWorkspaces: [Workspace]
+        if let monitor {
+            // Per-monitor mode: show workspaces assigned to this monitor
+            // workspaceMonitor already handles fallback to mainMonitor for unassigned workspaces
+            filteredWorkspaces = allWorkspaces.filter { workspace in
+                workspace.workspaceMonitor.rect.topLeftCorner == monitor.rect.topLeftCorner
+            }
+        } else {
+            // Single-bar mode: show all workspaces
+            filteredWorkspaces = allWorkspaces
+        }
+
+        // Filter empty workspaces if enabled
+        if hideEmptyWorkspaces {
+            filteredWorkspaces = filteredWorkspaces.filter { !$0.allLeafWindowsRecursive.isEmpty }
+        }
+
+        return filteredWorkspaces.map { workspace in
             processWorkspace(workspace, focus: focus, dedupeEnabled: dedupeEnabled)
         }
     }

@@ -42,7 +42,7 @@ public func menuBar(viewModel: TrayMenuModel) -> some Scene { // todo should it 
                 }
             }
         }.keyboardShortcut("E", modifiers: .command)
-        getExperimentalUISettingsMenu(viewModel: viewModel)
+        ExperimentalUISettingsMenu(viewModel: viewModel)
         openConfigButton()
         reloadConfigButton()
         Button("Quit \(aeroSpaceAppName)") {

@@ -14,6 +14,19 @@ struct ExperimentalUISettings {
             UserDefaults.standard.synchronize()
         }
     }
+
+    var showMenuBarWorkspaces: Bool {
+        get {
+            if UserDefaults.standard.object(forKey: ExperimentalUISettingsItems.showMenuBarWorkspaces.rawValue) == nil {
+                return true // Default to showing workspace indicators
+            }
+            return UserDefaults.standard.bool(forKey: ExperimentalUISettingsItems.showMenuBarWorkspaces.rawValue)
+        }
+        set {
+            UserDefaults.standard.setValue(newValue, forKey: ExperimentalUISettingsItems.showMenuBarWorkspaces.rawValue)
+            UserDefaults.standard.synchronize()
+        }
+    }
 }
 
 enum MenuBarStyle: String, CaseIterable, Identifiable, Equatable, Hashable {
@@ -36,102 +49,111 @@ enum MenuBarStyle: String, CaseIterable, Identifiable, Equatable, Hashable {
 
 enum ExperimentalUISettingsItems: String {
     case displayStyle
+    case showMenuBarWorkspaces
 }
 
 @MainActor
-func getExperimentalUISettingsMenu(viewModel: TrayMenuModel) -> some View {
-    let color = AppearanceTheme.current == .dark ? Color.white : Color.black
-    return Menu {
-        Text("Menu bar style (macOS 14 or later):")
-        ForEach(MenuBarStyle.allCases, id: \.id) { style in
-            MenuBarStyleButton(style: style, color: color).environmentObject(viewModel)
-        }
+struct ExperimentalUISettingsMenu: View {
+    @ObservedObject var viewModel: TrayMenuModel
 
-        // CENTERED BAR FEATURE
-        Divider()
-        Text("Centered Workspace Bar:")
-        Button {
-            CenteredBarSettings.shared.enabled = !CenteredBarSettings.shared.enabled
-            CenteredBarManager.shared?.toggleCenteredBar(viewModel: viewModel)
-        } label: {
-            Toggle(isOn: .constant(CenteredBarSettings.shared.enabled)) {
+    var body: some View {
+        let color = AppearanceTheme.current == .dark ? Color.white : Color.black
+        return Menu {
+            Toggle(isOn: Binding(
+                get: { viewModel.experimentalUISettings.showMenuBarWorkspaces },
+                set: { newValue in
+                    viewModel.experimentalUISettings.showMenuBarWorkspaces = newValue
+                }
+            )) {
+                Text("Show workspace indicators in menu bar")
+            }
+
+            if viewModel.experimentalUISettings.showMenuBarWorkspaces {
+                Text("Menu bar style (macOS 14 or later):")
+                ForEach(MenuBarStyle.allCases, id: \.id) { style in
+                    MenuBarStyleButton(style: style, color: color).environmentObject(viewModel)
+                }
+            }
+
+            // CENTERED BAR FEATURE
+            Divider()
+            Text("Centered Workspace Bar:")
+            Toggle(isOn: Binding(
+                get: { viewModel.centeredBarEnabled },
+                set: { viewModel.centeredBarEnabled = $0 }
+            )) {
                 Text("Enable centered workspace bar")
             }
-        }
 
-        Button {
-            CenteredBarSettings.shared.showNumbers = !CenteredBarSettings.shared.showNumbers
-            if CenteredBarSettings.shared.enabled {
-                CenteredBarManager.shared?.update(viewModel: viewModel)
-            }
-        } label: {
-            Toggle(isOn: .constant(CenteredBarSettings.shared.showNumbers)) {
+            Toggle(isOn: Binding(
+                get: { viewModel.centeredBarShowNumbers },
+                set: { viewModel.centeredBarShowNumbers = $0 }
+            )) {
                 Text("Show workspace numbers")
             }
-        }
-        .disabled(!CenteredBarSettings.shared.enabled)
+            .disabled(!viewModel.centeredBarEnabled)
 
-        // Window level selection
-        Text("Window Level:")
-        ForEach(CenteredBarWindowLevel.allCases) { level in
-            Button {
-                CenteredBarSettings.shared.windowLevel = level
-                if CenteredBarSettings.shared.enabled {
-                    CenteredBarManager.shared?.update(viewModel: viewModel)
-                }
-            } label: {
-                Toggle(isOn: .constant(CenteredBarSettings.shared.windowLevel == level)) {
+            // Window level selection
+            Text("Window Level (Z-Index):")
+            ForEach(CenteredBarWindowLevel.allCases) { level in
+                Toggle(isOn: Binding(
+                    get: { viewModel.centeredBarWindowLevel == level },
+                    set: { isOn in
+                        guard isOn else { return }
+                        viewModel.centeredBarWindowLevel = level
+                    }
+                )) {
                     Text(level.title)
                 }
+                .disabled(!viewModel.centeredBarEnabled)
             }
-        }
-        .disabled(!CenteredBarSettings.shared.enabled)
 
-        // Target display selection
-        Text("Target Display:")
-        ForEach(CenteredBarTargetDisplay.allCases) { target in
-            Button {
-                CenteredBarSettings.shared.targetDisplay = target
-                if CenteredBarSettings.shared.enabled {
-                    CenteredBarManager.shared?.update(viewModel: viewModel)
+            // Bar position selection
+            Text("Bar Position:")
+            ForEach(CenteredBarPosition.allCases) { position in
+                Toggle(isOn: Binding(
+                    get: { viewModel.centeredBarPosition == position },
+                    set: { isOn in
+                        guard isOn else { return }
+                        viewModel.centeredBarPosition = position
+                    }
+                )) {
+                    Text(position.title)
                 }
-            } label: {
-                Toggle(isOn: .constant(CenteredBarSettings.shared.targetDisplay == target)) {
-                    Text(target.title)
-                }
+                .disabled(!viewModel.centeredBarEnabled)
             }
-        }
-        .disabled(!CenteredBarSettings.shared.enabled)
 
-        Divider()
+            Divider()
 
-        // Notch-aware positioning
-        Button {
-            CenteredBarSettings.shared.notchAware = !CenteredBarSettings.shared.notchAware
-            if CenteredBarSettings.shared.enabled {
-                CenteredBarManager.shared?.update(viewModel: viewModel)
-            }
-        } label: {
-            Toggle(isOn: .constant(CenteredBarSettings.shared.notchAware)) {
+            // Notch-aware positioning
+            Toggle(isOn: Binding(
+                get: { viewModel.centeredBarNotchAware },
+                set: { viewModel.centeredBarNotchAware = $0 }
+            )) {
                 Text("Notch-aware positioning (shift right of notch)")
             }
-        }
-        .disabled(!CenteredBarSettings.shared.enabled)
+            .disabled(!viewModel.centeredBarEnabled)
 
-        // Deduplicate app icons
-        Button {
-            CenteredBarSettings.shared.deduplicateAppIcons = !CenteredBarSettings.shared.deduplicateAppIcons
-            if CenteredBarSettings.shared.enabled {
-                CenteredBarManager.shared?.update(viewModel: viewModel)
-            }
-        } label: {
-            Toggle(isOn: .constant(CenteredBarSettings.shared.deduplicateAppIcons)) {
+            // Deduplicate app icons
+            Toggle(isOn: Binding(
+                get: { viewModel.centeredBarDeduplicateIcons },
+                set: { viewModel.centeredBarDeduplicateIcons = $0 }
+            )) {
                 Text("Deduplicate app icons (show badge with count)")
             }
+            .disabled(!viewModel.centeredBarEnabled)
+
+            // Hide empty workspaces
+            Toggle(isOn: Binding(
+                get: { viewModel.centeredBarHideEmptyWorkspaces },
+                set: { viewModel.centeredBarHideEmptyWorkspaces = $0 }
+            )) {
+                Text("Hide empty workspaces")
+            }
+            .disabled(!viewModel.centeredBarEnabled)
+        } label: {
+            Text("Experimental UI Settings (No stability guarantees)")
         }
-        .disabled(!CenteredBarSettings.shared.enabled)
-    } label: {
-        Text("Experimental UI Settings (No stability guarantees)")
     }
 }
 

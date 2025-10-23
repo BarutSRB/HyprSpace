@@ -49,17 +49,17 @@ public class CenteredBarSettings {
         }
     }
 
-    public var targetDisplay: CenteredBarTargetDisplay {
+    public var position: CenteredBarPosition {
         get {
-            if let raw = UserDefaults.standard.string(forKey: CenteredBarSettingsKeys.targetDisplay.rawValue),
-               let value = CenteredBarTargetDisplay(rawValue: raw)
+            if let raw = UserDefaults.standard.string(forKey: CenteredBarSettingsKeys.position.rawValue),
+               let value = CenteredBarPosition(rawValue: raw)
             {
                 return value
             }
-            return .focused // default: follows focused workspace
+            return .overlappingMenuBar // default: overlap menu bar
         }
         set {
-            UserDefaults.standard.setValue(newValue.rawValue, forKey: CenteredBarSettingsKeys.targetDisplay.rawValue)
+            UserDefaults.standard.setValue(newValue.rawValue, forKey: CenteredBarSettingsKeys.position.rawValue)
             UserDefaults.standard.synchronize()
         }
     }
@@ -83,34 +83,51 @@ public class CenteredBarSettings {
             UserDefaults.standard.synchronize()
         }
     }
+
+    public var hideEmptyWorkspaces: Bool {
+        get {
+            return UserDefaults.standard.bool(forKey: CenteredBarSettingsKeys.hideEmptyWorkspaces.rawValue)
+        }
+        set {
+            UserDefaults.standard.setValue(newValue, forKey: CenteredBarSettingsKeys.hideEmptyWorkspaces.rawValue)
+            UserDefaults.standard.synchronize()
+        }
+    }
 }
 
 public enum CenteredBarSettingsKeys: String {
     case enabled
     case showNumbers
     case windowLevel
-    case targetDisplay
+    case position
     case notchAware
     case deduplicateAppIcons
+    case hideEmptyWorkspaces
 }
 
 public enum CenteredBarWindowLevel: String, CaseIterable, Identifiable, Equatable, Hashable {
+    case normal      // NSWindow.Level.normal
+    case floating    // NSWindow.Level.floating
     case status      // NSWindow.Level.statusBar
-    case popup       // NSWindow.Level.popUpMenu (above menu bar)
-    case screensaver // NSWindow.Level.screenSaver (highest common level)
+    case popup       // NSWindow.Level.popUpMenu
+    case screensaver // NSWindow.Level.screenSaver
 
     public var id: String { rawValue }
 
     public var title: String {
         switch self {
+            case .normal: "Normal"
+            case .floating: "Floating"
             case .status: "Status Bar"
-            case .popup: "Popup (above menu bar)"
+            case .popup: "Popup"
             case .screensaver: "Screen Saver (highest)"
         }
     }
 
     public var nsWindowLevel: NSWindow.Level {
         switch self {
+            case .normal: .normal
+            case .floating: .floating
             case .status: .statusBar
             case .popup: .popUpMenu
             case .screensaver: .screenSaver
@@ -118,18 +135,16 @@ public enum CenteredBarWindowLevel: String, CaseIterable, Identifiable, Equatabl
     }
 }
 
-public enum CenteredBarTargetDisplay: String, CaseIterable, Identifiable, Equatable, Hashable {
-    case focused // monitor of the focused workspace
-    case primary // main monitor (origin 0,0)
-    case mouse   // display under mouse cursor
+public enum CenteredBarPosition: String, CaseIterable, Identifiable, Equatable, Hashable {
+    case overlappingMenuBar // Bar overlaps menu bar (same y position)
+    case belowMenuBar       // Bar positioned below menu bar
 
     public var id: String { rawValue }
 
     public var title: String {
         switch self {
-            case .focused: "Focused Workspace Monitor"
-            case .primary: "Primary Display"
-            case .mouse: "Display Under Mouse"
+            case .overlappingMenuBar: "Overlapping Menu Bar"
+            case .belowMenuBar: "Below Menu Bar"
         }
     }
 }
