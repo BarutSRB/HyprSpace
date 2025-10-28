@@ -20,10 +20,16 @@ private func balance(_ parent: TilingContainer) {
         parent.dwindleCache.resetAllRatios()
     }
 
+    // For master layout, reset master area percentage to 50%
+    if parent.layout == .master {
+        parent.masterCache.resetToDefault()
+    }
+
     for child in parent.children {
         switch parent.layout {
             case .tiles: child.setWeight(parent.orientation, 1)
             case .dwindle: break // Ratios already reset above via cache
+            case .master: break // Percentage already reset above via cache
             case .accordion, .scroll: break // Do nothing
         }
         if let child = child as? TilingContainer {

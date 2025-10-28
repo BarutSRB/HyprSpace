@@ -12,7 +12,7 @@ import AppKit
 /// - A split orientation (vertical or horizontal)
 ///
 /// Leaf nodes reference actual windows and have no children.
-class DwindleNode {
+final class DwindleNode {
     // MARK: - Tree Structure
 
     /// Parent node in the tree (weak to avoid retain cycles)

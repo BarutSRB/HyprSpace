@@ -11,7 +11,7 @@ private struct MonitorBarInstance {
 }
 
 @MainActor
-public class CenteredBarManager: ObservableObject {
+public final class CenteredBarManager: ObservableObject {
     public static var shared: CenteredBarManager?
 
     // Multi-panel support: keyed by monitorAppKitNsScreenScreensId
@@ -67,7 +67,7 @@ public class CenteredBarManager: ObservableObject {
         let instance = MonitorBarInstance(
             monitorId: monitor.monitorAppKitNsScreenScreensId,
             panel: panel,
-            hostingView: hostingView
+            hostingView: hostingView,
         )
         barsByMonitor[monitor.monitorAppKitNsScreenScreensId] = instance
 
@@ -106,7 +106,7 @@ public class CenteredBarManager: ObservableObject {
             contentRect: .zero,
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
-            defer: false
+            defer: false,
         )
         // Level and behaviors are applied from settings below
         // Show on all Spaces and during fullscreen as an auxiliary overlay
@@ -146,11 +146,10 @@ public class CenteredBarManager: ObservableObject {
 
         // Position bar based on position setting
         let position = CenteredBarSettings.shared.position
-        let y: CGFloat
-        if position == .belowMenuBar {
-            y = visibleFrame.maxY - barHeight
+        let y: CGFloat = if position == .belowMenuBar {
+            visibleFrame.maxY - barHeight
         } else {
-            y = visibleFrame.maxY
+            visibleFrame.maxY
         }
 
         if notchAware && screenHasNotch {
@@ -188,7 +187,7 @@ public class CenteredBarManager: ObservableObject {
         screenObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil,
-            queue: .main
+            queue: .main,
         ) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }

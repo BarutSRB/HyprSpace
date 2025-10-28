@@ -10,7 +10,7 @@ include::util/man-attributes.adoc[]
 [verse]
 // tag::synopsis[]
 aerospace layout [-h|--help] [--window-id <window-id>]
-                 (h_tiles|v_tiles|h_accordion|v_accordion|tiles|accordion|dwindle|horizontal|vertical|tiling|floating)...
+                 (h_tiles|v_tiles|h_accordion|v_accordion|tiles|accordion|dwindle|master|master_left|master_right|horizontal|vertical|tiling|floating)...
 
 // end::synopsis[]
 
@@ -23,11 +23,14 @@ aerospace layout [-h|--help] [--window-id <window-id>]
 If several arguments are supplied then finds the first argument that doesn't describe the currently active layout, and applies the layout.
 
 * Change both tiling layout and orientation in one go: `h_tiles|v_tiles|h_accordion|v_accordion`
-* Change tiling layout but preserve orientation: `tiles|accordion|dwindle`
+* Change tiling layout but preserve orientation: `tiles|accordion|dwindle|master`
 * Change orientation but preserve layout: `horizontal|vertical`
+* Change master layout orientation: `master_left|master_right`
 * Toggle floating/tiling mode: `tiling|floating`
 
 The `dwindle` layout is a binary tree-based tiling layout inspired by Hyprland. It automatically determines split direction based on the available space: wider areas split vertically (left/right), while taller areas split horizontally (top/bottom). Windows are split using a 50/50 ratio. The split direction alternates naturally based on the aspect ratio at each recursion level, creating the characteristic dwindle pattern.
+
+The `master` layout divides the workspace into two areas: a master area (containing one window) and a stack area (containing remaining windows arranged vertically). The master area occupies a configurable percentage of the horizontal space (default 50%). Use `master_left` to position the master on the left with stack on the right, or `master_right` for the opposite. The master area boundary can be resized using the `resize` command, and windows can be promoted to master using the `promote-master` command.
 
 // =========================================================== Options
 include::./util/conditional-options-header.adoc[]
@@ -51,6 +54,15 @@ include::util/conditional-examples-header.adoc[]
 
 * Switch to `tiles` layout. Toggle the layout orientation if already in `tiles` layout: +
 `aerospace layout tiles horizontal vertical`
+
+* Switch to master layout with master on the left: +
+`aerospace layout master-left`
+
+* Toggle between master left and master right orientations: +
+`aerospace layout master-left master-right`
+
+* Toggle between tiles and master layouts: +
+`aerospace layout tiles master`
 
 // end::body[]
 

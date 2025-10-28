@@ -11,7 +11,7 @@ import Common
 /// The cache automatically rebuilds when windows are added/removed and maintains
 /// fresh geometry data throughout resize operations using a "layout → resize → layout"
 /// pattern to prevent stale cached values.
-class DwindleLayoutCache {
+final class DwindleLayoutCache {
     // MARK: - Properties
 
     /// Root node of the binary tree
@@ -88,7 +88,7 @@ class DwindleLayoutCache {
         // Future-ready: can incorporate split_width_multiplier, smart_split, user overrides
         container.splitVertically = determineSplitOrientation(
             availableRect: availableRect,
-            windowCount: windows.count
+            windowCount: windows.count,
         )
 
         // Split children into two groups
@@ -98,11 +98,11 @@ class DwindleLayoutCache {
         let (leftRect, rightRect) = calculateChildRects(
             parentRect: availableRect,
             splitVertically: container.splitVertically,
-            ratio: container.splitRatio
+            ratio: container.splitRatio,
         )
 
         // Recursively build left and right subtrees
-        let leftChild = buildBinaryTree(Array(windows[0..<midIndex]), availableRect: leftRect)
+        let leftChild = buildBinaryTree(Array(windows[0 ..< midIndex]), availableRect: leftRect)
         let rightChild = buildBinaryTree(Array(windows[midIndex...]), availableRect: rightRect)
 
         // Link children to parent
@@ -145,22 +145,22 @@ class DwindleLayoutCache {
     private func calculateChildRects(
         parentRect: CGRect,
         splitVertically: Bool,
-        ratio: CGFloat
+        ratio: CGFloat,
     ) -> (CGRect, CGRect) {
         let (leftSize, rightSize) = calculateSplitSizes(
             containerSize: splitVertically ? parentRect.width : parentRect.height,
-            ratio: ratio
+            ratio: ratio,
         )
 
         if splitVertically {
             return (
                 CGRect(x: parentRect.minX, y: parentRect.minY, width: leftSize, height: parentRect.height),
-                CGRect(x: parentRect.minX + leftSize, y: parentRect.minY, width: rightSize, height: parentRect.height)
+                CGRect(x: parentRect.minX + leftSize, y: parentRect.minY, width: rightSize, height: parentRect.height),
             )
         } else {
             return (
                 CGRect(x: parentRect.minX, y: parentRect.minY, width: parentRect.width, height: leftSize),
-                CGRect(x: parentRect.minX, y: parentRect.minY + leftSize, width: parentRect.width, height: rightSize)
+                CGRect(x: parentRect.minX, y: parentRect.minY + leftSize, width: parentRect.width, height: rightSize),
             )
         }
     }
@@ -186,7 +186,7 @@ class DwindleLayoutCache {
     private func layoutRecursive(
         _ node: DwindleNode,
         in rect: CGRect,
-        context: LayoutContext
+        context: LayoutContext,
     ) async throws {
         // CRITICAL: Update box with fresh geometry BEFORE any calculations
         // This ensures resize operations always use current sizes
@@ -205,7 +205,7 @@ class DwindleLayoutCache {
                     topLeftX: rect.minX,
                     topLeftY: rect.minY,
                     width: rect.width,
-                    height: rect.height
+                    height: rect.height,
                 )
                 treeNode.lastAppliedLayoutVirtualRect = virtual
 
@@ -213,7 +213,7 @@ class DwindleLayoutCache {
                     topLeftX: rect.minX,
                     topLeftY: rect.minY,
                     width: rect.width,
-                    height: rect.height
+                    height: rect.height,
                 )
 
                 // Apply frame with fullscreen support (matches tiles/accordion behavior)
@@ -244,7 +244,7 @@ class DwindleLayoutCache {
         let availableSize = (node.splitVertically ? rect.width : rect.height) - gapSize
         let (leftSize, rightSize) = calculateSplitSizes(
             containerSize: availableSize,
-            ratio: node.splitRatio
+            ratio: node.splitRatio,
         )
 
         let (leftRect, rightRect) = if node.splitVertically {
@@ -254,14 +254,14 @@ class DwindleLayoutCache {
                     x: rect.minX,
                     y: rect.minY,
                     width: leftSize,
-                    height: rect.height
+                    height: rect.height,
                 ),
                 CGRect(
                     x: rect.minX + leftSize + gapSize,
                     y: rect.minY,
                     width: rightSize,
-                    height: rect.height
-                )
+                    height: rect.height,
+                ),
             )
         } else {
             // Horizontal split: top / gap / bottom
@@ -270,14 +270,14 @@ class DwindleLayoutCache {
                     x: rect.minX,
                     y: rect.minY,
                     width: rect.width,
-                    height: leftSize
+                    height: leftSize,
                 ),
                 CGRect(
                     x: rect.minX,
                     y: rect.minY + leftSize + gapSize,
                     width: rect.width,
-                    height: rightSize
-                )
+                    height: rightSize,
+                ),
             )
         }
 
@@ -311,7 +311,7 @@ class DwindleLayoutCache {
     }
 
     private func findNodeRecursive(_ node: DwindleNode?, target: TreeNode) -> DwindleNode? {
-        guard let node = node else { return nil }
+        guard let node else { return nil }
 
         if node.window === target {
             return node
@@ -336,7 +336,7 @@ class DwindleLayoutCache {
     }
 
     private func resetRatiosRecursive(_ node: DwindleNode?) {
-        guard let node = node else { return }
+        guard let node else { return }
 
         if node.isContainer {
             node.splitRatio = 1.0
@@ -393,7 +393,7 @@ class DwindleLayoutCache {
             // CRITICAL: Use hOuter.box.width which was updated in last layout pass
             let ratioDelta = pixelDeltaToRatioDelta(
                 pixels: allowedDelta.x,
-                containerSize: hOuter.box.width
+                containerSize: hOuter.box.width,
             )
             hOuter.splitRatio = clampRatio(hOuter.splitRatio + ratioDelta)
         }
@@ -402,7 +402,7 @@ class DwindleLayoutCache {
         if let vOuter = targets.verticalOuter, allowedDelta.y != 0 {
             let ratioDelta = pixelDeltaToRatioDelta(
                 pixels: allowedDelta.y,
-                containerSize: vOuter.box.height
+                containerSize: vOuter.box.height,
             )
             vOuter.splitRatio = clampRatio(vOuter.splitRatio + ratioDelta)
         }
@@ -411,7 +411,7 @@ class DwindleLayoutCache {
         if let hInner = targets.horizontalInner, allowedDelta.x != 0 {
             let ratioDelta = pixelDeltaToRatioDelta(
                 pixels: -allowedDelta.x,  // Negative to shrink
-                containerSize: hInner.box.width
+                containerSize: hInner.box.width,
             )
             hInner.splitRatio = clampRatio(hInner.splitRatio + ratioDelta)
         }
@@ -419,7 +419,7 @@ class DwindleLayoutCache {
         if let vInner = targets.verticalInner, allowedDelta.y != 0 {
             let ratioDelta = pixelDeltaToRatioDelta(
                 pixels: -allowedDelta.y,
-                containerSize: vInner.box.height
+                containerSize: vInner.box.height,
             )
             vInner.splitRatio = clampRatio(vInner.splitRatio + ratioDelta)
         }
@@ -435,7 +435,7 @@ class DwindleLayoutCache {
             // Use FRESH box size from last layout
             let ratioDelta = pixelDeltaToRatioDelta(
                 pixels: delta.x,
-                containerSize: hParent.box.width
+                containerSize: hParent.box.width,
             )
             hParent.splitRatio = clampRatio(hParent.splitRatio + ratioDelta)
         }
@@ -445,7 +445,7 @@ class DwindleLayoutCache {
             // Use FRESH box size from last layout
             let ratioDelta = pixelDeltaToRatioDelta(
                 pixels: delta.y,
-                containerSize: vParent.box.height
+                containerSize: vParent.box.height,
             )
             vParent.splitRatio = clampRatio(vParent.splitRatio + ratioDelta)
         }

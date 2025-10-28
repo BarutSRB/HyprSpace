@@ -60,6 +60,7 @@ enum Layout: String {
     case accordion
     case dwindle
     case scroll
+    case master
 }
 
 extension String {
@@ -85,14 +86,12 @@ extension TilingContainer {
     /// tree structure with split ratios. It automatically rebuilds when windows
     /// are added or removed.
     var dwindleCache: DwindleLayoutCache {
-        get {
-            if let cache = getUserData(key: dwindleCacheKey) {
-                return cache
-            }
-            let cache = DwindleLayoutCache()
-            putUserData(key: dwindleCacheKey, data: cache)
+        if let cache = getUserData(key: dwindleCacheKey) {
             return cache
         }
+        let cache = DwindleLayoutCache()
+        putUserData(key: dwindleCacheKey, data: cache)
+        return cache
     }
 
     /// Invalidates the dwindle cache, forcing a rebuild on next layout pass
@@ -101,5 +100,31 @@ extension TilingContainer {
     /// changes significantly (e.g., normalization)
     func invalidateDwindleCache() {
         cleanUserData(key: dwindleCacheKey)
+    }
+}
+
+// MARK: - Master Layout Cache Integration
+
+private let masterCacheKey = TreeNodeUserDataKey<MasterLayoutCache>(key: "masterLayoutCache")
+
+extension TilingContainer {
+    /// Gets or creates the master layout cache for this container
+    ///
+    /// The cache persists across layout recalculations and maintains the
+    /// master area percentage and orientation.
+    var masterCache: MasterLayoutCache {
+        if let cache = getUserData(key: masterCacheKey) {
+            return cache
+        }
+        let cache = MasterLayoutCache()
+        putUserData(key: masterCacheKey, data: cache)
+        return cache
+    }
+
+    /// Invalidates the master cache, resetting to defaults
+    ///
+    /// Called when switching away from master layout
+    func invalidateMasterCache() {
+        cleanUserData(key: masterCacheKey)
     }
 }

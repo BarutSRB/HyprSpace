@@ -37,7 +37,7 @@ aerospace -h;
 
     | join-with [--window-id <window_id>] (left|down|up|right)
 
-    | layout [--window-id <window_id>] (h_tiles|v_tiles|h_accordion|v_accordion|tiles|accordion|horizontal|vertical|tiling|floating)...
+    | layout [--window-id <window_id>] (h_tiles|v_tiles|h_accordion|v_accordion|tiles|accordion|dwindle|scroll|master|master_left|master_right|horizontal|vertical|tiling|floating)...
 
     | macos-native-fullscreen [--fail-if-noop|--window-id <window_id>]... [on|off] [--fail-if-noop|--window-id <window_id>]...
 
@@ -57,6 +57,8 @@ aerospace -h;
 
     | move-workspace-to-monitor [--wrap-around] (left|down|up|right|next|prev) [--wrap-around]
     | move-workspace-to-monitor [--wrap-around] <monitor_pattern>... [--wrap-around]
+
+    | promote-master [--window-id <window_id>]
 
     | reload-config [--no-gui | --dry-run]...
 

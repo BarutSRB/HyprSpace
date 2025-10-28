@@ -170,6 +170,11 @@ private func toLayoutString(tc: TilingContainer) -> String {
         case (.dwindle, .h): return LayoutCmdArgs.LayoutDescription.horizontal.rawValue
         case (.dwindle, .v): return LayoutCmdArgs.LayoutDescription.vertical.rawValue
         case (.scroll, _): return LayoutCmdArgs.LayoutDescription.scroll.rawValue
+        case (.master, _):
+            // For master layout, orientation is controlled by cache, not container orientation
+            return tc.masterCache.orientation == .left
+                ? LayoutCmdArgs.LayoutDescription.master_left.rawValue
+                : LayoutCmdArgs.LayoutDescription.master_right.rawValue
     }
 }
 

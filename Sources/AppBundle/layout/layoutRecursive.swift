@@ -51,6 +51,8 @@ extension TreeNode {
                         try await container.layoutDwindle(point, width: width, height: height, virtual: virtual, context)
                     case .scroll:
                         try await container.layoutScroll(point, width: width, height: height, virtual: virtual, context)
+                    case .master:
+                        try await container.layoutMaster(point, width: width, height: height, virtual: virtual, context)
                 }
             case .macosMinimizedWindowsContainer, .macosFullscreenWindowsContainer,
                  .macosPopupWindowsContainer, .macosHiddenAppsWindowsContainer:
@@ -207,7 +209,7 @@ extension TilingContainer {
                 width: width,
                 height: height,
                 virtual: virtual,
-                context
+                context,
             )
             return
         }
@@ -242,7 +244,7 @@ extension TilingContainer {
         // Position windows to the right of focused
         var rightCursor = focusedX + windowWidths[anchorIndex]
         if anchorIndex + 1 < children.count {
-            for index in (anchorIndex + 1)..<children.count {
+            for index in (anchorIndex + 1) ..< children.count {
                 positions[index] = rightCursor
                 rightCursor += windowWidths[index]
             }
@@ -263,7 +265,7 @@ extension TilingContainer {
 
         var virtualRightCursor = virtual.topLeftX + windowWidths[anchorIndex]
         if anchorIndex + 1 < children.count {
-            for index in (anchorIndex + 1)..<children.count {
+            for index in (anchorIndex + 1) ..< children.count {
                 virtualPositions[index] = virtualRightCursor
                 virtualRightCursor += windowWidths[index]
             }
@@ -290,11 +292,105 @@ extension TilingContainer {
                     topLeftX: virtualPositions[index],
                     topLeftY: virtual.topLeftY,
                     width: childWidth,
-                    height: virtual.height
+                    height: virtual.height,
                 ),
-                context
+                context,
             )
             child.setWeight(.h, childWidth)
+        }
+    }
+
+    @MainActor
+    fileprivate func layoutMaster(_ point: CGPoint, width: CGFloat, height: CGFloat, virtual: Rect, _ context: LayoutContext) async throws {
+        guard !children.isEmpty else { return }
+
+        // Single window takes full space
+        if children.count == 1 {
+            try await children[0].layoutRecursive(point, width: width, height: height, virtual: virtual, context)
+            return
+        }
+
+        // Master layout with 2+ windows:
+        // - First child is master window (gets masterPercent of width)
+        // - Remaining children are stack windows (share remaining width, arranged vertically)
+        // - Orientation determines if master is on left or right
+
+        guard let container = self as? TilingContainer else { return }
+        let cache = container.masterCache
+        let horizontalGap = CGFloat(context.resolvedGaps.inner.horizontal)
+        let verticalGap = CGFloat(context.resolvedGaps.inner.vertical)
+
+        // Calculate master and stack widths
+        let masterWidth = cache.getMasterWidth(totalWidth: width - horizontalGap)
+        let stackWidth = cache.getStackWidth(totalWidth: width - horizontalGap)
+
+        // Calculate master and stack positions based on orientation
+        let (masterX, stackX) = if cache.orientation == .left {
+            // Master on left, stack on right
+            (point.x, point.x + masterWidth + horizontalGap)
+        } else {
+            // Master on right, stack on left
+            (point.x + stackWidth + horizontalGap, point.x)
+        }
+
+        // Layout master window (first child)
+        let masterChild = children[0]
+        let masterPoint = CGPoint(x: masterX, y: point.y)
+        let masterVirtual = Rect(
+            topLeftX: cache.orientation == .left ? virtual.topLeftX : virtual.topLeftX + stackWidth,
+            topLeftY: virtual.topLeftY,
+            width: masterWidth,
+            height: virtual.height,
+        )
+
+        try await masterChild.layoutRecursive(
+            masterPoint,
+            width: masterWidth,
+            height: height,
+            virtual: masterVirtual,
+            context,
+        )
+
+        // Layout stack windows (remaining children) vertically
+        if children.count > 1 {
+            let stackChildren = Array(children[1...])
+            let stackChildCount = stackChildren.count
+
+            // Calculate equal height for each stack window with gaps
+            let totalVerticalGaps = verticalGap * CGFloat(stackChildCount - 1)
+            let availableHeight = height - totalVerticalGaps
+            let stackChildHeight = availableHeight / CGFloat(stackChildCount)
+
+            var currentY = point.y
+            var virtualCurrentY = virtual.topLeftY
+
+            for (i, child) in stackChildren.enumerated() {
+                let childPoint = CGPoint(x: stackX, y: currentY)
+                let childVirtual = Rect(
+                    topLeftX: cache.orientation == .left ? virtual.topLeftX + masterWidth : virtual.topLeftX,
+                    topLeftY: virtualCurrentY,
+                    width: stackWidth,
+                    height: stackChildHeight,
+                )
+
+                try await child.layoutRecursive(
+                    childPoint,
+                    width: stackWidth,
+                    height: stackChildHeight,
+                    virtual: childVirtual,
+                    context,
+                )
+
+                // Advance to next position
+                currentY += stackChildHeight
+                virtualCurrentY += stackChildHeight
+
+                // Add gap if not the last child
+                if i < stackChildCount - 1 {
+                    currentY += verticalGap
+                    virtualCurrentY += verticalGap
+                }
+            }
         }
     }
 }

@@ -1,0 +1,51 @@
+= aerospace-promote-master(1)
+include::util/man-attributes.adoc[]
+:manname: aerospace-promote-master
+// tag::purpose[]
+:manpurpose: Promote the focused window to be the master window
+// end::purpose[]
+
+// =========================================================== Synopsis
+== Synopsis
+[verse]
+// tag::synopsis[]
+aerospace promote-master [-h|--help] [--window-id <window-id>]
+
+// end::synopsis[]
+
+// =========================================================== Description
+== Description
+
+// tag::body[]
+{manpurpose}
+
+Swaps the focused window with the current master window (the first window in the master layout).
+This command only works when the parent container is using the `master` layout.
+
+If the focused window is already the master window, the command will fail with an error message.
+
+// =========================================================== Options
+include::./util/conditional-options-header.adoc[]
+
+-h, --help:: Print help
+
+--window-id <window-id>::
+include::./util/window-id-flag-desc.adoc[]
+
+// =========================================================== Examples
+include::util/conditional-examples-header.adoc[]
+
+* Promote the focused window to master: +
+`aerospace promote-master`
+
+* Bind a key to promote windows to master: +
+[source,toml]
+----
+[mode.main.binding]
+cmd-shift-p = 'promote-master'
+----
+
+// end::body[]
+
+// =========================================================== Footer
+include::util/man-footer.adoc[]

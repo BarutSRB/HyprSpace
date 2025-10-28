@@ -116,6 +116,7 @@ fi
 mkdir -p ".release/AeroSpace-v$build_version/manpage" && cp .man/*.1 ".release/AeroSpace-v$build_version/manpage"
 cp -r ./legal ".release/AeroSpace-v$build_version/legal"
 cp -r .shell-completion ".release/AeroSpace-v$build_version/shell-completion"
+cp -r docs/config-examples ".release/AeroSpace-v$build_version/config-examples"
 cd .release
     mkdir -p "AeroSpace-v$build_version/bin" && cp -r aerospace "AeroSpace-v$build_version/bin"
     cp -r AeroSpace.app "AeroSpace-v$build_version"

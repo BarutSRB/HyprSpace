@@ -30,6 +30,12 @@ struct LayoutCommand: Command {
                 return changeTilingLayout(io, targetLayout: .dwindle, targetOrientation: nil, window: window)
             case .scroll:
                 return changeTilingLayout(io, targetLayout: .scroll, targetOrientation: nil, window: window)
+            case .master:
+                return changeTilingLayout(io, targetLayout: .master, targetOrientation: nil, window: window)
+            case .master_left:
+                return changeTilingLayout(io, targetLayout: .master, targetOrientation: nil, masterOrientation: .left, window: window)
+            case .master_right:
+                return changeTilingLayout(io, targetLayout: .master, targetOrientation: nil, masterOrientation: .right, window: window)
             case .horizontal:
                 return changeTilingLayout(io, targetLayout: nil, targetOrientation: .h, window: window)
             case .vertical:
@@ -57,7 +63,7 @@ struct LayoutCommand: Command {
     }
 }
 
-@MainActor private func changeTilingLayout(_ io: CmdIo, targetLayout: Layout?, targetOrientation: Orientation?, window: Window) -> Bool {
+@MainActor private func changeTilingLayout(_ io: CmdIo, targetLayout: Layout?, targetOrientation: Orientation?, masterOrientation: MasterOrientation? = nil, window: Window) -> Bool {
     guard let parent = window.parent else { return false }
     switch parent.cases {
         case .tilingContainer(let parent):
@@ -67,6 +73,16 @@ struct LayoutCommand: Command {
             // Invalidate dwindle cache when switching away from dwindle layout
             if parent.layout == .dwindle && targetLayout != .dwindle {
                 parent.invalidateDwindleCache()
+            }
+
+            // Invalidate master cache when switching away from master layout
+            if parent.layout == .master && targetLayout != .master {
+                parent.invalidateMasterCache()
+            }
+
+            // Set master orientation if switching to master layout
+            if targetLayout == .master, let masterOrientation {
+                parent.masterCache.orientation = masterOrientation
             }
 
             parent.layout = targetLayout
@@ -85,6 +101,9 @@ extension Window {
             case .tiles:       (parent as? TilingContainer)?.layout == .tiles
             case .dwindle:     (parent as? TilingContainer)?.layout == .dwindle
             case .scroll:      (parent as? TilingContainer)?.layout == .scroll
+            case .master:      (parent as? TilingContainer)?.layout == .master
+            case .master_left: (parent as? TilingContainer).map { $0.layout == .master && $0.masterCache.orientation == .left } == true
+            case .master_right: (parent as? TilingContainer).map { $0.layout == .master && $0.masterCache.orientation == .right } == true
             case .horizontal:  (parent as? TilingContainer)?.orientation == .h
             case .vertical:    (parent as? TilingContainer)?.orientation == .v
             case .h_accordion: (parent as? TilingContainer).map { $0.layout == .accordion && $0.orientation == .h } == true

@@ -41,7 +41,7 @@ struct CenteredBarView: View {
                     cornerRadius: cornerRadius,
                     backgroundColor: backgroundColor,
                     activeBackgroundColor: activeBackgroundColor,
-                    borderColor: borderColor
+                    borderColor: borderColor,
                 )
             }
         }
@@ -86,7 +86,7 @@ private struct WorkspaceItemView: View {
                     workspace: item.workspace,
                     iconSize: iconSize,
                     isFocused: window.isFocused,
-                    isInFocusedWorkspace: item.isFocused
+                    isInFocusedWorkspace: item.isFocused,
                 )
             }
         }
@@ -95,11 +95,11 @@ private struct WorkspaceItemView: View {
         .frame(height: itemHeight)
         .background(
             RoundedRectangle(cornerRadius: cornerRadius)
-                .fill(item.isFocused ? activeBackgroundColor : (isHovered ? backgroundColor : Color.clear))
+                .fill(item.isFocused ? activeBackgroundColor : (isHovered ? backgroundColor : Color.clear)),
         )
         .overlay(
             RoundedRectangle(cornerRadius: cornerRadius)
-                .strokeBorder(item.isFocused ? borderColor : Color.clear, lineWidth: 1)
+                .strokeBorder(item.isFocused ? borderColor : Color.clear, lineWidth: 1),
         )
         .onHover { hovering in
             isHovered = hovering
@@ -155,7 +155,7 @@ private struct WindowIconView: View {
                     .padding(2)
                     .background(
                         Circle()
-                            .fill(Color.red)
+                            .fill(Color.red),
                     )
                     .offset(x: iconSize * 0.2, y: -iconSize * 0.1)
             }
@@ -176,7 +176,7 @@ private struct WindowIconView: View {
             WindowListSheet(
                 windows: window.allWindows,
                 workspace: workspace,
-                appName: window.appName ?? "Unknown App"
+                appName: window.appName ?? "Unknown App",
             )
         }
         .help(window.appName ?? "Unknown App")
@@ -305,16 +305,15 @@ extension TrayMenuModel {
         let hideEmptyWorkspaces = CenteredBarSettings.shared.hideEmptyWorkspaces
 
         // Filter workspaces by monitor if specified
-        var filteredWorkspaces: [Workspace]
-        if let monitor {
+        var filteredWorkspaces: [Workspace] = if let monitor {
             // Per-monitor mode: show workspaces assigned to this monitor
             // workspaceMonitor already handles fallback to mainMonitor for unassigned workspaces
-            filteredWorkspaces = allWorkspaces.filter { workspace in
+            allWorkspaces.filter { workspace in
                 workspace.workspaceMonitor.rect.topLeftCorner == monitor.rect.topLeftCorner
             }
         } else {
             // Single-bar mode: show all workspaces
-            filteredWorkspaces = allWorkspaces
+            allWorkspaces
         }
 
         // Filter empty workspaces if enabled
@@ -338,7 +337,7 @@ extension TrayMenuModel {
         return CenteredBarWorkspaceItem(
             workspace: workspace,
             isFocused: workspace == focus.workspace,
-            windows: windows
+            windows: windows,
         )
     }
 
@@ -366,7 +365,7 @@ extension TrayMenuModel {
             icon: icon,
             isFocused: anyFocused,
             windowCount: windowsInApp.count,
-            allWindows: windowInfos
+            allWindows: windowInfos,
         )
     }
 
@@ -381,7 +380,7 @@ extension TrayMenuModel {
                 icon: icon,
                 isFocused: window == focus.windowOrNil,
                 windowCount: 1,
-                allWindows: [windowInfo]
+                allWindows: [windowInfo],
             )
         }
     }
@@ -400,7 +399,7 @@ extension TrayMenuModel {
             id: window.windowId,
             windowId: window.windowId,
             title: titleText,
-            isFocused: window == focus.windowOrNil
+            isFocused: window == focus.windowOrNil,
         )
     }
 }

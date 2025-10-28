@@ -291,7 +291,7 @@ extension TreeNode {
             case .macosPopupWindowsContainer: .macosPopupWindowsContainer
             case .tilingContainer(let container):
                 switch container.layout {
-                    case .tiles, .dwindle:
+                    case .tiles, .dwindle, .master:
                         container.orientation == .h
                             ? .h_tiles(container.children.map(\.layoutDescription))
                             : .v_tiles(container.children.map(\.layoutDescription))

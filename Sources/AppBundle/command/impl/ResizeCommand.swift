@@ -11,7 +11,7 @@ struct ResizeCommand: Command { // todo cover with tests
         let candidates = target.windowOrNil?.parentsWithSelf
             .filter {
                 let layout = ($0.parent as? TilingContainer)?.layout
-                return layout == .tiles || layout == .dwindle || layout == .scroll
+                return layout == .tiles || layout == .dwindle || layout == .scroll || layout == .master
             }
             ?? []
 
@@ -55,6 +55,39 @@ struct ResizeCommand: Command { // todo cover with tests
             }
 
             cache.resize(window: node, delta: delta, shouldGrow: shouldGrow)
+            // Layout will be refreshed automatically via refreshModel() after command completes
+            return true
+        }
+
+        // Handle master layout separately - adjusts master area percentage
+        if parent.layout == .master {
+            let cache = parent.masterCache
+
+            // Only allow width resizing for master layout (horizontal boundary between master and stack)
+            guard args.dimension.val == .width || args.dimension.val == .smart else {
+                return io.err("Master layout only supports width resizing (the boundary between master and stack areas)")
+            }
+
+            // Calculate pixel delta
+            let pixelDiff: CGFloat = switch args.units.val {
+                case .set(let unit): CGFloat(unit) * 10  // Arbitrary pixel value for set mode
+                case .add(let unit): CGFloat(unit)
+                case .subtract(let unit): -CGFloat(unit)
+            }
+
+            // Get total width for percentage calculation
+            guard let workspace = parent.nodeWorkspace else { return false }
+            let totalWidth = workspace.workspaceMonitor.visibleRectPaddedByOuterGaps.width
+            let gaps = ResolvedGaps(gaps: config.gaps, monitor: workspace.workspaceMonitor)
+            let horizontalGap = CGFloat(gaps.inner.horizontal)
+            let availableWidth = totalWidth - horizontalGap
+
+            // Adjust master percentage based on orientation
+            // For left orientation: positive delta = grow master (move boundary right)
+            // For right orientation: positive delta = shrink master (boundary controlled from left side)
+            let adjustedDelta = cache.orientation == .left ? pixelDiff : -pixelDiff
+            cache.adjustMasterPercent(delta: adjustedDelta, totalWidth: availableWidth)
+
             // Layout will be refreshed automatically via refreshModel() after command completes
             return true
         }

@@ -63,7 +63,7 @@ struct ExperimentalUISettingsMenu: View {
                 get: { viewModel.experimentalUISettings.showMenuBarWorkspaces },
                 set: { newValue in
                     viewModel.experimentalUISettings.showMenuBarWorkspaces = newValue
-                }
+                },
             )) {
                 Text("Show workspace indicators in menu bar")
             }
@@ -80,14 +80,14 @@ struct ExperimentalUISettingsMenu: View {
             Text("Centered Workspace Bar:")
             Toggle(isOn: Binding(
                 get: { viewModel.centeredBarEnabled },
-                set: { viewModel.centeredBarEnabled = $0 }
+                set: { viewModel.centeredBarEnabled = $0 },
             )) {
                 Text("Enable centered workspace bar")
             }
 
             Toggle(isOn: Binding(
                 get: { viewModel.centeredBarShowNumbers },
-                set: { viewModel.centeredBarShowNumbers = $0 }
+                set: { viewModel.centeredBarShowNumbers = $0 },
             )) {
                 Text("Show workspace numbers")
             }
@@ -101,7 +101,7 @@ struct ExperimentalUISettingsMenu: View {
                     set: { isOn in
                         guard isOn else { return }
                         viewModel.centeredBarWindowLevel = level
-                    }
+                    },
                 )) {
                     Text(level.title)
                 }
@@ -116,7 +116,7 @@ struct ExperimentalUISettingsMenu: View {
                     set: { isOn in
                         guard isOn else { return }
                         viewModel.centeredBarPosition = position
-                    }
+                    },
                 )) {
                     Text(position.title)
                 }
@@ -128,7 +128,7 @@ struct ExperimentalUISettingsMenu: View {
             // Notch-aware positioning
             Toggle(isOn: Binding(
                 get: { viewModel.centeredBarNotchAware },
-                set: { viewModel.centeredBarNotchAware = $0 }
+                set: { viewModel.centeredBarNotchAware = $0 },
             )) {
                 Text("Notch-aware positioning (shift right of notch)")
             }
@@ -137,7 +137,7 @@ struct ExperimentalUISettingsMenu: View {
             // Deduplicate app icons
             Toggle(isOn: Binding(
                 get: { viewModel.centeredBarDeduplicateIcons },
-                set: { viewModel.centeredBarDeduplicateIcons = $0 }
+                set: { viewModel.centeredBarDeduplicateIcons = $0 },
             )) {
                 Text("Deduplicate app icons (show badge with count)")
             }
@@ -146,7 +146,7 @@ struct ExperimentalUISettingsMenu: View {
             // Hide empty workspaces
             Toggle(isOn: Binding(
                 get: { viewModel.centeredBarHideEmptyWorkspaces },
-                set: { viewModel.centeredBarHideEmptyWorkspaces = $0 }
+                set: { viewModel.centeredBarHideEmptyWorkspaces = $0 },
             )) {
                 Text("Hide empty workspaces")
             }

@@ -3,7 +3,7 @@ import SwiftUI
 // CENTERED BAR FEATURE
 // UserDefaults-backed settings for the centered workspace bar
 @MainActor
-public class CenteredBarSettings {
+public final class CenteredBarSettings {
     public static let shared = CenteredBarSettings()
 
     private init() {}

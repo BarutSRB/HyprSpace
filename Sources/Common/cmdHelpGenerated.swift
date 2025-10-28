@@ -58,7 +58,7 @@ let join_with_help_generated = """
     """
 let layout_help_generated = """
     USAGE: layout [-h|--help] [--window-id <window-id>]
-                  (h_tiles|v_tiles|h_accordion|v_accordion|tiles|accordion|dwindle|horizontal|vertical|tiling|floating)...
+                  (h_tiles|v_tiles|h_accordion|v_accordion|tiles|accordion|dwindle|master|master_left|master_right|horizontal|vertical|tiling|floating)...
     """
 let list_apps_help_generated = """
     USAGE: list-apps [-h|--help] [--macos-native-hidden [no]] [--format <output-format>] [--count] [--json]
@@ -119,6 +119,9 @@ let move_workspace_to_monitor_help_generated = """
     """
 let move_help_generated = """
     USAGE: move [-h|--help] [--window-id <window-id>] [--boundaries <boundary>] [--boundaries-action <boundary-action>] (left|down|up|right)
+    """
+let promote_master_help_generated = """
+    USAGE: promote-master [-h|--help] [--window-id <window-id>]
     """
 let reload_config_help_generated = """
     USAGE: reload-config [-h|--help] [--no-gui] [--dry-run]
