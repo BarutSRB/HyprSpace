@@ -215,11 +215,16 @@ class DwindleLayoutCache {
                     width: rect.width,
                     height: rect.height
                 )
-                treeNode.lastAppliedLayoutPhysicalRect = physicalRect
 
-                // Apply frame (dwindle is always tiled, so no fullscreen handling needed)
-                window.isFullscreen = false
-                window.setAxFrame(rect.topLeftCorner, CGSize(width: rect.width, height: rect.height))
+                // Apply frame with fullscreen support (matches tiles/accordion behavior)
+                if window.isFullscreen && window == context.workspace.rootTilingContainer.mostRecentWindowRecursive {
+                    treeNode.lastAppliedLayoutPhysicalRect = nil
+                    window.layoutFullscreen(context)
+                } else {
+                    treeNode.lastAppliedLayoutPhysicalRect = physicalRect
+                    window.isFullscreen = false
+                    window.setAxFrame(rect.topLeftCorner, CGSize(width: rect.width, height: rect.height))
+                }
             }
             return
         }

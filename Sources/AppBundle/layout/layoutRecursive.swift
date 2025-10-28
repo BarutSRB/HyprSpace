@@ -92,7 +92,7 @@ extension Window {
     }
 
     @MainActor
-    fileprivate func layoutFullscreen(_ context: LayoutContext) {
+    func layoutFullscreen(_ context: LayoutContext) {
         let monitorRect = noOuterGapsInFullscreen
             ? context.workspace.workspaceMonitor.visibleRect
             : context.workspace.workspaceMonitor.visibleRectPaddedByOuterGaps
