@@ -52,13 +52,34 @@ private func resizeWithMouse(_ window: Window) async throws { // todo cover with
             let (uParent, uOwnIndex) = window.closestParent(hasChildrenInDirection: .up, withLayout: nil) ?? (nil, nil)
             let (rParent, rOwnIndex) = window.closestParent(hasChildrenInDirection: .right, withLayout: nil) ?? (nil, nil)
             let table: [(CGFloat, TilingContainer?, Int?, Int?)] = [
-                (lastAppliedLayoutRect.minX - rect.minX, lParent, 0,                        lOwnIndex),               // Horizontal, to the left of the window
+                (rect.minX - lastAppliedLayoutRect.minX, lParent, 0,                        lOwnIndex),               // Horizontal, to the left of the window
                 (rect.maxY - lastAppliedLayoutRect.maxY, dParent, dOwnIndex.map { $0 + 1 }, dParent?.children.count), // Vertical, to the down of the window
-                (lastAppliedLayoutRect.minY - rect.minY, uParent, 0,                        uOwnIndex),               // Vertical, to the up of the window
+                (rect.minY - lastAppliedLayoutRect.minY, uParent, 0,                        uOwnIndex),               // Vertical, to the up of the window
                 (rect.maxX - lastAppliedLayoutRect.maxX, rParent, rOwnIndex.map { $0 + 1 }, rParent?.children.count), // Horizontal, to the right of the window
             ]
             for (diff, parent, startIndex, pastTheEndIndex) in table {
                 if let parent, let startIndex, let pastTheEndIndex, pastTheEndIndex - startIndex > 0 && abs(diff) > 5 { // 5 pixels should be enough to fight with accumulated floating precision error
+
+                    // Dwindle layout uses cache-based resizing
+                    if parent.layout == .dwindle {
+                        let cache = parent.dwindleCache
+                        let orientation = parent.orientation
+
+                        // Create delta vector from the resize diff
+                        let delta = Vector2D(
+                            x: orientation == .h ? diff : 0,
+                            y: orientation == .v ? diff : 0
+                        )
+
+                        // Mouse resize: positive diff = grow, negative diff = shrink
+                        let shouldGrow = diff > 0
+
+                        cache.resize(window: window, delta: delta, shouldGrow: shouldGrow)
+                        currentlyManipulatedWithMouseWindowId = window.windowId
+                        continue
+                    }
+
+                    // Tiles and scroll layouts use weight-based resizing
                     let siblingDiff = diff.div(pastTheEndIndex - startIndex).orDie()
                     let orientation = parent.orientation
 
@@ -67,7 +88,7 @@ private func resizeWithMouse(_ window: Window) async throws { // todo cover with
                         .filter {
                             let parent = $0.parent as? TilingContainer
                             let layout = parent?.layout
-                            return parent?.orientation == orientation && (layout == .tiles || layout == .dwindle || layout == .scroll)
+                            return parent?.orientation == orientation && (layout == .tiles || layout == .scroll)
                         }
                         .forEach { $0.setWeight(orientation, $0.getWeightBeforeResize(orientation) + diff) }
                     if parent.layout != .scroll {

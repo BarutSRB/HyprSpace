@@ -73,3 +73,33 @@ extension String {
         }
     }
 }
+
+// MARK: - Dwindle Layout Cache Integration
+
+private let dwindleCacheKey = TreeNodeUserDataKey<DwindleLayoutCache>(key: "dwindleLayoutCache")
+
+extension TilingContainer {
+    /// Gets or creates the dwindle layout cache for this container
+    ///
+    /// The cache persists across layout recalculations and maintains the binary
+    /// tree structure with split ratios. It automatically rebuilds when windows
+    /// are added or removed.
+    var dwindleCache: DwindleLayoutCache {
+        get {
+            if let cache = getUserData(key: dwindleCacheKey) {
+                return cache
+            }
+            let cache = DwindleLayoutCache()
+            putUserData(key: dwindleCacheKey, data: cache)
+            return cache
+        }
+    }
+
+    /// Invalidates the dwindle cache, forcing a rebuild on next layout pass
+    ///
+    /// Called when switching away from dwindle layout or when tree structure
+    /// changes significantly (e.g., normalization)
+    func invalidateDwindleCache() {
+        cleanUserData(key: dwindleCacheKey)
+    }
+}

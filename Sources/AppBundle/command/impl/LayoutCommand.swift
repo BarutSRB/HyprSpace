@@ -63,6 +63,12 @@ struct LayoutCommand: Command {
         case .tilingContainer(let parent):
             let targetOrientation = targetOrientation ?? parent.orientation
             let targetLayout = targetLayout ?? parent.layout
+
+            // Invalidate dwindle cache when switching away from dwindle layout
+            if parent.layout == .dwindle && targetLayout != .dwindle {
+                parent.invalidateDwindleCache()
+            }
+
             parent.layout = targetLayout
             parent.changeOrientation(targetOrientation)
             return true

@@ -15,9 +15,15 @@ struct BalanceSizesCommand: Command {
 
 @MainActor
 private func balance(_ parent: TilingContainer) {
+    // For dwindle layout, reset all split ratios in the cache
+    if parent.layout == .dwindle {
+        parent.dwindleCache.resetAllRatios()
+    }
+
     for child in parent.children {
         switch parent.layout {
-            case .tiles, .dwindle: child.setWeight(parent.orientation, 1)
+            case .tiles: child.setWeight(parent.orientation, 1)
+            case .dwindle: break // Ratios already reset above via cache
             case .accordion, .scroll: break // Do nothing
         }
         if let child = child as? TilingContainer {
