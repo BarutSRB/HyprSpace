@@ -22,3 +22,7 @@
 # XCode User settings
 xcuserdata/
 xcshareddata/
+
+# Hyprland reference code (C++ implementation for research)
+/Dwindle/
+/MasterLay/
