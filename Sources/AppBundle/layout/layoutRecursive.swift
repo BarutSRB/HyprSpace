@@ -72,6 +72,58 @@ struct LayoutContext {
     }
 }
 
+/// Applies aspect ratio padding to a single window in dwindle layout
+/// - Parameters:
+///   - point: Top-left corner of available rect
+///   - width: Available width
+///   - height: Available height
+///   - context: Layout context with workspace and monitor information
+/// - Returns: Adjusted (point, width, height) tuple with aspect ratio padding applied, or original if disabled
+@MainActor
+private func applyAspectRatioPadding(
+    point: CGPoint,
+    width: CGFloat,
+    height: CGFloat,
+    context: LayoutContext
+) -> (point: CGPoint, width: CGFloat, height: CGFloat) {
+    let aspectRatio = config.dwindleSingleWindowAspectRatio
+    let tolerance = config.dwindleSingleWindowAspectRatioTolerance
+
+    // Feature disabled if y is zero
+    guard aspectRatio.y != 0 else {
+        return (point, width, height)
+    }
+
+    // Calculate requested and actual aspect ratios
+    let requestedRatio = aspectRatio.x / aspectRatio.y
+    let originalRatio = width / height
+
+    var padding = CGSize.zero
+
+    if requestedRatio > originalRatio {
+        // Monitor is taller than requested - add vertical padding
+        let vPadding = height - (width / requestedRatio)
+        // Only apply if padding exceeds tolerance threshold
+        if vPadding / 2 > tolerance * height {
+            padding.height = vPadding
+        }
+    } else if requestedRatio < originalRatio {
+        // Monitor is wider than requested - add horizontal padding
+        let hPadding = width - (height * requestedRatio)
+        // Only apply if padding exceeds tolerance threshold
+        if hPadding / 2 > tolerance * width {
+            padding.width = hPadding
+        }
+    }
+
+    // Apply padding by centering the window
+    return (
+        point: CGPoint(x: point.x + padding.width / 2, y: point.y + padding.height / 2),
+        width: width - padding.width,
+        height: height - padding.height
+    )
+}
+
 extension Window {
     @MainActor
     fileprivate func layoutFloatingWindow(_ context: LayoutContext) async throws {
@@ -179,9 +231,17 @@ extension TilingContainer {
         guard let container = self as? TilingContainer else { return }
         guard !children.isEmpty else { return }
 
-        // Single child takes full space - no need for cache
+        // Single child takes full space (with optional aspect ratio padding)
         if children.count == 1 {
-            try await children[0].layoutRecursive(point, width: width, height: height, virtual: virtual, context)
+            // Apply aspect ratio padding if configured
+            let adjusted = applyAspectRatioPadding(point: point, width: width, height: height, context: context)
+            try await children[0].layoutRecursive(
+                adjusted.point,
+                width: adjusted.width,
+                height: adjusted.height,
+                virtual: virtual,
+                context
+            )
             return
         }
 

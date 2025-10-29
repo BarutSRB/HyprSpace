@@ -1,0 +1,27 @@
+// File: src/config/ConfigManager.cpp
+// Function: CConfigManager::CConfigManager() [Constructor]
+// Lines: 629-630
+//
+// This code registers the two configuration variables for the single_window_aspect_ratio feature.
+// These lines are part of the dwindle layout configuration section.
+
+// Register the aspect ratio vector (x, y)
+// Default: {0, 0} - feature disabled (y-value of 0 means inactive)
+registerConfigVar("dwindle:single_window_aspect_ratio", Hyprlang::VEC2{0, 0});
+
+// Register the tolerance threshold
+// Default: 0.1f - minimum 10% of screen dimension for padding to apply
+registerConfigVar("dwindle:single_window_aspect_ratio_tolerance", {0.1f});
+
+// Context: These are part of a larger block of dwindle configuration options:
+// Line 620: dwindle:preserve_split
+// Line 621: dwindle:special_scale_factor
+// Line 622: dwindle:split_width_multiplier
+// Line 623: dwindle:use_active_for_splits
+// Line 624: dwindle:default_split_ratio
+// Line 625: dwindle:split_bias
+// Line 626: dwindle:smart_split
+// Line 627: dwindle:smart_resizing
+// Line 628: dwindle:precise_mouse_move
+// Line 629: dwindle:single_window_aspect_ratio
+// Line 630: dwindle:single_window_aspect_ratio_tolerance

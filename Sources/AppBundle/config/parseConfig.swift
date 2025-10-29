@@ -104,6 +104,8 @@ private let configParser: [String: any ParserProtocol<Config>] = [
     "start-at-login": Parser(\.startAtLogin, parseBool),
     "automatically-unhide-macos-hidden-apps": Parser(\.automaticallyUnhideMacosHiddenApps, parseBool),
     "accordion-padding": Parser(\.accordionPadding, parseInt),
+    "dwindle-single-window-aspect-ratio": Parser(\.dwindleSingleWindowAspectRatio, parseCGPoint),
+    "dwindle-single-window-aspect-ratio-tolerance": Parser(\.dwindleSingleWindowAspectRatioTolerance, parseCGFloat),
     "exec-on-workspace-change": Parser(\.execOnWorkspaceChange, parseExecOnWorkspaceChange),
     "exec": Parser(\.execConfig, parseExecConfig),
 
@@ -310,6 +312,49 @@ extension Parsed where Failure == String {
 
 func parseBool(_ raw: TOMLValueConvertible, _ backtrace: TomlBacktrace) -> ParsedToml<Bool> {
     raw.bool.orFailure(expectedActualTypeError(expected: .bool, actual: raw.type, backtrace))
+}
+
+func parseCGFloat(_ raw: TOMLValueConvertible, _ backtrace: TomlBacktrace) -> ParsedToml<CGFloat> {
+    // TOML supports both int and float, so we should accept both
+    if let intValue = raw.int {
+        return .success(CGFloat(intValue))
+    } else if let doubleValue = raw.double {
+        return .success(CGFloat(doubleValue))
+    } else {
+        return .failure(.semantic(backtrace, "Expected number (int or float), got \(raw.type)"))
+    }
+}
+
+func parseCGPoint(_ raw: TOMLValueConvertible, _ backtrace: TomlBacktrace) -> ParsedToml<CGPoint> {
+    guard let array = raw.array else {
+        return .failure(expectedActualTypeError(expected: .array, actual: raw.type, backtrace))
+    }
+
+    guard array.count == 2 else {
+        return .failure(.semantic(backtrace, "Expected array with exactly 2 elements [x, y], got \(array.count) elements"))
+    }
+
+    // Parse x value (can be int or float)
+    let x: CGFloat
+    if let intValue = array[0].int {
+        x = CGFloat(intValue)
+    } else if let doubleValue = array[0].double {
+        x = CGFloat(doubleValue)
+    } else {
+        return .failure(.semantic(backtrace + .index(0), "Expected number, got \(array[0].type)"))
+    }
+
+    // Parse y value (can be int or float)
+    let y: CGFloat
+    if let intValue = array[1].int {
+        y = CGFloat(intValue)
+    } else if let doubleValue = array[1].double {
+        y = CGFloat(doubleValue)
+    } else {
+        return .failure(.semantic(backtrace + .index(1), "Expected number, got \(array[1].type)"))
+    }
+
+    return .success(CGPoint(x: x, y: y))
 }
 
 indirect enum TomlBacktrace: CustomStringConvertible, Equatable {

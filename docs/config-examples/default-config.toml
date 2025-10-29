@@ -17,11 +17,67 @@ enable-normalization-opposite-orientation-for-nested-containers = true
 # You can set 0 to disable the padding feature
 accordion-padding = 30
 
-# Possible values: tiles|accordion|dwindle|scroll
-# - tiles: Traditional tiling layout with adjustable splits
-# - accordion: Tabbed/stacked layout (h_accordion or v_accordion)
-# - dwindle: Binary tree layout inspired by Hyprland (automatic splits)
-# - scroll: Carousel layout with centered focused window and peek effect
+# ============================================================================
+# DWINDLE LAYOUT: SINGLE WINDOW ASPECT RATIO (HyprSpace Exclusive Feature)
+# ============================================================================
+# When only ONE window is present in a dwindle workspace, enforce a specific
+# aspect ratio to prevent uncomfortably wide/tall windows on ultrawide or
+# vertical monitors. The window will be centered with padding on the sides.
+#
+# FORMAT: [width, height] where the ratio is width/height
+#
+# COMMON ASPECT RATIOS:
+#   [16, 9]  - Standard widescreen (1920x1080, 2560x1440, 3840x2160)
+#              Good for: General use, media, gaming
+#
+#   [16, 10] - Productivity ratio (1920x1200, 2560x1600)
+#              Good for: Balance between code and media
+#
+#   [4, 3]   - Traditional/square (1024x768, 1600x1200)
+#              Good for: Coding, terminals, documents, reading
+#              More vertical space, less horizontal stretch
+#
+#   [21, 9]  - Ultrawide native (2560x1080, 3440x1440, 5120x2160)
+#              Good for: Matching your ultrawide monitor's native ratio
+#
+#   [32, 9]  - Super ultrawide (3840x1080, 5120x1440)
+#              Good for: Extreme ultrawide monitors
+#
+#   [3, 2]   - MacBook-style (3024x2016, 2880x1920)
+#              Good for: Matching MacBook Pro aspect ratio
+#
+#   [0, 0]   - DISABLED (default)
+#              Windows fill entire screen width (no padding)
+#
+# EXAMPLES - Uncomment and modify to enable:
+# dwindle-single-window-aspect-ratio = [16, 9]   # Standard widescreen
+# dwindle-single-window-aspect-ratio = [16, 10]  # Productivity
+# dwindle-single-window-aspect-ratio = [4, 3]    # Traditional/square
+# dwindle-single-window-aspect-ratio = [21, 9]   # Ultrawide
+dwindle-single-window-aspect-ratio = [0, 0]      # DISABLED (default)
+
+# Tolerance threshold (0.0 to 1.0)
+# Prevents tiny adjustments when monitor ratio is already close to requested.
+# Higher values = less likely to apply padding.
+#   0.0 - Always apply padding (even for tiny differences)
+#   0.1 - Apply padding if it would be >10% of screen dimension (recommended)
+#   0.2 - Apply padding if it would be >20% of screen dimension
+dwindle-single-window-aspect-ratio-tolerance = 0.1
+
+# IMPORTANT NOTES:
+# - This feature ONLY works with the DWINDLE layout
+# - Padding automatically appears when you have ONE window
+# - Padding automatically disappears when you add a SECOND window
+# - Does NOT affect tiles, accordion, scroll, or master layouts
+# ============================================================================
+
+# Default layout for new workspaces
+# Possible values: tiles | accordion | dwindle | scroll | master
+#   tiles    - Traditional tiling with manual splits (i3-like) - DEFAULT
+#   accordion - Tabbed/stacked layout, only most recent window visible
+#   dwindle  - Binary tree auto-splits (Hyprland-inspired)
+#   scroll   - Carousel layout (80% centered, 10% peek on each side)
+#   master   - Master-stack layout (one large master, others in stack)
 default-root-container-layout = 'tiles'
 
 # Possible values: horizontal|vertical|auto

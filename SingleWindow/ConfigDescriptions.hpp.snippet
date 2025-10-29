@@ -1,0 +1,34 @@
+// File: src/config/ConfigDescriptions.hpp
+// Lines: 1871-1881
+//
+// This code provides user-facing documentation and validation rules for the
+// single_window_aspect_ratio configuration options.
+// These descriptions are used in hyprctl configdescriptions and documentation.
+
+SConfigOptionDescription{
+    .value       = "dwindle:single_window_aspect_ratio",
+    .description = "If specified, whenever only a single window is open, it will be coerced into the specified aspect ratio.  Ignored if the y-value is zero.",
+    .type        = CONFIG_OPTION_VECTOR,
+    .data        = SConfigOptionDescription::SVectorData{{0, 0}, {0, 0}, {1000., 1000.}},
+    //                                                    ^^^^^^^  ^^^^^^^  ^^^^^^^^^^^^^
+    //                                                    default  minimum  maximum
+},
+SConfigOptionDescription{
+    .value       = "dwindle:single_window_aspect_ratio_tolerance",
+    .description = "Minimum distance for single_window_aspect_ratio to take effect, in fractions of the monitor's size.",
+    .type        = CONFIG_OPTION_FLOAT,
+    .data        = SConfigOptionDescription::SFloatData{0.1f, 0.f, 1.f},
+    //                                                  ^^^^  ^^^  ^^^
+    //                                                  default min max
+},
+
+// Type Details:
+// - CONFIG_OPTION_VECTOR: A 2D vector (x, y)
+//   - Default: {0, 0} means feature is disabled
+//   - Range: Both x and y can be 0-1000
+//   - Examples: {16, 9} for 16:9, {4, 3} for 4:3
+//
+// - CONFIG_OPTION_FLOAT: A floating-point value
+//   - Default: 0.1 = 10% tolerance
+//   - Range: 0.0 to 1.0 (0% to 100%)
+//   - Prevents tiny padding adjustments
