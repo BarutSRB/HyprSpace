@@ -7,15 +7,15 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		46DF828E558B5BE8D9DE19EC /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0ED8A4820563E19AE5075046 /* Assets.xcassets */; };
-		6663F143C1F3A9B4DDF926E8 /* AppBundle in Frameworks */ = {isa = PBXBuildFile; productRef = 34539BD6FADF2BABFFA7C7EE /* AppBundle */; };
-		6D6A7955B977A23E9627DF0A /* default-config.toml in Resources */ = {isa = PBXBuildFile; fileRef = FFFFA715F58C33D553F3375C /* default-config.toml */; };
-		C8DB5B4428B54C4E91ED7B89 /* AeroSpaceApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E746DD7BDE64913BE4A12C4 /* AeroSpaceApp.swift */; };
+		09110E71A321252FC59E0986 /* AeroSpaceApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E746DD7BDE64913BE4A12C4 /* AeroSpaceApp.swift */; };
+		1605B896A359E45ACABFCD64 /* AppBundle in Frameworks */ = {isa = PBXBuildFile; productRef = 9F79E0477B94FC02188EB127 /* AppBundle */; };
+		16EBD1FEF71E70A7579632B7 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0ED8A4820563E19AE5075046 /* Assets.xcassets */; };
+		58E36ED1B34424D84FE38464 /* default-config.toml in Resources */ = {isa = PBXBuildFile; fileRef = FFFFA715F58C33D553F3375C /* default-config.toml */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		01DD4FAAACCDA29D565324F5 /* HyprSpace.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HyprSpace.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		0ED8A4820563E19AE5075046 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		2FBD52A3B7B6A06E4E9D88B2 /* AeroSpace.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AeroSpace.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		3270ECAB558F594A4226526B /* HyprSpace */ = {isa = PBXFileReference; lastKnownFileType = folder; name = HyprSpace; path = .; sourceTree = SOURCE_ROOT; };
 		5BD0B882A1FEDB36C9E87414 /* HyprSpace.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = HyprSpace.entitlements; sourceTree = "<group>"; };
 		9E746DD7BDE64913BE4A12C4 /* AeroSpaceApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AeroSpaceApp.swift; sourceTree = "<group>"; };
@@ -23,11 +23,11 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		76588312F2EC20AE97C27C7D /* Frameworks */ = {
+		8E90CCC69EF86331A2F7A8C2 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				6663F143C1F3A9B4DDF926E8 /* AppBundle in Frameworks */,
+				1605B896A359E45ACABFCD64 /* AppBundle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -48,7 +48,7 @@
 		0EB9195764827955083DABDA /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				2FBD52A3B7B6A06E4E9D88B2 /* AeroSpace.app */,
+				01DD4FAAACCDA29D565324F5 /* HyprSpace.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -91,24 +91,24 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		0E6655C18C67156AC3E9EBF5 /* AeroSpace */ = {
+		FA36148E1AA0551B119346C2 /* HyprSpace */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 6B4B2C7455C788BDD7F576DC /* Build configuration list for PBXNativeTarget "AeroSpace" */;
+			buildConfigurationList = 9FF01488C5478F95C4B88E69 /* Build configuration list for PBXNativeTarget "HyprSpace" */;
 			buildPhases = (
-				F9B4D11930553F3B32AC6A24 /* Sources */,
-				E13ECBC525393A9498DAA429 /* Resources */,
-				76588312F2EC20AE97C27C7D /* Frameworks */,
+				D1491792E4E1779251F0B49E /* Sources */,
+				28A6390B790C0FED59134B9E /* Resources */,
+				8E90CCC69EF86331A2F7A8C2 /* Frameworks */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
-			name = AeroSpace;
+			name = HyprSpace;
 			packageProductDependencies = (
-				34539BD6FADF2BABFFA7C7EE /* AppBundle */,
+				9F79E0477B94FC02188EB127 /* AppBundle */,
 			);
-			productName = AeroSpace;
-			productReference = 2FBD52A3B7B6A06E4E9D88B2 /* AeroSpace.app */;
+			productName = HyprSpace;
+			productReference = 01DD4FAAACCDA29D565324F5 /* HyprSpace.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -137,35 +137,59 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				0E6655C18C67156AC3E9EBF5 /* AeroSpace */,
+				FA36148E1AA0551B119346C2 /* HyprSpace */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		E13ECBC525393A9498DAA429 /* Resources */ = {
+		28A6390B790C0FED59134B9E /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				46DF828E558B5BE8D9DE19EC /* Assets.xcassets in Resources */,
-				6D6A7955B977A23E9627DF0A /* default-config.toml in Resources */,
+				16EBD1FEF71E70A7579632B7 /* Assets.xcassets in Resources */,
+				58E36ED1B34424D84FE38464 /* default-config.toml in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		F9B4D11930553F3B32AC6A24 /* Sources */ = {
+		D1491792E4E1779251F0B49E /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				C8DB5B4428B54C4E91ED7B89 /* AeroSpaceApp.swift in Sources */,
+				09110E71A321252FC59E0986 /* AeroSpaceApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
+		1F4CA3F6DD5133B030624270 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = resources/HyprSpace.entitlements;
+				CODE_SIGN_IDENTITY = "hyprspace-codesign-certificate";
+				COMBINE_HIDPI_IMAGES = YES;
+				GCC_TREAT_WARNINGS_AS_ERRORS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_LSUIElement = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 0.2.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.barut.hyprspace;
+				PRODUCT_NAME = HyprSpace;
+				SDKROOT = macosx;
+				SWIFT_TREAT_WARNINGS_AS_ERRORS = YES;
+				SWIFT_VERSION = 6.2;
+			};
+			name = Release;
+		};
 		3CB5366364B858BD731E2BA5 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -283,31 +307,7 @@
 			};
 			name = Debug;
 		};
-		C72EDC9BA62BDC84822179C1 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = resources/HyprSpace.entitlements;
-				CODE_SIGN_IDENTITY = "hyprspace-codesign-certificate";
-				COMBINE_HIDPI_IMAGES = YES;
-				GCC_TREAT_WARNINGS_AS_ERRORS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_LSUIElement = YES;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/../Frameworks",
-				);
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				MARKETING_VERSION = "0.0.0-SNAPSHOT";
-				PRODUCT_BUNDLE_IDENTIFIER = com.barut.hyprspace;
-				PRODUCT_NAME = HyprSpace;
-				SDKROOT = macosx;
-				SWIFT_TREAT_WARNINGS_AS_ERRORS = YES;
-				SWIFT_VERSION = 6.2;
-			};
-			name = Release;
-		};
-		F665BCC3E4099FD6761D7356 /* Debug */ = {
+		DA04E0B46C6C0B452986725E /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
@@ -321,7 +321,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				MARKETING_VERSION = "0.0.0-SNAPSHOT";
+				MARKETING_VERSION = 0.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.barut.hyprspace.debug;
 				PRODUCT_NAME = "HyprSpace-Debug";
 				SDKROOT = macosx;
@@ -332,20 +332,20 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		6B4B2C7455C788BDD7F576DC /* Build configuration list for PBXNativeTarget "AeroSpace" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				F665BCC3E4099FD6761D7356 /* Debug */,
-				C72EDC9BA62BDC84822179C1 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Debug;
-		};
 		79D25C08B97EF7B5EB36CAF3 /* Build configuration list for PBXProject "HyprSpace" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				42AA61E58AC6D5C8DB52194C /* Debug */,
 				3CB5366364B858BD731E2BA5 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		9FF01488C5478F95C4B88E69 /* Build configuration list for PBXNativeTarget "HyprSpace" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DA04E0B46C6C0B452986725E /* Debug */,
+				1F4CA3F6DD5133B030624270 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
@@ -360,7 +360,7 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		34539BD6FADF2BABFFA7C7EE /* AppBundle */ = {
+		9F79E0477B94FC02188EB127 /* AppBundle */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = AppBundle;
 		};

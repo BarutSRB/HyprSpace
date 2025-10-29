@@ -4,7 +4,7 @@
 name: HyprSpace
 
 packages:
-  AeroSpacePackage:
+  HyprSpacePackage:
     path: .
 
 configs:
@@ -12,7 +12,7 @@ configs:
   Release: release
 
 targets:
-  AeroSpace:
+  HyprSpace:
     type: application
     platform: macOS
     deploymentTarget: "13.0"
@@ -21,7 +21,7 @@ targets:
       - "resources"
       - "docs/config-examples/default-config.toml"
     dependencies:
-      - package: AeroSpacePackage
+      - package: HyprSpacePackage
         product: AppBundle
     # https://developer.apple.com/documentation/xcode/build-settings-reference
     settings:
