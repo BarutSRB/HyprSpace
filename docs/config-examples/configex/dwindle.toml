@@ -1,5 +1,5 @@
 # HyprSpace Dwindle Layout Configuration Example
-# Place a copy of this config to ~/.aerospace.toml
+# Place a copy of this config to ~/.hyprspace.toml
 # Optimized for the dwindle layout - a binary tree layout inspired by Hyprland
 
 # You can use it to add commands that run after AeroSpace startup.

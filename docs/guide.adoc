@@ -64,7 +64,7 @@ xattr -d com.apple.quarantine /Applications/AeroSpace.app
 
 AeroSpace tries to find the custom config in two locations:
 
-. `~/.aerospace.toml`
+. `~/.hyprspace.toml`
 . `+${XDG_CONFIG_HOME}/aerospace/aerospace.toml+`
 (environment variable `XDG_CONFIG_HOME` fallbacks to `~/.config` if the variable is not presented)
 
@@ -103,7 +103,7 @@ You can bootstrap your custom config by copying the default config from the app 
 
 [source,shell]
 ----
-cp /Applications/AeroSpace.app/Contents/Resources/default-config.toml ~/.aerospace.toml
+cp /Applications/AeroSpace.app/Contents/Resources/default-config.toml ~/.hyprspace.toml
 ----
 
 link:config-examples/default-config.toml[Download default-config.toml]

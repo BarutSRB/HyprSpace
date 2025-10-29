@@ -28,7 +28,7 @@ func toggleReleaseServerIfDebug(_ state: EnableCmdArgs.State) {
     defer {
         socket.close()
     }
-    let socketFile = "/tmp/bobko.aerospace-\(unixUserName).sock"
+    let socketFile = "/tmp/com.barut.hyprspace-\(unixUserName).sock"
     if (try? socket.connect(to: socketFile)) == nil { // Can't connect, AeroSpace.app is not running
         return
     }

@@ -78,37 +78,37 @@ Choose your preferred installation method from the [latest release](../../releas
 
 #### Option 1: DMG Installer (Recommended)
 
-1. **Download** `AeroSpace-v*.dmg`
+1. **Download** `HyprSpace-v*.dmg`
 2. **Open** the .dmg file
-3. **Drag** AeroSpace.app to the Applications folder
+3. **Drag** HyprSpace.app to the Applications folder
 4. **First Launch Only** - Bypass Gatekeeper:
-   - **Right-click** AeroSpace.app → Select **"Open"**
+   - **Right-click** HyprSpace.app → Select **"Open"**
    - Click **"Open"** in the security dialog
    - *Alternative:* Run in Terminal:
      ```bash
-     xattr -cr /Applications/AeroSpace.app
+     xattr -cr /Applications/HyprSpace.app
      ```
 5. **Grant Accessibility Permissions** when prompted
 
 #### Option 2: ZIP Archive (Includes CLI & Extras)
 
-1. **Download** `AeroSpace-v*.zip`
+1. **Download** `HyprSpace-v*.zip`
 2. **Extract** the archive
-3. **Move** `AeroSpace.app` to your Applications folder
+3. **Move** `HyprSpace.app` to your Applications folder
 4. **Optional - Install CLI:**
    ```bash
    # Copy CLI binary to a directory in your PATH
-   cp AeroSpace-v*/bin/aerospace /usr/local/bin/
+   cp HyprSpace-v*/bin/hyprspace /usr/local/bin/
 
    # Copy man pages (optional)
-   cp AeroSpace-v*/manpage/*.1 /usr/local/share/man/man1/
+   cp HyprSpace-v*/manpage/*.1 /usr/local/share/man/man1/
 
    # Copy shell completion (optional - choose your shell)
-   cp AeroSpace-v*/shell-completion/bash/_aerospace /usr/local/etc/bash_completion.d/
+   cp HyprSpace-v*/shell-completion/bash/_hyprspace /usr/local/etc/bash_completion.d/
    # OR for zsh:
-   cp AeroSpace-v*/shell-completion/zsh/_aerospace /usr/local/share/zsh/site-functions/
+   cp HyprSpace-v*/shell-completion/zsh/_hyprspace /usr/local/share/zsh/site-functions/
    # OR for fish:
-   cp AeroSpace-v*/shell-completion/fish/aerospace.fish ~/.config/fish/completions/
+   cp HyprSpace-v*/shell-completion/fish/hyprspace.fish ~/.config/fish/completions/
    ```
 5. **Bypass Gatekeeper** (same as Option 1, step 4)
 6. **Grant Accessibility Permissions** when prompted
@@ -116,14 +116,14 @@ Choose your preferred installation method from the [latest release](../../releas
 ### 🔧 Enable Features
 
 #### Centered Workspace Bar
-1. Click the AeroSpace **menu bar icon**
+1. Click the HyprSpace **menu bar icon**
 2. Navigate to **"Experimental UI Settings"**
 3. Click **"Enable centered workspace bar"**
 4. Customize settings in the same menu
 
 #### Dwindle Layout
 
-Add to your `~/.aerospace.toml`:
+Add to your `~/.hyprspace.toml`:
 
 ```toml
 # Set as default layout
@@ -158,7 +158,7 @@ All settings accessible via **Menu Bar Icon → Experimental UI Settings**:
 ### Dwindle Layout Example
 
 ```toml
-# ~/.aerospace.toml
+# ~/.hyprspace.toml
 
 # Set dwindle as default
 default-root-container-layout = 'dwindle'
@@ -192,7 +192,7 @@ cmd-shift-v = 'layout vertical'
 ### Niri Layout Example
 
 ```toml
-# ~/.aerospace.toml
+# ~/.hyprspace.toml
 
 # Set Niri as default (great for horizontal workflows)
 default-root-container-layout = 'scroll'  # Note: uses 'scroll' in config
@@ -281,8 +281,8 @@ cd AeroSpace
 ./build-release.sh
 
 # Outputs:
-# - .release/AeroSpace-v*.zip (full package with CLI and extras)
-# - .release/AeroSpace-v*.dmg (app-only installer)
+# - .release/HyprSpace-v*.zip (full package with CLI and extras)
+# - .release/HyprSpace-v*.dmg (app-only installer)
 ```
 
 **Requirements:**

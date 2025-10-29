@@ -4,15 +4,15 @@
 import PackageDescription
 
 let package = Package(
-    name: "AeroSpacePackage",
+    name: "HyprSpacePackage",
     // Runtime support for parameterized protocol types is only available in macOS 13.0.0 or newer
     // And it specifies deploymentTarget for CLI
     platforms: [.macOS(.v13)],
     // Products define the executables and libraries a package produces, making them visible to other packages.
     products: [
-        .executable(name: "aerospace", targets: ["Cli"]),
+        .executable(name: "hyprspace", targets: ["Cli"]),
         // Don't use this build for release, use xcode instead
-        .executable(name: "AeroSpaceApp", targets: ["AeroSpaceApp"]),
+        .executable(name: "HyprSpaceApp", targets: ["HyprSpaceApp"]),
         // We only need to expose this as a product for xcode
         .library(name: "AppBundle", targets: ["AppBundle"]),
     ],
@@ -51,15 +51,17 @@ let package = Package(
                 .target(name: "Common"),
                 .target(name: "PrivateApi"),
             ],
+            exclude: ["layout/dwindle/README.md"],
             swiftSettings: [
                 .enableUpcomingFeature("NonisolatedNonsendingByDefault"),
             ],
         ),
         .executableTarget(
-            name: "AeroSpaceApp",
+            name: "HyprSpaceApp",
             dependencies: [
                 .target(name: "AppBundle"),
             ],
+            path: "Sources/AeroSpaceApp"
         ),
         .executableTarget(
             name: "Cli",

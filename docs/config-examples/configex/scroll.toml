@@ -1,5 +1,5 @@
 # HyprSpace Scroll Layout Configuration Example
-# Place a copy of this config to ~/.aerospace.toml
+# Place a copy of this config to ~/.hyprspace.toml
 # Optimized for the scroll layout - carousel-style with centered focused window
 
 # You can use it to add commands that run after AeroSpace startup.

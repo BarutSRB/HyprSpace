@@ -6,7 +6,7 @@ public func showMessageInGui(filenameIfConsoleApp: String, title: String, messag
     if isCli {
         print(titleAndMessage)
     } else {
-        let cachesDir = URL(filePath: "/tmp/bobko.aerospace/")
+        let cachesDir = URL(filePath: "/tmp/com.barut.hyprspace/")
         Result { try FileManager.default.createDirectory(at: cachesDir, withIntermediateDirectories: true) }.getOrDie()
         let file = cachesDir.appending(component: filenameIfConsoleApp)
         Result { try (titleAndMessage + "\n").write(to: file, atomically: true, encoding: .utf8) }.getOrDie()

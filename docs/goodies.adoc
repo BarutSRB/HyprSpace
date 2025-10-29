@@ -79,7 +79,7 @@ Alternatively, inspect the source code, and build it yourself.
 You can integrate AeroSpace workspace indicators with link:https://github.com/FelixKratz/SketchyBar[Sketchybar].
 Use these snippets as a starting point.
 
-.~/.aerospace.toml
+.~/.hyprspace.toml
 [source,toml]
 ----
 # Run Sketchybar together with AeroSpace
@@ -134,7 +134,7 @@ link:https://github.com/Jean-Tinland/simple-bar[simple-bar] can be used to displ
 
 In order to sync simple-bar with AeroSpace, add these lines to your AeroSpace config file:
 
-.~/.aerospace.toml
+.~/.hyprspace.toml
 [source,toml]
 ----
 # Notify simple-bar about window focus change
@@ -186,7 +186,7 @@ end tell'
 
 If `automatically-unhide-macos-hidden-apps` isn't enough, you can disable `cmd-h` altogether (which will make this hotkey unavailable for apps that might use it for other purposes)
 
-.~/.aerospace.toml
+.~/.hyprspace.toml
 [source,toml]
 ----
 [mode.main.binding]
@@ -200,7 +200,7 @@ If `automatically-unhide-macos-hidden-apps` isn't enough, you can disable `cmd-h
 You can configure a custom shortcut take a screenshot.
 `screencapture` is a built-in macOS command.
 
-.~/.aerospace.toml
+.~/.hyprspace.toml
 [source,toml]
 ----
 alt-shift-s = 'exec-and-forget screencapture -i -c'

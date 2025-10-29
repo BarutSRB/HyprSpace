@@ -23,7 +23,7 @@ done
 ./script/check-uncommitted-files.sh
 ./generate.sh --build-version "$build_version" --codesign-identity "$codesign_identity" --generate-git-hash
 
-swift build -c release --arch arm64 --arch x86_64 --product aerospace -Xswiftc -warnings-as-errors # CLI
+swift build -c release --arch arm64 --arch x86_64 --product hyprspace -Xswiftc -warnings-as-errors # CLI
 
 # todo: make xcodebuild use the same toolchain as swift
 # toolchain="$(plutil -extract CFBundleIdentifier raw ~/Library/Developer/Toolchains/swift-6.1-RELEASE.xctoolchain/Info.plist)"
@@ -39,22 +39,22 @@ rm -rf .release && mkdir .release
 xcode_configuration="Release"
 xcodebuild -version
 xcodebuild-pretty .release/xcodebuild.log clean build \
-    -scheme AeroSpace \
+    -scheme HyprSpace \
     -destination "generic/platform=macOS" \
     -configuration "$xcode_configuration" \
     -derivedDataPath .xcode-build
 
 git checkout .
 
-cp -r ".xcode-build/Build/Products/$xcode_configuration/AeroSpace.app" .release
-cp -r .build/apple/Products/Release/aerospace .release
+cp -r ".xcode-build/Build/Products/$xcode_configuration/HyprSpace.app" .release
+cp -r .build/apple/Products/Release/hyprspace .release
 
 ################
 ### SIGN CLI ###
 ################
 
 if [ "$codesign_identity" != "none" ]; then
-    codesign -s "$codesign_identity" .release/aerospace
+    codesign -s "$codesign_identity" .release/hyprspace
 fi
 
 ################
@@ -62,24 +62,24 @@ fi
 ################
 
 expected_layout=$(cat <<EOF
-.release/AeroSpace.app
-.release/AeroSpace.app/Contents
-.release/AeroSpace.app/Contents/_CodeSignature
-.release/AeroSpace.app/Contents/_CodeSignature/CodeResources
-.release/AeroSpace.app/Contents/MacOS
-.release/AeroSpace.app/Contents/MacOS/AeroSpace
-.release/AeroSpace.app/Contents/Resources
-.release/AeroSpace.app/Contents/Resources/default-config.toml
-.release/AeroSpace.app/Contents/Resources/AppIcon.icns
-.release/AeroSpace.app/Contents/Resources/Assets.car
-.release/AeroSpace.app/Contents/Info.plist
-.release/AeroSpace.app/Contents/PkgInfo
+.release/HyprSpace.app
+.release/HyprSpace.app/Contents
+.release/HyprSpace.app/Contents/_CodeSignature
+.release/HyprSpace.app/Contents/_CodeSignature/CodeResources
+.release/HyprSpace.app/Contents/MacOS
+.release/HyprSpace.app/Contents/MacOS/HyprSpace
+.release/HyprSpace.app/Contents/Resources
+.release/HyprSpace.app/Contents/Resources/default-config.toml
+.release/HyprSpace.app/Contents/Resources/AppIcon.icns
+.release/HyprSpace.app/Contents/Resources/Assets.car
+.release/HyprSpace.app/Contents/Info.plist
+.release/HyprSpace.app/Contents/PkgInfo
 EOF
 )
 
-if test "$expected_layout" != "$(find .release/AeroSpace.app)"; then
+if test "$expected_layout" != "$(find .release/HyprSpace.app)"; then
     echo "!!! Expect/Actual layout don't match !!!"
-    find .release/AeroSpace.app
+    find .release/HyprSpace.app
     exit 1
 fi
 
@@ -98,29 +98,29 @@ check-contains-hash() {
     fi
 }
 
-check-universal-binary .release/AeroSpace.app/Contents/MacOS/AeroSpace
-check-universal-binary .release/aerospace
+check-universal-binary .release/HyprSpace.app/Contents/MacOS/HyprSpace
+check-universal-binary .release/hyprspace
 
-check-contains-hash .release/AeroSpace.app/Contents/MacOS/AeroSpace
-check-contains-hash .release/aerospace
+check-contains-hash .release/HyprSpace.app/Contents/MacOS/HyprSpace
+check-contains-hash .release/hyprspace
 
 if [ "$codesign_identity" != "none" ]; then
-    codesign -v .release/AeroSpace.app
-    codesign -v .release/aerospace
+    codesign -v .release/HyprSpace.app
+    codesign -v .release/hyprspace
 fi
 
 ############
 ### PACK ###
 ############
 
-mkdir -p ".release/AeroSpace-v$build_version/manpage" && cp .man/*.1 ".release/AeroSpace-v$build_version/manpage"
-cp -r ./legal ".release/AeroSpace-v$build_version/legal"
-cp -r .shell-completion ".release/AeroSpace-v$build_version/shell-completion"
-cp -r docs/config-examples ".release/AeroSpace-v$build_version/config-examples"
+mkdir -p ".release/HyprSpace-v$build_version/manpage" && cp .man/*.1 ".release/HyprSpace-v$build_version/manpage"
+cp -r ./legal ".release/HyprSpace-v$build_version/legal"
+cp -r .shell-completion ".release/HyprSpace-v$build_version/shell-completion"
+cp -r docs/config-examples ".release/HyprSpace-v$build_version/config-examples"
 cd .release
-    mkdir -p "AeroSpace-v$build_version/bin" && cp -r aerospace "AeroSpace-v$build_version/bin"
-    cp -r AeroSpace.app "AeroSpace-v$build_version"
-    zip -r "AeroSpace-v$build_version.zip" "AeroSpace-v$build_version"
+    mkdir -p "HyprSpace-v$build_version/bin" && cp -r hyprspace "HyprSpace-v$build_version/bin"
+    cp -r HyprSpace.app "HyprSpace-v$build_version"
+    zip -r "HyprSpace-v$build_version.zip" "HyprSpace-v$build_version"
 cd -
 
 #############
@@ -133,16 +133,16 @@ temp_dmg_dir=".release/dmg-temp"
 rm -rf "$temp_dmg_dir" && mkdir -p "$temp_dmg_dir"
 
 # Copy app to temp directory
-cp -r .release/AeroSpace.app "$temp_dmg_dir/"
+cp -r .release/HyprSpace.app "$temp_dmg_dir/"
 
 # Create Applications symlink for easy installation
 ln -s /Applications "$temp_dmg_dir/Applications"
 
 # Create the DMG
-hdiutil create -volname "AeroSpace Installer" \
+hdiutil create -volname "HyprSpace Installer" \
     -srcfolder "$temp_dmg_dir" \
     -ov -format UDZO \
-    ".release/AeroSpace-v$build_version.dmg"
+    ".release/HyprSpace-v$build_version.dmg"
 
 # Cleanup
 rm -rf "$temp_dmg_dir"
@@ -150,9 +150,9 @@ rm -rf "$temp_dmg_dir"
 #################
 ### Brew Cask ###
 #################
-for cask_name in aerospace aerospace-dev; do
+for cask_name in hyprspace hyprspace-dev; do
     ./script/build-brew-cask.sh \
         --cask-name "$cask_name" \
-        --zip-uri ".release/AeroSpace-v$build_version.zip" \
+        --zip-uri ".release/HyprSpace-v$build_version.zip" \
         --build-version "$build_version"
 done
