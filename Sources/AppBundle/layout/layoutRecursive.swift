@@ -228,7 +228,6 @@ extension TilingContainer {
     fileprivate func layoutDwindle(_ point: CGPoint, width: CGFloat, height: CGFloat, virtual: Rect, _ context: LayoutContext) async throws {
         // Dwindle layout uses a persistent binary tree cache that maintains split ratios
         // across layout recalculations, enabling window resizing.
-        guard let container = self as? TilingContainer else { return }
         guard !children.isEmpty else { return }
 
         // Single child takes full space (with optional aspect ratio padding)
@@ -246,12 +245,12 @@ extension TilingContainer {
         }
 
         // Get or create the dwindle cache
-        let cache = container.dwindleCache
+        let cache = dwindleCache
 
         // Rebuild cache if window structure changed
         let rect = CGRect(x: point.x, y: point.y, width: width, height: height)
-        if cache.needsRebuild(for: container.children) {
-            cache.rebuild(from: container.children, availableRect: rect)
+        if cache.needsRebuild(for: children) {
+            cache.rebuild(from: children, availableRect: rect)
         }
 
         // Layout using cache - this maintains split ratios and updates geometry
@@ -381,8 +380,7 @@ extension TilingContainer {
         // - Remaining children are stack windows (share remaining width, arranged vertically)
         // - Orientation determines if master is on left or right
 
-        guard let container = self as? TilingContainer else { return }
-        let cache = container.masterCache
+        let cache = masterCache
         let horizontalGap = CGFloat(context.resolvedGaps.inner.horizontal)
         let verticalGap = CGFloat(context.resolvedGaps.inner.vertical)
 
