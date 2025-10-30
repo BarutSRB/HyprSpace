@@ -31,19 +31,30 @@ open class TreeNode: Equatable, AeroAny {
     }
 
     /// See: ``getWeight(_:)``
+    ///
+    /// Note: This function handles errors gracefully by logging and returning early
+    /// instead of crashing the application when weight changes are not allowed.
     func setWeight(_ targetOrientation: Orientation, _ newValue: CGFloat) {
-        guard let parent else { die("Can't change weight if TreeNode doesn't have parent") }
+        guard let parent else {
+            print("Warning: Can't change weight if TreeNode doesn't have parent")
+            return
+        }
         switch getChildParentRelation(child: self, parent: parent) {
             case .tiling(let parent):
+                // Graceful handling: Check if orientation matches
                 if parent.orientation != targetOrientation {
-                    die("You can't change \(targetOrientation) weight of nodes located in \(parent.orientation) container")
+                    print("Warning: Can't change \(targetOrientation) weight of nodes located in \(parent.orientation) container")
+                    return
                 }
+                // Graceful handling: Check if layout supports weight changes
                 if parent.layout != .tiles && parent.layout != .dwindle && parent.layout != .scroll {
-                    die("Weight can be changed only for nodes whose parent has 'tiles', 'dwindle' or 'scroll' layout")
+                    print("Warning: Weight can be changed only for nodes whose parent has '\(parent.layout)' layout (expected 'tiles', 'dwindle', or 'scroll')")
+                    return
                 }
                 adaptiveWeight = newValue
             default:
-                die("Can't change weight")
+                print("Warning: Can't change weight for this type of parent-child relation")
+                return
         }
     }
 

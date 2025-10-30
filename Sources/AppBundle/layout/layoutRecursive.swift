@@ -262,6 +262,12 @@ extension TilingContainer {
     fileprivate func layoutScroll(_ point: CGPoint, width: CGFloat, height: CGFloat, virtual: Rect, _ context: LayoutContext) async throws {
         guard !children.isEmpty else { return }
 
+        // Defensive: Ensure horizontal orientation (should be set by Layer 1)
+        if orientation != .h {
+            changeOrientation(.h)
+            print("Debug: Auto-adjusted orientation to horizontal for scroll layout")
+        }
+
         // Special case: single window uses full width
         if children.count == 1 {
             try await children[0].layoutRecursive(

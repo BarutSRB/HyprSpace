@@ -67,8 +67,13 @@ struct LayoutCommand: Command {
     guard let parent = window.parent else { return false }
     switch parent.cases {
         case .tilingContainer(let parent):
-            let targetOrientation = targetOrientation ?? parent.orientation
+            var targetOrientation = targetOrientation ?? parent.orientation
             let targetLayout = targetLayout ?? parent.layout
+
+            // Scroll layout requires horizontal orientation
+            if targetLayout == .scroll {
+                targetOrientation = .h
+            }
 
             // Invalidate dwindle cache when switching away from dwindle layout
             if parent.layout == .dwindle && targetLayout != .dwindle {

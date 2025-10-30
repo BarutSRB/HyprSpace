@@ -10,6 +10,10 @@ final class TilingContainer: TreeNode, NonLeafTreeNodeObject { // todo consider 
     init(parent: NonLeafTreeNodeObject, adaptiveWeight: CGFloat, _ orientation: Orientation, _ layout: Layout, index: Int) {
         self._orientation = orientation
         self.layout = layout
+        // Scroll layout requires horizontal orientation
+        if layout == .scroll && orientation != .h {
+            self._orientation = .h
+        }
         super.init(parent: parent, adaptiveWeight: adaptiveWeight, index: index)
     }
 
