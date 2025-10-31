@@ -31,12 +31,12 @@ if [ -z "$apple_id" ] || [ -z "$team_id" ] || [ -z "$app_password" ]; then
     exit 1
 fi
 
-APP_PATH=".release/AeroSpace.app"
-ZIP_PATH=".release/AeroSpace-v$build_version.zip"
-DMG_PATH=".release/AeroSpace-v$build_version.dmg"
+APP_PATH=".release/HyprSpace.app"
+ZIP_PATH=".release/HyprSpace-v$build_version.zip"
+DMG_PATH=".release/HyprSpace-v$build_version.dmg"
 
 echo "========================================="
-echo "Notarizing AeroSpace v$build_version"
+echo "Notarizing HyprSpace v$build_version"
 echo "========================================="
 echo ""
 
@@ -198,29 +198,29 @@ echo "Rebuilding ZIP with notarized app..."
 
 # The ZIP contains more than just the app, so we need to rebuild it
 cd .release
-    rm -rf "AeroSpace-v$build_version"
-    mkdir -p "AeroSpace-v$build_version"
+    rm -rf "HyprSpace-v$build_version"
+    mkdir -p "HyprSpace-v$build_version"
 
     # Copy notarized app
-    cp -r AeroSpace.app "AeroSpace-v$build_version/"
+    cp -r HyprSpace.app "HyprSpace-v$build_version/"
 
     # Copy CLI binary
-    mkdir -p "AeroSpace-v$build_version/bin"
-    cp aerospace "AeroSpace-v$build_version/bin/"
+    mkdir -p "HyprSpace-v$build_version/bin"
+    cp hyprspace "HyprSpace-v$build_version/bin/"
 
     # Copy documentation
-    mkdir -p "AeroSpace-v$build_version/manpage"
-    cp ../.man/*.1 "AeroSpace-v$build_version/manpage/" 2>/dev/null || true
+    mkdir -p "HyprSpace-v$build_version/manpage"
+    cp ../.man/*.1 "HyprSpace-v$build_version/manpage/" 2>/dev/null || true
 
     # Copy legal files
-    cp -r ../legal "AeroSpace-v$build_version/legal" 2>/dev/null || true
+    cp -r ../legal "HyprSpace-v$build_version/legal" 2>/dev/null || true
 
     # Copy shell completion
-    cp -r ../.shell-completion "AeroSpace-v$build_version/shell-completion" 2>/dev/null || true
+    cp -r ../.shell-completion "HyprSpace-v$build_version/shell-completion" 2>/dev/null || true
 
     # Create new ZIP
-    rm -f "AeroSpace-v$build_version.zip"
-    zip -r "AeroSpace-v$build_version.zip" "AeroSpace-v$build_version"
+    rm -f "HyprSpace-v$build_version.zip"
+    zip -r "HyprSpace-v$build_version.zip" "HyprSpace-v$build_version"
 cd -
 
 echo "✓ ZIP updated with notarized app"
@@ -235,8 +235,8 @@ echo "Notarization Complete!"
 echo "========================================="
 echo ""
 echo "Release artifacts:"
-echo "  • DMG:  .release/AeroSpace-v$build_version.dmg (signed, notarized)"
-echo "  • ZIP:  .release/AeroSpace-v$build_version.zip (notarized app included)"
+echo "  • DMG:  .release/HyprSpace-v$build_version.dmg (signed, notarized)"
+echo "  • ZIP:  .release/HyprSpace-v$build_version.zip (notarized app included)"
 echo ""
 echo "The app is now ready for distribution!"
 echo ""
