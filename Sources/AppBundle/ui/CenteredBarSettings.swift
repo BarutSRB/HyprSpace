@@ -93,6 +93,16 @@ public final class CenteredBarSettings {
             UserDefaults.standard.synchronize()
         }
     }
+
+    public var showModeIndicator: Bool {
+        get {
+            return UserDefaults.standard.bool(forKey: CenteredBarSettingsKeys.showModeIndicator.rawValue)
+        }
+        set {
+            UserDefaults.standard.setValue(newValue, forKey: CenteredBarSettingsKeys.showModeIndicator.rawValue)
+            UserDefaults.standard.synchronize()
+        }
+    }
 }
 
 public enum CenteredBarSettingsKeys: String {
@@ -103,6 +113,7 @@ public enum CenteredBarSettingsKeys: String {
     case notchAware
     case deduplicateAppIcons
     case hideEmptyWorkspaces
+    case showModeIndicator
 }
 
 public enum CenteredBarWindowLevel: String, CaseIterable, Identifiable, Equatable, Hashable {

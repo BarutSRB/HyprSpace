@@ -63,11 +63,33 @@ private struct WorkspaceItemView: View {
 
     @State private var isHovered = false
 
+    private var shouldShowModeIndicator: Bool {
+        guard CenteredBarSettings.shared.showModeIndicator else { return false }
+        guard let mode = activeMode, mode != mainModeId else { return false }
+        return true
+    }
+
+    private var workspaceDisplayText: String {
+        // If we should show mode indicator
+        if shouldShowModeIndicator, let mode = activeMode, mode != mainModeId {
+            let modeInitial = mode.first.map { String($0).uppercased() } ?? ""
+            if CenteredBarSettings.shared.showNumbers {
+                // Show both mode and workspace name: "[W] 1"
+                return "[\(modeInitial)] \(item.workspace.name)"
+            } else {
+                // Show only mode initial: "W"
+                return modeInitial
+            }
+        }
+        // Normal display: just workspace name
+        return item.workspace.name
+    }
+
     var body: some View {
         HStack(spacing: windowSpacing) {
-            // Workspace identifier
-            if CenteredBarSettings.shared.showNumbers {
-                Text(item.workspace.name)
+            // Workspace identifier with optional mode indicator
+            if CenteredBarSettings.shared.showNumbers || shouldShowModeIndicator {
+                Text(workspaceDisplayText)
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
                     .foregroundColor(item.isFocused ? borderColor : .secondary)
                     .frame(minWidth: 16)

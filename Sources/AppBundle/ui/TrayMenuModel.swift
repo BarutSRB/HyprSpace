@@ -79,6 +79,15 @@ public final class TrayMenuModel: ObservableObject {
         }
     }
 
+    @Published var centeredBarShowModeIndicator: Bool {
+        didSet {
+            CenteredBarSettings.shared.showModeIndicator = centeredBarShowModeIndicator
+            if centeredBarEnabled {
+                CenteredBarManager.shared?.update(viewModel: self)
+            }
+        }
+    }
+
     private init() {
         // Initialize centered bar properties from UserDefaults
         self.centeredBarEnabled = CenteredBarSettings.shared.enabled
@@ -88,6 +97,7 @@ public final class TrayMenuModel: ObservableObject {
         self.centeredBarNotchAware = CenteredBarSettings.shared.notchAware
         self.centeredBarDeduplicateIcons = CenteredBarSettings.shared.deduplicateAppIcons
         self.centeredBarHideEmptyWorkspaces = CenteredBarSettings.shared.hideEmptyWorkspaces
+        self.centeredBarShowModeIndicator = CenteredBarSettings.shared.showModeIndicator
     }
 }
 

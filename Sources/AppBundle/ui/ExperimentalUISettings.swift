@@ -93,6 +93,14 @@ struct ExperimentalUISettingsMenu: View {
             }
             .disabled(!viewModel.centeredBarEnabled)
 
+            Toggle(isOn: Binding(
+                get: { viewModel.centeredBarShowModeIndicator },
+                set: { viewModel.centeredBarShowModeIndicator = $0 },
+            )) {
+                Text("Show mode indicator in centered bar")
+            }
+            .disabled(!viewModel.centeredBarEnabled)
+
             // Window level selection
             Text("Window Level (Z-Index):")
             ForEach(CenteredBarWindowLevel.allCases) { level in
