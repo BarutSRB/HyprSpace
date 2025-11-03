@@ -66,7 +66,7 @@ private struct WorkspaceItemView: View {
     private var shouldShowModeIndicator: Bool {
         guard CenteredBarSettings.shared.showModeIndicator else { return false }
         guard let mode = activeMode, mode != mainModeId else { return false }
-        return true
+        return item.isFocused
     }
 
     private var workspaceDisplayText: String {
