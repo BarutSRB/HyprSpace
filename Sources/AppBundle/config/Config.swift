@@ -44,6 +44,7 @@ struct Config: ConvenienceCopyable {
     var accordionPadding: Int = 30
     var dwindleSingleWindowAspectRatio: CGPoint = .zero // x, y (e.g., 16, 9). Zero means disabled
     var dwindleSingleWindowAspectRatioTolerance: CGFloat = 0.1 // 0.0-1.0, prevents tiny adjustments
+    var niriFocusedWidthRatio: CGFloat = 0.8 // 0.1-1.0, ratio of screen width for focused window in scroll/niri layout
     var enableNormalizationOppositeOrientationForNestedContainers: Bool = true
     var execOnWorkspaceChange: [String] = [] // todo deprecate
     var keyMapping = KeyMapping()

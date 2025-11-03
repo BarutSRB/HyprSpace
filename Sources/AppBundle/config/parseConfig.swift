@@ -106,6 +106,7 @@ private let configParser: [String: any ParserProtocol<Config>] = [
     "accordion-padding": Parser(\.accordionPadding, parseInt),
     "dwindle-single-window-aspect-ratio": Parser(\.dwindleSingleWindowAspectRatio, parseCGPoint),
     "dwindle-single-window-aspect-ratio-tolerance": Parser(\.dwindleSingleWindowAspectRatioTolerance, parseCGFloat),
+    "niri-focused-width-ratio": Parser(\.niriFocusedWidthRatio, parseCGFloat),
     "exec-on-workspace-change": Parser(\.execOnWorkspaceChange, parseExecOnWorkspaceChange),
     "exec": Parser(\.execConfig, parseExecConfig),
 
@@ -193,6 +194,16 @@ func parseCommandOrCommands(_ raw: TOMLValueConvertible) -> Parsed<[any Command]
                 binding.commands.filterIsInstance(of: MoveNodeToWorkspaceCommand.self).compactMap { $0.args.target.val.workspaceNameOrNil()?.raw }
         }
         + (config.workspaceToMonitorForceAssignment).keys
+
+    // Validate niri-focused-width-ratio
+    if config.niriFocusedWidthRatio < 0.1 || config.niriFocusedWidthRatio > 1.0 {
+        errors += [.semantic(
+            .rootKey("niri-focused-width-ratio"),
+            "niri-focused-width-ratio must be between 0.1 and 1.0 (got \(config.niriFocusedWidthRatio))"
+        )]
+        // Reset to default if invalid
+        config.niriFocusedWidthRatio = 0.8
+    }
 
     if config.enableNormalizationFlattenContainers {
         let containsSplitCommand = config.modes.values.lazy.flatMap { $0.bindings.values }

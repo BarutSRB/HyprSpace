@@ -17,6 +17,15 @@ enable-normalization-opposite-orientation-for-nested-containers = true
 # You can set 0 to disable the padding feature
 accordion-padding = 30
 
+# The 'niri-focused-width-ratio' controls the width of the focused window
+# in the scroll/niri/paper layout. Value must be between 0.1 and 1.0
+# Examples:
+#   0.8 (default) - 80% focused window, 10% peek on each side
+#   0.6 - 60% focused window, 20% peek on each side
+#   0.9 - 90% focused window, 5% peek on each side
+#   1.0 - Full width (no peek effect)
+niri-focused-width-ratio = 0.8
+
 # ============================================================================
 # DWINDLE LAYOUT: SINGLE WINDOW ASPECT RATIO (HyprSpace Exclusive Feature)
 # ============================================================================

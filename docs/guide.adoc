@@ -283,6 +283,8 @@ While in a `v_accordion`, you can navigate the windows using the `focus (up|down
 
 Accordion padding is configurable via `accordion-padding` option.
 
+For the scroll layout (also known as niri or paper layout), the width of the focused window is configurable via `niri-focused-width-ratio` option. This controls how much of the screen width the centered window occupies (default 0.8 = 80%, leaving 10% peek margins on each side).
+
 [#normalization]
 === Normalization
 

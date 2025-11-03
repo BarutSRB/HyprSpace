@@ -280,11 +280,11 @@ extension TilingContainer {
         }
 
         // Carousel scroll layout (horizontal only):
-        // - Focused window: centered, 80% screen width
-        // - Peek effect: 10% of left/right neighbors visible at edges
+        // - Focused window: centered, configurable width (default 80%)
+        // - Peek effect: margins split equally on left/right (e.g., 10% each for 80% width)
         // - Custom widths: preserved from previous layouts (if resized)
 
-        let focusedWidthRatio: CGFloat = 0.8
+        let focusedWidthRatio: CGFloat = config.niriFocusedWidthRatio
         let defaultWindowWidth = width * focusedWidthRatio
         let peekMargin = width * ((1.0 - focusedWidthRatio) / 2.0)
 
