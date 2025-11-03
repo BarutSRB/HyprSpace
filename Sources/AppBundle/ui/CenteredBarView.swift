@@ -350,6 +350,10 @@ extension TrayMenuModel {
 
     private func processWorkspace(_ workspace: Workspace, focus: LiveFocus, dedupeEnabled: Bool) -> CenteredBarWorkspaceItem {
         let allWindows = workspace.allLeafWindowsRecursive
+
+        // Trigger async window title updates for all windows
+        TrayMenuModel.shared.updateWindowTitles(for: allWindows)
+
         let windows: [CenteredBarWindowItem] = if dedupeEnabled {
             createDedupedWindowItems(allWindows: allWindows, focus: focus)
         } else {
@@ -415,8 +419,8 @@ extension TrayMenuModel {
     }
 
     private func createWindowInfo(_ window: Window, focus: LiveFocus) -> WindowInfo {
-        // Use app name as title since window.title is async
-        let titleText = window.app.name ?? "Untitled"
+        // Use cached title if available, otherwise fall back to app name
+        let titleText = TrayMenuModel.shared.getCachedWindowTitle(for: window.windowId) ?? window.app.name ?? "Untitled"
         return WindowInfo(
             id: window.windowId,
             windowId: window.windowId,

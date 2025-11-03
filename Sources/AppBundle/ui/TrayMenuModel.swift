@@ -13,6 +13,9 @@ public final class TrayMenuModel: ObservableObject {
     @Published var experimentalUISettings: ExperimentalUISettings = ExperimentalUISettings()
     @Published var sponsorshipMessage: String = sponsorshipPrompts.randomElement().orDie()
 
+    // CENTERED BAR FEATURE - Cache for window titles
+    @Published private var windowTitleCache: [UInt32: String] = [:]
+
     // CENTERED BAR FEATURE - Reactive properties for menu bindings
     @Published var centeredBarEnabled: Bool {
         didSet {
@@ -99,11 +102,47 @@ public final class TrayMenuModel: ObservableObject {
         self.centeredBarHideEmptyWorkspaces = CenteredBarSettings.shared.hideEmptyWorkspaces
         self.centeredBarShowModeIndicator = CenteredBarSettings.shared.showModeIndicator
     }
+
+    // CENTERED BAR FEATURE - Window title cache management
+    func getCachedWindowTitle(for windowId: UInt32) -> String? {
+        return windowTitleCache[windowId]
+    }
+
+    func updateWindowTitles(for windows: [Window]) {
+        Task {
+            for window in windows {
+                do {
+                    let title = try await window.title
+                    if !title.isEmpty {
+                        await MainActor.run {
+                            if windowTitleCache[window.windowId] != title {
+                                windowTitleCache[window.windowId] = title
+                                // Trigger view update if needed
+                                objectWillChange.send()
+                            }
+                        }
+                    }
+                } catch {
+                    // If we can't get the title, continue without caching
+                    continue
+                }
+            }
+        }
+    }
+
+    func clearWindowTitleCache() {
+        windowTitleCache.removeAll()
+    }
 }
 
 @MainActor func updateTrayText() {
     let sortedMonitors = sortedMonitors
     let focus = focus
+
+    // CENTERED BAR FEATURE - Update window titles for all visible windows
+    let allVisibleWindows = Workspace.all.flatMap { $0.allLeafWindowsRecursive }
+    TrayMenuModel.shared.updateWindowTitles(for: allVisibleWindows)
+
     TrayMenuModel.shared.trayText = (activeMode?.takeIf { $0 != mainModeId }?.first.map { "[\($0.uppercased())] " } ?? "") +
         sortedMonitors
         .map {
