@@ -15,12 +15,12 @@ struct BalanceSizesCommand: Command {
 
 @MainActor
 private func balance(_ parent: TilingContainer) {
-    // For dwindle layout, reset all split ratios in the cache
+    // For dwindle layout, reset all split ratios to configured default
     if parent.layout == .dwindle {
         parent.dwindleCache.resetAllRatios()
     }
 
-    // For master layout, reset master area percentage to 50%
+    // For master layout, reset master area percentage to configured default
     if parent.layout == .master {
         parent.masterCache.resetToDefault()
     }

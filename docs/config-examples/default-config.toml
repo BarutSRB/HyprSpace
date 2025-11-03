@@ -80,6 +80,32 @@ dwindle-single-window-aspect-ratio-tolerance = 0.1
 # - Does NOT affect tiles, accordion, scroll, or master layouts
 # ============================================================================
 
+# ============================================================================
+# GOLDEN RATIO AND DEFAULT SPLIT SETTINGS
+# ============================================================================
+
+# Default split ratio for new dwindle containers (0.1 to 1.9)
+# Controls how space is divided when dwindle creates new splits
+#   1.0     - 50/50 split (equal halves) - DEFAULT
+#   1.618   - Golden ratio (61.8% / 38.2% split)
+#   0.618   - Inverse golden ratio (38.2% / 61.8% split)
+#   1.5     - 60/40 split
+#   0.667   - 40/60 split
+# Note: balance-sizes command resets all ratios to this value
+# dwindle-default-split-ratio = 1.0      # Default (50/50)
+# dwindle-default-split-ratio = 1.618    # Golden ratio (recommended for aesthetics)
+
+# Default master area percentage for master layout (0.1 to 0.9)
+# Controls how much width the master window takes vs the stack
+#   0.5     - 50% master, 50% stack - DEFAULT
+#   0.618   - Golden ratio (61.8% master, 38.2% stack)
+#   0.382   - Inverse golden ratio (38.2% master, 61.8% stack)
+#   0.6     - 60% master, 40% stack
+#   0.667   - 66.7% master, 33.3% stack (2:1 ratio)
+# Note: balance-sizes command resets master area to this value
+# master-default-percent = 0.5           # Default (50/50)
+# master-default-percent = 0.618         # Golden ratio (recommended for productivity)
+
 # Default layout for new workspaces
 # Possible values: tiles | accordion | dwindle | scroll | master
 #   tiles    - Traditional tiling with manual splits (i3-like) - DEFAULT

@@ -17,12 +17,23 @@ import Common
 final class MasterLayoutCache {
     // MARK: - Properties
 
-    /// Master area percentage of total width (default 0.5 = 50%)
+    /// Master area percentage of total width
     /// Range: [0.1, 0.9] to prevent extreme layouts
-    var masterPercent: CGFloat = 0.5
+    var masterPercent: CGFloat
 
     /// Master area orientation
     var orientation: MasterOrientation = .left
+
+    // MARK: - Initialization
+
+    init() {
+        @MainActor func getDefaultPercent() -> CGFloat {
+            return config.masterDefaultPercent
+        }
+        self.masterPercent = MainActor.assumeIsolated {
+            getDefaultPercent()
+        }
+    }
 
     // MARK: - Calculated Values
 
@@ -61,9 +72,10 @@ final class MasterLayoutCache {
         return max(0.1, min(0.9, percent))
     }
 
-    /// Resets master percentage to default 50/50 split
+    /// Resets master percentage to configured default
+    @MainActor
     func resetToDefault() {
-        masterPercent = 0.5
+        masterPercent = config.masterDefaultPercent
     }
 }
 

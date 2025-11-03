@@ -106,6 +106,8 @@ private let configParser: [String: any ParserProtocol<Config>] = [
     "accordion-padding": Parser(\.accordionPadding, parseInt),
     "dwindle-single-window-aspect-ratio": Parser(\.dwindleSingleWindowAspectRatio, parseCGPoint),
     "dwindle-single-window-aspect-ratio-tolerance": Parser(\.dwindleSingleWindowAspectRatioTolerance, parseCGFloat),
+    "dwindle-default-split-ratio": Parser(\.dwindleDefaultSplitRatio, parseCGFloat),
+    "master-default-percent": Parser(\.masterDefaultPercent, parseCGFloat),
     "niri-focused-width-ratio": Parser(\.niriFocusedWidthRatio, parseCGFloat),
     "exec-on-workspace-change": Parser(\.execOnWorkspaceChange, parseExecOnWorkspaceChange),
     "exec": Parser(\.execConfig, parseExecConfig),
@@ -203,6 +205,26 @@ func parseCommandOrCommands(_ raw: TOMLValueConvertible) -> Parsed<[any Command]
         )]
         // Reset to default if invalid
         config.niriFocusedWidthRatio = 0.8
+    }
+
+    // Validate dwindle-default-split-ratio
+    if config.dwindleDefaultSplitRatio < 0.1 || config.dwindleDefaultSplitRatio > 1.9 {
+        errors += [.semantic(
+            .rootKey("dwindle-default-split-ratio"),
+            "dwindle-default-split-ratio must be between 0.1 and 1.9 (got \(config.dwindleDefaultSplitRatio))"
+        )]
+        // Reset to default if invalid
+        config.dwindleDefaultSplitRatio = 1.0
+    }
+
+    // Validate master-default-percent
+    if config.masterDefaultPercent < 0.1 || config.masterDefaultPercent > 0.9 {
+        errors += [.semantic(
+            .rootKey("master-default-percent"),
+            "master-default-percent must be between 0.1 and 0.9 (got \(config.masterDefaultPercent))"
+        )]
+        // Reset to default if invalid
+        config.masterDefaultPercent = 0.5
     }
 
     if config.enableNormalizationFlattenContainers {

@@ -53,6 +53,7 @@ final class DwindleLayoutCache {
     /// - Parameters:
     ///   - windows: Flat list of windows to arrange
     ///   - availableRect: Available space for the tree
+    @MainActor
     func rebuild(from windows: [TreeNode], availableRect: CGRect) {
         rootNode = buildBinaryTree(windows, availableRect: availableRect)
         cachedWindowIds = windows.compactMap { node -> CGWindowID? in
@@ -72,6 +73,7 @@ final class DwindleLayoutCache {
     ///   - windows: Windows to include in this subtree
     ///   - availableRect: Available space for this subtree
     /// - Returns: Root node of the subtree
+    @MainActor
     private func buildBinaryTree(_ windows: [TreeNode], availableRect: CGRect) -> DwindleNode? {
         guard !windows.isEmpty else { return nil }
 
@@ -82,7 +84,7 @@ final class DwindleLayoutCache {
 
         // Container node - binary split
         let container = DwindleNode()
-        container.splitRatio = 1.0  // Default 50/50 split
+        container.splitRatio = config.dwindleDefaultSplitRatio  // Use configured default split ratio
 
         // Determine split orientation based on available space
         // Future-ready: can incorporate split_width_multiplier, smart_split, user overrides
@@ -328,18 +330,20 @@ final class DwindleLayoutCache {
 
     // MARK: - Reset
 
-    /// Resets all split ratios to 1.0 (50/50)
+    /// Resets all split ratios to configured default
     ///
     /// Used by the balance-sizes command to restore default layout
+    @MainActor
     func resetAllRatios() {
         resetRatiosRecursive(rootNode)
     }
 
+    @MainActor
     private func resetRatiosRecursive(_ node: DwindleNode?) {
         guard let node else { return }
 
         if node.isContainer {
-            node.splitRatio = 1.0
+            node.splitRatio = config.dwindleDefaultSplitRatio
             for child in node.children {
                 resetRatiosRecursive(child)
             }

@@ -44,6 +44,8 @@ struct Config: ConvenienceCopyable {
     var accordionPadding: Int = 30
     var dwindleSingleWindowAspectRatio: CGPoint = .zero // x, y (e.g., 16, 9). Zero means disabled
     var dwindleSingleWindowAspectRatioTolerance: CGFloat = 0.1 // 0.0-1.0, prevents tiny adjustments
+    var dwindleDefaultSplitRatio: CGFloat = 1.0 // 0.1-1.9, default split ratio for new dwindle containers (1.0 = 50/50, 1.618 = golden ratio)
+    var masterDefaultPercent: CGFloat = 0.5 // 0.1-0.9, default master area percentage for master layout (0.5 = 50%, 0.618 = golden ratio)
     var niriFocusedWidthRatio: CGFloat = 0.8 // 0.1-1.0, ratio of screen width for focused window in scroll/niri layout
     var enableNormalizationOppositeOrientationForNestedContainers: Bool = true
     var execOnWorkspaceChange: [String] = [] // todo deprecate
