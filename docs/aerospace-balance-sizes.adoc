@@ -19,6 +19,90 @@ aerospace balance-sizes [-h|--help] [--workspace <workspace>]
 // tag::body[]
 {manpurpose}
 
+The `balance-sizes` command resets window sizes to create a balanced layout, but the exact behavior
+depends on the layout algorithm being used:
+
+=== Layout-Specific Behavior
+
+==== Tiles Layout (`tiles`, `h_tiles`, `v_tiles`)
+Resets all window weights to 1, giving each window equal size within its container.
+This creates a perfectly uniform grid where all windows have the same dimensions.
+
+Example: Three windows in horizontal tiles
+----
+Before (uneven):          After balance-sizes:
+┌──┬────────┬──┐         ┌─────┬─────┬─────┐
+│1 │   2    │3 │   →     │  1  │  2  │  3  │
+│  │        │  │         │     │     │     │
+└──┴────────┴──┘         └─────┴─────┴─────┘
+----
+
+==== Dwindle Layout
+Resets all split ratios to the configured `dwindle-default-split-ratio` value (default: 1.0).
+This applies the same split ratio throughout the entire window tree.
+
+Configuration example in `~/.hyprspace.toml`:
+----
+dwindle-default-split-ratio = 1.618  # Golden ratio
+----
+
+Example with ratio 1.0 (equal splits):
+----
+Before (uneven):          After balance-sizes:
+┌──┬──────────┐         ┌─────┬─────┐
+│1 │    2     │   →     │  1  │  2  │
+│  ├──────────┤         │     ├─────┤
+│  │    3     │         │     │  3  │
+└──┴──────────┘         └─────┴─────┘
+----
+
+==== Master Layout
+Resets the master area to the configured `master-default-percent` value (default: 50%).
+This affects the size ratio between the master window(s) and the stack area.
+
+Configuration example in `~/.hyprspace.toml`:
+----
+master-default-percent = 0.6  # Master takes 60% of space (0.6 = 60%)
+----
+
+Example with 50% master area:
+----
+Before (70% master):      After balance-sizes (50%):
+┌────────┬────┐         ┌─────┬─────┐
+│        │ 2  │         │     │  2  │
+│   1    ├────┤   →     │  1  ├─────┤
+│        │ 3  │         │     │  3  │
+└────────┴────┘         └─────┴─────┘
+----
+
+==== Accordion Layout
+No effect. The accordion layout always shows one window maximized with others minimized,
+so there are no sizes to balance.
+
+==== Scroll/Niri/Paper Layout
+No effect. The scroll layout uses a fixed width ratio for the focused window
+(configured via `niri-focused-width-ratio`), which is not affected by balance-sizes.
+
+=== Recursive Balancing
+
+The command works recursively through the entire workspace tree. If you have nested
+containers with different layouts, each container will be balanced according to its
+own layout rules.
+
+Example with mixed layouts:
+----
+Workspace root (tiles)
+├── Window 1
+├── Container (dwindle)
+│   ├── Window 2
+│   └── Window 3
+└── Window 4
+
+After balance-sizes:
+- Windows 1, Container, and 4 get equal weight in the root tiles layout
+- Windows 2 and 3 get the default dwindle split ratio within their container
+----
+
 // =========================================================== Options
 include::./util/conditional-options-header.adoc[]
 
@@ -28,6 +112,31 @@ include::./util/conditional-options-header.adoc[]
 include::./util/workspace-flag-desc.adoc[]
 
 // end::body[]
+
+// =========================================================== Examples
+== Examples
+
+Balance sizes in the current workspace using default configuration::
+    aerospace balance-sizes
+
+Balance sizes in workspace 2::
+    aerospace balance-sizes --workspace 2
+
+Balance after resizing windows manually::
+    # After manually resizing windows with mouse or resize commands
+    aerospace balance-sizes  # Returns to balanced state
+
+Common key binding in `~/.hyprspace.toml`::
+    [mode.main.binding]
+    alt-b = 'balance-sizes'  # Alt+B to balance
+
+// =========================================================== See Also
+
+aerospace-resize(1)::
+    Command to manually resize windows
+
+aerospace-layout(1)::
+    Command to change layout algorithms with different balancing behaviors
 
 // =========================================================== Footer
 include::util/man-footer.adoc[]

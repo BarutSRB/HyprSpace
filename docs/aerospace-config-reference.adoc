@@ -1,0 +1,359 @@
+= aerospace-config-reference(1)
+include::util/man-attributes.adoc[]
+:manname: aerospace-config-reference
+// tag::purpose[]
+:manpurpose: Complete reference for all HyprSpace configuration options
+// end::purpose[]
+
+// =========================================================== Synopsis
+== Synopsis
+[verse]
+// tag::synopsis[]
+Complete configuration reference for ~/.hyprspace.toml
+
+// end::synopsis[]
+
+// =========================================================== Description
+== Description
+
+// tag::body[]
+
+This document provides a comprehensive reference for all configuration options available in HyprSpace.
+Configuration is done through a TOML file located at `~/.hyprspace.toml`.
+
+== Runtime Options
+
+[cols="2,1,3", options="header"]
+|===
+| Option | Default | Description
+
+| `start-at-login`
+| `false`
+| Automatically start HyprSpace when logging into macOS. Registers as a Login Item.
+
+| `automatically-unhide-macos-hidden-apps`
+| `false`
+| Automatically unhide applications hidden with Cmd+H. Prevents "lost" hidden windows.
+
+| `after-startup-command`
+| `[]`
+| Array of commands to run after HyprSpace starts. Use for launching helper apps or initial setup.
+
+| `enable-normalization-flatten-containers`
+| `true`
+| Flatten containers with only one child to simplify the tree structure.
+
+| `enable-normalization-opposite-orientation-for-nested-containers`
+| `true`
+| Ensure nested containers have opposite orientations (horizontal inside vertical, etc.).
+
+| `on-focused-monitor-changed`
+| `[]`
+| Commands to run when focus changes monitors. Common: `['move-mouse monitor-lazy-center']`.
+
+| `non-empty-workspaces-root-containers-layout-on-startup`
+| (deprecated)
+| Deprecated. Use `default-root-container-layout` instead.
+|===
+
+== Layout Options
+
+[cols="2,1,3", options="header"]
+|===
+| Option | Default | Description
+
+| `default-root-container-layout`
+| `'tiles'`
+| Default layout for new workspaces. Options: `tiles`, `accordion`, `dwindle`, `scroll`, `master`.
+
+| `default-root-container-orientation`
+| `'auto'`
+| Default split orientation. Options: `horizontal`, `vertical`, `auto` (based on monitor aspect).
+
+| `accordion-padding`
+| `30`
+| Padding size for accordion layouts to indicate hidden windows. Set to 0 to disable.
+
+| `niri-focused-width-ratio`
+| `0.8`
+| Width ratio for focused window in scroll/niri layout (0.1-1.0). 0.8 = 80% center, 10% peek sides.
+
+| `dwindle-default-split-ratio`
+| `1.0`
+| Default split ratio for dwindle layout. 1.0 = 50/50, 1.618 = golden ratio.
+
+| `dwindle-single-window-aspect-ratio`
+| `[0, 0]`
+| Aspect ratio `[width, height]` for single windows in dwindle. `[0, 0]` = disabled, `[16, 9]` = 16:9.
+
+| `dwindle-single-window-aspect-ratio-tolerance`
+| `0.1`
+| Tolerance threshold (0.0-1.0) for applying aspect ratio padding. Higher = less likely to apply.
+
+| `master-default-percent`
+| `0.5`
+| Default master area percentage (0.1-0.9). 0.5 = 50%, 0.618 = golden ratio.
+|===
+
+== Gaps Configuration
+
+All gap values support either constant values or per-monitor overrides using array syntax.
+
+[cols="2,1,3", options="header"]
+|===
+| Option | Default | Description
+
+| `gaps.inner.horizontal`
+| `0`
+| Horizontal spacing between adjacent windows.
+
+| `gaps.inner.vertical`
+| `0`
+| Vertical spacing between adjacent windows.
+
+| `gaps.outer.left`
+| `0`
+| Spacing between windows and left monitor edge.
+
+| `gaps.outer.right`
+| `0`
+| Spacing between windows and right monitor edge.
+
+| `gaps.outer.top`
+| `0`
+| Spacing between windows and top monitor edge.
+
+| `gaps.outer.bottom`
+| `0`
+| Spacing between windows and bottom monitor edge.
+|===
+
+=== Per-Monitor Gap Syntax
+
+[source,toml]
+----
+gaps.outer.top = [
+    { monitor.main = 35 },        # Main monitor
+    { monitor."Dell.*" = 20 },    # Pattern match
+    10                             # Default for others
+]
+----
+
+== Workspace Options
+
+[cols="2,1,3", options="header"]
+|===
+| Option | Default | Description
+
+| `workspace-to-monitor-force-assignment`
+| (none)
+| Force specific workspaces to specific monitors. Example: `{ 1 = 'main', 2 = 'secondary' }`.
+
+| `on-workspace-change`
+| `[]`
+| Commands to run when workspace changes.
+|===
+
+== Key Mapping
+
+[cols="2,1,3", options="header"]
+|===
+| Option | Default | Description
+
+| `key-mapping.preset`
+| `'qwerty'`
+| Keyboard layout preset. Options: `qwerty`, `dvorak`, `colemak`.
+
+| `key-mapping.key-remap`
+| (none)
+| Custom key remapping table. Example: `{ q = 'a', w = 'z' }`.
+|===
+
+== Mode Configuration
+
+Modes are defined under `[mode.MODE_NAME.binding]` sections:
+
+[source,toml]
+----
+[mode.main.binding]
+alt-h = 'focus left'
+alt-j = 'focus down'
+alt-k = 'focus up'
+alt-l = 'focus right'
+
+[mode.resize.binding]
+h = 'resize width -50'
+l = 'resize width +50'
+escape = 'mode main'
+----
+
+== Callbacks
+
+=== on-window-detected
+
+Conditional commands when new windows are detected:
+
+[source,toml]
+----
+[[on-window-detected]]
+if.app-id = 'com.apple.finder'
+if.window-title-regex-substring = 'Downloads'
+run = ['layout floating', 'move-node-to-workspace F']
+----
+
+Available conditions:
+* `if.app-id` - Match by application bundle ID
+* `if.app-name-regex-substring` - Match app name with regex
+* `if.window-title-regex-substring` - Match window title with regex
+* `if.workspace` - Match specific workspace
+* `if.during-aerospace-startup` - Only during startup
+
+=== on-focus-changed
+
+Commands to run when focus changes:
+
+[source,toml]
+----
+[[on-focus-changed]]
+if.from-workspace = '1'
+if.to-workspace = '2'
+run = 'exec-and-forget echo "Switched from 1 to 2"'
+----
+
+== Exec Environment Variables
+
+When using `exec-*` commands, these environment variables are available:
+
+[cols="2,3", options="header"]
+|===
+| Variable | Description
+
+| `AEROSPACE_FOCUSED_WINDOW_ID`
+| ID of currently focused window
+
+| `AEROSPACE_FOCUSED_WORKSPACE`
+| Name of focused workspace
+
+| `AEROSPACE_FOCUSED_MONITOR_ID`
+| ID of focused monitor
+
+| `AEROSPACE_FOCUSED_MONITOR_NAME`
+| Name of focused monitor
+
+| `AEROSPACE_PREV_FOCUSED_WINDOW_ID`
+| ID of previously focused window
+
+| `AEROSPACE_PREV_FOCUSED_WORKSPACE`
+| Name of previous workspace
+
+| `AEROSPACE_ROOT_WINDOW_ID`
+| ID of root window (macOS desktop)
+
+| `AEROSPACE_WORKSPACE_FOCUSED_WINDOW_ID`
+| ID of focused window in current workspace
+
+| `AEROSPACE_VERSION`
+| HyprSpace version string
+|===
+
+== Example Configurations
+
+=== Minimal Configuration
+
+[source,toml]
+----
+start-at-login = true
+default-root-container-layout = 'dwindle'
+
+[mode.main.binding]
+alt-h = 'focus left'
+alt-j = 'focus down'
+alt-k = 'focus up'
+alt-l = 'focus right'
+----
+
+=== Ultrawide Monitor Setup
+
+[source,toml]
+----
+# Single window aspect ratio for ultrawide
+dwindle-single-window-aspect-ratio = [16, 9]
+dwindle-single-window-aspect-ratio-tolerance = 0.1
+
+# Larger gaps for ultrawide
+[gaps]
+inner.horizontal = 20
+inner.vertical = 20
+outer.left = 30
+outer.right = 30
+----
+
+=== Multi-Monitor with Per-Display Gaps
+
+[source,toml]
+----
+[gaps]
+outer.top = [
+    { monitor.main = 35 },      # Space for menu bar
+    { monitor."LG.*" = 10 },    # External monitor
+    5                            # Default
+]
+
+workspace-to-monitor-force-assignment = {
+    1 = 'main',
+    2 = 'main',
+    3 = '^LG.*',
+    4 = '^LG.*'
+}
+----
+
+=== Golden Ratio Configuration
+
+[source,toml]
+----
+# Golden ratio everywhere
+dwindle-default-split-ratio = 1.618
+master-default-percent = 0.618
+
+# Fibonacci-inspired gaps
+[gaps]
+inner.horizontal = 8   # Fibonacci number
+inner.vertical = 5     # Fibonacci number
+outer.left = 13        # Fibonacci number
+outer.right = 13
+----
+
+== Configuration Validation
+
+HyprSpace validates configuration on startup and reload. Invalid values are reset to defaults with warnings in the log. Common validations:
+
+* Ratios must be between 0.1 and 0.9 (or special values like 1.0, 1.618)
+* Gap values must be non-negative integers
+* Layout names must be valid (`tiles`, `accordion`, `dwindle`, `scroll`, `master`)
+* Monitor patterns must be valid regex when using wildcards
+
+To test configuration changes:
+[source,bash]
+----
+aerospace reload-config
+----
+
+Check for errors:
+[source,bash]
+----
+aerospace config --get-errors
+----
+
+// end::body[]
+
+// =========================================================== See Also
+
+== See Also
+
+- link:aerospace-guide.html[HyprSpace Guide]
+- link:aerospace-commands.html[Command Reference]
+- link:aerospace-layout.html[Layout Documentation]
+- Example configs in `docs/config-examples/`
+
+// =========================================================== Footer
+include::util/man-footer.adoc[]

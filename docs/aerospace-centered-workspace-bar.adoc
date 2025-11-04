@@ -1,0 +1,277 @@
+= aerospace-centered-workspace-bar(1)
+include::util/man-attributes.adoc[]
+:manname: aerospace-centered-workspace-bar
+// tag::purpose[]
+:manpurpose: HyprSpace's enhanced visual workspace indicator with centered bar display
+// end::purpose[]
+
+// =========================================================== Synopsis
+== Synopsis
+[verse]
+// tag::synopsis[]
+The centered workspace bar is a GUI feature configured via menu settings
+
+// end::synopsis[]
+
+// =========================================================== Description
+== Description
+
+// tag::body[]
+
+The centered workspace bar is an optional UI enhancement that displays a centered bar at the top
+of your screen showing:
+
+- Current workspace indicators with numbers or icons
+- Application icons for windows in each workspace
+- Focus indicators highlighting the active workspace and window
+- Mode indicator showing the current binding mode (e.g., main, resize, service)
+- Interactive workspace and window switching via mouse clicks
+
+The bar is fully configurable and can be positioned at different window levels (z-index) to work
+with various workflows and display setups.
+
+== Enabling the Centered Bar
+
+To enable the centered workspace bar:
+
+1. Click the HyprSpace menu bar icon (in the system tray area)
+2. Navigate to "Experimental UI Settings"
+3. Toggle "Enable centered workspace bar"
+
+Once enabled, the bar will appear at the top of your display showing your current workspaces.
+
+== Configuration Options
+
+All settings are available through the menu bar icon → Experimental UI Settings:
+
+=== Display Options
+
+*Show workspace numbers*::
+    When enabled, displays numeric labels (1, 2, 3...) alongside workspace indicators.
+    Default: enabled
+
+*Show mode indicator in centered bar*::
+    When enabled, displays the current binding mode (main, resize, service, etc.) in the bar.
+    This helps you track which key bindings are currently active.
+    Default: disabled
+
+*Hide empty workspaces*::
+    When enabled, only shows workspaces that contain windows.
+    Empty workspaces are hidden from the bar.
+    Default: disabled
+
+*Deduplicate app icons*::
+    When multiple windows from the same application exist in a workspace, shows a single
+    icon with a badge count instead of repeating the icon.
+    Default: disabled
+
+=== Window Level (Z-Index)
+
+Controls the stacking order of the centered bar relative to other windows:
+
+*Normal*::
+    Same level as regular application windows. The bar can be covered by other windows.
+
+*Floating*::
+    Appears above normal windows but below popups and menus.
+
+*Status Bar*::
+    Same level as the system menu bar. Stays visible above most content.
+
+*Popup* (recommended)::
+    Appears above the menu bar and most UI elements. This is the default and recommended setting.
+
+*Screen Saver*::
+    Highest possible level. The bar will appear above all other UI elements, including
+    screen savers and overlays.
+
+=== Bar Position
+
+*Overlapping Menu Bar*::
+    The bar appears at the same vertical position as the system menu bar, effectively
+    overlapping it. This maximizes vertical screen space.
+    Default setting.
+
+*Below Menu Bar*::
+    The bar is positioned directly below the system menu bar, creating a double-bar
+    appearance but preserving the full menu bar visibility.
+
+=== Special Features
+
+*Notch-aware positioning*::
+    For MacBook Pro models with a notch, enabling this option shifts the bar to the right
+    of the notch to avoid overlapping with the camera cutout.
+    Default: disabled
+
+== Interaction
+
+The centered bar supports interactive features:
+
+=== Click to Focus Workspace
+Click on any workspace indicator to immediately switch to that workspace.
+
+=== Click Window Icon to Focus
+Click on any application icon within a workspace to:
+1. Switch to that workspace (if not already active)
+2. Focus the clicked application window
+
+=== Grouped Window Popup
+When app icon deduplication is enabled and multiple windows exist:
+- Hovering over a grouped icon shows the count badge
+- Clicking the grouped icon displays a popup menu listing all window titles
+- Select a window title from the popup to focus that specific window
+
+== Multi-Monitor Support
+
+The centered bar adapts to multi-monitor setups:
+
+- **Focused Workspace Monitor**: The bar appears on the monitor containing the currently
+  focused workspace (default behavior)
+- **Primary Display**: The bar always appears on the primary display regardless of focus
+- **Display Under Mouse**: The bar appears on whichever display the mouse cursor is on
+
+Configure this via the target display options in Experimental UI Settings.
+
+== Mode Indicator
+
+When enabled, the mode indicator shows your current binding mode:
+
+- `main` - Default mode with standard key bindings
+- `resize` - Active when in resize mode
+- `service` - Service mode for window management operations
+- Custom modes defined in your configuration
+
+The indicator helps track which set of key bindings is currently active, especially useful
+when working with modal configurations.
+
+== Visual Appearance
+
+The centered bar inherits your system's appearance settings:
+
+- Automatically adapts to light/dark mode
+- Uses system colors and transparency
+- Respects reduced transparency accessibility settings
+
+The bar's width automatically adjusts based on:
+- Number of visible workspaces
+- Width of application icons
+- Presence of mode indicator
+- Screen width and display configuration
+
+== Performance Considerations
+
+The centered bar is designed to be lightweight:
+
+- Updates only when workspace state changes
+- Minimal CPU usage when idle
+- Efficient icon caching for applications
+- Smooth animations for state transitions
+
+For systems with limited resources, you can optimize performance by:
+- Hiding empty workspaces
+- Enabling icon deduplication
+- Using a lower window level (e.g., Normal or Floating)
+
+== Troubleshooting
+
+=== Bar not visible after enabling
+
+1. Check the window level setting - it may be set too low
+2. Verify no other applications are in fullscreen mode
+3. Try setting window level to "Screen Saver" temporarily to confirm visibility
+
+=== Bar appears behind menu bar
+
+Change the window level to "Popup" or higher in Experimental UI Settings.
+
+=== Bar overlaps with notch on MacBook Pro
+
+Enable "Notch-aware positioning" in Experimental UI Settings.
+
+=== Icons not showing for some applications
+
+Some applications may not provide accessible icons. The bar will show a placeholder
+for these applications.
+
+=== Bar position incorrect on external displays
+
+Check the target display setting and ensure it matches your preferred behavior
+(Focused Workspace Monitor is recommended for most setups).
+
+== Examples
+
+=== Basic Setup
+Enable the centered bar with default settings:
+[source]
+----
+1. Menu Bar Icon → Experimental UI Settings
+2. Enable "Enable centered workspace bar"
+3. Window Level: Popup (default)
+4. Position: Overlapping Menu Bar (default)
+----
+
+=== Multi-Monitor Optimized Setup
+For multi-monitor users who want the bar on their primary display:
+[source]
+----
+1. Enable centered workspace bar
+2. Set Target Display: Primary Display
+3. Enable "Hide empty workspaces"
+4. Enable "Deduplicate app icons"
+----
+
+=== MacBook Pro with Notch
+Configuration for MacBook Pro with notch:
+[source]
+----
+1. Enable centered workspace bar
+2. Enable "Notch-aware positioning"
+3. Window Level: Popup
+4. Position: Overlapping Menu Bar
+----
+
+=== Minimal Distraction Setup
+For users who want a minimal, unobtrusive indicator:
+[source]
+----
+1. Enable centered workspace bar
+2. Disable "Show workspace numbers"
+3. Enable "Hide empty workspaces"
+4. Enable "Deduplicate app icons"
+5. Window Level: Normal (allows covering with other windows)
+----
+
+== Compatibility
+
+- **macOS Version**: Requires macOS 13.0 (Ventura) or later
+- **Display Types**: Works with all Mac displays including Retina, external monitors, and notched MacBook Pro models
+- **Spaces/Mission Control**: Compatible with macOS native Spaces when virtual workspace emulation is active
+
+== Known Limitations
+
+1. The centered bar cannot be configured via the text configuration file (`.hyprspace.toml`).
+   All settings must be adjusted through the GUI menu.
+
+2. Custom styling (colors, fonts, sizes) is not currently supported. The bar uses system
+   defaults for consistency.
+
+3. The bar may briefly flicker when switching between displays in certain multi-monitor
+   configurations.
+
+4. Some system-level overlays (e.g., screenshot selection) may appear above the bar even
+   when set to the highest window level.
+
+== See Also
+
+- link:aerospace-guide.html[HyprSpace Guide]
+- link:aerospace-config.html[Configuration Reference]
+- link:aerospace-layout.html[Layout Documentation]
+
+The centered workspace bar is an experimental feature unique to HyprSpace. Feedback and bug
+reports specific to this feature should be directed to the HyprSpace fork repository, not
+the upstream AeroSpace project.
+
+// end::body[]
+
+// =========================================================== Footer
+include::util/man-footer.adoc[]

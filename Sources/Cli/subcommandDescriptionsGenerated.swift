@@ -3,8 +3,10 @@
 
 let subcommandDescriptions = [
     ["  balance-sizes", "Balance sizes of all windows in the current workspace"],
+    ["  centered-workspace-bar", "HyprSpace's enhanced visual workspace indicator with centered bar display"],
     ["  close-all-windows-but-current", "On the focused workspace, close all windows but current"],
     ["  close", "Close the focused window"],
+    ["  config-reference", "Complete reference for all HyprSpace configuration options"],
     ["  config", "Query AeroSpace config options"],
     ["  debug-windows", "Interactive command to record Accessibility API debug information to create bug reports"],
     ["  enable", "Temporarily disable window management"],

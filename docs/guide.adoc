@@ -62,11 +62,14 @@ xattr -d com.apple.quarantine /Applications/AeroSpace.app
 [#config-location]
 === Custom config location
 
-AeroSpace tries to find the custom config in two locations:
+HyprSpace (the enhanced fork of AeroSpace) looks for its configuration file in the following locations:
 
-. `~/.hyprspace.toml`
+. `~/.hyprspace.toml` (primary location for HyprSpace)
 . `+${XDG_CONFIG_HOME}/aerospace/aerospace.toml+`
 (environment variable `XDG_CONFIG_HOME` fallbacks to `~/.config` if the variable is not presented)
+
+**Important:** HyprSpace uses `~/.hyprspace.toml` as its primary configuration file, not `~/.aerospace.toml`.
+This distinguishes it from the upstream AeroSpace project.
 
 If the config is found in more than one location then the ambiguity is reported.
 
@@ -112,6 +115,123 @@ link:config-examples/default-config.toml[Download default-config.toml]
 ----
 include::config-examples/default-config.toml[]
 ----
+
+[#configuration-reference]
+=== Configuration Reference
+
+This section provides detailed documentation for key configuration options available in HyprSpace.
+While the default config above shows examples with inline comments, this reference provides comprehensive explanations.
+
+For a complete list of all configuration options with tables and examples, see link:aerospace-config-reference.html[Configuration Reference].
+
+==== Runtime Options
+
+===== start-at-login
+
+Controls whether HyprSpace automatically starts when you log into macOS.
+
+[source,toml]
+----
+start-at-login = true  # or false (default)
+----
+
+When enabled, HyprSpace will:
+
+* Register itself as a Login Item in macOS
+* Start automatically after login without requiring manual launch
+* Be manageable through System Settings → General → Login Items
+
+This is the recommended way to ensure HyprSpace is always running. Alternative methods like using `launchd` or adding to Login Items manually are also possible but less integrated.
+
+===== automatically-unhide-macos-hidden-apps
+
+Automatically unhides applications that were hidden using macOS's "Hide" feature (Cmd+H).
+
+[source,toml]
+----
+automatically-unhide-macos-hidden-apps = true  # or false (default)
+----
+
+**Problem this solves**: When you press Cmd+H in macOS, the application is hidden (different from minimized). Hidden apps don't appear in the workspace and can be confusing in a tiling window manager context. With this option enabled:
+
+* Applications hidden with Cmd+H are automatically unhidden
+* Windows remain visible in their workspace tiles
+* Prevents "lost" windows that are hidden but still running
+* Useful if you frequently hit Cmd+H accidentally
+
+If you prefer the macOS hiding behavior, leave this as `false`. If you find hidden apps disrupting your workflow, set to `true`.
+
+See also link:aerospace-goodies.html#disable-hide-app[Disable Hide Application] for alternative approaches.
+
+===== after-startup-command
+
+Specifies commands to run automatically after HyprSpace starts.
+
+[source,toml]
+----
+after-startup-command = [
+    'exec-and-forget borders active_color=0xffe1e3e4 inactive_color=0xff494d64 width=5.0'
+]
+----
+
+Common use cases:
+
+* Starting helper applications (e.g., borders, sketchybar)
+* Setting up initial workspace arrangement
+* Running workspace assignment commands
+* Executing custom scripts
+
+Commands are executed in order. Use `exec-and-forget` for background processes that should continue running.
+
+==== Default Layout Settings
+
+These settings control the initial layout configuration for new workspaces.
+
+===== default-root-container-layout
+
+Sets the default tiling layout algorithm for new workspaces.
+
+[source,toml]
+----
+default-root-container-layout = 'tiles'  # Default value
+----
+
+Available options:
+
+* `tiles` - Traditional i3-style manual tiling (default)
+* `accordion` - One window maximized, others minimized to the side
+* `dwindle` - Binary tree with automatic split direction (HyprSpace exclusive)
+* `scroll` - Carousel/niri-style with centered focus (HyprSpace exclusive)
+* `master` - Master-stack layout with one primary window
+
+This determines the initial layout when a workspace is created. You can change layouts dynamically using the `layout` command. Choose based on your workflow:
+
+* `tiles` for maximum control
+* `dwindle` for automatic management
+* `master` for focus-oriented work
+* `scroll` for distraction-free viewing
+
+===== default-root-container-orientation
+
+Sets the default split orientation for new containers.
+
+[source,toml]
+----
+default-root-container-orientation = 'auto'  # Default value
+----
+
+Options:
+
+* `horizontal` - Always split side-by-side initially
+* `vertical` - Always split top-bottom initially
+* `auto` - Choose based on monitor aspect ratio (default)
+
+With `auto` mode:
+* Wide monitors (wider than tall) → horizontal orientation
+* Tall monitors (taller than wide) → vertical orientation
+* Square monitors → horizontal orientation
+
+This only affects the initial split. You can change orientation with `layout horizontal` or `layout vertical` commands.
 
 [#binding-modes]
 === Binding modes
@@ -285,9 +405,293 @@ Accordion padding is configurable via `accordion-padding` option.
 
 For the scroll layout (also known as niri or paper layout), the width of the focused window is configurable via `niri-focused-width-ratio` option. This controls how much of the screen width the centered window occupies (default 0.8 = 80%, leaving 10% peek margins on each side).
 
-For the dwindle layout, the default split ratio for new containers is configurable via `dwindle-default-split-ratio` option (default 1.0 = 50/50 split, golden ratio 1.618 = 61.8/38.2 split).
+==== Dwindle Layout Customization
+
+The dwindle layout (HyprSpace exclusive) offers advanced customization options:
+
+===== Default Split Ratio
+
+Controls the size ratio when splitting containers.
+
+[source,toml]
+----
+dwindle-default-split-ratio = 1.0      # Default: 50/50 split
+# dwindle-default-split-ratio = 1.618  # Golden ratio (61.8/38.2)
+# dwindle-default-split-ratio = 0.618  # Inverse golden ratio (38.2/61.8)
+----
+
+The split ratio determines how space is divided:
+* `1.0` = Equal split (50% each)
+* `1.618` = Golden ratio (larger window gets 61.8%)
+* `2.0` = 2:1 ratio (larger window gets 66.7%)
+
+===== Single Window Aspect Ratio (HyprSpace Exclusive)
+
+When only ONE window is present in a dwindle workspace, you can enforce a specific aspect ratio to prevent uncomfortably wide windows on ultrawide monitors or tall windows on vertical displays.
+
+[source,toml]
+----
+# Format: [width, height] where ratio = width/height
+dwindle-single-window-aspect-ratio = [16, 9]  # Standard widescreen
+dwindle-single-window-aspect-ratio-tolerance = 0.1  # 10% tolerance
+----
+
+**Common Aspect Ratios:**
+
+[cols="1,1,2", options="header"]
+|===
+| Ratio | Config | Use Case
+
+| 16:9
+| `[16, 9]`
+| Standard widescreen (1920x1080, 2560x1440). Good for media, gaming, general use.
+
+| 16:10
+| `[16, 10]`
+| Productivity ratio (1920x1200, 2560x1600). Balance between code and media.
+
+| 4:3
+| `[4, 3]`
+| Traditional/square (1024x768, 1600x1200). Excellent for coding, terminals, documents. More vertical space.
+
+| 21:9
+| `[21, 9]`
+| Ultrawide (2560x1080, 3440x1440). Matches ultrawide monitor native ratio.
+
+| 32:9
+| `[32, 9]`
+| Super ultrawide (3840x1080, 5120x1440). For extreme ultrawide monitors.
+
+| 3:2
+| `[3, 2]`
+| MacBook-style (3024x2016). Matches MacBook Pro aspect ratio.
+
+| Disabled
+| `[0, 0]`
+| Default. Windows fill entire screen width.
+|===
+
+**How it works:**
+* When you have ONE window → Aspect ratio is enforced with padding
+* When you add a SECOND window → Padding disappears automatically
+* The window is centered with equal padding on the sides
+
+**Example for ultrawide monitor:**
+----
+Without aspect ratio (uncomfortable):
+┌────────────────────────────────────────────┐
+│                One Window                  │
+│            (very wide, hard to read)       │
+└────────────────────────────────────────────┘
+
+With 16:9 aspect ratio:
+┌────────────────────────────────────────────┐
+│░░░░░┌──────────────────────────┐░░░░░░░░░░│
+│░░░░░│      One Window (16:9)    │░░░░░░░░░░│
+│░░░░░│    (comfortable width)    │░░░░░░░░░░│
+│░░░░░└──────────────────────────┘░░░░░░░░░░│
+└────────────────────────────────────────────┘
+     ↑                              ↑
+     └─ Automatic padding ──────────┘
+----
+
+**Tolerance Setting:**
+
+The tolerance threshold prevents tiny adjustments:
+
+[source,toml]
+----
+dwindle-single-window-aspect-ratio-tolerance = 0.1  # Recommended
+----
+
+* `0.0` = Always apply padding (even for 1% difference)
+* `0.1` = Apply padding only if >10% of screen dimension
+* `0.2` = Apply padding only if >20% of screen dimension
+
+Higher tolerance means padding is less likely to be applied for minor differences.
+
+==== Master Layout Customization
 
 For the master layout, the default master area percentage is configurable via `master-default-percent` option (default 0.5 = 50% master area, golden ratio 0.618 = 61.8% master area).
+
+[#gaps-and-spacing]
+=== Gaps and Spacing
+
+Gaps provide visual spacing between windows and between windows and monitor edges. HyprSpace supports highly customizable gap configurations including per-monitor overrides.
+
+==== Gap Types
+
+There are two categories of gaps, each with directional variants:
+
+===== Inner Gaps
+Spacing between adjacent windows within the workspace.
+
+[source,toml]
+----
+[gaps]
+inner.horizontal = 10  # Horizontal space between windows
+inner.vertical = 10    # Vertical space between windows
+----
+
+Visual representation:
+----
+┌────────┐  10px  ┌────────┐
+│        │ <----> │        │  ← inner.horizontal
+│ Window │        │ Window │
+│   1    │        │   2    │
+└────────┘        └────────┘
+    ↑                ↑
+    └── 10px gap ────┘
+       inner.vertical
+----
+
+===== Outer Gaps
+Spacing between windows and monitor edges.
+
+[source,toml]
+----
+[gaps]
+outer.left = 20
+outer.right = 20
+outer.top = 20
+outer.bottom = 20
+----
+
+Visual representation:
+----
+Monitor Edge
+↓
+████████████████████████████████
+██                            ██ ← outer.top (20px)
+██  ┌────────────────────┐    ██
+██  │                    │    ██
+██  │      Window        │    ██ ← outer.left/right
+██  │                    │    ██
+██  └────────────────────┘    ██
+██                            ██ ← outer.bottom (20px)
+████████████████████████████████
+----
+
+==== Simple Configuration
+
+For uniform gaps across all monitors:
+
+[source,toml]
+----
+[gaps]
+inner.horizontal = 8
+inner.vertical = 8
+outer.left = 10
+outer.right = 10
+outer.top = 10
+outer.bottom = 10
+----
+
+==== Per-Monitor Gap Overrides
+
+HyprSpace supports sophisticated per-monitor gap configurations using an array syntax. This allows different gap sizes for different monitors.
+
+===== Syntax
+
+[source,toml]
+----
+gaps.outer.top = [
+    { monitor.main = 16 },           # Main monitor gets 16px
+    { monitor."Built-in Retina" = 8 }, # Specific monitor pattern
+    12                                # Default for all other monitors
+]
+----
+
+The array is evaluated in order:
+1. First matching monitor pattern is applied
+2. If no patterns match, the last numeric value is used as default
+3. If no default is provided, gap is 0
+
+===== Monitor Patterns
+
+Monitor patterns follow the same syntax as `workspace-to-monitor-force-assignment`:
+
+* `monitor.main` - The main monitor (one with menu bar)
+* `monitor."Pattern"` - Match by monitor name/model
+* `monitor."UUID"` - Match by specific monitor UUID
+* Patterns support wildcards: `monitor.".*Retina.*"`
+
+===== Complete Example
+
+[source,toml]
+----
+[gaps]
+# Different outer gaps per monitor
+outer.top = [
+    { monitor.main = 35 },           # Extra space for menu bar on main
+    { monitor.".*4K.*" = 20 },       # More gaps on 4K displays
+    10                                # Default for other monitors
+]
+
+outer.bottom = [
+    { monitor.".*MacBook.*" = 5 },   # Minimal bottom gap on laptop
+    { monitor.main = 15 },           # Standard on main
+    20                                # More space on external monitors
+]
+
+# Uniform inner gaps (no per-monitor override)
+inner.horizontal = 8
+inner.vertical = 8
+
+# Side gaps vary by monitor
+outer.left = [
+    { monitor.main = 0 },            # No side gaps on main
+    { monitor."Dell.*" = 30 },       # Wide margins on Dell monitor
+    15                                # Default side gaps
+]
+
+outer.right = [
+    { monitor.main = 0 },
+    { monitor."Dell.*" = 30 },
+    15
+]
+----
+
+==== Interaction with Layouts
+
+* **Tiles/Master**: Gaps apply between all tiled windows
+* **Dwindle**: Gaps apply at each split in the binary tree
+* **Accordion**: Only outer gaps apply (inner windows are stacked)
+* **Scroll**: Gaps affect the centered window and peek areas
+* **Floating**: Outer gaps are ignored for floating windows
+
+==== Disabling Gaps
+
+To disable all gaps:
+
+[source,toml]
+----
+[gaps]
+inner.horizontal = 0
+inner.vertical = 0
+outer.left = 0
+outer.right = 0
+outer.top = 0
+outer.bottom = 0
+----
+
+Or to disable gaps for specific monitors:
+
+[source,toml]
+----
+outer.top = [
+    { monitor.main = 0 },    # No top gap on main monitor
+    20                        # But keep gaps on other monitors
+]
+----
+
+==== Tips
+
+1. **Menu bar clearance**: Use larger `outer.top` on main monitor to avoid overlapping menu bar
+2. **Notch handling**: On MacBook Pro with notch, consider asymmetric outer gaps
+3. **Ultra-wide monitors**: Use larger inner gaps to prevent windows from being too wide
+4. **Consistency**: Keep inner gaps consistent while varying outer gaps per monitor
+5. **Testing**: Use `aerospace reload-config` to test gap changes instantly
 
 [#normalization]
 === Normalization
@@ -712,6 +1116,50 @@ You can also use `on-window-detected` to force tile or force float all windows o
     if.app-id = '...'
     run = 'layout floating'
 ----
+
+== Centered Workspace Bar (HyprSpace Exclusive Feature)
+
+The centered workspace bar is a visual enhancement exclusive to HyprSpace that provides a modern,
+centered display of workspace indicators and window icons at the top of your screen.
+
+=== Enabling the Centered Bar
+
+The centered workspace bar is configured through the GUI menu, not through the configuration file:
+
+1. Click the HyprSpace menu bar icon (in the system tray area)
+2. Navigate to "Experimental UI Settings"
+3. Toggle "Enable centered workspace bar"
+
+=== Key Features
+
+* **Visual Workspace Indicators**: Shows all workspaces with numbers and/or icons
+* **Application Icons**: Displays icons of windows in each workspace
+* **Interactive Navigation**: Click workspaces or window icons to switch focus
+* **Mode Indicator**: Optional display of current binding mode (main, resize, service, etc.)
+* **Multi-Monitor Support**: Follows focused workspace or stays on primary display
+* **Notch Awareness**: Adjusts position for MacBook Pro models with notch
+* **Icon Deduplication**: Groups multiple windows from same app with badge count
+
+=== Configuration Options
+
+All settings are accessible via Menu Bar Icon → Experimental UI Settings:
+
+* **Show workspace numbers**: Display numeric labels alongside workspace indicators
+* **Show mode indicator**: Display current binding mode in the bar
+* **Hide empty workspaces**: Only show workspaces containing windows
+* **Deduplicate app icons**: Group same-app windows with count badge
+* **Window Level**: Control z-index (Normal, Floating, Status Bar, Popup, Screen Saver)
+* **Bar Position**: Overlapping or below menu bar
+* **Notch-aware positioning**: Shift right of notch on MacBook Pro
+
+=== Interaction
+
+* **Click workspace** to switch to that workspace
+* **Click window icon** to focus that window
+* **Hover grouped icons** to see window count
+* **Click grouped icons** for popup menu with window titles
+
+For detailed information about the centered workspace bar, see link:aerospace-centered-workspace-bar.html[aerospace-centered-workspace-bar(1)].
 
 == Common pitfall: keyboard keys handling
 

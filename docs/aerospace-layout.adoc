@@ -10,7 +10,7 @@ include::util/man-attributes.adoc[]
 [verse]
 // tag::synopsis[]
 aerospace layout [-h|--help] [--window-id <window-id>]
-                 (h_tiles|v_tiles|h_accordion|v_accordion|tiles|accordion|dwindle|master|master_left|master_right|horizontal|vertical|tiling|floating)...
+                 (h_tiles|v_tiles|h_accordion|v_accordion|tiles|accordion|dwindle|scroll|master|master_left|master_right|horizontal|vertical|tiling|floating)...
 
 // end::synopsis[]
 
@@ -23,14 +23,18 @@ aerospace layout [-h|--help] [--window-id <window-id>]
 If several arguments are supplied then finds the first argument that doesn't describe the currently active layout, and applies the layout.
 
 * Change both tiling layout and orientation in one go: `h_tiles|v_tiles|h_accordion|v_accordion`
-* Change tiling layout but preserve orientation: `tiles|accordion|dwindle|master`
+* Change tiling layout but preserve orientation: `tiles|accordion|dwindle|scroll|master`
 * Change orientation but preserve layout: `horizontal|vertical`
 * Change master layout orientation: `master_left|master_right`
 * Toggle floating/tiling mode: `tiling|floating`
 
-The `dwindle` layout is a binary tree-based tiling layout inspired by Hyprland. It automatically determines split direction based on the available space: wider areas split vertically (left/right), while taller areas split horizontally (top/bottom). Windows are split using a 50/50 ratio. The split direction alternates naturally based on the aspect ratio at each recursion level, creating the characteristic dwindle pattern.
+The `dwindle` layout is a binary tree-based tiling layout inspired by Hyprland. It automatically determines split direction based on the available space: wider areas split vertically (left/right), while taller areas split horizontally (top/bottom). Windows are split using a configurable split ratio (default 1.0 for equal splits, configurable via `dwindle-default-split-ratio`). The split direction alternates naturally based on the aspect ratio at each recursion level, creating the characteristic dwindle pattern.
 
-The `master` layout divides the workspace into two areas: a master area (containing one window) and a stack area (containing remaining windows arranged vertically). The master area occupies a configurable percentage of the horizontal space (default 50%). Use `master_left` to position the master on the left with stack on the right, or `master_right` for the opposite. The master area boundary can be resized using the `resize` command, and windows can be promoted to master using the `promote-master` command.
+HyprSpace's dwindle layout includes an exclusive single-window aspect ratio feature: when only one window is present, it can be constrained to a specific aspect ratio (e.g., 16:9) to prevent uncomfortably wide windows on ultrawide monitors. Configure with `dwindle-single-window-aspect-ratio = [16, 9]` and `dwindle-single-window-aspect-ratio-tolerance = 0.1`. The window is automatically centered with padding, which disappears when a second window is added. See the link:aerospace-guide.html#dwindle-layout-customization[guide's Dwindle Layout Customization section] for detailed configuration options.
+
+The `scroll` layout (also known as `niri` or `paper` layout) is inspired by the Niri compositor. It arranges windows horizontally in a carousel-like structure where the focused window takes center stage at a configurable width (default 80%, set via `niri-focused-width-ratio`), while adjacent windows peek from the sides. When you change focus, the entire row smoothly scrolls to center the newly focused window. This layout is ideal for workflows that benefit from focused work on a single window while maintaining visual context of adjacent windows.
+
+The `master` layout divides the workspace into two areas: a master area (containing one window) and a stack area (containing remaining windows arranged vertically). The master area occupies a configurable percentage of the horizontal space (default 50%, set via `master-default-percent`). Use `master_left` to position the master on the left with stack on the right, or `master_right` for the opposite. The master area boundary can be resized using the `resize` command, and windows can be promoted to master using the `promote-master` command.
 
 // =========================================================== Options
 include::./util/conditional-options-header.adoc[]
@@ -63,6 +67,12 @@ include::util/conditional-examples-header.adoc[]
 
 * Toggle between tiles and master layouts: +
 `aerospace layout tiles master`
+
+* Switch to scroll layout (niri-style carousel): +
+`aerospace layout scroll`
+
+* Cycle through different layouts: +
+`aerospace layout tiles accordion dwindle scroll master`
 
 // end::body[]
 

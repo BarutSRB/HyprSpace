@@ -184,7 +184,36 @@ end tell'
 [#disable-hide-app]
 == Disable annoying and useless "hide application" shortcut
 
-If `automatically-unhide-macos-hidden-apps` isn't enough, you can disable `cmd-h` altogether (which will make this hotkey unavailable for apps that might use it for other purposes)
+=== Understanding macOS Application Hiding
+
+macOS has a "Hide" feature (Cmd+H) that makes application windows invisible without minimizing them. This is different from minimizing (Cmd+M) which sends windows to the Dock. Hidden applications:
+
+* Remain running in the background
+* Don't appear in any workspace
+* Can be confusing in a tiling window manager where you expect all windows to be visible
+* Are often hidden accidentally when trying to use other Cmd+H shortcuts
+
+=== Solution 1: Automatic Unhiding (Recommended)
+
+HyprSpace provides the `automatically-unhide-macos-hidden-apps` option to automatically unhide any application that gets hidden:
+
+.~/.hyprspace.toml
+[source,toml]
+----
+automatically-unhide-macos-hidden-apps = true  # Default is false
+----
+
+With this enabled:
+* Any app hidden with Cmd+H is immediately unhidden
+* Windows stay visible in their workspace tiles
+* Prevents "lost" windows that are hidden but running
+* Solves the accidental Cmd+H problem
+
+This is the recommended approach as it preserves the Cmd+H key for applications that might use it for other purposes (like showing/hiding panels).
+
+=== Solution 2: Disable Hide Shortcuts
+
+If automatic unhiding isn't enough (e.g., you want to prevent the hide animation entirely), you can disable `cmd-h` altogether (which will make this hotkey unavailable for apps that might use it for other purposes)
 
 .~/.hyprspace.toml
 [source,toml]
