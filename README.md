@@ -158,6 +158,55 @@ Your choice depends on which window manager you want to benefit from Homebrew's 
 
 ---
 
+## Getting Started
+
+### 📝 Configuration File
+
+HyprSpace uses a TOML configuration file located at:
+
+**`~/.hyprspace.toml`** (in your home directory)
+
+**Quick setup:**
+
+```bash
+# Option 1: Create from the comprehensive example
+curl -o ~/.hyprspace.toml https://raw.githubusercontent.com/BarutSRB/HyprSpace/main/docs/config-examples/default-config.toml
+
+# Option 2: Start with minimal config
+cat > ~/.hyprspace.toml << 'EOF'
+# HyprSpace Configuration
+# See: https://github.com/BarutSRB/HyprSpace/blob/main/docs/config-examples/default-config.toml
+
+# Set your preferred default layout
+default-root-container-layout = 'dwindle'
+
+# Configure gaps
+[gaps]
+inner.horizontal = 8
+inner.vertical = 8
+outer.left = 8
+outer.bottom = 8
+outer.top = 8
+outer.right = 8
+
+# Key bindings (example)
+[mode.main.binding]
+cmd-h = 'focus left'
+cmd-j = 'focus down'
+cmd-k = 'focus up'
+cmd-l = 'focus right'
+EOF
+```
+
+**Note:** HyprSpace will run with sensible defaults if no config file exists. You can customize settings later.
+
+**For complete configuration reference:**
+- **[Default Config File](docs/config-examples/default-config.toml)** - Comprehensive reference with all options documented
+- **[Configuration Guide](docs/guide.adoc)** - In-depth explanation of all settings
+- **[Quick Reference](docs/aerospace-config-reference.adoc)** - Configuration tables and examples
+
+---
+
 ### 🔧 Enable Features
 
 #### Centered Workspace Bar
@@ -165,10 +214,6 @@ Your choice depends on which window manager you want to benefit from Homebrew's 
 2. Navigate to **"Experimental UI Settings"**
 3. Click **"Enable centered workspace bar"**
 4. Customize settings in the same menu
-
-#### Layout Configuration
-For complete configuration examples including Dwindle, Niri, Master layouts, and keybindings, see:
-- **[Default Config File](docs/config-examples/default-config.toml)** - Comprehensive reference with all options
 
 ---
 
