@@ -12,7 +12,7 @@
 
 **AeroSpace** is an i3-like tiling window manager for macOS
 
-*This fork adds three exclusive features: **Centered Workspace Bar** + **Dwindle Layout** + **Niri Layout***
+*This fork adds four exclusive features: **Centered Workspace Bar** + **Dwindle Layout** + **Niri Layout** + **Master Layout***
 
 [Download Latest Release](../../releases) • [Original AeroSpace](https://github.com/nikitabobko/AeroSpace) • [Report Issues](../../issues)
 
@@ -20,7 +20,7 @@
 
 ## ✨ What's New in This Fork
 
-This fork enhances the original AeroSpace with **three powerful features** not available upstream:
+This fork enhances the original AeroSpace with **four powerful features** not available upstream:
 
 ### 🎯 Centered Workspace Bar
 A macOS integrated menu bar that displays workspace indicators and full GUI window icons **centered at the top of your screen**.
@@ -29,13 +29,14 @@ A macOS integrated menu bar that displays workspace indicators and full GUI wind
 - 📍 Centered workspace indicators (not in system tray)
 - 🪟 Window icons for each workspace
 - 🖱️ Interactive: Click to focus workspace or window
-- 🎨 Multi-monitor support with configurable target display
+- 🎨 Shows mode indicator on focused workspace
 - 🔧 Highly customizable via menu:
-  - Window level (Status/Popup/Screensaver)
-  - Target display (Focused workspace/Primary/Mouse cursor)
+  - Window level (Normal/Floating/Status/Popup/Screensaver)
+  - Bar position (Overlapping/Below menu bar)
   - Notch-aware positioning for MacBook Pro
   - Deduplicate app icons with badge count
   - Toggle workspace numbers
+  - Hide empty workspaces
 
 ### 🌀 Dwindle Layout
 A binary tree-based tiling layout inspired by Hyprland's dwindle algorithm.
@@ -68,50 +69,94 @@ A carousel-style layout where the focused window is centered with neighboring wi
 
 **Inspired by:** [Niri Compositor](https://github.com/YaLTeR/niri)
 
+### 🎪 Master Layout
+A classic master-stack layout where one window takes the primary area and others stack in a secondary area.
+
+**Features:**
+- 🖼️ Configurable master area percentage (default 50%)
+- 🔄 Flexible orientation (left master or right master)
+- 📍 `promote-master` command to swap windows with master
+- ⚖️ Dynamic resizing with `resize` commands
+- 🎯 Ideal for focused workflows with a primary task
+- 🔧 Smooth integration with existing AeroSpace commands
+
+**Perfect for:** Code editing with reference windows, terminal + editor workflows, documentation + main window setups
+
 ---
 
 ## Installation
 
-### 📦 Download & Install
+### 🍺 Homebrew (Recommended)
 
-Choose your preferred installation method from the [latest release](../../releases/latest):
+```bash
+brew install --cask BarutSRB/tap/hyprspace
+```
 
-#### Option 1: DMG Installer (Recommended)
+**Benefits:**
+- ✅ Automatic quarantine removal
+- ✅ CLI binary and app installed automatically
+- ✅ Shell completions and man pages included
+- ✅ Easy updates with `brew upgrade`
+
+**After installation:**
+1. Launch HyprSpace from Applications
+2. **Grant Accessibility Permissions** when prompted
+
+---
+
+### 📦 Manual Installation
+
+If you prefer manual installation, download from [latest release](../../releases/latest):
+
+#### Option A: DMG Installer
 
 1. **Download** `HyprSpace-v*.dmg`
-2. **Open** the .dmg file
-3. **Drag** HyprSpace.app to the Applications folder
-4. **First Launch Only** - Bypass Gatekeeper:
-   - **Right-click** HyprSpace.app → Select **"Open"**
-   - Click **"Open"** in the security dialog
-   - *Alternative:* Run in Terminal:
-     ```bash
-     xattr -cr /Applications/HyprSpace.app
-     ```
+2. **Open** the .dmg file and drag HyprSpace.app to Applications
+3. **Remove quarantine** to allow the app to run:
+   ```bash
+   xattr -cr /Applications/HyprSpace.app
+   ```
+4. **Launch** HyprSpace from Applications
 5. **Grant Accessibility Permissions** when prompted
 
-#### Option 2: ZIP Archive (Includes CLI & Extras)
+#### Option B: ZIP Archive (Includes CLI)
 
-1. **Download** `HyprSpace-v*.zip`
-2. **Extract** the archive
-3. **Move** `HyprSpace.app` to your Applications folder
-4. **Optional - Install CLI:**
+1. **Download** `HyprSpace-v*.zip` and extract
+2. **Move** `HyprSpace.app` to `/Applications/`
+3. **Remove quarantine:**
    ```bash
-   # Copy CLI binary to a directory in your PATH
+   xattr -cr /Applications/HyprSpace.app
+   ```
+4. **Install CLI** (optional):
+   ```bash
+   # Copy CLI binary
    cp HyprSpace-v*/bin/hyprspace /usr/local/bin/
 
-   # Copy man pages (optional)
-   cp HyprSpace-v*/manpage/*.1 /usr/local/share/man/man1/
-
-   # Copy shell completion (optional - choose your shell)
-   cp HyprSpace-v*/shell-completion/bash/_hyprspace /usr/local/etc/bash_completion.d/
-   # OR for zsh:
+   # Install shell completion (choose your shell)
    cp HyprSpace-v*/shell-completion/zsh/_hyprspace /usr/local/share/zsh/site-functions/
+   # OR for bash:
+   cp HyprSpace-v*/shell-completion/bash/_hyprspace /usr/local/etc/bash_completion.d/
    # OR for fish:
    cp HyprSpace-v*/shell-completion/fish/hyprspace.fish ~/.config/fish/completions/
    ```
-5. **Bypass Gatekeeper** (same as Option 1, step 4)
-6. **Grant Accessibility Permissions** when prompted
+5. **Launch** HyprSpace and grant Accessibility Permissions
+
+---
+
+### ⚠️ Installing Both AeroSpace and HyprSpace
+
+**Important:** Both AeroSpace and HyprSpace **cannot** be installed via Homebrew simultaneously.
+
+If you want both window managers installed:
+
+**Choose one option:**
+
+- **Option 1:** Install HyprSpace via Homebrew + Install AeroSpace manually (.app/.dmg)
+- **Option 2:** Install AeroSpace via Homebrew + Install HyprSpace manually (.app/.dmg)
+
+Your choice depends on which window manager you want to benefit from Homebrew's automatic updates.
+
+---
 
 ### 🔧 Enable Features
 
@@ -121,18 +166,9 @@ Choose your preferred installation method from the [latest release](../../releas
 3. Click **"Enable centered workspace bar"**
 4. Customize settings in the same menu
 
-#### Dwindle Layout
-
-Add to your `~/.hyprspace.toml`:
-
-```toml
-# Set as default layout
-default-root-container-layout = 'dwindle'
-
-# Or add a keybinding to toggle
-[mode.main.binding]
-cmd-shift-d = 'layout dwindle'
-```
+#### Layout Configuration
+For complete configuration examples including Dwindle, Niri, Master layouts, and keybindings, see:
+- **[Default Config File](docs/config-examples/default-config.toml)** - Comprehensive reference with all options
 
 ---
 
@@ -145,87 +181,28 @@ All settings accessible via **Menu Bar Icon → Experimental UI Settings**:
 - ✅ Enable centered workspace bar
 - 🔢 Show workspace numbers
 - 📊 Window Level:
-  - Status Bar
+  - Normal (default window level)
+  - Floating (stays on top of normal windows)
+  - Status Bar (same level as menu bar)
   - **Popup (above menu bar)** ← Recommended
-  - Screen Saver (highest)
-- 🖥️ Target Display:
-  - **Focused Workspace Monitor** ← Recommended
-  - Primary Display
-  - Display Under Mouse
+  - Screen Saver (highest level)
+- 📍 Bar Position:
+  - Overlapping Menu Bar (default)
+  - Below Menu Bar
 - 💻 Notch-aware positioning (MacBook Pro)
 - 🎯 Deduplicate app icons with badge count
+- 👻 Hide workspaces with no windows
 
-### Dwindle Layout Example
+### Layout Configuration Examples
 
-```toml
-# ~/.hyprspace.toml
+For comprehensive configuration examples including:
+- **Dwindle Layout** - Binary tree tiling with automatic split direction
+- **Niri Layout** - Carousel-style centered focused window
+- **Master Layout** - Classic master-stack paradigm
+- **All keybindings** - Complete keyboard shortcuts reference
+- **All settings** - Gap sizes, margins, split ratios, and more
 
-# Set dwindle as default
-default-root-container-layout = 'dwindle'
-
-[mode.main.binding]
-# Toggle layouts
-cmd-shift-t = 'layout tiles'
-cmd-shift-a = 'layout accordion'
-cmd-shift-d = 'layout dwindle'
-
-# Resize works with dwindle
-cmd-shift-h = 'resize width -50'
-cmd-shift-l = 'resize width +50'
-cmd-shift-equal = 'balance-sizes'
-
-# Change orientation
-cmd-shift-o = 'layout horizontal'
-cmd-shift-v = 'layout vertical'
-```
-
-**Dwindle Layout Progression:**
-```
-1 window:           2 windows (h):      3 windows:          4 windows:
-┌─────────┐        ┌────┬────┐         ┌────┬────┐         ┌────┬────┐
-│         │        │    │    │         │    │ 2  │         │    │ 2  │
-│    1    │   →    │ 1  │ 2  │    →    │ 1  ├────┤    →    │ 1  ├────┤
-│         │        │    │    │         │    │ 3  │         │    │ 3,4│
-└─────────┘        └────┴────┘         └────┴────┘         └────┴────┘
-```
-
-### Niri Layout Example
-
-```toml
-# ~/.hyprspace.toml
-
-# Set Niri as default (great for horizontal workflows)
-default-root-container-layout = 'scroll'  # Note: uses 'scroll' in config
-
-[mode.main.binding]
-# Optimized for horizontal navigation
-cmd-h = 'focus left'
-cmd-l = 'focus right'
-
-# Resize focused window width (default 80%)
-cmd-shift-minus = 'resize smart -50'
-cmd-shift-equal = 'resize smart +50'
-
-# Toggle layouts
-cmd-shift-s = 'layout scroll'  # Niri layout
-cmd-shift-t = 'layout tiles'
-cmd-shift-d = 'layout dwindle'
-```
-
-**Niri Layout Visual:**
-```
-3 windows (focused on middle):
-┌──┬────────────────┬──┐
-│1 │       2        │3 │  ← Window 2 is focused (80% width)
-│  │   (focused)    │  │     Windows 1 & 3 peek at 10% each
-└──┴────────────────┴──┘
-
-After focusing right (cmd-l):
-┌──┬────────────────┬──┐
-│1 │       3        │4 │  ← Window 3 now centered
-│  │   (focused)    │  │     Carousel shifts smoothly
-└──┴────────────────┴──┘
-```
+See the **[Default Config File](docs/config-examples/default-config.toml)** - This is the comprehensive reference with all options and detailed comments.
 
 ---
 
@@ -250,6 +227,7 @@ All original AeroSpace features are preserved:
 | **accordion** | ✅ | ✅ | One maximized, others stacked |
 | **dwindle** | ❌ | ✅ | Binary tree with alternating splits |
 | **niri** | ❌ | ✅ | Carousel with centered focused window (use `scroll` in config) |
+| **master** | ❌ | ✅ | Master-stack with configurable ratios |
 
 ---
 
@@ -271,8 +249,8 @@ All original AeroSpace features are preserved:
 
 ```bash
 # Clone this fork
-git clone https://github.com/YOUR_USERNAME/AeroSpace.git
-cd AeroSpace
+git clone https://github.com/BarutSRB/HyprSpace.git
+cd HyprSpace
 
 # Build debug version
 ./build-debug.sh
@@ -288,7 +266,7 @@ cd AeroSpace
 **Requirements:**
 - macOS 13.0+ (Ventura)
 - Xcode 16+ (from App Store)
-- Swift 6.1+
+- Swift 6.2+ (managed via .swift-version and swiftly)
 
 See [dev-docs/development.md](./dev-docs/development.md) for more details.
 
@@ -296,13 +274,15 @@ See [dev-docs/development.md](./dev-docs/development.md) for more details.
 
 ## macOS Compatibility
 
-|                                                                                | macOS 13 (Ventura) | macOS 14 (Sonoma) | macOS 15 (Sequoia) | macOS 26 (Tahoe) |
-| ------------------------------------------------------------------------------ | ------------------ | ----------------- | ------------------ | ---------------- |
-| AeroSpace binary runs on ...                                                   | +                  | +                 | +                  | +                |
-| Centered Bar feature works on ...                                              | +                  | +                 | +                  | +                |
-| Dwindle layout works on ...                                                    | +                  | +                 | +                  | +                |
-| Debug build from sources is supported on ...                                   |                    | +                 | +                  | +                |
-| Release build from sources is supported on ... (Requires Xcode 26+)            |                    |                   | +                  | +                |
+|                                                                                | macOS 13 (Ventura) | macOS 14 (Sonoma) | macOS 15 (Sequoia) |
+| ------------------------------------------------------------------------------ | ------------------ | ----------------- | ------------------ |
+| HyprSpace binary runs on ...                                                   | +                  | +                 | +                  |
+| Centered Bar feature works on ...                                              | +                  | +                 | +                  |
+| Dwindle layout works on ...                                                    | +                  | +                 | +                  |
+| Niri layout works on ...                                                       | +                  | +                 | +                  |
+| Master layout works on ...                                                     | +                  | +                 | +                  |
+| Debug build from sources is supported on ...                                   |                    | +                 | +                  |
+| Release build from sources is supported on ...                                 |                    |                   | +                  |
 
 ---
 
@@ -316,6 +296,8 @@ See [dev-docs/development.md](./dev-docs/development.md) for more details.
 ### Fork Enhancements
 - **Centered Bar:** Inspired by [Barik](https://github.com/mocki-toki/barik)
 - **Dwindle Layout:** Inspired by [Hyprland](https://github.com/hyprwm/Hyprland)
+- **Niri Layout:** Inspired by [Niri](https://github.com/YaLTeR/niri)
+- **Master Layout:** Classic tiling paradigm
 - **Author:** [BarutSRB]
 
 ### License
@@ -327,7 +309,7 @@ Copyright (c) 2024 Nikita Bobko (original AeroSpace)
 Copyright (c) 2024-2025 [BarutSRB] (fork enhancements)
 ```
 
-See [LICENSE](LICENSE) for full text.
+See [LICENSE.txt](LICENSE.txt) for full text.
 
 ---
 
@@ -336,11 +318,13 @@ See [LICENSE](LICENSE) for full text.
 ### Merge Strategy
 - Centered bar code is isolated with `// CENTERED BAR FEATURE` comments
 - Dwindle layout integrates cleanly with existing layout system
-- Minimal touchpoints with core AeroSpace code (~25 LOC modified)
-- Easy to merge upstream changes
+- Master layout follows existing layout patterns
+- Fork adds ~2000+ lines of new feature code (CenteredBar, Dwindle, Niri, Master)
+- Core integration points are minimal and clearly marked
+- Easy to merge upstream changes due to clean separation
 
 ### Reporting Issues
-- **Fork-specific features** (centered bar, dwindle): [Open an issue here](../../issues)
+- **Fork-specific features** (centered bar, dwindle, niri, master): [Open an issue here](../../issues)
 - **Core AeroSpace bugs**: Report to [upstream repository](https://github.com/nikitabobko/AeroSpace/issues)
 
 ---
@@ -351,20 +335,6 @@ See [LICENSE](LICENSE) for full text.
 - 🐛 [Issue Tracker](../../issues)
 - 📧 Contact Discord: [Barut1]
 - ⭐ **Star this repo** if you find it useful!
-
----
-
-## Tip of the Day
-
-From original AeroSpace:
-
-```bash
-defaults write -g NSWindowShouldDragOnGesture -bool true
-```
-
-Now you can move windows by holding `ctrl`+`cmd` and dragging any part of the window!
-
-Source: [reddit](https://www.reddit.com/r/MacOS/comments/k6hiwk/keyboard_modifier_to_simplify_click_drag_of/)
 
 ---
 
@@ -385,6 +355,6 @@ Source: [reddit](https://www.reddit.com/r/MacOS/comments/k6hiwk/keyboard_modifie
 
 *If you find this useful, consider starring the repository!*
 
-[⬆ Back to Top](#aerospace---enhanced-fork)
+[⬆ Back to Top](#hyprspace-a-heavily-enhanced-fork-of-aerospace)
 
 </div>
