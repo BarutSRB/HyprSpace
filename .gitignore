@@ -26,3 +26,6 @@ xcshareddata/
 # Hyprland reference code (C++ implementation for research)
 /Dwindle/
 /MasterLay/
+
+# Claude AI assistant configurations
+/.claude/

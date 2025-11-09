@@ -17,12 +17,36 @@ struct FocusCommand: Command {
 
         switch args.target {
             case .direction(let direction):
-                let window = target.windowOrNil
-                if let (parent, ownIndex) = window?.closestParent(hasChildrenInDirection: direction, withLayout: nil) {
-                    guard let windowToFocus = parent.children[ownIndex + direction.focusOffset]
-                        .findLeafWindowRecursive(snappedTo: direction.opposite) else { return false }
+                guard let window = target.windowOrNil else {
+                    return hitWorkspaceBoundaries(target, io, args, direction)
+                }
+
+                // Determine navigation strategy based on layout type
+                let navigationProvider: NavigationProvider = {
+                    guard let parent = window.parent as? TilingContainer else {
+                        // Not in a tiling container - use tree navigation as fallback
+                        return TreeNavigationProvider()
+                    }
+
+                    switch parent.layout {
+                    case .dwindle, .accordion:
+                        // Geometric layouts - use position-based navigation
+                        return GeometricNavigationProvider()
+                    case .tiles, .master, .scroll:
+                        // Tree-based layouts - use hierarchy navigation
+                        return TreeNavigationProvider()
+                    }
+                }()
+
+                // Delegate navigation to the appropriate provider
+                if let windowToFocus = try await navigationProvider.findNeighbor(
+                    from: window,
+                    direction: direction,
+                    workspace: target.workspace
+                ) {
                     return windowToFocus.focusWindow()
                 } else {
+                    // No neighbor found - hit workspace boundary
                     return hitWorkspaceBoundaries(target, io, args, direction)
                 }
             case .windowId(let windowId):

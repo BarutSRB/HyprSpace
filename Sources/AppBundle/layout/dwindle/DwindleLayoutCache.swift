@@ -346,6 +346,287 @@ final class DwindleLayoutCache {
         return nil
     }
 
+    // MARK: - Navigation
+
+    /// Syncs node geometry from macOS accessibility APIs
+    ///
+    /// Refreshes all window positions in the dwindle tree by querying actual window
+    /// positions from macOS. This prevents stale geometry issues when windows are
+    /// manually moved outside the layout system (e.g., via third-party tools or
+    /// manual dragging while AeroSpace isn't managing).
+    ///
+    /// Call this before navigation operations to ensure accurate neighbor detection.
+    @MainActor
+    func syncGeometryFromMacOS() async throws {
+        guard let root = rootNode else { return }
+        try await syncGeometryRecursive(root)
+    }
+
+    @MainActor
+    private func syncGeometryRecursive(_ node: DwindleNode) async throws {
+        // Leaf node - sync from actual window position
+        if node.isLeaf, let treeNode = node.window {
+            guard case .window(let window) = treeNode.nodeCases else { return }
+
+            // Get fresh geometry from macOS
+            if let axRect = try await window.getAxRect() {
+                // Update node.box with fresh coordinates
+                node.box = CGRect(
+                    x: axRect.topLeftX,
+                    y: axRect.topLeftY,
+                    width: axRect.width,
+                    height: axRect.height
+                )
+            }
+            return
+        }
+
+        // Container node - recurse to children
+        for child in node.children {
+            try await syncGeometryRecursive(child)
+        }
+    }
+
+    /// Finds the neighboring window in the specified direction using geometric analysis
+    ///
+    /// This method implements geometry-based navigation similar to Hyprland's approach,
+    /// analyzing window positions and edge adjacency rather than tree structure.
+    ///
+    /// Algorithm:
+    /// 1. Find current window's DwindleNode and geometry
+    /// 2. Collect all candidate leaf windows in the binary tree
+    /// 3. Filter candidates by:
+    ///    - Edge adjacency (e.g., for "up": candidate's bottom edge touches current's top edge)
+    ///    - Perpendicular overlap (at least 10% overlap on the perpendicular axis)
+    /// 4. Sort by overlap length (prefer maximum overlap)
+    /// 5. Return the window with the longest overlap
+    ///
+    /// - Parameters:
+    ///   - window: Current window to navigate from
+    ///   - direction: Cardinal direction to navigate (up/down/left/right)
+    ///   - gaps: Resolved gap configuration for accurate edge detection
+    /// - Returns: The neighboring window, or nil if no valid neighbor exists
+    func findNeighbor(from window: TreeNode, direction: CardinalDirection, gaps: ResolvedGaps) -> Window? {
+        #if DEBUG
+        print("[Dwindle Navigation] Finding neighbor from window \(window) in direction \(direction)")
+        print("[Dwindle Navigation] Gap sizes: H=\(gaps.inner.horizontal)px V=\(gaps.inner.vertical)px")
+        #endif
+
+        // Find the DwindleNode for the current window
+        guard let currentNode = findNode(for: window) else {
+            #if DEBUG
+            print("[Dwindle Navigation] ❌ Could not find DwindleNode for window")
+            #endif
+            return nil
+        }
+        let currentBox = currentNode.box
+
+        #if DEBUG
+        print("[Dwindle Navigation] Current window box: \(currentBox)")
+        #endif
+
+        // Collect all candidate windows with their overlap measurements
+        var candidates: [(window: Window, overlap: CGFloat)] = []
+        collectNavigationCandidates(
+            from: rootNode,
+            current: currentNode,
+            currentBox: currentBox,
+            direction: direction,
+            gaps: gaps,
+            candidates: &candidates
+        )
+
+        // No candidates found - we're at workspace boundary
+        guard !candidates.isEmpty else {
+            #if DEBUG
+            print("[Dwindle Navigation] ❌ No candidates found - at workspace boundary")
+            #endif
+            return nil
+        }
+
+        #if DEBUG
+        print("[Dwindle Navigation] Found \(candidates.count) candidate(s):")
+        for (i, candidate) in candidates.enumerated() {
+            print("  [\(i + 1)] Window \(candidate.window.windowId) - overlap: \(String(format: "%.1f", candidate.overlap))px")
+        }
+        #endif
+
+        // Sort by overlap length (descending) - prefer windows with maximum overlap
+        let sorted = candidates.sorted { $0.overlap > $1.overlap }
+
+        // Return the window with the longest overlap
+        let selected = sorted.first?.window
+        #if DEBUG
+        if let selected = selected {
+            print("[Dwindle Navigation] ✅ Selected window \(selected.windowId) with max overlap")
+        }
+        #endif
+        return selected
+    }
+
+    /// Recursively collects candidate windows for navigation
+    ///
+    /// Traverses the binary tree to find all leaf windows that are valid navigation targets
+    /// in the specified direction from the current window.
+    private func collectNavigationCandidates(
+        from node: DwindleNode?,
+        current: DwindleNode,
+        currentBox: CGRect,
+        direction: CardinalDirection,
+        gaps: ResolvedGaps,
+        candidates: inout [(window: Window, overlap: CGFloat)]
+    ) {
+        guard let node else { return }
+
+        // Skip the current node itself
+        if node === current {
+            // Still recurse to children in case they're candidates
+            for child in node.children {
+                collectNavigationCandidates(
+                    from: child,
+                    current: current,
+                    currentBox: currentBox,
+                    direction: direction,
+                    gaps: gaps,
+                    candidates: &candidates
+                )
+            }
+            return
+        }
+
+        // Leaf node - check if it's a valid candidate
+        if node.isLeaf, let candidateTreeNode = node.window {
+            let candidateBox = node.box
+
+            // Check if this window is in the correct direction with sufficient overlap
+            if let overlap = calculateDirectionalOverlap(
+                from: currentBox,
+                to: candidateBox,
+                direction: direction,
+                gaps: gaps
+            ) {
+                // Extract Window from TreeNode
+                if case .window(let window) = candidateTreeNode.nodeCases {
+                    candidates.append((window, overlap))
+                }
+            }
+            return
+        }
+
+        // Container node - recurse to children
+        for child in node.children {
+            collectNavigationCandidates(
+                from: child,
+                current: current,
+                currentBox: currentBox,
+                direction: direction,
+                gaps: gaps,
+                candidates: &candidates
+            )
+        }
+    }
+
+    /// Calculates the perpendicular overlap between two windows if they're adjacent in the specified direction
+    ///
+    /// Returns the overlap length if windows are adjacent, or nil if they're not valid neighbors.
+    /// "Adjacent" means edges touch within the gap size plus a small tolerance.
+    /// "Overlap" is the shared length on the perpendicular axis.
+    ///
+    /// Example for "up" navigation:
+    /// - Checks if candidate's bottom edge touches current's top edge (within gap size + tolerance)
+    /// - Calculates horizontal overlap (how much the windows align horizontally)
+    ///
+    /// - Parameters:
+    ///   - source: Current window's bounding box
+    ///   - target: Candidate window's bounding box
+    ///   - direction: Navigation direction
+    ///   - gaps: Resolved gap configuration for accurate edge detection
+    /// - Returns: Overlap length if windows are adjacent, nil otherwise
+    private func calculateDirectionalOverlap(
+        from source: CGRect,
+        to target: CGRect,
+        direction: CardinalDirection,
+        gaps: ResolvedGaps
+    ) -> CGFloat? {
+        // Calculate gap-aware edge threshold based on direction
+        // Add small tolerance (5px) for floating point precision
+        let edgeThreshold: CGFloat = switch direction {
+            case .up, .down: CGFloat(gaps.inner.vertical) + 5.0
+            case .left, .right: CGFloat(gaps.inner.horizontal) + 5.0
+        }
+        let minOverlapRatio: CGFloat = 0.1  // Require at least 10% overlap
+
+        switch direction {
+        case .up:
+            // Target must be above: candidate's bottom edge touches current's top edge
+            // macOS coordinates: Y increases downward, so "up" means smaller Y values
+            let edgeDistance = abs(source.minY - target.maxY)
+            let edgesTouch = edgeDistance < edgeThreshold
+            #if DEBUG
+            if !edgesTouch {
+                print("[Dwindle Navigation]   Skip: edge distance \(String(format: "%.1f", edgeDistance))px > threshold \(String(format: "%.1f", edgeThreshold))px")
+            }
+            #endif
+            guard edgesTouch else { return nil }
+
+            // Calculate horizontal overlap
+            let overlapStart = max(source.minX, target.minX)
+            let overlapEnd = min(source.maxX, target.maxX)
+            let overlap = max(0, overlapEnd - overlapStart)
+
+            // Require minimum overlap (avoid diagonal neighbors)
+            let minRequiredOverlap = min(source.width, target.width) * minOverlapRatio
+            let hasValidOverlap = overlap >= minRequiredOverlap
+            #if DEBUG
+            if hasValidOverlap {
+                print("[Dwindle Navigation]   ✓ Valid candidate: overlap \(String(format: "%.1f", overlap))px >= min \(String(format: "%.1f", minRequiredOverlap))px")
+            } else if overlap > 0 {
+                print("[Dwindle Navigation]   Skip: overlap \(String(format: "%.1f", overlap))px < min \(String(format: "%.1f", minRequiredOverlap))px")
+            }
+            #endif
+            return hasValidOverlap ? overlap : nil
+
+        case .down:
+            // Target must be below: candidate's top edge touches current's bottom edge
+            let edgesTouch = abs(source.maxY - target.minY) < edgeThreshold
+            guard edgesTouch else { return nil }
+
+            // Calculate horizontal overlap
+            let overlapStart = max(source.minX, target.minX)
+            let overlapEnd = min(source.maxX, target.maxX)
+            let overlap = max(0, overlapEnd - overlapStart)
+
+            let minRequiredOverlap = min(source.width, target.width) * minOverlapRatio
+            return overlap >= minRequiredOverlap ? overlap : nil
+
+        case .left:
+            // Target must be to the left: candidate's right edge touches current's left edge
+            let edgesTouch = abs(source.minX - target.maxX) < edgeThreshold
+            guard edgesTouch else { return nil }
+
+            // Calculate vertical overlap
+            let overlapStart = max(source.minY, target.minY)
+            let overlapEnd = min(source.maxY, target.maxY)
+            let overlap = max(0, overlapEnd - overlapStart)
+
+            let minRequiredOverlap = min(source.height, target.height) * minOverlapRatio
+            return overlap >= minRequiredOverlap ? overlap : nil
+
+        case .right:
+            // Target must be to the right: candidate's left edge touches current's right edge
+            let edgesTouch = abs(source.maxX - target.minX) < edgeThreshold
+            guard edgesTouch else { return nil }
+
+            // Calculate vertical overlap
+            let overlapStart = max(source.minY, target.minY)
+            let overlapEnd = min(source.maxY, target.maxY)
+            let overlap = max(0, overlapEnd - overlapStart)
+
+            let minRequiredOverlap = min(source.height, target.height) * minOverlapRatio
+            return overlap >= minRequiredOverlap ? overlap : nil
+        }
+    }
+
     // MARK: - Reset
 
     /// Resets all split ratios to configured default
@@ -563,10 +844,19 @@ final class DwindleLayoutCache {
     }
 
     /// Detects if node is constrained by workspace edges
+    ///
+    /// Checks if a window's edges are flush with the workspace boundaries.
+    /// Uses a tolerance threshold to account for floating point precision and
+    /// minor positioning variations.
+    ///
+    /// Note: This checks workspace boundaries, not window-to-window adjacency,
+    /// so gap sizes are not applicable here (workspace rect is already padded by outer gaps).
     private func detectEdgeConstraints(_ node: DwindleNode) -> EdgeConstraints {
         guard let rootBox = rootNode?.box else { return EdgeConstraints() }
 
-        let threshold: CGFloat = 5.0  // Pixels
+        // Tolerance for floating point precision and minor variations
+        // Increased from 5px for better robustness
+        let threshold: CGFloat = 10.0
         var edges = EdgeConstraints()
 
         edges.left = abs(node.box.minX - rootBox.minX) < threshold
