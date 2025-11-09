@@ -41,7 +41,7 @@ struct ResizeCommand: Command { // todo cover with tests
             }
 
             // Map dimension directly to axes (no orientation lookup needed for dwindle)
-            let delta = switch args.dimension.val {
+            let delta: Vector2D = switch args.dimension.val {
                 case .width:
                     Vector2D(x: pixelDiff, y: 0)
                 case .height:
@@ -54,7 +54,26 @@ struct ResizeCommand: Command { // todo cover with tests
                     Vector2D(x: pixelDiff, y: -pixelDiff)
             }
 
-            cache.resize(window: node, delta: delta, shouldGrow: shouldGrow)
+            let edges = ManipulatedEdges(
+                horizontal: delta.x == 0 ? nil : (delta.x > 0 ? .positive : .negative),
+                vertical: delta.y == 0 ? nil : (delta.y > 0 ? .positive : .negative)
+            )
+
+            // Get window size from last layout for keyboard resize
+            guard let lastRect = node.lastAppliedLayoutPhysicalRect else {
+                return io.err("Window has no layout information")
+            }
+            let windowSize = CGSize(width: lastRect.width, height: lastRect.height)
+
+            // Get monitor size for normalization
+            guard let workspace = parent.nodeWorkspace else { return false }
+            let monitor = workspace.workspaceMonitor
+            let monitorSize = CGSize(width: monitor.visibleRect.width, height: monitor.visibleRect.height)
+
+            // Get sensitivity setting
+            let sensitivity = config.mouseSensitivity
+
+            cache.resize(window: node, delta: delta, shouldGrow: shouldGrow, windowSize: windowSize, edges: edges, monitorSize: monitorSize, sensitivity: sensitivity)
             // Layout will be refreshed automatically via refreshModel() after command completes
             return true
         }

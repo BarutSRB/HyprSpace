@@ -39,7 +39,14 @@ final class DwindleLayoutCache {
     /// Checks if cache needs to be rebuilt due to window changes
     /// - Parameter windows: Current list of windows
     /// - Returns: True if window IDs have changed
+    @MainActor
     func needsRebuild(for windows: [TreeNode]) -> Bool {
+        // Don't rebuild during active mouse manipulation - ratios are being updated
+        // and rebuild would destroy them by resetting to defaults
+        if currentlyManipulatedWithMouseWindowId != nil {
+            return false
+        }
+
         let currentIds = windows.compactMap { node -> CGWindowID? in
             if case .window(let window) = node.nodeCases {
                 return window.windowId
@@ -190,9 +197,20 @@ final class DwindleLayoutCache {
         in rect: CGRect,
         context: LayoutContext,
     ) async throws {
-        // CRITICAL: Update box with fresh geometry BEFORE any calculations
-        // This ensures resize operations always use current sizes
-        node.box = rect
+        // Update box with fresh geometry BEFORE any calculations
+        // CRITICAL: During manipulation, preserve snapshots to prevent geometry feedback loops
+        if currentlyManipulatedWithMouseWindowId == nil {
+            // Not manipulating - update box and clear any stale snapshots
+            node.box = rect
+            node.boxSnapshot = nil
+        } else if node.boxSnapshot == nil {
+            // First layout during manipulation - snapshot current box before updating
+            node.boxSnapshot = node.box
+            node.box = rect
+        } else {
+            // Subsequent layouts during manipulation - update box but keep snapshot frozen
+            node.box = rect
+        }
 
         // Leaf node - layout the actual window
         if node.isLeaf, let treeNode = node.window {
@@ -350,26 +368,44 @@ final class DwindleLayoutCache {
         }
     }
 
+    /// Clears all box snapshots after mouse manipulation completes
+    ///
+    /// This should be called when `currentlyManipulatedWithMouseWindowId` is cleared
+    /// to ensure clean state for the next manipulation session.
+    @MainActor
+    func clearBoxSnapshots() {
+        clearBoxSnapshotsRecursive(rootNode)
+    }
+
+    @MainActor
+    private func clearBoxSnapshotsRecursive(_ node: DwindleNode?) {
+        guard let node else { return }
+        node.boxSnapshot = nil
+        for child in node.children {
+            clearBoxSnapshotsRecursive(child)
+        }
+    }
+
     // MARK: - Resize Operations
 
     /// Resizes a window by applying delta to its containing nodes' split ratios
     ///
-    /// This method implements the "layout → resize → layout" pattern:
-    /// 1. Assumes boxes have fresh geometry from the last layout pass
-    /// 2. Applies resize using current node.box sizes
-    /// 3. Caller triggers another layout pass to apply new ratios
+    /// This method uses the current window size for accurate ratio calculations
+    /// instead of relying on potentially stale node.box values.
     ///
     /// - Parameters:
     ///   - window: Window to resize
     ///   - delta: Pixel delta (positive = grow, negative = shrink)
     ///   - shouldGrow: true for growth operations, false for shrink operations
-    func resize(window: TreeNode, delta: Vector2D, shouldGrow: Bool) {
+    ///   - windowSize: Current window size (from getAxRect) for accurate ratio calculations
+    ///   - edges: Which edges were manipulated for each axis
+    func resize(window: TreeNode, delta: Vector2D, shouldGrow: Bool, windowSize: CGSize, edges: ManipulatedEdges, monitorSize: CGSize, sensitivity: CGFloat) {
         guard let node = findNode(for: window) else { return }
 
         if smartResizing {
-            resizeSmart(node: node, delta: delta, shouldGrow: shouldGrow)
+            resizeSmart(node: node, delta: delta, shouldGrow: shouldGrow, windowSize: windowSize, edges: edges, monitorSize: monitorSize, sensitivity: sensitivity)
         } else {
-            resizeStandard(node: node, delta: delta)
+            resizeStandard(node: node, delta: delta, shouldGrow: shouldGrow, windowSize: windowSize, edges: edges, monitorSize: monitorSize, sensitivity: sensitivity)
         }
     }
 
@@ -377,55 +413,70 @@ final class DwindleLayoutCache {
     ///
     /// Uses corner/edge detection to intelligently resize multiple nodes,
     /// compensating inner nodes when outer nodes grow.
-    private func resizeSmart(node: DwindleNode, delta: Vector2D, shouldGrow: Bool) {
+    private func resizeSmart(node: DwindleNode, delta: Vector2D, shouldGrow: Bool, windowSize: CGSize, edges: ManipulatedEdges, monitorSize: CGSize, sensitivity: CGFloat) {
         // 1. Detect edge constraints
-        let edges = detectEdgeConstraints(node)
+        let constraints = detectEdgeConstraints(node)
         var allowedDelta = delta
 
         // Windows constrained by edges can't resize in those directions
-        if edges.left && edges.right { allowedDelta.x = 0 }
-        if edges.top && edges.bottom { allowedDelta.y = 0 }
+        if constraints.left && constraints.right { allowedDelta.x = 0 }
+        if constraints.top && constraints.bottom { allowedDelta.y = 0 }
+
+        // Ignore axes that weren't part of this drag
+        if edges.horizontal == nil { allowedDelta.x = 0 }
+        if edges.vertical == nil { allowedDelta.y = 0 }
 
         guard allowedDelta.x != 0 || allowedDelta.y != 0 else { return }
 
         // 2. Find resize targets (outer/inner nodes for compensation)
-        let targets = findSmartResizeTargets(node: node, delta: allowedDelta, shouldGrow: shouldGrow)
+        let targets = findSmartResizeTargets(node: node, edges: edges)
 
-        // 3. Apply ratio changes using FRESH box sizes
+        // 3. Apply ratio changes to outer targets
         // Horizontal axis
-        if let hOuter = targets.horizontalOuter, allowedDelta.x != 0 {
-            // CRITICAL: Use hOuter.box.width which was updated in last layout pass
-            let ratioDelta = pixelDeltaToRatioDelta(
+        if let hOuter = targets.horizontalOuter {
+            applyRatioDelta(
+                target: hOuter,
+                axis: .horizontal,
                 pixels: allowedDelta.x,
-                containerSize: hOuter.box.width,
+                shouldGrow: shouldGrow,
+                monitorSize: monitorSize,
+                sensitivity: sensitivity
             )
-            hOuter.splitRatio = clampRatio(hOuter.splitRatio + ratioDelta)
         }
 
         // Vertical axis
-        if let vOuter = targets.verticalOuter, allowedDelta.y != 0 {
-            let ratioDelta = pixelDeltaToRatioDelta(
+        if let vOuter = targets.verticalOuter {
+            applyRatioDelta(
+                target: vOuter,
+                axis: .vertical,
                 pixels: allowedDelta.y,
-                containerSize: vOuter.box.height,
+                shouldGrow: shouldGrow,
+                monitorSize: monitorSize,
+                sensitivity: sensitivity
             )
-            vOuter.splitRatio = clampRatio(vOuter.splitRatio + ratioDelta)
         }
 
         // 4. Compensate inner nodes (shrink opposite side)
-        if let hInner = targets.horizontalInner, allowedDelta.x != 0 {
-            let ratioDelta = pixelDeltaToRatioDelta(
-                pixels: -allowedDelta.x,  // Negative to shrink
-                containerSize: hInner.box.width,
+        if let hInner = targets.horizontalInner {
+            applyRatioDelta(
+                target: hInner,
+                axis: .horizontal,
+                pixels: allowedDelta.x,
+                shouldGrow: shouldGrow,
+                monitorSize: monitorSize,
+                sensitivity: sensitivity
             )
-            hInner.splitRatio = clampRatio(hInner.splitRatio + ratioDelta)
         }
 
-        if let vInner = targets.verticalInner, allowedDelta.y != 0 {
-            let ratioDelta = pixelDeltaToRatioDelta(
-                pixels: -allowedDelta.y,
-                containerSize: vInner.box.height,
+        if let vInner = targets.verticalInner {
+            applyRatioDelta(
+                target: vInner,
+                axis: .vertical,
+                pixels: allowedDelta.y,
+                shouldGrow: shouldGrow,
+                monitorSize: monitorSize,
+                sensitivity: sensitivity
             )
-            vInner.splitRatio = clampRatio(vInner.splitRatio + ratioDelta)
         }
     }
 
@@ -433,54 +484,50 @@ final class DwindleLayoutCache {
     ///
     /// Finds the parent controlling each axis and adjusts its split ratio.
     /// Simpler than smart resize but less intuitive for complex layouts.
-    private func resizeStandard(node: DwindleNode, delta: Vector2D) {
-        // Find parent controlling horizontal direction
-        if delta.x != 0, let hParent = findControllingParent(node, splitVertically: true) {
-            // Use FRESH box size from last layout
-            let ratioDelta = pixelDeltaToRatioDelta(
+    private func resizeStandard(node: DwindleNode, delta: Vector2D, shouldGrow: Bool, windowSize: CGSize, edges: ManipulatedEdges, monitorSize: CGSize, sensitivity: CGFloat) {
+        if let horizontalEdge = edges.horizontal,
+           delta.x != 0,
+           let hTarget = findParentControlling(node, axis: .horizontal, edgeIsPositive: horizontalEdge == .positive) {
+            applyRatioDelta(
+                target: hTarget,
+                axis: .horizontal,
                 pixels: delta.x,
-                containerSize: hParent.box.width,
+                shouldGrow: shouldGrow,
+                monitorSize: monitorSize,
+                sensitivity: sensitivity
             )
-            hParent.splitRatio = clampRatio(hParent.splitRatio + ratioDelta)
         }
 
-        // Find parent controlling vertical direction
-        if delta.y != 0, let vParent = findControllingParent(node, splitVertically: false) {
-            // Use FRESH box size from last layout
-            let ratioDelta = pixelDeltaToRatioDelta(
+        if let verticalEdge = edges.vertical,
+           delta.y != 0,
+           let vTarget = findParentControlling(node, axis: .vertical, edgeIsPositive: verticalEdge == .positive) {
+            applyRatioDelta(
+                target: vTarget,
+                axis: .vertical,
                 pixels: delta.y,
-                containerSize: vParent.box.height,
+                shouldGrow: shouldGrow,
+                monitorSize: monitorSize,
+                sensitivity: sensitivity
             )
-            vParent.splitRatio = clampRatio(vParent.splitRatio + ratioDelta)
         }
     }
 
     // MARK: - Smart Resize Helpers
 
     /// Finds nodes to resize for smart resizing mode
-    private func findSmartResizeTargets(node: DwindleNode, delta: Vector2D, shouldGrow: Bool) -> ResizeTargets {
+    private func findSmartResizeTargets(node: DwindleNode, edges: ManipulatedEdges) -> ResizeTargets {
         var targets = ResizeTargets()
 
-        // Horizontal axis
-        if delta.x > 0 {
-            // Growing right: find right-controlling parent (outer) and left-controlling (inner)
-            targets.horizontalOuter = findParentControlling(node, axis: .horizontal, growingPositive: true, shouldGrow: shouldGrow)
-            targets.horizontalInner = findParentControlling(node, axis: .horizontal, growingPositive: false, shouldGrow: shouldGrow)
-        } else if delta.x < 0 {
-            // Growing left: opposite
-            targets.horizontalOuter = findParentControlling(node, axis: .horizontal, growingPositive: false, shouldGrow: shouldGrow)
-            targets.horizontalInner = findParentControlling(node, axis: .horizontal, growingPositive: true, shouldGrow: shouldGrow)
+        if let horizontalEdge = edges.horizontal {
+            let isPositive = horizontalEdge == .positive
+            targets.horizontalOuter = findParentControlling(node, axis: .horizontal, edgeIsPositive: isPositive)
+            targets.horizontalInner = findParentControlling(node, axis: .horizontal, edgeIsPositive: !isPositive)
         }
 
-        // Vertical axis
-        if delta.y > 0 {
-            // Growing down: find bottom-controlling parent (outer) and top-controlling (inner)
-            targets.verticalOuter = findParentControlling(node, axis: .vertical, growingPositive: true, shouldGrow: shouldGrow)
-            targets.verticalInner = findParentControlling(node, axis: .vertical, growingPositive: false, shouldGrow: shouldGrow)
-        } else if delta.y < 0 {
-            // Growing up: opposite
-            targets.verticalOuter = findParentControlling(node, axis: .vertical, growingPositive: false, shouldGrow: shouldGrow)
-            targets.verticalInner = findParentControlling(node, axis: .vertical, growingPositive: true, shouldGrow: shouldGrow)
+        if let verticalEdge = edges.vertical {
+            let isPositive = verticalEdge == .positive
+            targets.verticalOuter = findParentControlling(node, axis: .vertical, edgeIsPositive: isPositive)
+            targets.verticalInner = findParentControlling(node, axis: .vertical, edgeIsPositive: !isPositive)
         }
 
         return targets
@@ -490,36 +537,27 @@ final class DwindleLayoutCache {
     ///
     /// Walks up the tree to find a parent whose split orientation matches the axis
     /// and whose child position matches the growth direction.
-    private func findParentControlling(_ node: DwindleNode, axis: Axis, growingPositive: Bool, shouldGrow: Bool) -> DwindleNode? {
+    private func findParentControlling(_ node: DwindleNode, axis: Axis, edgeIsPositive: Bool) -> ControllingSplit? {
         let targetSplitVertically = (axis == .horizontal)
 
-        var current = node
-        while let parent = current.parent {
+        var current: DwindleNode? = node
+        while let parent = current?.parent {
             if parent.splitVertically == targetSplitVertically {
-                // Check if this split controls the direction we want
-                let isLeftOrTop = parent.children.first === current
-                // Dual-path logic: choose based on operation type
-                // For grow: use !growingPositive (Path A)
-                // For shrink: use growingPositive (Path B)
-                let shouldBeLeftOrTop = shouldGrow ? !growingPositive : growingPositive
-
-                if isLeftOrTop == shouldBeLeftOrTop {
-                    return parent
+                let isFirstChild = parent.children.first === current
+                let isLastChild = parent.children.last === current
+                if edgeIsPositive {
+                    // Need a neighbor on the positive side (i.e., not the last child at this level)
+                    if !isLastChild {
+                        return ControllingSplit(parent: parent, childIsFirst: isFirstChild)
+                    }
+                } else {
+                    // Need a neighbor on the negative side (i.e., not the first child at this level)
+                    if !isFirstChild {
+                        return ControllingSplit(parent: parent, childIsFirst: isFirstChild)
+                    }
                 }
             }
             current = parent
-        }
-        return nil
-    }
-
-    /// Finds parent controlling a specific split orientation (for standard resize)
-    private func findControllingParent(_ node: DwindleNode, splitVertically: Bool) -> DwindleNode? {
-        var current = node.parent
-        while let parent = current {
-            if parent.splitVertically == splitVertically {
-                return parent
-            }
-            current = parent.parent
         }
         return nil
     }
@@ -541,12 +579,43 @@ final class DwindleLayoutCache {
 
     // MARK: - Resize Math Helpers
 
-    /// Converts pixel delta to split ratio delta (50% reduced sensitivity)
+    /// Applies a ratio delta to the target split using parent container dimensions
     ///
-    /// Formula: ratio_delta = 1.0 * pixels / containerSize
-    private func pixelDeltaToRatioDelta(pixels: CGFloat, containerSize: CGFloat) -> CGFloat {
-        guard containerSize > 0 else { return 0 }
-        return 1.0 * pixels / containerSize
+    /// Uses target.parent.box dimensions (the container being split) as the denominator
+    /// for ratio calculations. This ensures correct proportional adjustments.
+    private func applyRatioDelta(
+        target: ControllingSplit,
+        axis: Axis,
+        pixels: CGFloat,
+        shouldGrow: Bool,
+        monitorSize: CGSize,
+        sensitivity: CGFloat
+    ) {
+        let magnitude = abs(pixels)
+        guard magnitude > 0 else { return }
+
+        // CRITICAL: Use snapshot if available (during manipulation) to prevent feedback loops
+        // The snapshot freezes parent geometry at manipulation start, ensuring consistent
+        // ratio calculations across multiple mouse events. Falls back to current box when
+        // not manipulating.
+        let parentBox = target.parent.boxSnapshot ?? target.parent.box
+        let containerSize = axis == .horizontal
+            ? parentBox.width
+            : parentBox.height
+        guard containerSize > 0 else { return }
+
+        // Apply orientation and growth direction
+        let orientationSign: CGFloat = target.childIsFirst ? 1 : -1
+        let growthSign: CGFloat = shouldGrow ? 1 : -1
+
+        // Calculate ratio delta using container size for normalization
+        // This provides consistent behavior regardless of container size
+        // Sensitivity parameter allows user to adjust mouse responsiveness
+        let scaledMagnitude = magnitude * sensitivity
+        let ratioDelta = orientationSign * growthSign * (scaledMagnitude / containerSize)
+        guard ratioDelta != 0 else { return }
+
+        target.parent.splitRatio = clampRatio(target.parent.splitRatio + ratioDelta)
     }
 
     /// Clamps split ratio to valid range [0.1, 1.9]
@@ -569,12 +638,30 @@ enum Axis {
     case vertical
 }
 
+/// Direction of manipulated edge along an axis
+enum EdgeDirection {
+    case negative
+    case positive
+}
+
+/// Edge metadata for current resize operation
+struct ManipulatedEdges {
+    var horizontal: EdgeDirection?
+    var vertical: EdgeDirection?
+}
+
+/// Parent split plus orientation metadata
+struct ControllingSplit {
+    var parent: DwindleNode
+    var childIsFirst: Bool
+}
+
 /// Resize targets for smart resizing
 struct ResizeTargets {
-    var horizontalOuter: DwindleNode?
-    var horizontalInner: DwindleNode?
-    var verticalOuter: DwindleNode?
-    var verticalInner: DwindleNode?
+    var horizontalOuter: ControllingSplit?
+    var horizontalInner: ControllingSplit?
+    var verticalOuter: ControllingSplit?
+    var verticalInner: ControllingSplit?
 }
 
 /// Edge constraints for a node

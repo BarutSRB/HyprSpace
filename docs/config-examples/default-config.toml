@@ -78,6 +78,19 @@ dwindle-single-window-aspect-ratio = [0, 0]
 dwindle-single-window-aspect-ratio-tolerance = 0.1
 
 # ╔═══════════════════════════════════════════════════════════════════════════════╗
+# ║                      MOUSE INTERACTION (HYPRSPACE EXCLUSIVE)                  ║
+# ╚═══════════════════════════════════════════════════════════════════════════════╝
+
+# Mouse resize sensitivity multiplier
+# Range: 0.1 to 3.0
+# Controls how aggressively windows resize when dragging with mouse
+# Examples:
+#   0.5 = Precise (slower, fine-grained control)
+#   1.0 = Balanced (default)
+#   2.0 = Aggressive (faster, coarse adjustments)
+mouse-sensitivity = 0.2
+
+# ╔═══════════════════════════════════════════════════════════════════════════════╗
 # ║                     MASTER LAYOUT (HYPRSPACE EXCLUSIVE)                       ║
 # ╚═══════════════════════════════════════════════════════════════════════════════╝
 
@@ -248,7 +261,7 @@ on-focused-monitor-changed = 'move-mouse monitor-lazy-center'
 
 # Automatically configure windows when detected
 # Available conditions:
-#   - app-id: Bundle identifier (use 'hyprspace list-apps' to find)
+#   - app-id: Bundle identifier (use 'aerospace list-apps' to find)
 #   - app-name-regex-substring: Partial regex match on app name
 #   - window-title-regex-substring: Partial regex match on window title
 #   - workspace: Current workspace name

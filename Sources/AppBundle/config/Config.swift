@@ -47,6 +47,7 @@ struct Config: ConvenienceCopyable {
     var dwindleDefaultSplitRatio: CGFloat = 1.0 // 0.1-1.9, default split ratio for new dwindle containers (1.0 = 50/50, 1.618 = golden ratio)
     var masterDefaultPercent: CGFloat = 0.5 // 0.1-0.9, default master area percentage for master layout (0.5 = 50%, 0.618 = golden ratio)
     var niriFocusedWidthRatio: CGFloat = 0.8 // 0.1-1.0, ratio of screen width for focused window in scroll/niri layout
+    var mouseSensitivity: CGFloat = 2.0 // 0.1-3.0, mouse resize sensitivity multiplier (2.0 = balanced, 1.0 = precise, 3.0 = aggressive)
     var enableNormalizationOppositeOrientationForNestedContainers: Bool = true
     var execOnWorkspaceChange: [String] = [] // todo deprecate
     var keyMapping = KeyMapping()

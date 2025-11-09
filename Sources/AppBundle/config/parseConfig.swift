@@ -109,6 +109,7 @@ private let configParser: [String: any ParserProtocol<Config>] = [
     "dwindle-default-split-ratio": Parser(\.dwindleDefaultSplitRatio, parseCGFloat),
     "master-default-percent": Parser(\.masterDefaultPercent, parseCGFloat),
     "niri-focused-width-ratio": Parser(\.niriFocusedWidthRatio, parseCGFloat),
+    "mouse-sensitivity": Parser(\.mouseSensitivity, parseCGFloat),
     "exec-on-workspace-change": Parser(\.execOnWorkspaceChange, parseExecOnWorkspaceChange),
     "exec": Parser(\.execConfig, parseExecConfig),
 
@@ -225,6 +226,16 @@ func parseCommandOrCommands(_ raw: TOMLValueConvertible) -> Parsed<[any Command]
         )]
         // Reset to default if invalid
         config.masterDefaultPercent = 0.5
+    }
+
+    // Validate mouse-sensitivity
+    if config.mouseSensitivity < 0.1 || config.mouseSensitivity > 3.0 {
+        errors += [.semantic(
+            .rootKey("mouse-sensitivity"),
+            "mouse-sensitivity must be between 0.1 and 3.0 (got \(config.mouseSensitivity))"
+        )]
+        // Reset to default if invalid
+        config.mouseSensitivity = 1.0
     }
 
     if config.enableNormalizationFlattenContainers {

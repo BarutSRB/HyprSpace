@@ -56,6 +56,15 @@ final class DwindleNode {
     /// always use the current box size to avoid stale data.
     var box: CGRect = .zero
 
+    /// Snapshot of box dimensions before mouse manipulation started.
+    ///
+    /// Used to ensure consistent ratio calculations during mouse resize operations.
+    /// When set, ratio deltas are calculated using this frozen value instead of the
+    /// dynamically updated `box`, preventing geometry feedback loops.
+    ///
+    /// This is cleared after mouse manipulation completes.
+    var boxSnapshot: CGRect?
+
     // MARK: - Helpers
 
     /// Returns true if this is a leaf node (contains a window)
