@@ -8,7 +8,8 @@ final class ConfigTest: XCTestCase {
         let toml = try! String(contentsOf: projectRoot.appending(component: "docs/config-examples/i3-like-config-example.toml"))
         let (i3Config, errors) = parseConfig(toml)
         assertEquals(errors, [])
-        assertEquals(i3Config.execConfig, defaultConfig.execConfig)
+        // i3 config sets on-focused-monitor-changed to ['move-mouse monitor-lazy-center']
+        assertEquals(i3Config.onFocusedMonitorChanged.count, 1)
         assertEquals(i3Config.enableNormalizationFlattenContainers, false)
         assertEquals(i3Config.enableNormalizationOppositeOrientationForNestedContainers, false)
     }

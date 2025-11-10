@@ -58,6 +58,7 @@ final class FocusCommandTest: XCTestCase {
             assertEquals(TestWindow.new(id: 1, parent: $0).focusWindow(), true)
             TestWindow.new(id: 2, parent: $0)
         }
+        try await initializeLayoutForTests(Workspace.get(byName: name))
 
         assertEquals(focus.windowOrNil?.windowId, 1)
         try await FocusCommand.new(direction: .right).run(.defaultEnv, .emptyStdin)
@@ -119,6 +120,7 @@ final class FocusCommandTest: XCTestCase {
                 window3 = TestWindow.new(id: 3, parent: $0)
             }
         }
+        try await initializeLayoutForTests(workspace)
 
         assertEquals(workspace.mostRecentWindowRecursive?.windowId, 3) // The latest bound
         _ = startWindow.focusWindow()
@@ -144,6 +146,7 @@ final class FocusCommandTest: XCTestCase {
                 assertEquals(TestWindow.new(id: 2, parent: $0).focusWindow(), true)
             }
         }
+        try await initializeLayoutForTests(Workspace.get(byName: name))
 
         try await FocusCommand.new(direction: .left).run(.defaultEnv, .emptyStdin)
         assertEquals(focus.windowOrNil?.windowId, 1)
@@ -156,6 +159,7 @@ final class FocusCommandTest: XCTestCase {
                 assertEquals(TestWindow.new(id: 2, parent: $0).focusWindow(), true)
             }
         }
+        try await initializeLayoutForTests(Workspace.get(byName: name))
 
         try await FocusCommand.new(direction: .left).run(.defaultEnv, .emptyStdin)
         assertEquals(focus.windowOrNil?.windowId, 1)

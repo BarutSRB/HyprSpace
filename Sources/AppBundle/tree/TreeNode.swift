@@ -32,29 +32,31 @@ open class TreeNode: Equatable, AeroAny {
 
     /// See: ``getWeight(_:)``
     ///
-    /// Note: This function handles errors gracefully by logging and returning early
-    /// instead of crashing the application when weight changes are not allowed.
-    func setWeight(_ targetOrientation: Orientation, _ newValue: CGFloat) {
+    /// Returns true if the weight was successfully set, false if the operation is not allowed.
+    /// This function will log warnings when weight changes are not allowed.
+    @discardableResult
+    func setWeight(_ targetOrientation: Orientation, _ newValue: CGFloat) -> Bool {
         guard let parent else {
             print("Warning: Can't change weight if TreeNode doesn't have parent")
-            return
+            return false
         }
         switch getChildParentRelation(child: self, parent: parent) {
             case .tiling(let parent):
-                // Graceful handling: Check if orientation matches
+                // Check if orientation matches
                 if parent.orientation != targetOrientation {
                     print("Warning: Can't change \(targetOrientation) weight of nodes located in \(parent.orientation) container")
-                    return
+                    return false
                 }
-                // Graceful handling: Check if layout supports weight changes
+                // Check if layout supports weight changes
                 if parent.layout != .tiles && parent.layout != .dwindle && parent.layout != .scroll {
                     print("Warning: Weight can be changed only for nodes whose parent has '\(parent.layout)' layout (expected 'tiles', 'dwindle', or 'scroll')")
-                    return
+                    return false
                 }
                 adaptiveWeight = newValue
+                return true
             default:
                 print("Warning: Can't change weight for this type of parent-child relation")
-                return
+                return false
         }
     }
 

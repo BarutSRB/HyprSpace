@@ -40,6 +40,14 @@ func setUpWorkspacesForTests() {
     TestApp.shared.windows = []
 }
 
+/// Initializes layout caches for a workspace by triggering a layout pass.
+/// This is required in tests to properly initialize dwindleCache and other layout-specific state.
+/// Call this after creating test windows to simulate production environment behavior.
+@MainActor
+func initializeLayoutForTests(_ workspace: Workspace) async throws {
+    try await workspace.layoutWorkspace()
+}
+
 extension ParsedCmd {
     var errorOrNil: String? {
         if case .failure(let e) = self {

@@ -66,7 +66,8 @@ final class Workspace: TreeNode, NonLeafTreeNodeObject, Hashable, Comparable {
         workspaceMonitor.visibleRectPaddedByOuterGaps.getDimension(targetOrientation)
     }
 
-    override func setWeight(_ targetOrientation: Orientation, _ newValue: CGFloat) {
+    @discardableResult
+    override func setWeight(_ targetOrientation: Orientation, _ newValue: CGFloat) -> Bool {
         die("It's not possible to change weight of Workspace")
     }
 
