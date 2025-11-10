@@ -4,11 +4,17 @@
 let balance_sizes_help_generated = """
     USAGE: balance-sizes [-h|--help] [--workspace <workspace>]
     """
+let centered_workspace_bar_help_generated = """
+    The centered workspace bar is a GUI feature configured via menu settings
+    """
 let close_all_windows_but_current_help_generated = """
     USAGE: close-all-windows-but-current [-h|--help] [--quit-if-last-window]
     """
 let close_help_generated = """
     USAGE: close [-h|--help] [--quit-if-last-window] [--window-id <window-id>]
+    """
+let config_reference_help_generated = """
+    Complete configuration reference for ~/.hyprspace.toml
     """
 let config_help_generated = """
     USAGE: config [-h|--help] --get <name> [--json] [--keys]
@@ -58,7 +64,7 @@ let join_with_help_generated = """
     """
 let layout_help_generated = """
     USAGE: layout [-h|--help] [--window-id <window-id>]
-                  (h_tiles|v_tiles|h_accordion|v_accordion|tiles|accordion|dwindle|master|master_left|master_right|horizontal|vertical|tiling|floating)...
+                  (h_tiles|v_tiles|h_accordion|v_accordion|tiles|accordion|dwindle|scroll|master|master_left|master_right|horizontal|vertical|tiling|floating)...
     """
 let list_apps_help_generated = """
     USAGE: list-apps [-h|--help] [--macos-native-hidden [no]] [--format <output-format>] [--count] [--json]
