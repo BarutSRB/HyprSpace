@@ -55,7 +55,10 @@ struct Main {
         }
 
         var stdin = ""
-        if (parsedArgs is WorkspaceCmdArgs || parsedArgs is MoveNodeToWorkspaceCmdArgs) && hasStdin() {
+        if (parsedArgs is WorkspaceCmdArgs && (parsedArgs as! WorkspaceCmdArgs).target.val.isRelatve
+            || parsedArgs is MoveNodeToWorkspaceCmdArgs && (parsedArgs as! MoveNodeToWorkspaceCmdArgs).target.val.isRelatve)
+            && hasStdin()
+        {
             if parsedArgs is WorkspaceCmdArgs && (parsedArgs as! WorkspaceCmdArgs).explicitStdinFlag == nil ||
                 parsedArgs is MoveNodeToWorkspaceCmdArgs && (parsedArgs as! MoveNodeToWorkspaceCmdArgs).explicitStdinFlag == nil
             {
@@ -78,7 +81,11 @@ struct Main {
             }
         }
 
-        let ans = isVersion ? run(socket, [], stdin: stdin) : run(socket, args, stdin: stdin)
+        let windowId = ProcessInfo.processInfo.environment[AEROSPACE_WINDOW_ID].flatMap(UInt32.init)
+        let workspace = ProcessInfo.processInfo.environment[AEROSPACE_WORKSPACE]
+        let ans = isVersion
+            ? run(socket, [], stdin: stdin, windowId: windowId, workspace: workspace)
+            : run(socket, args, stdin: stdin, windowId: windowId, workspace: workspace)
         if isVersion {
             printVersionAndExit(serverVersion: ans.serverVersionAndHash)
         }
@@ -111,8 +118,8 @@ func printVersionAndExit(serverVersion: String?) -> Never {
     exit(0)
 }
 
-func run(_ socket: Socket, _ args: StrArrSlice, stdin: String) -> ServerAnswer {
-    let request = Result { try JSONEncoder().encode(ClientRequest(args: args.toArray(), stdin: stdin)) }.getOrDie()
+func run(_ socket: Socket, _ args: StrArrSlice, stdin: String, windowId: UInt32?, workspace: String?) -> ServerAnswer {
+    let request = Result { try JSONEncoder().encode(ClientRequest(args: args.toArray(), stdin: stdin, windowId: windowId, workspace: workspace)) }.getOrDie()
     Result { try socket.write(from: request) }.getOrDie()
     Result { try Socket.wait(for: [socket], timeout: 0, waitForever: true) }.getOrDie()
 

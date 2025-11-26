@@ -27,13 +27,13 @@ func resizedObs(_ obs: AXObserver, ax: AXUIElement, notif: CFString, data: Unsaf
 
         guard let token: RunSessionGuard = .isServerEnabled else { return }
         guard let windowId, let window = Window.get(byId: windowId), try await isManipulatedWithMouse(window) else {
-            runRefreshSession(.ax(notif))
+            scheduleRefreshSession(.ax(notif))
             return
         }
         resizeWithMouseTask?.cancel()
         resizeWithMouseTask = Task {
             try checkCancellation()
-            try await runSession(.ax(notif), token) {
+            try await runLightSession(.ax(notif), token) {
                 try await resizeWithMouse(window)
             }
         }
@@ -56,7 +56,7 @@ func resetManipulatedWithMouseIfPossible() async throws {
             // Clear dwindle box snapshots to ensure clean state for next manipulation
             workspace.rootTilingContainer.dwindleCache.clearBoxSnapshots()
         }
-        runRefreshSession(.resetManipulatedWithMouse, optimisticallyPreLayoutWorkspaces: true)
+        scheduleRefreshSession(.resetManipulatedWithMouse, optimisticallyPreLayoutWorkspaces: true)
     }
 }
 

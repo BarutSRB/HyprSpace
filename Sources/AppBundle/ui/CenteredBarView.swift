@@ -134,7 +134,7 @@ private struct WorkspaceItemView: View {
     private func focusWorkspace(_ workspace: Workspace) {
         Task {
             if let token: RunSessionGuard = .isServerEnabled {
-                try await runSession(.menuBarButton, token) {
+                try await runLightSession(.menuBarButton, token) {
                     _ = workspace.focusWorkspace()
                 }
             }
@@ -217,7 +217,7 @@ private struct WindowIconView: View {
     private func focusWindow() {
         Task {
             if let token: RunSessionGuard = .isServerEnabled {
-                try await runSession(.menuBarButton, token) {
+                try await runLightSession(.menuBarButton, token) {
                     // First focus the workspace
                     _ = workspace.focusWorkspace()
                     // Then focus the specific window
@@ -281,7 +281,7 @@ private struct WindowListSheet: View {
     private func focusSpecificWindow(_ windowId: UInt32) {
         Task {
             if let token: RunSessionGuard = .isServerEnabled {
-                try await runSession(.menuBarButton, token) {
+                try await runLightSession(.menuBarButton, token) {
                     // First focus the workspace
                     _ = workspace.focusWorkspace()
                     // Then focus the specific window
