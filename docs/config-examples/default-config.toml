@@ -172,11 +172,6 @@ persistent-workspaces = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B",
 # See: https://nikitabobko.github.io/AeroSpace/commands#mode
 on-mode-changed = []
 
-# Possible values: (qwerty|dvorak|colemak)
-# See https://nikitabobko.github.io/AeroSpace/guide#key-mapping
-[key-mapping]
-    preset = 'qwerty'
-
 # ╔═══════════════════════════════════════════════════════════════════════════════╗
 # ║                            GAPS CONFIGURATION                                 ║
 # ╚═══════════════════════════════════════════════════════════════════════════════╝
