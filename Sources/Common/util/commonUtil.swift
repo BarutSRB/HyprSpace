@@ -2,6 +2,7 @@ import AppKit
 import Darwin
 import Foundation
 
+public let socketPath = "/tmp/\(aeroSpaceAppId)-\(unixUserName).sock"
 public let unixUserName = NSUserName()
 public let mainModeId = "main"
 
@@ -184,16 +185,16 @@ extension URL {
     }
 }
 
-public func printStderr(_ msg: String) {
+public func eprint(_ msg: String) {
     fputs(msg + "\n", stderr)
 }
 
-public func cliError(_ message: String = "") -> Never {
-    cliErrorT(message)
+public func exit(stderrMsg message: String = "") -> Never {
+    exitT(stderrMsg: message)
 }
 
-public func cliErrorT<T>(_ message: String = "") -> T {
-    printStderr(message)
+public func exitT<T>(stderrMsg message: String = "") -> T {
+    eprint(message)
     exit(1)
 }
 

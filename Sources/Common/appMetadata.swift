@@ -1,3 +1,4 @@
+public let stableAeroSpaceAppId: String = "bobko.aerospace"
 #if DEBUG
     public let aeroSpaceAppId: String = "com.barut.hyprspace.debug"
     public let aeroSpaceAppName: String = "HyprSpace-Debug"
