@@ -667,13 +667,18 @@ final class WMController {
 
     func isManagedWindowDisplayable(_ token: WindowToken) -> Bool {
         guard workspaceManager.entry(for: token) != nil else { return false }
-        if hiddenAppPIDs.contains(token.pid) {
+        if isManagedWindowSuppressedByMacOSHide(token) {
             return false
         }
         if workspaceManager.layoutReason(for: token) != .standard {
             return false
         }
         return !workspaceManager.isHiddenInCorner(token)
+    }
+
+    func isManagedWindowSuppressedByMacOSHide(_ token: WindowToken) -> Bool {
+        hiddenAppPIDs.contains(token.pid)
+            || workspaceManager.layoutReason(for: token) == .macosHiddenApp
     }
 
     func isManagedWindowSuspendedForNativeFullscreen(_ token: WindowToken) -> Bool {
@@ -1598,7 +1603,10 @@ final class WMController {
     ) -> WindowToken? {
         let explicitCandidates = [
             workspaceManager.lastFocusedToken(in: workspaceId),
-            workspaceManager.preferredFocusToken(in: workspaceId),
+            workspaceManager.preferredFocusToken(
+                in: workspaceId,
+                isSuppressed: isManagedWindowSuppressedByMacOSHide
+            ),
             workspaceManager.lastFloatingFocusedToken(in: workspaceId),
             workspaceManager.focusedToken
         ]
@@ -1636,7 +1644,11 @@ final class WMController {
             return
         }
 
-        _ = workspaceManager.resolveAndSetWorkspaceFocusToken(in: workspaceId, onMonitor: monitorId)
+        _ = workspaceManager.resolveAndSetWorkspaceFocusToken(
+            in: workspaceId,
+            onMonitor: monitorId,
+            isSuppressed: isManagedWindowSuppressedByMacOSHide
+        )
     }
 
     func cleanupScratchpadWindowResources(for token: WindowToken) {
@@ -2931,7 +2943,8 @@ final class WMController {
     func resolveAndSetWorkspaceFocusToken(for workspaceId: WorkspaceDescriptor.ID) -> WindowToken? {
         workspaceManager.resolveAndSetWorkspaceFocusToken(
             in: workspaceId,
-            onMonitor: workspaceManager.monitorId(for: workspaceId)
+            onMonitor: workspaceManager.monitorId(for: workspaceId),
+            isSuppressed: isManagedWindowSuppressedByMacOSHide
         )
     }
 
@@ -2952,9 +2965,16 @@ final class WMController {
         switch workspaceManager.activeLayoutKind(for: workspaceId) {
         case .niri:
             if let engine = niriEngine {
-                let node = preferredToken.flatMap { engine.findNode(for: $0, in: workspaceId) }
-                    ?? preferredNodeId.flatMap { engine.findNode(by: $0, in: workspaceId) as? NiriWindow }
-                if let node {
+                let preferredTokenNode: NiriWindow? = preferredToken.flatMap { token in
+                    guard !isManagedWindowSuppressedByMacOSHide(token) else { return nil }
+                    return engine.findNode(for: token, in: workspaceId)
+                }
+                let preferredNode = preferredNodeId
+                    .flatMap { engine.findNode(by: $0, in: workspaceId) as? NiriWindow }
+                    .flatMap { node in
+                        isManagedWindowSuppressedByMacOSHide(node.token) ? nil : node
+                    }
+                if let node = preferredTokenNode ?? preferredNode {
                     _ = workspaceManager.commitWorkspaceSelection(
                         nodeId: node.id,
                         focusedToken: node.token,
@@ -2965,7 +2985,9 @@ final class WMController {
                 }
             }
         case .dwindle:
-            if let token = dwindleEngine?.selectedNode(in: workspaceId)?.windowToken {
+            if let token = dwindleEngine?.selectedNode(in: workspaceId)?.windowToken,
+               !isManagedWindowSuppressedByMacOSHide(token)
+            {
                 _ = workspaceManager.commitWorkspaceSelection(
                     nodeId: nil,
                     focusedToken: token,
@@ -2975,6 +2997,7 @@ final class WMController {
                 return
             }
             if let preferredToken,
+               !isManagedWindowSuppressedByMacOSHide(preferredToken),
                dwindleEngine?.findNode(for: preferredToken, in: workspaceId) != nil
             {
                 commitWorkspaceFocusCandidate(preferredToken, in: workspaceId)
@@ -2982,7 +3005,11 @@ final class WMController {
             }
         }
 
-        _ = workspaceManager.resolveAndSetWorkspaceFocusToken(in: workspaceId, onMonitor: monitorId)
+        _ = workspaceManager.resolveAndSetWorkspaceFocusToken(
+            in: workspaceId,
+            onMonitor: monitorId,
+            isSuppressed: isManagedWindowSuppressedByMacOSHide
+        )
     }
 
     @discardableResult
@@ -3044,7 +3071,8 @@ final class WMController {
         guard !workspaceManager.hasPendingNativeFullscreenTransition else { return }
 
         if let pendingFocusedToken = workspaceManager.pendingFocusedToken,
-           workspaceManager.pendingFocusedWorkspaceId == workspaceId
+           workspaceManager.pendingFocusedWorkspaceId == workspaceId,
+           !isManagedWindowSuppressedByMacOSHide(pendingFocusedToken)
         {
             commitWorkspaceFocusCandidate(pendingFocusedToken, in: workspaceId)
             return
@@ -3052,7 +3080,8 @@ final class WMController {
 
         if let preferredRecoveryToken {
             if let entry = workspaceManager.entry(for: preferredRecoveryToken),
-               entry.workspaceId == workspaceId
+               entry.workspaceId == workspaceId,
+               !isManagedWindowSuppressedByMacOSHide(preferredRecoveryToken)
             {
                 let routedDwindleFocus = commitWorkspaceFocusCandidate(
                     preferredRecoveryToken,
@@ -3067,7 +3096,8 @@ final class WMController {
         }
 
         if let focusedToken = workspaceManager.focusedToken,
-           workspaceManager.entry(for: focusedToken)?.workspaceId == workspaceId
+           workspaceManager.entry(for: focusedToken)?.workspaceId == workspaceId,
+           !isManagedWindowSuppressedByMacOSHide(focusedToken)
         {
             commitWorkspaceFocusCandidate(focusedToken, in: workspaceId)
             return
@@ -3075,7 +3105,8 @@ final class WMController {
 
         guard let nextFocusToken = workspaceManager.resolveAndSetWorkspaceFocusToken(
             in: workspaceId,
-            onMonitor: workspaceManager.monitorId(for: workspaceId)
+            onMonitor: workspaceManager.monitorId(for: workspaceId),
+            isSuppressed: isManagedWindowSuppressedByMacOSHide
         ) else {
             return
         }
@@ -3195,7 +3226,8 @@ extension WMController {
 
     func retryManagedFocusFronting(_ request: ManagedFocusRequest) {
         guard let entry = workspaceManager.entry(for: request.token),
-              entry.workspaceId == request.workspaceId
+              entry.workspaceId == request.workspaceId,
+              !isManagedWindowSuppressedByMacOSHide(request.token)
         else {
             return
         }
@@ -3208,6 +3240,7 @@ extension WMController {
 
     func activateNativeFullscreenPlaceholder(_ token: WindowToken) {
         guard let entry = workspaceManager.entry(for: token) else { return }
+        guard !isManagedWindowSuppressedByMacOSHide(token) else { return }
         guard workspaceManager.layoutReason(for: token) == .nativeFullscreen else { return }
         guard !isLockScreenActive else { return }
         if hasStartedServices {
@@ -3294,6 +3327,9 @@ extension WMController {
         guard !isLockScreenActive else { return }
         if hasStartedServices {
             guard !isFrontmostAppLockScreen() else { return }
+        }
+        if isManagedWindowSuppressedByMacOSHide(token) {
+            return
         }
         if isManagedWindowSuspendedForNativeFullscreen(token) {
             selectNativeFullscreenPlaceholder(entry)

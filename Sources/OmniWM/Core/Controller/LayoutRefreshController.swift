@@ -856,7 +856,9 @@ import QuartzCore
         guard let controller else { return nil }
 
         let monitorSnapshot = buildMonitorSnapshot(for: monitor, orientation: orientation)
-        let entries = controller.workspaceManager.tiledEntries(in: workspaceId)
+        let entries = controller.workspaceManager.tiledEntries(in: workspaceId).filter {
+            !controller.isManagedWindowSuppressedByMacOSHide($0.token)
+        }
         let windows = buildWindowSnapshots(
             for: entries,
             resolveConstraints: resolveConstraints,
@@ -1352,7 +1354,11 @@ import QuartzCore
     }
 
     private func buildVisibilityEffectPlan() -> EffectPlan {
-        EffectPlan(effects: EffectPlanEffects())
+        buildRelayoutEffectPlan(
+            useScrollAnimationPath: false,
+            recoverFocus: true,
+            affectedWorkspaceIds: []
+        )
     }
 
     private func buildWorkspacePlansInBatch(_ build: () -> [WorkspaceLayoutPlan]) -> [WorkspaceLayoutPlan] {

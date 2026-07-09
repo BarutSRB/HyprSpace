@@ -309,7 +309,9 @@ final class WorkspaceNavigationHandler {
             : nil
         let candidates = controller.workspaceManager.tiledEntries(in: targetWorkspace.id)
             .compactMap { entry -> (token: WindowToken, frame: CGRect)? in
-                if dwindleEngine?.isInactiveGroupMember(entry.token, in: targetWorkspace.id) == true {
+                if controller.isManagedWindowSuppressedByMacOSHide(entry.token)
+                    || dwindleEngine?.isInactiveGroupMember(entry.token, in: targetWorkspace.id) == true
+                {
                     return nil
                 }
                 return controller.preferredKeyboardFocusFrame(for: entry.token).map {
@@ -374,6 +376,7 @@ final class WorkspaceNavigationHandler {
         let anchorToken: WindowToken? = targetIsNiri ? Self.spatialNeighborToken(
             from: controller.preferredKeyboardFocusFrame(for: handle.id),
             candidates: controller.workspaceManager.tiledEntries(in: targetWorkspace.id)
+                .filter { !controller.isManagedWindowSuppressedByMacOSHide($0.token) }
                 .compactMap { entry in
                     controller.preferredKeyboardFocusFrame(for: entry.token).map { (token: entry.token, frame: $0) }
                 },
@@ -963,7 +966,10 @@ final class WorkspaceNavigationHandler {
         controller.reassignManagedWindow(token, to: targetWorkspaceId)
         guard workspaceManager.workspace(for: token) == targetWorkspaceId else { return false }
 
-        _ = workspaceManager.resolveAndSetWorkspaceFocusToken(in: sourceWorkspaceId)
+        _ = workspaceManager.resolveAndSetWorkspaceFocusToken(
+            in: sourceWorkspaceId,
+            isSuppressed: controller.isManagedWindowSuppressedByMacOSHide
+        )
 
         if let matchingRequest {
             guard let retargetedRequest = controller.intentLedger.retargetManagedRequest(

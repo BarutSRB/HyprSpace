@@ -1425,11 +1425,15 @@ final class WorkspaceManager {
         world.focus.lastFloatingFocusedByWorkspace[workspaceId]
     }
 
-    func preferredFocusToken(in workspaceId: WorkspaceDescriptor.ID) -> WindowToken? {
+    func preferredFocusToken(
+        in workspaceId: WorkspaceDescriptor.ID,
+        isSuppressed: (WindowToken) -> Bool
+    ) -> WindowToken? {
         if let pendingToken = eligibleFocusCandidate(
             world.focus.pendingManagedFocus.token,
             in: workspaceId,
-            mode: .tiling
+            mode: .tiling,
+            isSuppressed: isSuppressed
         ),
             world.focus.pendingManagedFocus.workspaceId == workspaceId
         {
@@ -1439,7 +1443,8 @@ final class WorkspaceManager {
         if let remembered = eligibleFocusCandidate(
             world.focus.lastTiledFocusedByWorkspace[workspaceId],
             in: workspaceId,
-            mode: .tiling
+            mode: .tiling,
+            isSuppressed: isSuppressed
         ) {
             return remembered
         }
@@ -1447,20 +1452,29 @@ final class WorkspaceManager {
         if let confirmed = eligibleFocusCandidate(
             world.focus.focusedToken,
             in: workspaceId,
-            mode: .tiling
+            mode: .tiling,
+            isSuppressed: isSuppressed
         ) {
             return confirmed
         }
 
         return tiledEntries(in: workspaceId).first {
-            isFocusResolutionEligible($0, in: workspaceId, mode: .tiling)
+            isFocusResolutionEligible($0, in: workspaceId, mode: .tiling, isSuppressed: isSuppressed)
         }?.token
     }
 
-    func resolveWorkspaceFocusToken(in workspaceId: WorkspaceDescriptor.ID) -> WindowToken? {
+    func resolveWorkspaceFocusToken(
+        in workspaceId: WorkspaceDescriptor.ID,
+        isSuppressed: (WindowToken) -> Bool
+    ) -> WindowToken? {
         if let mostRecent = world.focus.lastFocusedByWorkspace[workspaceId],
            let mode = windowMode(for: mostRecent),
-           let remembered = eligibleFocusCandidate(mostRecent, in: workspaceId, mode: mode)
+           let remembered = eligibleFocusCandidate(
+               mostRecent,
+               in: workspaceId,
+               mode: mode,
+               isSuppressed: isSuppressed
+           )
         {
             return remembered
         }
@@ -1468,38 +1482,42 @@ final class WorkspaceManager {
         if let remembered = eligibleFocusCandidate(
             world.focus.lastTiledFocusedByWorkspace[workspaceId],
             in: workspaceId,
-            mode: .tiling
+            mode: .tiling,
+            isSuppressed: isSuppressed
         ) {
             return remembered
         }
-        if let preferredTiled = preferredFocusToken(in: workspaceId) {
+        if let preferredTiled = preferredFocusToken(in: workspaceId, isSuppressed: isSuppressed) {
             return preferredTiled
         }
         if let rememberedFloating = eligibleFocusCandidate(
             world.focus.lastFloatingFocusedByWorkspace[workspaceId],
             in: workspaceId,
-            mode: .floating
+            mode: .floating,
+            isSuppressed: isSuppressed
         ) {
             return rememberedFloating
         }
         if let confirmed = eligibleFocusCandidate(
             world.focus.focusedToken,
             in: workspaceId,
-            mode: .floating
+            mode: .floating,
+            isSuppressed: isSuppressed
         ) {
             return confirmed
         }
         return floatingEntries(in: workspaceId).first {
-            isFocusResolutionEligible($0, in: workspaceId, mode: .floating)
+            isFocusResolutionEligible($0, in: workspaceId, mode: .floating, isSuppressed: isSuppressed)
         }?.token
     }
 
     @discardableResult
     func resolveAndSetWorkspaceFocusToken(
         in workspaceId: WorkspaceDescriptor.ID,
-        onMonitor _: Monitor.ID? = nil
+        onMonitor _: Monitor.ID? = nil,
+        isSuppressed: (WindowToken) -> Bool
     ) -> WindowToken? {
-        if let token = resolveWorkspaceFocusToken(in: workspaceId) {
+        if let token = resolveWorkspaceFocusToken(in: workspaceId, isSuppressed: isSuppressed) {
             _ = rememberFocus(token, in: workspaceId)
             return token
         }
@@ -1620,11 +1638,12 @@ final class WorkspaceManager {
     private func eligibleFocusCandidate(
         _ token: WindowToken?,
         in workspaceId: WorkspaceDescriptor.ID,
-        mode: TrackedWindowMode
+        mode: TrackedWindowMode,
+        isSuppressed: (WindowToken) -> Bool
     ) -> WindowToken? {
         guard let token,
               let entry = entry(for: token),
-              isFocusResolutionEligible(entry, in: workspaceId, mode: mode)
+              isFocusResolutionEligible(entry, in: workspaceId, mode: mode, isSuppressed: isSuppressed)
         else {
             return nil
         }
@@ -1634,10 +1653,13 @@ final class WorkspaceManager {
     private func isFocusResolutionEligible(
         _ entry: WindowState,
         in workspaceId: WorkspaceDescriptor.ID,
-        mode: TrackedWindowMode
+        mode: TrackedWindowMode,
+        isSuppressed: (WindowToken) -> Bool
     ) -> Bool {
         guard entry.workspaceId == workspaceId,
-              entry.mode == mode
+              entry.mode == mode,
+              entry.layoutReason != .macosHiddenApp,
+              !isSuppressed(entry.token)
         else {
             return false
         }

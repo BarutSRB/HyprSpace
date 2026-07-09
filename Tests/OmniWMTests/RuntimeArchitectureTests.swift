@@ -4502,7 +4502,13 @@ final class RuntimeArchitectureTests: XCTestCase {
         XCTAssertNotNil(controller.layoutRefreshController.executeLayoutPlanReturningAcceptedSeq(plan))
         XCTAssertEqual(controller.workspaceManager.lastFocusedToken(in: workspaceId), tiled)
         XCTAssertEqual(controller.workspaceManager.lastFloatingFocusedToken(in: workspaceId), floating)
-        XCTAssertEqual(controller.workspaceManager.resolveWorkspaceFocusToken(in: workspaceId), floating)
+        XCTAssertEqual(
+            controller.workspaceManager.resolveWorkspaceFocusToken(
+                in: workspaceId,
+                isSuppressed: { _ in false }
+            ),
+            floating
+        )
     }
 
     @MainActor
@@ -4651,7 +4657,13 @@ final class RuntimeArchitectureTests: XCTestCase {
         XCTAssertNotNil(controller.layoutRefreshController.executeLayoutPlanReturningAcceptedSeq(plan))
         XCTAssertEqual(controller.workspaceManager.lastFocusedToken(in: workspaceId), tiled)
         XCTAssertEqual(controller.workspaceManager.lastFloatingFocusedToken(in: workspaceId), floating)
-        XCTAssertEqual(controller.workspaceManager.resolveWorkspaceFocusToken(in: workspaceId), floating)
+        XCTAssertEqual(
+            controller.workspaceManager.resolveWorkspaceFocusToken(
+                in: workspaceId,
+                isSuppressed: { _ in false }
+            ),
+            floating
+        )
     }
 
     @MainActor
