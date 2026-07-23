@@ -108,7 +108,6 @@ final class WorkspaceBarDataSourceTests: XCTestCase {
             mode: .tiling,
             to: fixture
         )
-        // Focus elsewhere so the empty policy, not the active-workspace carve-out, decides.
         _ = try XCTUnwrap(fixture.workspaceManager.workspaceId(for: "2", createIfMissing: true))
         _ = fixture.workspaceManager.focusWorkspace(named: "2")
 
@@ -147,7 +146,6 @@ final class WorkspaceBarDataSourceTests: XCTestCase {
         let idleId = try XCTUnwrap(
             fixture.workspaceManager.workspaceId(for: "3", createIfMissing: true)
         )
-        // The fixture focuses "1", which holds no windows.
         XCTAssertEqual(fixture.workspaceManager.activeWorkspace(on: fixture.monitor.id)?.id, fixture.workspaceId)
 
         let projection = project(

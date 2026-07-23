@@ -78,8 +78,6 @@ enum WorkspaceBarDataSource {
         let activeWorkspaceId = workspaceManager.activeWorkspace(on: monitor.id)?.id
 
         if options.hideEmptyWorkspaces {
-            // The active workspace stays on the bar even when empty: it is the only item that
-            // reports focus, and the split layouts anchor their active island on it.
             workspaces = workspaces.filter { $0.hasBarOccupancy || $0.workspace.id == activeWorkspaceId }
         }
 

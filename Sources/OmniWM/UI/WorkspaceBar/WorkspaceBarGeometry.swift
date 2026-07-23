@@ -45,8 +45,6 @@ struct WorkspaceBarGeometry: Equatable {
         monitor: Monitor,
         resolved: ResolvedBarSettings
     ) -> CGRect {
-        // The island hugs its measured content: SwiftUI draws the bar against the panel's
-        // leading edge, so a panel wider than the content offsets the visible bar from centre.
         let width = max(fittingWidth, Self.minimumIslandWidth)
         var x = monitor.frame.midX - width / 2
         var y = originY(for: monitor)

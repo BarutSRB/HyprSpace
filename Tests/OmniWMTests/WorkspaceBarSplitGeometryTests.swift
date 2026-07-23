@@ -211,8 +211,6 @@ final class WorkspaceBarSplitGeometryTests: XCTestCase {
         let resolved = makeResolved(notchMode: .off)
         let geometry = WorkspaceBarGeometry.resolve(monitor: monitor, resolved: resolved, isVisible: true)
 
-        // A panel wider than the content leaves the bar drawn against the panel's leading
-        // edge, which pushes the visible bar left of centre by half the slack.
         for fittingWidth: CGFloat in [40, 60, 221, 288, 355, 700] {
             let frame = geometry.frame(fittingWidth: fittingWidth, monitor: monitor, resolved: resolved)
             XCTAssertEqual(frame.width, fittingWidth, accuracy: 0.01, "fitting \(fittingWidth)")
