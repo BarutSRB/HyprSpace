@@ -1162,6 +1162,68 @@ final class AXFullRescanBoundaryTests: XCTestCase {
         XCTAssertNil(controller.workspaceManager.cachedConstraints(for: token))
     }
 
+    private func axErrorPlaceholder(_ error: AXError) -> Any {
+        var error = error
+        return AXValueCreate(.axError, &error)! as Any
+    }
+
+    func testUnavailableAttributeReadsAsAbsent() {
+        let placeholder = axErrorPlaceholder(.noValue)
+
+        XCTAssertTrue(AXWindowService.isAXErrorPlaceholder(placeholder))
+        XCTAssertFalse(AXWindowService.resolvedAttribute(placeholder))
+        XCTAssertEqual(AXWindowService.fullscreenButtonEvidence(placeholder), .absent)
+
+        XCTAssertFalse(AXWindowService.resolvedAttribute(nil))
+        XCTAssertTrue(AXWindowService.resolvedAttribute(AXUIElementCreateSystemWide()))
+        XCTAssertEqual(AXWindowService.fullscreenButtonEvidence(AXUIElementCreateSystemWide()), .element)
+        XCTAssertEqual(AXWindowService.fullscreenButtonEvidence("not-an-element"), .malformed)
+    }
+
+    func testWindowWithoutFullscreenButtonFloatsInsteadOfDeferringAdmission() {
+        // Shape of an Activity Monitor window: standard subrole with close/zoom/minimize buttons,
+        // and an AXFullScreenButton the AX API answers with a kAXErrorNoValue placeholder.
+        let fullscreenButton = axErrorPlaceholder(.noValue)
+        let buttonEvidence = AXWindowService.fullscreenButtonEvidence(fullscreenButton)
+        let facts = AXWindowService.makeWindowFacts(
+            AXWindowFactAttributeValues(
+                role: kAXWindowRole as String,
+                subrole: kAXStandardWindowSubrole as String,
+                title: nil,
+                closeButton: AXUIElementCreateSystemWide(),
+                fullscreenButton: fullscreenButton,
+                fullscreenButtonEnabled: nil,
+                zoomButton: AXUIElementCreateSystemWide(),
+                minimizeButton: AXUIElementCreateSystemWide()
+            ),
+            appPolicy: .regular,
+            bundleId: "com.apple.ActivityMonitor",
+            attributeFetchSucceeded: buttonEvidence != .malformed
+        )
+
+        XCTAssertTrue(facts.attributeFetchSucceeded)
+        XCTAssertFalse(facts.hasFullscreenButton)
+
+        let heuristic = AXWindowService.heuristicDisposition(for: facts)
+        XCTAssertEqual(heuristic.disposition, .floating)
+        XCTAssertEqual(heuristic.reasons, [.missingFullscreenButton])
+
+        let decision = WindowRuleEngine().decision(
+            for: WindowRuleFacts(
+                appName: "Activity Monitor",
+                ax: facts,
+                sizeConstraints: nil,
+                windowServer: nil
+            ),
+            token: nil,
+            appFullscreen: false
+        )
+
+        XCTAssertEqual(decision.disposition, .floating)
+        XCTAssertEqual(decision.trackedMode, .floating)
+        XCTAssertNil(decision.deferredReason)
+    }
+
     func testCapturedConstraintParserUsesObservedSizeForFixedWindow() {
         let size = CGSize(width: 420, height: 280)
 

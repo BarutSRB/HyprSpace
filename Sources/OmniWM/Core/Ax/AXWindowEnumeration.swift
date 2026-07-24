@@ -357,11 +357,9 @@ enum AXWindowEnumerationInspector {
         deadline: TimeInterval,
         checkCancellation: () throws -> Void
     ) throws -> (enabled: Bool?, succeeded: Bool) {
-        guard AXWindowService.resolvedAttribute(value) else { return (nil, true) }
-        guard let value,
-              CFGetTypeID(value as CFTypeRef) == AXUIElementGetTypeID()
-        else {
-            return (nil, false)
+        let evidence = AXWindowService.fullscreenButtonEvidence(value)
+        guard evidence == .element, let value else {
+            return (nil, evidence == .absent)
         }
         let button = unsafeDowncast(value as AnyObject, to: AXUIElement.self)
         try setRemainingTimeout(on: button, until: deadline)

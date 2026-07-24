@@ -199,6 +199,15 @@ func sameAXWindowIdentity(_ lhs: AXWindowRef, _ rhs: AXWindowRef) -> Bool {
     lhs.windowId == rhs.windowId && CFEqual(lhs.element, rhs.element)
 }
 
+enum AXFullscreenButtonEvidence: Equatable, Sendable {
+    /// No fullscreen button: the attribute was missing or came back as an AX error placeholder.
+    case absent
+    /// A real button element the caller can query for `AXEnabled`.
+    case element
+    /// Present but not a button element, so the surrounding attribute fetch is untrustworthy.
+    case malformed
+}
+
 enum AXWindowHeuristicReason: String, Sendable {
     case attributeFetchFailed
     case browserPictureInPicture
@@ -652,28 +661,28 @@ enum AXWindowService {
 
         let fullscreenButtonElement = attributeValue(.fullScreenButton)
         var attributeFetchSucceeded = true
-        let hasFullscreenButton = resolvedAttribute(fullscreenButtonElement)
+        let buttonEvidence = fullscreenButtonEvidence(fullscreenButtonElement)
 
         var fullscreenButtonEnabled: Bool?
-        if hasFullscreenButton, let fullscreenButtonElement {
-            guard CFGetTypeID(fullscreenButtonElement as CFTypeRef) == AXUIElementGetTypeID() else {
-                attributeFetchSucceeded = false
-                return makeWindowFacts(
-                    AXWindowFactAttributeValues(
-                        role: attributeValue(.role) as? String,
-                        subrole: attributeValue(.subrole) as? String,
-                        title: includeTitle ? (attributeValue(.title) as? String) : nil,
-                        closeButton: attributeValue(.closeButton),
-                        fullscreenButton: nil,
-                        fullscreenButtonEnabled: nil,
-                        zoomButton: attributeValue(.zoomButton),
-                        minimizeButton: attributeValue(.minimizeButton)
-                    ),
-                    appPolicy: appPolicy,
-                    bundleId: bundleId,
-                    attributeFetchSucceeded: attributeFetchSucceeded
-                )
-            }
+        if buttonEvidence == .malformed {
+            attributeFetchSucceeded = false
+            return makeWindowFacts(
+                AXWindowFactAttributeValues(
+                    role: attributeValue(.role) as? String,
+                    subrole: attributeValue(.subrole) as? String,
+                    title: includeTitle ? (attributeValue(.title) as? String) : nil,
+                    closeButton: attributeValue(.closeButton),
+                    fullscreenButton: nil,
+                    fullscreenButtonEnabled: nil,
+                    zoomButton: attributeValue(.zoomButton),
+                    minimizeButton: attributeValue(.minimizeButton)
+                ),
+                appPolicy: appPolicy,
+                bundleId: bundleId,
+                attributeFetchSucceeded: attributeFetchSucceeded
+            )
+        }
+        if buttonEvidence == .element, let fullscreenButtonElement {
             let buttonElement = unsafeDowncast(fullscreenButtonElement as AnyObject, to: AXUIElement.self)
             var enabledValue: CFTypeRef?
             let enabledResult = AXUIElementCopyAttributeValue(
@@ -731,8 +740,24 @@ enum AXWindowService {
     }
 
     static func resolvedAttribute(_ value: Any?) -> Bool {
-        guard let value else { return false }
-        return !(value is NSError)
+        guard let value, !(value is NSError) else { return false }
+        return !isAXErrorPlaceholder(value)
+    }
+
+    /// `AXUIElementCopyMultipleAttributeValues` reports per-attribute failures by substituting an
+    /// `AXValue` of type `.axError` instead of leaving the slot empty, so an unavailable attribute
+    /// only shows up as a placeholder of that shape - never as `nil` or `NSError`.
+    static func isAXErrorPlaceholder(_ value: Any?) -> Bool {
+        guard let value, CFGetTypeID(value as CFTypeRef) == AXValueGetTypeID() else { return false }
+        return AXValueGetType(unsafeDowncast(value as AnyObject, to: AXValue.self)) == .axError
+    }
+
+    static func fullscreenButtonEvidence(_ value: Any?) -> AXFullscreenButtonEvidence {
+        guard resolvedAttribute(value) else { return .absent }
+        guard let value, CFGetTypeID(value as CFTypeRef) == AXUIElementGetTypeID() else {
+            return .malformed
+        }
+        return .element
     }
 
     static func sizeValue(_ value: Any?) -> CGSize? {
@@ -857,10 +882,10 @@ enum AXWindowService {
         var maxSize: CGSize?
 
         if result == .success, let valuesArray = values as? [Any?] {
-            if !valuesArray.isEmpty, valuesArray[0] != nil, !(valuesArray[0] is NSError) {
+            if !valuesArray.isEmpty, resolvedAttribute(valuesArray[0]) {
                 hasGrowArea = true
             }
-            if valuesArray.count > 1, valuesArray[1] != nil, !(valuesArray[1] is NSError) {
+            if valuesArray.count > 1, resolvedAttribute(valuesArray[1]) {
                 hasZoomButton = true
             }
             if valuesArray.count > 2, let subrole = valuesArray[2] as? String {
