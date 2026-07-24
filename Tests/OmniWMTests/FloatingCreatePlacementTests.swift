@@ -435,8 +435,17 @@ final class FloatingCreatePlacementTests: XCTestCase {
 
     private func makeTwoMonitorFixture() throws -> TwoMonitorFixture {
         let controller = makeController()
-        let primary = makeMonitor(1, "Primary", CGRect(x: 0, y: 0, width: 1800, height: 1169))
-        let secondary = makeMonitor(3, "Secondary", CGRect(x: 1800, y: 1169, width: 1920, height: 1080))
+        let primaryDisplayId = CGMainDisplayID()
+        let primary = makeMonitor(
+            primaryDisplayId,
+            "Primary",
+            CGRect(x: 0, y: 0, width: 1800, height: 1169)
+        )
+        let secondary = makeMonitor(
+            primaryDisplayId &+ 1,
+            "Secondary",
+            CGRect(x: 1800, y: 1169, width: 1920, height: 1080)
+        )
         controller.workspaceManager.applyMonitorConfigurationChange([primary, secondary])
 
         let primaryWorkspace = try XCTUnwrap(
