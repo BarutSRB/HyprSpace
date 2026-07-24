@@ -39,27 +39,51 @@ func performAXAction(_ element: AXUIElement, _ action: CFString, noteKey: String
     return ok
 }
 
+enum KeyWindowEventRecord {
+    enum EventType: UInt8 {
+        case mouseDown = 0x01
+        case mouseUp = 0x02
+    }
+
+    private static let bufferSize = 0x100
+    private static let declaredLength: UInt8 = 0xF8
+    private static let declaredLengthOffset = 0x04
+    private static let eventTypeOffset = 0x08
+    private static let windowLocationOffset = 0x20
+    private static let keyWindowFlagOffset = 0x3A
+    private static let keyWindowFlag: UInt8 = 0x10
+    private static let windowIdOffset = 0x3C
+    private static let offContentLocation = CGPoint(x: -1, y: -1)
+
+    static func make(windowId: UInt32) -> [UInt8] {
+        var bytes = [UInt8](repeating: 0, count: bufferSize)
+        bytes[declaredLengthOffset] = declaredLength
+        bytes[keyWindowFlagOffset] = keyWindowFlag
+        setEventType(.mouseDown, in: &bytes)
+        encode(offContentLocation, in: &bytes, at: windowLocationOffset)
+        encode(windowId, in: &bytes, at: windowIdOffset)
+        return bytes
+    }
+
+    static func setEventType(_ eventType: EventType, in bytes: inout [UInt8]) {
+        bytes[eventTypeOffset] = eventType.rawValue
+    }
+
+    private static func encode<Value>(_ value: Value, in bytes: inout [UInt8], at offset: Int) {
+        withUnsafeBytes(of: value) { encodedValue in
+            for index in encodedValue.indices {
+                bytes[offset + index] = encodedValue[index]
+            }
+        }
+    }
+}
+
 func makeKeyWindow(psn: inout ProcessSerialNumber, windowId: UInt32) {
-    var eventBytes = [UInt8](repeating: 0, count: 0xF8)
-    eventBytes[0x04] = 0xF8
-    eventBytes[0x08] = 0x01
-    eventBytes[0x3A] = 0x10
-
-    withUnsafeBytes(of: windowId) { ptr in
-        eventBytes[0x3C] = ptr[0]
-        eventBytes[0x3D] = ptr[1]
-        eventBytes[0x3E] = ptr[2]
-        eventBytes[0x3F] = ptr[3]
-    }
-
-    for i in 0x20 ..< 0x30 {
-        eventBytes[i] = 0xFF
-    }
-
+    var eventBytes = KeyWindowEventRecord.make(windowId: windowId)
     if SLPSPostEventRecordTo(&psn, &eventBytes) != noErr {
         FallbackFiringRecorder.shared.note(.skylight, "postEventRecordFailed")
     }
-    eventBytes[0x08] = 0x02
+    KeyWindowEventRecord.setEventType(.mouseUp, in: &eventBytes)
     if SLPSPostEventRecordTo(&psn, &eventBytes) != noErr {
         FallbackFiringRecorder.shared.note(.skylight, "postEventRecordFailed")
     }
