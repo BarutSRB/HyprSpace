@@ -241,7 +241,7 @@ final class SettingsTOMLCodecTests: XCTestCase {
         XCTAssertEqual(export.workspaceSwipeAxis, "diagonal")
 
         let settings = makeSettingsStore()
-        settings.applyExport(export, monitors: [])
+        settings.applyExport(export)
 
         XCTAssertEqual(settings.workspaceSwipeFingerCount, .three)
         XCTAssertEqual(settings.workspaceSwipeAxis, .vertical)
@@ -257,7 +257,7 @@ final class SettingsTOMLCodecTests: XCTestCase {
         export.workspaceSwipeAxis = WorkspaceSwipeAxis.horizontal.rawValue
 
         let settings = makeSettingsStore()
-        settings.applyExport(export, monitors: [])
+        settings.applyExport(export)
 
         XCTAssertEqual(settings.workspaceSwipeAxis, .horizontal)
         XCTAssertTrue(settings.workspaceSwipeAxisLockedToVertical)

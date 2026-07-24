@@ -74,7 +74,7 @@ final class HiddenBarSettingsTOMLTests: XCTestCase {
 
         for testCase in cases {
             let export = try SettingsTOMLCodec.decode(tomlWithRehideInterval(testCase.literal))
-            settings.applyExport(export, monitors: [])
+            settings.applyExport(export)
 
             XCTAssertEqual(
                 settings.hiddenBarRehideIntervalSeconds,
@@ -96,7 +96,7 @@ final class HiddenBarSettingsTOMLTests: XCTestCase {
             "com.example.second"
         ]
 
-        settings.applyExport(export, monitors: [])
+        settings.applyExport(export)
 
         XCTAssertEqual(
             settings.hiddenBarHiddenBundleIDs,

@@ -9,11 +9,6 @@ enum MouseContainment {
         case wall(clamped: CGPoint)
     }
 
-    private struct GridCell: Hashable {
-        let column: Int
-        let row: Int
-    }
-
     static func evaluate(
         location: CGPoint,
         source: Monitor,
@@ -23,7 +18,7 @@ enum MouseContainment {
         margin: CGFloat
     ) -> Verdict {
         guard source.id != destination.id else { return .allow }
-        guard layoutIsComplete(layout, monitors: monitors) else { return .allow }
+        guard MonitorRouting.completeLayout(layout, for: monitors) != nil else { return .allow }
         guard let direction = physicalDirection(from: source, to: destination) else { return .allow }
 
         switch MonitorRouting.gridAdjacent(
@@ -47,16 +42,6 @@ enum MouseContainment {
         }
 
         return .wall(clamped: clamped(location, inside: source.frame, margin: margin))
-    }
-
-    private static func layoutIsComplete(_ layout: [MonitorRoutingSettings], monitors: [Monitor]) -> Bool {
-        var cells = Set<GridCell>()
-        for monitor in monitors {
-            guard let settings = MonitorSettingsStore.get(for: monitor, in: layout) else { return false }
-            let cell = GridCell(column: settings.gridColumn, row: settings.gridRow)
-            guard cells.insert(cell).inserted else { return false }
-        }
-        return cells.count == monitors.count
     }
 
     private static func physicalDirection(from source: Monitor, to destination: Monitor) -> Direction? {

@@ -130,6 +130,15 @@ final class MonitorRoutingTests: XCTestCase {
         XCTAssertEqual(adjacent(from: a, .right, layout: layout, monitors: monitors), .fallBackToMacOS)
     }
 
+    func testIncompleteLayoutFallsBackWhenSourceHasEntry() {
+        let a = makeMonitor(1, "A")
+        let b = makeMonitor(2, "B")
+        let monitors = [a, b]
+        let layout = [routing(1, "A", 0, 0)]
+
+        XCTAssertEqual(adjacent(from: a, .right, layout: layout, monitors: monitors), .fallBackToMacOS)
+    }
+
     func testDuplicateCellsFallBackToMacOS() {
         let a = makeMonitor(1, "A")
         let b = makeMonitor(2, "B")

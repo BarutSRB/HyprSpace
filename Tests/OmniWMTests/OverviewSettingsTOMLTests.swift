@@ -104,7 +104,7 @@ final class OverviewSettingsTOMLTests: XCTestCase {
         export.overviewSelectedBorderColor = color(0.2, .nan, 2, -1)
 
         let settings = makeSettingsStore()
-        settings.applyExport(export, monitors: [])
+        settings.applyExport(export)
 
         XCTAssertEqual(settings.overviewZoom, defaults.overviewZoom)
         XCTAssertEqual(settings.overviewBackdropColor, color(0, 1, defaults.overviewBackdropColor.blue, 1))
@@ -133,11 +133,11 @@ final class OverviewSettingsTOMLTests: XCTestCase {
         var export = SettingsExport.defaults()
 
         export.overviewZoom = 0.25
-        settings.applyExport(export, monitors: [])
+        settings.applyExport(export)
         XCTAssertEqual(settings.overviewZoom, 0.5)
 
         export.overviewZoom = 2
-        settings.applyExport(export, monitors: [])
+        settings.applyExport(export)
         XCTAssertEqual(settings.overviewZoom, 1.5)
         XCTAssertEqual(settings.toExport().overviewZoom, 1.5)
     }

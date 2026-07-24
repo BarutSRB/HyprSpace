@@ -7,6 +7,7 @@ import Foundation
 struct MonitorGapSettings: MonitorSettingsType {
     let id: UUID
     var monitorName: String
+    var monitorDisplayUUID: String?
     var monitorDisplayId: CGDirectDisplayID?
 
     var innerGap: Double?
@@ -23,6 +24,7 @@ struct MonitorGapSettings: MonitorSettingsType {
     init(
         id: UUID = UUID(),
         monitorName: String,
+        monitorDisplayUUID: String? = nil,
         monitorDisplayId: CGDirectDisplayID? = nil,
         innerGap: Double? = nil,
         outerGapLeft: Double? = nil,
@@ -32,6 +34,7 @@ struct MonitorGapSettings: MonitorSettingsType {
     ) {
         self.id = id
         self.monitorName = monitorName
+        self.monitorDisplayUUID = DisplayUUID.canonical(monitorDisplayUUID)
         self.monitorDisplayId = monitorDisplayId
         self.innerGap = innerGap
         self.outerGapLeft = outerGapLeft
@@ -41,7 +44,7 @@ struct MonitorGapSettings: MonitorSettingsType {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, monitorName, monitorDisplayId
+        case id, monitorName, monitorDisplayUUID, monitorDisplayId
         case innerGap, outerGapLeft, outerGapRight, outerGapTop, outerGapBottom
     }
 
@@ -49,6 +52,7 @@ struct MonitorGapSettings: MonitorSettingsType {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
         monitorName = try container.decode(String.self, forKey: .monitorName)
+        monitorDisplayUUID = try DisplayUUID.decode(from: container, forKey: .monitorDisplayUUID)
         monitorDisplayId = try container.decodeIfPresent(CGDirectDisplayID.self, forKey: .monitorDisplayId)
         innerGap = try container.decodeIfPresent(Double.self, forKey: .innerGap)
         outerGapLeft = try container.decodeIfPresent(Double.self, forKey: .outerGapLeft)
@@ -61,7 +65,13 @@ struct MonitorGapSettings: MonitorSettingsType {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
         try container.encode(monitorName, forKey: .monitorName)
-        try container.encodeIfPresent(monitorDisplayId, forKey: .monitorDisplayId)
+        try DisplayUUID.encode(
+            monitorDisplayUUID,
+            displayId: monitorDisplayId,
+            to: &container,
+            uuidKey: .monitorDisplayUUID,
+            displayIdKey: .monitorDisplayId
+        )
         try container.encodeIfPresent(innerGap, forKey: .innerGap)
         try container.encodeIfPresent(outerGapLeft, forKey: .outerGapLeft)
         try container.encodeIfPresent(outerGapRight, forKey: .outerGapRight)

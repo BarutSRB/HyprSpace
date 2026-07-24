@@ -17,14 +17,14 @@ enum MonitorRouting {
         monitors: [Monitor],
         wrapAround: Bool
     ) -> Adjacency {
-        let placed = monitors.compactMap { monitor -> PlacedMonitor? in
-            guard let settings = MonitorSettingsStore.get(for: monitor, in: layout) else { return nil }
-            return PlacedMonitor(monitor: monitor, column: settings.gridColumn, row: settings.gridRow)
-        }
-        guard let origin = placed.first(where: { $0.monitor.id == source.id }) else {
+        guard let completeLayout = completeLayout(layout, for: monitors) else {
             return .fallBackToMacOS
         }
-        if Set(placed.map(\.cell)).count != placed.count {
+
+        let placed = zip(monitors, completeLayout).map { monitor, settings in
+            PlacedMonitor(monitor: monitor, column: settings.gridColumn, row: settings.gridRow)
+        }
+        guard let origin = placed.first(where: { $0.monitor.id == source.id }) else {
             return .fallBackToMacOS
         }
 
@@ -46,12 +46,34 @@ enum MonitorRouting {
         return .monitor(wrapped.monitor)
     }
 
+    static func completeLayout(
+        _ layout: [MonitorRoutingSettings],
+        for monitors: [Monitor]
+    ) -> [MonitorRoutingSettings]? {
+        var completeLayout: [MonitorRoutingSettings] = []
+        completeLayout.reserveCapacity(monitors.count)
+        var occupiedCells = Set<GridCell>()
+        occupiedCells.reserveCapacity(monitors.count)
+
+        for monitor in monitors {
+            guard let settings = MonitorSettingsStore.get(for: monitor, in: layout) else {
+                return nil
+            }
+            let cell = GridCell(column: settings.gridColumn, row: settings.gridRow)
+            guard occupiedCells.insert(cell).inserted else { return nil }
+            completeLayout.append(settings)
+        }
+
+        return completeLayout
+    }
+
     static func seedLayout(from monitors: [Monitor]) -> [MonitorRoutingSettings] {
         let columns = sortedDistinct(monitors.map(\.frame.center.x), ascending: true)
         let rows = sortedDistinct(monitors.map(\.frame.center.y), ascending: false)
         return monitors.map { monitor in
             MonitorRoutingSettings(
                 monitorName: monitor.name,
+                monitorDisplayUUID: monitor.displayUUID,
                 monitorDisplayId: monitor.displayId,
                 gridColumn: columns.firstIndex(of: monitor.frame.center.x) ?? 0,
                 gridRow: rows.firstIndex(of: monitor.frame.center.y) ?? 0
@@ -69,10 +91,6 @@ private struct PlacedMonitor {
     let monitor: Monitor
     let column: Int
     let row: Int
-
-    var cell: GridCell {
-        GridCell(column: column, row: row)
-    }
 
     func sharesLine(with origin: PlacedMonitor, direction: Direction) -> Bool {
         switch direction {

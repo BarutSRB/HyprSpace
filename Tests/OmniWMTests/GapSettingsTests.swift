@@ -56,16 +56,19 @@ final class GapSettingsTests: XCTestCase {
         XCTAssertEqual(decoded, original)
     }
 
-    func testMonitorSettingsStoreMatchesByDisplayIdThenName() {
+    func testMonitorSettingsStoreMatchesUUIDLessRowsByDisplayIdAndName() {
         let byId = MonitorGapSettings(monitorName: "Whatever", monitorDisplayId: 42, outerGapTop: 5)
         let byName = MonitorGapSettings(monitorName: "External", monitorDisplayId: nil, outerGapTop: 9)
         let overrides = [byId, byName]
 
-        let idMonitor = makeMonitor(displayId: 42, name: "Renamed")
+        let idMonitor = makeMonitor(displayId: 42, name: "Whatever")
         XCTAssertEqual(MonitorSettingsStore.get(for: idMonitor, in: overrides)?.outerGapTop, 5)
 
+        let reusedIdMonitor = makeMonitor(displayId: 42, name: "Renamed")
+        XCTAssertNil(MonitorSettingsStore.get(for: reusedIdMonitor, in: overrides))
+
         let nameMonitor = makeMonitor(displayId: 99, name: "External")
-        XCTAssertEqual(MonitorSettingsStore.get(for: nameMonitor, in: overrides)?.outerGapTop, 9)
+        XCTAssertNil(MonitorSettingsStore.get(for: nameMonitor, in: overrides))
 
         let unknownMonitor = makeMonitor(displayId: 100, name: "Unknown")
         XCTAssertNil(MonitorSettingsStore.get(for: unknownMonitor, in: overrides))
@@ -88,7 +91,8 @@ final class GapSettingsTests: XCTestCase {
         XCTAssertEqual(globalOnly.outerGapLeft, 12)
 
         settings.updateGapSettings(
-            MonitorGapSettings(monitorName: "Built-in", monitorDisplayId: 1, innerGap: 6, outerGapTop: 20)
+            MonitorGapSettings(monitorName: "Built-in", monitorDisplayId: 1, innerGap: 6, outerGapTop: 20),
+            for: monitor
         )
 
         let resolved = settings.resolvedGapSettings(for: monitor)
@@ -107,12 +111,14 @@ final class GapSettingsTests: XCTestCase {
         XCTAssertEqual(settings.resolvedGapSettings(for: monitor).innerGap, 64)
 
         settings.updateGapSettings(
-            MonitorGapSettings(monitorName: monitor.name, monitorDisplayId: monitor.displayId, innerGap: -10)
+            MonitorGapSettings(monitorName: monitor.name, monitorDisplayId: monitor.displayId, innerGap: -10),
+            for: monitor
         )
         XCTAssertEqual(settings.resolvedGapSettings(for: monitor).innerGap, 0)
 
         settings.updateGapSettings(
-            MonitorGapSettings(monitorName: monitor.name, monitorDisplayId: monitor.displayId, innerGap: 0)
+            MonitorGapSettings(monitorName: monitor.name, monitorDisplayId: monitor.displayId, innerGap: 0),
+            for: monitor
         )
         XCTAssertEqual(settings.gapSettings(for: monitor)?.innerGap, 0)
     }
@@ -128,14 +134,14 @@ final class GapSettingsTests: XCTestCase {
             outerGapTop: 20
         )
 
-        settings.updateGapSettings(override)
+        settings.updateGapSettings(override, for: monitor)
         override.innerGap = nil
-        settings.updateGapSettings(override)
+        settings.updateGapSettings(override, for: monitor)
         XCTAssertNil(settings.gapSettings(for: monitor)?.innerGap)
         XCTAssertEqual(settings.gapSettings(for: monitor)?.outerGapTop, 20)
 
         override.outerGapTop = nil
-        settings.updateGapSettings(override)
+        settings.updateGapSettings(override, for: monitor)
         XCTAssertNil(settings.gapSettings(for: monitor))
         XCTAssertTrue(settings.toExport().monitorGapSettings.isEmpty)
     }
@@ -149,7 +155,7 @@ final class GapSettingsTests: XCTestCase {
             MonitorGapSettings(monitorName: monitor.name, monitorDisplayId: monitor.displayId)
         ]
 
-        settings.applyExport(export, monitors: [monitor])
+        settings.applyExport(export)
 
         XCTAssertNil(settings.gapSettings(for: monitor))
         XCTAssertTrue(settings.toExport().monitorGapSettings.isEmpty)
@@ -162,7 +168,8 @@ final class GapSettingsTests: XCTestCase {
         settings.gapSize = 16
         settings.dwindleUseGlobalGaps = true
         settings.updateGapSettings(
-            MonitorGapSettings(monitorName: monitor.name, monitorDisplayId: monitor.displayId, innerGap: 24)
+            MonitorGapSettings(monitorName: monitor.name, monitorDisplayId: monitor.displayId, innerGap: 24),
+            for: monitor
         )
 
         let generalResolved = settings.resolvedDwindleSettings(for: monitor)
@@ -182,7 +189,8 @@ final class GapSettingsTests: XCTestCase {
                 monitorDisplayId: monitor.displayId,
                 useGlobalGaps: false,
                 innerGap: 6
-            )
+            ),
+            for: monitor
         )
         XCTAssertEqual(settings.resolvedDwindleSettings(for: monitor).innerGap, 6)
     }
@@ -192,7 +200,8 @@ final class GapSettingsTests: XCTestCase {
         let settings = makeSettingsStore()
         let monitor = makeMonitor(displayId: 1, name: "Built-in")
         settings.updateGapSettings(
-            MonitorGapSettings(monitorName: monitor.name, monitorDisplayId: monitor.displayId, innerGap: 6)
+            MonitorGapSettings(monitorName: monitor.name, monitorDisplayId: monitor.displayId, innerGap: 6),
+            for: monitor
         )
         let controller = WMController(settings: settings)
         controller.workspaceManager.applyMonitorConfigurationChange([monitor])
@@ -240,10 +249,12 @@ final class GapSettingsTests: XCTestCase {
             )
         ]
         settings.updateGapSettings(
-            MonitorGapSettings(monitorName: left.name, monitorDisplayId: left.displayId, innerGap: 4)
+            MonitorGapSettings(monitorName: left.name, monitorDisplayId: left.displayId, innerGap: 4),
+            for: left
         )
         settings.updateGapSettings(
-            MonitorGapSettings(monitorName: right.name, monitorDisplayId: right.displayId, innerGap: 24)
+            MonitorGapSettings(monitorName: right.name, monitorDisplayId: right.displayId, innerGap: 24),
+            for: right
         )
         let controller = WMController(settings: settings)
         controller.workspaceManager.applyMonitorConfigurationChange([left, right])

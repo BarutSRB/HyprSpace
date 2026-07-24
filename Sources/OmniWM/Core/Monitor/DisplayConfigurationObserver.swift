@@ -9,14 +9,14 @@ import Foundation
 final class DisplayConfigurationObserver: NSObject {
     enum DisplayEvent: Sendable {
         case connected(Monitor)
-        case disconnected(Monitor.ID, OutputId)
+        case disconnected(Monitor.ID)
         case reconfigured(Monitor)
     }
 
     typealias EventHandler = @MainActor (DisplayEvent) -> Void
 
     private var onEvent: EventHandler?
-    private var previousMonitors: [Monitor.ID: (monitor: Monitor, outputId: OutputId)] = [:]
+    private var previousMonitors: [Monitor.ID: Monitor] = [:]
     private var debounceTask: Task<Void, Never>?
 
     private let debounceInterval: UInt64 = 100_000_000
@@ -24,7 +24,7 @@ final class DisplayConfigurationObserver: NSObject {
     override nonisolated init() {
         super.init()
         MainActor.assumeIsolated {
-            self.updatePreviousMonitors()
+            self.updatePreviousMonitors(Monitor.current())
         }
 
         NotificationCenter.default.addObserver(
@@ -67,9 +67,7 @@ final class DisplayConfigurationObserver: NSObject {
 
         let disconnectedIds = previousIds.subtracting(currentIds)
         for monitorId in disconnectedIds {
-            if let prev = previousMonitors[monitorId] {
-                onEvent?(.disconnected(monitorId, prev.outputId))
-            }
+            onEvent?(.disconnected(monitorId))
         }
 
         let connectedIds = currentIds.subtracting(previousIds)
@@ -82,21 +80,21 @@ final class DisplayConfigurationObserver: NSObject {
         let existingIds = currentIds.intersection(previousIds)
         for monitorId in existingIds {
             guard let current = currentById[monitorId],
-                  let previous = previousMonitors[monitorId]?.monitor else { continue }
+                  let previous = previousMonitors[monitorId] else { continue }
 
-            if current.frame != previous.frame || current.visibleFrame != previous.visibleFrame {
+            if Self.requiresReconfiguration(previous: previous, current: current) {
                 onEvent?(.reconfigured(current))
             }
         }
 
-        updatePreviousMonitors()
+        updatePreviousMonitors(currentMonitors)
     }
 
-    private func updatePreviousMonitors() {
-        previousMonitors = Dictionary(uniqueKeysWithValues:
-            Monitor.current().map {
-                ($0.id, (monitor: $0, outputId: OutputId(from: $0)))
-            }
-        )
+    static func requiresReconfiguration(previous: Monitor, current: Monitor) -> Bool {
+        previous != current
+    }
+
+    private func updatePreviousMonitors(_ monitors: [Monitor]) {
+        previousMonitors = Dictionary(uniqueKeysWithValues: monitors.map { ($0.id, $0) })
     }
 }

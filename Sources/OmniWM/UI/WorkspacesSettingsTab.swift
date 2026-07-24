@@ -335,11 +335,21 @@ struct WorkspaceEditSheet: View {
                     Text("Main").tag(MonitorAssignment.main)
                     Text("Secondary").tag(MonitorAssignment.secondary)
                     Divider()
+                    if case let .specificDisplay(output) = configuration.monitorAssignment,
+                       output.resolveMonitor(in: connectedMonitors) == nil
+                    {
+                        Text("Unavailable: \(output.name)")
+                            .tag(configuration.monitorAssignment)
+                        Divider()
+                    }
                     ForEach(connectedMonitors, id: \.id) { monitor in
                         HStack {
                             Text(monitor.name)
                             if monitor.isMain {
                                 Text("(Main)").foregroundColor(.secondary)
+                            }
+                            if monitor.displayUUID == nil {
+                                Text("(Session only)").foregroundColor(.secondary)
                             }
                         }
                         .tag(MonitorAssignment.specificDisplay(OutputId(from: monitor)))

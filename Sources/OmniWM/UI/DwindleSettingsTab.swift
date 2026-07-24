@@ -114,17 +114,14 @@ private struct MonitorDwindleSettingsSection: View {
 
     private var monitorSettings: MonitorDwindleSettings {
         settings.dwindleSettings(for: monitor) ?? MonitorDwindleSettings(
-            monitorName: monitor.name,
-            monitorDisplayId: monitor.displayId
+            monitorName: monitor.name
         )
     }
 
     private func updateSetting(_ update: (inout MonitorDwindleSettings) -> Void) {
         var ms = monitorSettings
-        ms.monitorName = monitor.name
-        ms.monitorDisplayId = monitor.displayId
         update(&ms)
-        settings.updateDwindleSettings(ms)
+        settings.updateDwindleSettings(ms, for: monitor)
         controller.updateMonitorDwindleSettings()
     }
 

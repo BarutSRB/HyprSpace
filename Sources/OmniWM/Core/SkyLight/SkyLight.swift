@@ -242,14 +242,14 @@ final class SkyLight {
     private static let allSpacesMask: Int32 = 0x7
     private static let fullscreenSpaceType = 4
 
-    private static let displayCreateUUIDFromDisplayID: DisplayCreateUUIDFromDisplayIDFunc? = {
+    private nonisolated static let displayCreateUUIDFromDisplayID: DisplayCreateUUIDFromDisplayIDFunc? = {
         let handle = dlopen("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices", RTLD_LAZY)
             ?? dlopen("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics", RTLD_LAZY)
         guard let handle, let symbol = dlsym(handle, "CGDisplayCreateUUIDFromDisplayID") else { return nil }
         return unsafeBitCast(symbol, to: DisplayCreateUUIDFromDisplayIDFunc.self)
     }()
 
-    static var displayUUIDResolved: Bool {
+    nonisolated static var displayUUIDResolved: Bool {
         displayCreateUUIDFromDisplayID != nil
     }
 
@@ -525,7 +525,7 @@ final class SkyLight {
         var displayIdByIdentifier: [String: CGDirectDisplayID] = [:]
         for monitor in monitors {
             displayIdByIdentifier[String(monitor.displayId)] = monitor.displayId
-            if let identifier = Self.managedDisplayIdentifier(for: monitor.displayId) {
+            if let identifier = monitor.displayUUID {
                 displayIdByIdentifier[identifier] = monitor.displayId
             }
         }
@@ -604,7 +604,7 @@ final class SkyLight {
         }
     }
 
-    private static func managedDisplayIdentifier(for displayId: CGDirectDisplayID) -> String? {
+    nonisolated static func displayUUID(for displayId: CGDirectDisplayID) -> String? {
         guard let uuid = displayCreateUUIDFromDisplayID?(displayId)?.takeRetainedValue(),
               let string = CFUUIDCreateString(nil, uuid)
         else { return nil }

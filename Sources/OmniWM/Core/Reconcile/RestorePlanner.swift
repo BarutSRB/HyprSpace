@@ -378,14 +378,24 @@ struct RestorePlanner {
             return monitors.first
         }
 
-        if let exactFingerprintMonitor = monitors.first(where: {
-            DisplayFingerprint(monitor: $0) == preferredMonitor
+        if let displayUUID = preferredMonitor.displayUUID {
+            var match: Monitor?
+            for monitor in monitors where monitor.displayUUID == displayUUID {
+                guard match == nil else {
+                    match = nil
+                    break
+                }
+                match = monitor
+            }
+            if let match {
+                return match
+            }
+        } else if let exactRuntimeMonitor = monitors.first(where: {
+            $0.displayUUID == nil &&
+                $0.displayId == preferredMonitor.displayId &&
+                Monitor.namesMatch($0.name, preferredMonitor.name)
         }) {
-            return exactFingerprintMonitor
-        }
-
-        if let exactMonitor = monitors.first(where: { $0.displayId == preferredMonitor.displayId }) {
-            return exactMonitor
+            return exactRuntimeMonitor
         }
 
         let bestFallback = monitors.min { lhs, rhs in

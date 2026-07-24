@@ -594,10 +594,7 @@ final class SettingsStore {
         isApplyingRuntimeState = false
         syncQuakeTerminalCustomFrameToRuntimeState()
 
-        applyExport(
-            persistence.load(),
-            monitors: Monitor.current()
-        )
+        applyExport(persistence.load())
         persistence.setExternalChangeHandler { [weak self] export in
             self?.handleExternalReload(export)
         }
@@ -695,7 +692,7 @@ final class SettingsStore {
             dwindleUseGlobalGaps: dwindleUseGlobalGaps,
             dwindleMoveToRootStable: dwindleMoveToRootStable,
             monitorDwindleSettings: monitorDwindleSettings,
-            monitorGapSettings: monitorGapSettings,
+            monitorGapSettings: monitorGapSettings.filter(\.hasOverrides),
             preventSleepEnabled: preventSleepEnabled,
             updateChecksEnabled: updateChecksEnabled,
             ipcEnabled: ipcEnabled,
@@ -732,7 +729,7 @@ final class SettingsStore {
         )
     }
 
-    func applyExport(_ export: SettingsExport, monitors: [Monitor]) {
+    func applyExport(_ export: SettingsExport) {
         let baseline = SettingsStore.defaultExport
         isApplyingExport = true
         defer { isApplyingExport = false }
@@ -748,7 +745,7 @@ final class SettingsStore {
         mouseWarpEnabled = export.mouseWarpEnabled
         cursorContainmentEnabled = export.cursorContainmentEnabled
         monitorRoutingMode = MonitorRoutingMode(rawValue: export.monitorRoutingMode) ?? .macOS
-        monitorRoutingSettings = SettingsStore.reboundMonitorSettings(export.monitorRoutingSettings, monitors: monitors)
+        monitorRoutingSettings = export.monitorRoutingSettings
         gapSize = export.gapSize
         outerGapLeft = export.outerGapLeft
         outerGapRight = export.outerGapRight
@@ -765,10 +762,7 @@ final class SettingsStore {
         )
         niriDefaultColumnWidth = SettingsStore.validatedDefaultColumnWidth(export.niriDefaultColumnWidth)
 
-        workspaceConfigurations = SettingsStore.normalizedWorkspaceConfigurations(
-            export.workspaceConfigurations,
-            monitors: monitors
-        )
+        workspaceConfigurations = SettingsStore.normalizedWorkspaceConfigurations(export.workspaceConfigurations)
         defaultLayoutType = LayoutType(rawValue: export.defaultLayoutType) ?? .niri
 
         bordersEnabled = export.bordersEnabled
@@ -823,14 +817,11 @@ final class SettingsStore {
         workspaceBarYOffset = export.workspaceBarYOffset
         workspaceBarAccentColor = export.workspaceBarAccentColor
         workspaceBarTextColor = export.workspaceBarTextColor
-        monitorBarSettings = SettingsStore.reboundMonitorSettings(export.monitorBarSettings, monitors: monitors)
+        monitorBarSettings = export.monitorBarSettings
 
         appRules = export.appRules
-        monitorOrientationSettings = SettingsStore.reboundMonitorSettings(
-            export.monitorOrientationSettings,
-            monitors: monitors
-        )
-        monitorNiriSettings = SettingsStore.reboundMonitorSettings(export.monitorNiriSettings, monitors: monitors)
+        monitorOrientationSettings = export.monitorOrientationSettings
+        monitorNiriSettings = export.monitorNiriSettings
 
         dwindleSmartSplit = export.dwindleSmartSplit
         dwindleDefaultSplitRatio = export.dwindleDefaultSplitRatio
@@ -838,14 +829,8 @@ final class SettingsStore {
         dwindleSingleWindowFit = SingleWindowFit(serialized: export.dwindleSingleWindowAspectRatio)
         dwindleUseGlobalGaps = export.dwindleUseGlobalGaps
         dwindleMoveToRootStable = export.dwindleMoveToRootStable
-        monitorDwindleSettings = SettingsStore.reboundMonitorSettings(
-            export.monitorDwindleSettings,
-            monitors: monitors
-        )
-        monitorGapSettings = SettingsStore.reboundMonitorSettings(
-            export.monitorGapSettings.filter(\.hasOverrides),
-            monitors: monitors
-        )
+        monitorDwindleSettings = export.monitorDwindleSettings
+        monitorGapSettings = export.monitorGapSettings.filter(\.hasOverrides)
 
         preventSleepEnabled = export.preventSleepEnabled
         updateChecksEnabled = export.updateChecksEnabled
@@ -902,7 +887,7 @@ final class SettingsStore {
     }
 
     private func handleExternalReload(_ export: SettingsExport) {
-        applyExport(export, monitors: Monitor.current())
+        applyExport(export)
         onExternalSettingsReloaded?()
     }
 
@@ -991,24 +976,9 @@ final class SettingsStore {
         workspaceConfigurations.first(where: { $0.name == workspaceName })?.effectiveDisplayName ?? workspaceName
     }
 
-    static func normalizedWorkspaceConfigurations(
-        _ configs: [WorkspaceConfiguration],
-        monitors: [Monitor] = []
-    ) -> [WorkspaceConfiguration] {
+    static func normalizedWorkspaceConfigurations(_ configs: [WorkspaceConfiguration]) -> [WorkspaceConfiguration] {
         var seen: Set<String> = []
-        let rebound = configs.map { config in
-            guard case let .specificDisplay(output) = config.monitorAssignment,
-                  let resolvedMonitor = output.resolveMonitor(in: monitors)
-            else {
-                return config
-            }
-
-            var updated = config
-            updated.monitorAssignment = .specificDisplay(OutputId(from: resolvedMonitor))
-            return updated
-        }
-
-        let normalized = rebound
+        let normalized = configs
             .filter { WorkspaceIDPolicy.normalizeRawID($0.name) != nil }
             .filter { seen.insert($0.name).inserted }
             .sorted { WorkspaceIDPolicy.sortsBefore($0.name, $1.name) }
@@ -1020,63 +990,20 @@ final class SettingsStore {
         return normalized
     }
 
-    private static func reboundMonitorSettings<T: MonitorSettingsType>(
-        _ settings: [T],
-        monitors: [Monitor]
-    ) -> [T] {
-        settings.map { setting in
-            var rebound = setting
-            rebound.monitorDisplayId = reboundMonitorDisplayId(
-                rebound.monitorDisplayId,
-                monitorName: rebound.monitorName,
-                monitors: monitors
-            )
-            return rebound
-        }
-    }
-
-    private static func reboundMonitorDisplayId(
-        _ displayId: CGDirectDisplayID?,
-        monitorName: String,
-        monitors: [Monitor]
-    ) -> CGDirectDisplayID? {
-        if let displayId,
-           monitors.contains(where: { $0.displayId == displayId })
-        {
-            return displayId
-        }
-
-        let matches = monitors.filter { $0.name.caseInsensitiveCompare(monitorName) == .orderedSame }
-        guard matches.count == 1 else { return nil }
-        return matches[0].displayId
-    }
-
     func barSettings(for monitor: Monitor) -> MonitorBarSettings? {
         MonitorSettingsStore.get(for: monitor, in: monitorBarSettings)
     }
 
-    func barSettings(for monitorName: String) -> MonitorBarSettings? {
-        MonitorSettingsStore.get(for: monitorName, in: monitorBarSettings)
-    }
-
-    func updateBarSettings(_ settings: MonitorBarSettings) {
-        MonitorSettingsStore.update(settings, in: &monitorBarSettings)
+    func updateBarSettings(_ settings: MonitorBarSettings, for monitor: Monitor) {
+        MonitorSettingsStore.update(settings, for: monitor, in: &monitorBarSettings)
     }
 
     func removeBarSettings(for monitor: Monitor) {
         MonitorSettingsStore.remove(for: monitor, from: &monitorBarSettings)
     }
 
-    func removeBarSettings(for monitorName: String) {
-        MonitorSettingsStore.remove(for: monitorName, from: &monitorBarSettings)
-    }
-
     func resolvedBarSettings(for monitor: Monitor) -> ResolvedBarSettings {
         resolvedBarSettings(override: barSettings(for: monitor))
-    }
-
-    func resolvedBarSettings(for monitorName: String) -> ResolvedBarSettings {
-        resolvedBarSettings(override: barSettings(for: monitorName))
     }
 
     private func resolvedBarSettings(override: MonitorBarSettings?) -> ResolvedBarSettings {
@@ -1137,10 +1064,6 @@ final class SettingsStore {
         MonitorSettingsStore.get(for: monitor, in: monitorOrientationSettings)
     }
 
-    func orientationSettings(for monitorName: String) -> MonitorOrientationSettings? {
-        MonitorSettingsStore.get(for: monitorName, in: monitorOrientationSettings)
-    }
-
     func effectiveOrientation(for monitor: Monitor) -> Monitor.Orientation {
         if let override = orientationSettings(for: monitor),
            let orientation = override.orientation
@@ -1150,24 +1073,20 @@ final class SettingsStore {
         return monitor.autoOrientation
     }
 
-    func updateOrientationSettings(_ settings: MonitorOrientationSettings) {
-        MonitorSettingsStore.update(settings, in: &monitorOrientationSettings)
+    func updateOrientationSettings(_ settings: MonitorOrientationSettings, for monitor: Monitor) {
+        MonitorSettingsStore.update(settings, for: monitor, in: &monitorOrientationSettings)
     }
 
     func removeOrientationSettings(for monitor: Monitor) {
         MonitorSettingsStore.remove(for: monitor, from: &monitorOrientationSettings)
     }
 
-    func removeOrientationSettings(for monitorName: String) {
-        MonitorSettingsStore.remove(for: monitorName, from: &monitorOrientationSettings)
-    }
-
     func routingSettings(for monitor: Monitor) -> MonitorRoutingSettings? {
         MonitorSettingsStore.get(for: monitor, in: monitorRoutingSettings)
     }
 
-    func updateRoutingSettings(_ settings: MonitorRoutingSettings) {
-        MonitorSettingsStore.update(settings, in: &monitorRoutingSettings)
+    func updateRoutingSettings(_ settings: MonitorRoutingSettings, for monitor: Monitor) {
+        MonitorSettingsStore.update(settings, for: monitor, in: &monitorRoutingSettings)
     }
 
     func removeRoutingSettings(for monitor: Monitor) {
@@ -1178,28 +1097,16 @@ final class SettingsStore {
         MonitorSettingsStore.get(for: monitor, in: monitorNiriSettings)
     }
 
-    func niriSettings(for monitorName: String) -> MonitorNiriSettings? {
-        MonitorSettingsStore.get(for: monitorName, in: monitorNiriSettings)
-    }
-
-    func updateNiriSettings(_ settings: MonitorNiriSettings) {
-        MonitorSettingsStore.update(settings, in: &monitorNiriSettings)
+    func updateNiriSettings(_ settings: MonitorNiriSettings, for monitor: Monitor) {
+        MonitorSettingsStore.update(settings, for: monitor, in: &monitorNiriSettings)
     }
 
     func removeNiriSettings(for monitor: Monitor) {
         MonitorSettingsStore.remove(for: monitor, from: &monitorNiriSettings)
     }
 
-    func removeNiriSettings(for monitorName: String) {
-        MonitorSettingsStore.remove(for: monitorName, from: &monitorNiriSettings)
-    }
-
     func resolvedNiriSettings(for monitor: Monitor) -> ResolvedNiriSettings {
         resolvedNiriSettings(override: niriSettings(for: monitor))
-    }
-
-    func resolvedNiriSettings(for monitorName: String) -> ResolvedNiriSettings {
-        resolvedNiriSettings(override: niriSettings(for: monitorName))
     }
 
     private func resolvedNiriSettings(override: MonitorNiriSettings?) -> ResolvedNiriSettings {
@@ -1216,33 +1123,18 @@ final class SettingsStore {
         MonitorSettingsStore.get(for: monitor, in: monitorDwindleSettings)
     }
 
-    func dwindleSettings(for monitorName: String) -> MonitorDwindleSettings? {
-        MonitorSettingsStore.get(for: monitorName, in: monitorDwindleSettings)
-    }
-
-    func updateDwindleSettings(_ settings: MonitorDwindleSettings) {
-        MonitorSettingsStore.update(settings, in: &monitorDwindleSettings)
+    func updateDwindleSettings(_ settings: MonitorDwindleSettings, for monitor: Monitor) {
+        MonitorSettingsStore.update(settings, for: monitor, in: &monitorDwindleSettings)
     }
 
     func removeDwindleSettings(for monitor: Monitor) {
         MonitorSettingsStore.remove(for: monitor, from: &monitorDwindleSettings)
     }
 
-    func removeDwindleSettings(for monitorName: String) {
-        MonitorSettingsStore.remove(for: monitorName, from: &monitorDwindleSettings)
-    }
-
     func resolvedDwindleSettings(for monitor: Monitor) -> ResolvedDwindleSettings {
         resolvedDwindleSettings(
             override: dwindleSettings(for: monitor),
             sharedInnerGap: resolvedGapSettings(for: monitor).innerGap
-        )
-    }
-
-    func resolvedDwindleSettings(for monitorName: String) -> ResolvedDwindleSettings {
-        resolvedDwindleSettings(
-            override: dwindleSettings(for: monitorName),
-            sharedInnerGap: resolvedInnerGap(gapSettings(for: monitorName)?.innerGap)
         )
     }
 
@@ -1265,24 +1157,16 @@ final class SettingsStore {
         MonitorSettingsStore.get(for: monitor, in: monitorGapSettings)
     }
 
-    func gapSettings(for monitorName: String) -> MonitorGapSettings? {
-        MonitorSettingsStore.get(for: monitorName, in: monitorGapSettings)
-    }
-
-    func updateGapSettings(_ settings: MonitorGapSettings) {
+    func updateGapSettings(_ settings: MonitorGapSettings, for monitor: Monitor) {
         if settings.hasOverrides {
-            MonitorSettingsStore.update(settings, in: &monitorGapSettings)
+            MonitorSettingsStore.update(settings, for: monitor, in: &monitorGapSettings)
         } else {
-            MonitorSettingsStore.remove(matching: settings, from: &monitorGapSettings)
+            MonitorSettingsStore.remove(for: monitor, from: &monitorGapSettings)
         }
     }
 
     func removeGapSettings(for monitor: Monitor) {
         MonitorSettingsStore.remove(for: monitor, from: &monitorGapSettings)
-    }
-
-    func removeGapSettings(for monitorName: String) {
-        MonitorSettingsStore.remove(for: monitorName, from: &monitorGapSettings)
     }
 
     func resolvedGapSettings(for monitor: Monitor) -> ResolvedGapSettings {

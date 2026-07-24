@@ -5,16 +5,39 @@ import CoreGraphics
 import Foundation
 
 struct MonitorRestoreKey: Hashable {
+    let displayUUID: String?
     let displayId: CGDirectDisplayID
     let name: String
     let anchorPoint: CGPoint
     let frameSize: CGSize
 
     init(monitor: Monitor) {
+        displayUUID = monitor.displayUUID
         displayId = monitor.displayId
         name = monitor.name
         anchorPoint = monitor.workspaceAnchorPoint
         frameSize = monitor.frame.size
+    }
+
+    static func == (lhs: MonitorRestoreKey, rhs: MonitorRestoreKey) -> Bool {
+        if lhs.displayUUID != nil || rhs.displayUUID != nil {
+            return lhs.displayUUID == rhs.displayUUID
+        }
+        return lhs.displayId == rhs.displayId &&
+            lhs.name == rhs.name &&
+            lhs.anchorPoint == rhs.anchorPoint &&
+            lhs.frameSize == rhs.frameSize
+    }
+
+    func hash(into hasher: inout Hasher) {
+        if let displayUUID {
+            hasher.combine(displayUUID)
+        } else {
+            hasher.combine(displayId)
+            hasher.combine(name)
+            hasher.combine(anchorPoint)
+            hasher.combine(frameSize)
+        }
     }
 }
 
@@ -59,8 +82,21 @@ func resolveWorkspaceRestoreAssignments(
     var usedMonitorIds: Set<Monitor.ID> = []
     var assignedWorkspaceIds: Set<WorkspaceDescriptor.ID> = []
 
+    let snapshotUUIDCounts = filteredSnapshots.reduce(into: [String: Int]()) { counts, snapshot in
+        guard let displayUUID = snapshot.monitor.displayUUID else { return }
+        counts[displayUUID, default: 0] += 1
+    }
+    let monitorUUIDCounts = sortedMonitors.reduce(into: [String: Int]()) { counts, monitor in
+        guard let displayUUID = monitor.displayUUID else { return }
+        counts[displayUUID, default: 0] += 1
+    }
+
     for snapshot in filteredSnapshots {
-        guard let exactMonitor = sortedMonitors.first(where: { $0.displayId == snapshot.monitor.displayId }) else {
+        guard let displayUUID = snapshot.monitor.displayUUID,
+              snapshotUUIDCounts[displayUUID] == 1,
+              monitorUUIDCounts[displayUUID] == 1,
+              let exactMonitor = sortedMonitors.first(where: { $0.displayUUID == displayUUID })
+        else {
             continue
         }
         guard usedMonitorIds.insert(exactMonitor.id).inserted else { continue }
@@ -68,8 +104,28 @@ func resolveWorkspaceRestoreAssignments(
         assignedWorkspaceIds.insert(snapshot.workspaceId)
     }
 
-    let remainingSnapshots = filteredSnapshots.filter { !assignedWorkspaceIds.contains($0.workspaceId) }
-    let remainingMonitors = sortedMonitors.filter { !usedMonitorIds.contains($0.id) }
+    for snapshot in filteredSnapshots {
+        guard snapshot.monitor.displayUUID == nil,
+              !assignedWorkspaceIds.contains(snapshot.workspaceId),
+              let exactMonitor = sortedMonitors.first(where: {
+                  !usedMonitorIds.contains($0.id) &&
+                      $0.displayId == snapshot.monitor.displayId &&
+                      Monitor.namesMatch($0.name, snapshot.monitor.name)
+              })
+        else {
+            continue
+        }
+        guard usedMonitorIds.insert(exactMonitor.id).inserted else { continue }
+        assignments[exactMonitor.id] = snapshot.workspaceId
+        assignedWorkspaceIds.insert(snapshot.workspaceId)
+    }
+
+    let remainingSnapshots = filteredSnapshots.filter {
+        !assignedWorkspaceIds.contains($0.workspaceId)
+    }
+    let remainingMonitors = sortedMonitors.filter {
+        !usedMonitorIds.contains($0.id)
+    }
     let remainingAssignments = resolveBestRestoreMatches(
         snapshots: remainingSnapshots,
         monitors: remainingMonitors

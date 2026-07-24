@@ -302,17 +302,14 @@ private struct MonitorBarSettingsSection: View {
 
     private var monitorSettings: MonitorBarSettings {
         settings.barSettings(for: monitor) ?? MonitorBarSettings(
-            monitorName: monitor.name,
-            monitorDisplayId: monitor.displayId
+            monitorName: monitor.name
         )
     }
 
     private func updateSetting(_ update: (inout MonitorBarSettings) -> Void) {
         var ms = monitorSettings
-        ms.monitorName = monitor.name
-        ms.monitorDisplayId = monitor.displayId
         update(&ms)
-        settings.updateBarSettings(ms)
+        settings.updateBarSettings(ms, for: monitor)
         controller.updateWorkspaceBarSettings()
     }
 

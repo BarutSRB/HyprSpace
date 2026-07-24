@@ -253,13 +253,10 @@ struct GeneralSettingsTab: View {
 
     private func updateGapSetting(for monitor: Monitor, _ update: (inout MonitorGapSettings) -> Void) {
         var ms = settings.gapSettings(for: monitor) ?? MonitorGapSettings(
-            monitorName: monitor.name,
-            monitorDisplayId: monitor.displayId
+            monitorName: monitor.name
         )
-        ms.monitorName = monitor.name
-        ms.monitorDisplayId = monitor.displayId
         update(&ms)
-        settings.updateGapSettings(ms)
+        settings.updateGapSettings(ms, for: monitor)
         controller.updateMonitorGapSettings()
     }
 }
@@ -473,17 +470,14 @@ private struct MonitorNiriSettingsSection: View {
 
     private var monitorSettings: MonitorNiriSettings {
         settings.niriSettings(for: monitor) ?? MonitorNiriSettings(
-            monitorName: monitor.name,
-            monitorDisplayId: monitor.displayId
+            monitorName: monitor.name
         )
     }
 
     private func updateSetting(_ update: (inout MonitorNiriSettings) -> Void) {
         var ms = monitorSettings
-        ms.monitorName = monitor.name
-        ms.monitorDisplayId = monitor.displayId
         update(&ms)
-        settings.updateNiriSettings(ms)
+        settings.updateNiriSettings(ms, for: monitor)
         controller.updateMonitorNiriSettings()
     }
 

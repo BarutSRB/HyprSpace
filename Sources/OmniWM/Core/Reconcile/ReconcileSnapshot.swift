@@ -72,16 +72,40 @@ struct DesiredWindowState: Equatable {
 }
 
 struct DisplayFingerprint: Hashable, Equatable, Codable, Sendable {
+    let displayUUID: String?
     let displayId: CGDirectDisplayID
     let name: String
     let anchorPoint: CGPoint
     let frameSize: CGSize
 
     init(monitor: Monitor) {
+        displayUUID = monitor.displayUUID
         displayId = monitor.displayId
         name = monitor.name
         anchorPoint = monitor.workspaceAnchorPoint
         frameSize = monitor.frame.size
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case displayUUID, displayId, name, anchorPoint, frameSize
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        displayUUID = try DisplayUUID.decode(from: container, forKey: .displayUUID)
+        displayId = try container.decode(CGDirectDisplayID.self, forKey: .displayId)
+        name = try container.decode(String.self, forKey: .name)
+        anchorPoint = try container.decode(CGPoint.self, forKey: .anchorPoint)
+        frameSize = try container.decode(CGSize.self, forKey: .frameSize)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(displayUUID, forKey: .displayUUID)
+        try container.encode(displayId, forKey: .displayId)
+        try container.encode(name, forKey: .name)
+        try container.encode(anchorPoint, forKey: .anchorPoint)
+        try container.encode(frameSize, forKey: .frameSize)
     }
 }
 

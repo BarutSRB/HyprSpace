@@ -74,15 +74,15 @@ final class WorkspaceBarNotchModeSettingsTests: XCTestCase {
 
         var export = SettingsExport.defaults()
         export.workspaceBarNotchActiveZoneWidth = 12
-        settings.applyExport(export, monitors: [])
+        settings.applyExport(export)
         XCTAssertEqual(settings.workspaceBarNotchActiveZoneWidth, 100)
 
         export.workspaceBarNotchActiveZoneWidth = 9999
-        settings.applyExport(export, monitors: [])
+        settings.applyExport(export)
         XCTAssertEqual(settings.workspaceBarNotchActiveZoneWidth, 400)
 
         export.workspaceBarNotchMode = "bogus"
-        settings.applyExport(export, monitors: [])
+        settings.applyExport(export)
         XCTAssertEqual(settings.workspaceBarNotchMode, .moveBelowMenuBar)
     }
 
@@ -110,7 +110,8 @@ final class WorkspaceBarNotchModeSettingsTests: XCTestCase {
                 monitorDisplayId: 7,
                 notchMode: .off,
                 notchActiveZoneWidth: 300
-            )
+            ),
+            for: monitor
         )
 
         let resolved = settings.resolvedBarSettings(for: monitor)

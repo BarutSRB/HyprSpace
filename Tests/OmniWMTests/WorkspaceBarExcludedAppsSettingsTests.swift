@@ -61,7 +61,7 @@ final class WorkspaceBarExcludedAppsSettingsTests: XCTestCase {
             "com.Alpha"
         ]
 
-        settings.applyExport(export, monitors: [])
+        settings.applyExport(export)
 
         XCTAssertEqual(
             settings.workspaceBarExcludedBundleIDs,
@@ -139,7 +139,8 @@ final class WorkspaceBarExcludedAppsSettingsTests: XCTestCase {
                 monitorName: second.name,
                 monitorDisplayId: second.displayId,
                 hideEmptyWorkspaces: true
-            )
+            ),
+            for: second
         )
 
         XCTAssertEqual(

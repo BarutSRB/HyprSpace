@@ -50,16 +50,16 @@ final class WorkspaceBarRevealSettingsTests: XCTestCase {
 
         export.workspaceBarRevealModifier = WorkspaceBarRevealModifier.option.rawValue
         export.workspaceBarRevealHoldMilliseconds = -50
-        settings.applyExport(export, monitors: [])
+        settings.applyExport(export)
         XCTAssertEqual(settings.workspaceBarRevealModifier, .option)
         XCTAssertEqual(settings.workspaceBarRevealHoldMilliseconds, 0)
 
         export.workspaceBarRevealHoldMilliseconds = 5000
-        settings.applyExport(export, monitors: [])
+        settings.applyExport(export)
         XCTAssertEqual(settings.workspaceBarRevealHoldMilliseconds, 1000)
 
         export.workspaceBarRevealModifier = "bogus"
-        settings.applyExport(export, monitors: [])
+        settings.applyExport(export)
         XCTAssertEqual(settings.workspaceBarRevealModifier, .off)
     }
 

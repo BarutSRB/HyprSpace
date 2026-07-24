@@ -189,8 +189,8 @@ final class ServiceLifecycleManager {
 
     func handleDisplayEvent(_ event: DisplayConfigurationObserver.DisplayEvent) {
         switch event {
-        case let .disconnected(monitorId, outputId):
-            handleMonitorDisconnect(monitorId: monitorId, outputId: outputId)
+        case let .disconnected(monitorId):
+            handleMonitorDisconnect(monitorId: monitorId)
         case .connected,
              .reconfigured:
             break
@@ -198,10 +198,10 @@ final class ServiceLifecycleManager {
         handleMonitorConfigurationChanged()
     }
 
-    private func handleMonitorDisconnect(monitorId: Monitor.ID, outputId: OutputId) {
+    private func handleMonitorDisconnect(monitorId: Monitor.ID) {
         guard let controller else { return }
         controller.layoutRefreshController.cleanupForMonitorDisconnect(
-            displayId: outputId.displayId,
+            displayId: monitorId.displayId,
             migrateAnimations: false
         )
 

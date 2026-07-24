@@ -3,6 +3,56 @@
 
 import AppKit
 import CoreGraphics
+import Foundation
+
+enum DisplayUUID {
+    static func canonical(_ value: String?) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              let uuid = UUID(uuidString: trimmed)
+        else { return nil }
+        return uuid.uuidString
+    }
+
+    static func decode<Key: CodingKey>(
+        from container: KeyedDecodingContainer<Key>,
+        forKey key: Key
+    ) throws -> String? {
+        guard let value = try container.decodeIfPresent(String.self, forKey: key) else {
+            return nil
+        }
+        guard let canonical = canonical(value) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: key,
+                in: container,
+                debugDescription: "Invalid display UUID"
+            )
+        }
+        return canonical
+    }
+
+    static func encode<Key: CodingKey>(
+        _ value: String?,
+        displayId: CGDirectDisplayID?,
+        to container: inout KeyedEncodingContainer<Key>,
+        uuidKey: Key,
+        displayIdKey: Key
+    ) throws {
+        if let value {
+            guard let canonical = canonical(value) else {
+                throw EncodingError.invalidValue(
+                    value,
+                    EncodingError.Context(
+                        codingPath: container.codingPath + [uuidKey],
+                        debugDescription: "Invalid display UUID"
+                    )
+                )
+            }
+            try container.encode(canonical, forKey: uuidKey)
+        } else {
+            try container.encodeIfPresent(displayId, forKey: displayIdKey)
+        }
+    }
+}
 
 struct Monitor: Identifiable, Hashable {
     struct ID: Hashable {
@@ -19,6 +69,7 @@ struct Monitor: Identifiable, Hashable {
     var notchRange: ClosedRange<CGFloat>?
 
     let name: String
+    let displayUUID: String?
 
     init(
         id: ID,
@@ -27,7 +78,8 @@ struct Monitor: Identifiable, Hashable {
         visibleFrame: CGRect,
         hasNotch: Bool,
         notchRange: ClosedRange<CGFloat>? = nil,
-        name: String
+        name: String,
+        displayUUID: String? = nil
     ) {
         self.id = id
         self.displayId = displayId
@@ -36,10 +88,11 @@ struct Monitor: Identifiable, Hashable {
         self.hasNotch = hasNotch
         self.notchRange = notchRange
         self.name = name
+        self.displayUUID = DisplayUUID.canonical(displayUUID)
     }
 
     static func current() -> [Monitor] {
-        NSScreen.screens.compactMap { screen -> Monitor? in
+        let monitors = NSScreen.screens.compactMap { screen -> Monitor? in
             guard let displayId = screen.displayId else {
                 FallbackFiringRecorder.shared.note(.monitor, "nsScreenDisplayIdNil")
                 return nil
@@ -52,7 +105,39 @@ struct Monitor: Identifiable, Hashable {
                 visibleFrame: screen.visibleFrame,
                 hasNotch: hasNotch,
                 notchRange: notchRange(of: screen),
-                name: screen.localizedName
+                name: screen.localizedName,
+                displayUUID: SkyLight.displayUUID(for: displayId)
+            )
+        }
+        return discardingAmbiguousDisplayUUIDs(in: monitors)
+    }
+
+    static func namesMatch(_ lhs: String, _ rhs: String) -> Bool {
+        !lhs.isEmpty &&
+            !rhs.isEmpty &&
+            lhs.caseInsensitiveCompare(rhs) == .orderedSame
+    }
+
+    static func discardingAmbiguousDisplayUUIDs(in monitors: [Monitor]) -> [Monitor] {
+        let uuidCounts = monitors.reduce(into: [String: Int]()) { counts, monitor in
+            guard let displayUUID = monitor.displayUUID else { return }
+            counts[displayUUID, default: 0] += 1
+        }
+        guard uuidCounts.values.contains(where: { $0 > 1 }) else { return monitors }
+        FallbackFiringRecorder.shared.note(.monitor, "duplicateDisplayUUID")
+
+        return monitors.map { monitor in
+            guard let displayUUID = monitor.displayUUID,
+                  uuidCounts[displayUUID, default: 0] > 1
+            else { return monitor }
+            return Monitor(
+                id: monitor.id,
+                displayId: monitor.displayId,
+                frame: monitor.frame,
+                visibleFrame: monitor.visibleFrame,
+                hasNotch: monitor.hasNotch,
+                notchRange: monitor.notchRange,
+                name: monitor.name
             )
         }
     }
