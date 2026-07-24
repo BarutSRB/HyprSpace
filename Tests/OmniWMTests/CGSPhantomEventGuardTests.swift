@@ -38,6 +38,83 @@ final class CGSPhantomEventGuardTests: XCTestCase {
         XCTAssertEqual(controller.workspaceManager.invariantViolationCountsDump(), "clean")
     }
 
+    func testCGSDestroyForLiveTrackedWindowIsIgnored() throws {
+        let controller = Self.controller()
+        let workspaceId = try XCTUnwrap(controller.workspaceManager.workspaceId(for: "1", createIfMissing: true))
+        _ = controller.workspaceManager.focusWorkspace(named: "1")
+        controller.niriLayoutHandler.enableNiriLayout()
+
+        let windowId: UInt32 = 945_101
+        let token = controller.workspaceManager.addWindow(
+            AXWindowRef(element: AXUIElementCreateApplication(945_001), windowId: Int(windowId)),
+            pid: 945_001, windowId: Int(windowId), to: workspaceId
+        )
+        _ = controller.niriEngine?.addWindow(token: token, to: workspaceId, afterSelection: nil)
+        controller.axEventHandler.windowInfoProvider = { id in
+            guard id == windowId else { return nil }
+            return WindowServerInfo(
+                id: id,
+                pid: token.pid,
+                level: 0,
+                frame: CGRect(x: 0, y: 0, width: 800, height: 600)
+            )
+        }
+
+        controller.axEventHandler.handleCGSEvent(
+            .destroyed(windowId: windowId, spaceId: 0)
+        )
+
+        XCTAssertNotNil(controller.workspaceManager.entry(for: token))
+        XCTAssertNotNil(controller.niriEngine?.findNode(for: token, in: workspaceId))
+        XCTAssertEqual(controller.workspaceManager.invariantViolationCountsDump(), "clean")
+    }
+
+    func testCGSCloseRemovesParkedTrackedWindowDespiteStaleWindowServerInfo() throws {
+        let controller = Self.controller()
+        let workspaceId = try XCTUnwrap(controller.workspaceManager.workspaceId(for: "1", createIfMissing: true))
+        _ = controller.workspaceManager.focusWorkspace(named: "1")
+        controller.niriLayoutHandler.enableNiriLayout()
+
+        let windowId: UInt32 = 946_101
+        let token = controller.workspaceManager.addWindow(
+            AXWindowRef(element: AXUIElementCreateApplication(946_001), windowId: Int(windowId)),
+            pid: 946_001, windowId: Int(windowId), to: workspaceId
+        )
+        _ = controller.niriEngine?.addWindow(token: token, to: workspaceId, afterSelection: nil)
+        controller.workspaceManager.setHiddenState(
+            HiddenState(
+                proportionalPosition: .zero,
+                referenceMonitorId: nil,
+                reason: .layoutTransient(.left)
+            ),
+            for: token
+        )
+        controller.axEventHandler.windowInfoProvider = { id in
+            guard id == windowId else { return nil }
+            return WindowServerInfo(
+                id: id,
+                pid: token.pid,
+                level: 0,
+                frame: CGRect(x: 0, y: 0, width: 800, height: 600)
+            )
+        }
+
+        controller.axEventHandler.handleCGSEvent(.closed(windowId: windowId))
+
+        XCTAssertNil(controller.workspaceManager.entry(for: token))
+        XCTAssertNil(controller.workspaceManager.hiddenState(for: token))
+        XCTAssertNil(controller.niriEngine?.findNode(for: token, in: workspaceId))
+
+        controller.axEventHandler.windowInfoProvider = { _ in nil }
+        controller.axEventHandler.handleCGSEvent(
+            .destroyed(windowId: windowId, spaceId: 0)
+        )
+
+        XCTAssertNil(controller.workspaceManager.entry(for: token))
+        XCTAssertNil(controller.niriEngine?.findNode(for: token, in: workspaceId))
+        XCTAssertEqual(controller.workspaceManager.invariantViolationCountsDump(), "clean")
+    }
+
     func testCGSCreateForTrackedWindowVerifiesIdentityWithoutMutation() throws {
         let controller = Self.controller()
         let workspaceId = try XCTUnwrap(controller.workspaceManager.workspaceId(for: "1", createIfMissing: true))

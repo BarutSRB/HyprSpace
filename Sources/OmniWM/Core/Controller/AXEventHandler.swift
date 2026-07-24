@@ -440,14 +440,14 @@ final class AXEventHandler {
             WindowAdmissionTrace.record(
                 .init(action: .cgsDestroyed, windowId: Int(windowId), reason: "destroyed")
             )
-            handleCGSWindowDestroyed(windowId: windowId)
+            handleCGSSpaceWindowDestroyed(windowId: windowId)
             controller.spaceTracker.noteWindowDestroyed(windowId: Int(windowId))
 
         case let .closed(windowId):
             WindowAdmissionTrace.record(
                 .init(action: .cgsDestroyed, windowId: Int(windowId), reason: "closed")
             )
-            handleCGSWindowDestroyed(windowId: windowId)
+            handleConfirmedWindowDestroyed(windowId: windowId)
             controller.spaceTracker.noteWindowDestroyed(windowId: Int(windowId))
 
         case let .frameChanged(windowId):
@@ -1068,16 +1068,14 @@ final class AXEventHandler {
             ?? (try? AXWindowService.frame(axRef))
     }
 
-    private func handleCGSWindowDestroyed(windowId: UInt32) {
-        if resolveWindowInfo(windowId) != nil {
-            return
-        }
-        if let controller,
-           let entry = controller.workspaceManager.entry(forWindowId: Int(windowId)),
-           controller.workspaceManager.hiddenState(for: entry.token) != nil
-        {
-            return
-        }
+    private func handleCGSSpaceWindowDestroyed(windowId: UInt32) {
+        if resolveWindowInfo(windowId) != nil { return }
+        if let controller, let entry = controller.workspaceManager.entry(forWindowId: Int(windowId)),
+           controller.workspaceManager.hiddenState(for: entry.token) != nil { return }
+        handleConfirmedWindowDestroyed(windowId: windowId)
+    }
+
+    private func handleConfirmedWindowDestroyed(windowId: UInt32) {
         AXWindowService.invalidateCachedTitle(windowId: windowId)
         cancelCreatedWindowRetry(windowId: windowId)
         discardCreatePlacementContext(windowId: windowId)
