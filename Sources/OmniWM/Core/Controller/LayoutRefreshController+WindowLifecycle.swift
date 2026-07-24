@@ -47,6 +47,20 @@ extension LayoutRefreshController {
             || entry.ruleEffects != ruleEffects
     }
 
+    /// A brand-new floating window that macOS just created and fronted must take focus, mirroring
+    /// the AXWindowCreated fast path (`trackPreparedCreate`). Without it the workspace focused token
+    /// stays on the previously focused tiled window, and the post-admission relayout's focus recovery
+    /// re-fronts that window, stealing focus from the one the user just opened. The create-placement
+    /// context is the same signal the fast path uses to tell a user-created window from a window
+    /// merely discovered during startup enumeration, which must not steal focus.
+    static func shouldFocusNewlyAdmittedFloatingWindow(
+        isNewEntry: Bool,
+        trackedMode: TrackedWindowMode,
+        hasCreatePlacementContext: Bool
+    ) -> Bool {
+        isNewEntry && trackedMode == .floating && hasCreatePlacementContext
+    }
+
     func observedWindowFrame(_ entry: WindowState) -> CGRect? {
         fastFrame(for: entry.token, axRef: entry.axRef)
     }

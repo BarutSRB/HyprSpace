@@ -1440,6 +1440,7 @@ import QuartzCore
         }
         var seenKeys: Set<WindowToken> = []
         var decisionBasedRemovals: [WindowToken] = []
+        var newlyCreatedFloatingFocus: WindowToken?
         let focusedWorkspaceId = controller.activeWorkspace()?.id
         let screenFrames = NSScreen.screens.map(\.frame)
 
@@ -1718,7 +1719,21 @@ import QuartzCore
                     allowLiveFrameFallback: false
                 )
             }
+            if Self.shouldFocusNewlyAdmittedFloatingWindow(
+                isNewEntry: existingEntry == nil,
+                trackedMode: trackedMode,
+                hasCreatePlacementContext: createPlacementContext != nil
+            ) {
+                newlyCreatedFloatingFocus = admittedToken
+            }
             seenKeys.insert(admittedToken)
+        }
+
+        if let newlyCreatedFloatingFocus,
+           controller.hasStartedServices,
+           controller.workspaceManager.entry(for: newlyCreatedFloatingFocus)?.mode == .floating
+        {
+            _ = controller.windowActionHandler.raiseFloatingWindow(newlyCreatedFloatingFocus)
         }
 
         controller.axEventHandler.updateIdentityAliases(

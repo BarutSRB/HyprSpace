@@ -9,6 +9,46 @@ import XCTest
 
 @MainActor
 final class FullRescanReadmissionTests: XCTestCase {
+    func testNewlyCreatedFloatingWindowTakesFocus() {
+        // A user-created floating window (create-placement context present) must be focused so the
+        // post-admission focus recovery does not steal focus back to the previously focused window.
+        XCTAssertTrue(
+            LayoutRefreshController.shouldFocusNewlyAdmittedFloatingWindow(
+                isNewEntry: true,
+                trackedMode: .floating,
+                hasCreatePlacementContext: true
+            )
+        )
+    }
+
+    func testExistingOrTiledOrDiscoveredWindowsDoNotStealFocus() {
+        // Already-tracked floating window seen again by a rescan must not re-grab focus.
+        XCTAssertFalse(
+            LayoutRefreshController.shouldFocusNewlyAdmittedFloatingWindow(
+                isNewEntry: false,
+                trackedMode: .floating,
+                hasCreatePlacementContext: true
+            )
+        )
+        // New tiled windows are focused through the layout path, not this floating fast path.
+        XCTAssertFalse(
+            LayoutRefreshController.shouldFocusNewlyAdmittedFloatingWindow(
+                isNewEntry: true,
+                trackedMode: .tiling,
+                hasCreatePlacementContext: true
+            )
+        )
+        // A floating window discovered during startup enumeration has no create-placement context
+        // and must not yank focus from wherever the user currently is.
+        XCTAssertFalse(
+            LayoutRefreshController.shouldFocusNewlyAdmittedFloatingWindow(
+                isNewEntry: true,
+                trackedMode: .floating,
+                hasCreatePlacementContext: false
+            )
+        )
+    }
+
     func testUnchangedTrackedEntryIsNotReadmitted() throws {
         let manager = makeManager()
         let workspaceId = try XCTUnwrap(manager.workspaceId(for: "1", createIfMissing: true))
