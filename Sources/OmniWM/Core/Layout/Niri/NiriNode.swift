@@ -694,6 +694,7 @@ class NiriWindow: NiriNode {
 
     var moveXAnimation: MoveAnimation?
     var moveYAnimation: MoveAnimation?
+    private(set) var moveYContainmentFrame: CGRect?
 
     init(token: WindowToken) {
         self.token = token
@@ -754,6 +755,7 @@ class NiriWindow: NiriNode {
 
     func animateMoveFrom(
         displacement: CGPoint,
+        yContainmentFrame: CGRect? = nil,
         clock: AnimationClock?,
         config: SpringConfig = .default,
         displayRefreshRate: Double = 60.0,
@@ -792,6 +794,7 @@ class NiriWindow: NiriNode {
                 displayRefreshRate: displayRefreshRate
             )
             moveYAnimation = MoveAnimation(animation: anim, fromOffset: totalOffsetY)
+            moveYContainmentFrame = yContainmentFrame
         }
     }
 
@@ -807,6 +810,7 @@ class NiriWindow: NiriNode {
         if let moveY = moveYAnimation {
             if moveY.isComplete(at: time) {
                 moveYAnimation = nil
+                moveYContainmentFrame = nil
             } else {
                 running = true
             }
@@ -817,6 +821,7 @@ class NiriWindow: NiriNode {
     func stopMoveAnimations() {
         moveXAnimation = nil
         moveYAnimation = nil
+        moveYContainmentFrame = nil
     }
 
     var hasMoveAnimationsRunning: Bool {

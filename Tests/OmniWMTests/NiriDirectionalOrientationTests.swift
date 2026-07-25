@@ -44,6 +44,16 @@ final class NiriDirectionalOrientationTests: XCTestCase {
         let token: WindowToken
     }
 
+    private struct StackedAnimationFixture {
+        let controller: WMController
+        let engine: NiriLayoutEngine
+        let workspaceId: WorkspaceDescriptor.ID
+        let sourceMonitor: Monitor
+        let neighborMonitor: Monitor
+        let tokens: [WindowToken]
+        let selectedToken: WindowToken
+    }
+
     func testVerticalSiblingFocusAndMoveUseLeftRight() throws {
         let fixture = try makeFixture(
             frame: CGRect(x: 0, y: 0, width: 900, height: 1_600),
@@ -147,6 +157,129 @@ final class NiriDirectionalOrientationTests: XCTestCase {
         let rendered = frames(for: fixture)
         try assertOrder(fixture.firstToken, fixture.secondToken, in: rendered, by: \.midY)
         assertSelection(fixture.firstNode, in: fixture)
+    }
+
+    func testVerticalUpMoveAnimationDoesNotBleedOntoMonitorAbove() throws {
+        let fixture = try makeStackedAnimationFixture(neighborAbove: true, selectedIndex: 0)
+
+        execute(.move(.up), on: fixture.controller)
+
+        XCTAssertEqual(fixture.engine.columns(in: fixture.workspaceId).count, 1)
+        try assertVerticalMoveAnimationContained(fixture)
+    }
+
+    func testVerticalDownMoveAnimationDoesNotBleedOntoMonitorBelow() throws {
+        let fixture = try makeStackedAnimationFixture(neighborAbove: false, selectedIndex: 1)
+
+        execute(.move(.down), on: fixture.controller)
+
+        XCTAssertEqual(fixture.engine.columns(in: fixture.workspaceId).count, 1)
+        try assertVerticalMoveAnimationContained(fixture)
+    }
+
+    func testVerticalUpExpelAnimationDoesNotBleedOntoMonitorAbove() throws {
+        let fixture = try makeStackedAnimationFixture(
+            neighborAbove: true,
+            selectedIndex: 0,
+            startAsSiblings: true
+        )
+
+        execute(.move(.up), on: fixture.controller)
+
+        XCTAssertEqual(fixture.engine.columns(in: fixture.workspaceId).count, 2)
+        try assertVerticalMoveAnimationContained(fixture)
+    }
+
+    func testVerticalDownExpelAnimationDoesNotBleedOntoMonitorBelow() throws {
+        let fixture = try makeStackedAnimationFixture(
+            neighborAbove: false,
+            selectedIndex: 1,
+            startAsSiblings: true
+        )
+
+        execute(.move(.down), on: fixture.controller)
+
+        XCTAssertEqual(fixture.engine.columns(in: fixture.workspaceId).count, 2)
+        try assertVerticalMoveAnimationContained(fixture)
+    }
+
+    func testVerticalRapidPrimaryMoveRetargetStaysOnSourceMonitor() throws {
+        let fixture = try makeStackedAnimationFixture(neighborAbove: true, selectedIndex: 0)
+
+        execute(.move(.up), on: fixture.controller)
+        XCTAssertEqual(fixture.engine.columns(in: fixture.workspaceId).count, 1)
+        try assertVerticalMoveAnimationContained(fixture, sampleOffsets: [0])
+
+        execute(.move(.down), on: fixture.controller)
+        XCTAssertEqual(fixture.engine.columns(in: fixture.workspaceId).count, 2)
+        try assertVerticalMoveAnimationContained(fixture, sampleOffsets: [0])
+
+        execute(.move(.up), on: fixture.controller)
+        XCTAssertEqual(fixture.engine.columns(in: fixture.workspaceId).count, 1)
+        try assertVerticalMoveAnimationContained(fixture)
+
+        let settledTime = fixture.controller.animationClock.now() + 2
+        XCTAssertFalse(
+            fixture.engine.tickAllWindowAnimations(
+                in: fixture.workspaceId,
+                at: settledTime
+            )
+        )
+        XCTAssertFalse(
+            fixture.controller.workspaceManager.animationDriver.tick(
+                in: fixture.workspaceId,
+                at: settledTime
+            )
+        )
+        for token in fixture.tokens {
+            XCTAssertNil(
+                fixture.engine.findNode(for: token, in: fixture.workspaceId)?.moveYContainmentFrame
+            )
+        }
+        try assertVerticalMoveAnimationContained(
+            fixture,
+            sampleOffsets: [0],
+            requiresActiveContainment: false
+        )
+    }
+
+    func testVerticalMixedAxisRetargetKeepsContainment() throws {
+        let fixture = try makeStackedAnimationFixture(
+            neighborAbove: true,
+            selectedIndex: 0,
+            windowCount: 3
+        )
+
+        execute(.move(.up), on: fixture.controller)
+        XCTAssertEqual(fixture.engine.columns(in: fixture.workspaceId).count, 2)
+        try assertVerticalMoveAnimationContained(fixture, sampleOffsets: [0])
+
+        let selectedNode = try XCTUnwrap(
+            fixture.engine.findNode(for: fixture.tokens[0], in: fixture.workspaceId)
+        )
+        let selectedColumn = try XCTUnwrap(
+            fixture.engine.findColumn(containing: selectedNode, in: fixture.workspaceId)
+        )
+        let selectedIndex = try XCTUnwrap(
+            selectedColumn.windowNodes.firstIndex(where: { $0 === selectedNode })
+        )
+        let secondaryDirection: Direction = selectedIndex == 0 ? .right : .left
+
+        execute(.move(secondaryDirection), on: fixture.controller)
+
+        let movedIndex = try XCTUnwrap(
+            selectedColumn.windowNodes.firstIndex(where: { $0 === selectedNode })
+        )
+        XCTAssertNotEqual(movedIndex, selectedIndex)
+        for token in fixture.tokens {
+            guard let window = fixture.engine.findNode(for: token, in: fixture.workspaceId),
+                  window.moveYAnimation != nil
+            else {
+                continue
+            }
+            XCTAssertEqual(window.moveYContainmentFrame, fixture.sourceMonitor.frame)
+        }
+        try assertVerticalMoveAnimationContained(fixture)
     }
 
     func testVerticalConsumeToPreviousClearsLegacyColumnAnimation() throws {
@@ -441,6 +574,230 @@ extension NiriDirectionalOrientationTests {
             targetWorkspaceId: targetWorkspaceId,
             token: token
         )
+    }
+
+    private func makeStackedAnimationFixture(
+        neighborAbove: Bool,
+        selectedIndex: Int,
+        startAsSiblings: Bool = false,
+        windowCount: Int = 2
+    ) throws -> StackedAnimationFixture {
+        let controller = WindowAdmissionTestSupport.controller(
+            prefix: "OmniWMNiriDirectionalOrientationAnimationTests"
+        )
+        controller.motionPolicy.animationsEnabled = false
+        controller.settings.moveCrossesMonitorAtEdge = false
+
+        let sourceMonitor = Monitor(
+            id: .init(displayId: 47_410),
+            displayId: 47_410,
+            frame: CGRect(x: 0, y: 0, width: 1_440, height: 2_560),
+            visibleFrame: CGRect(x: 0, y: 0, width: 1_440, height: 2_560),
+            hasNotch: false,
+            name: "Portrait Animation Source"
+        )
+        let neighborY: CGFloat = neighborAbove ? 2_560 : -1_080
+        let neighborMonitor = Monitor(
+            id: .init(displayId: 47_411),
+            displayId: 47_411,
+            frame: CGRect(x: 328, y: neighborY, width: 1_920, height: 1_080),
+            visibleFrame: CGRect(x: 328, y: neighborY, width: 1_920, height: 1_080),
+            hasNotch: false,
+            name: neighborAbove ? "Upper Animation Neighbor" : "Lower Animation Neighbor"
+        )
+
+        controller.workspaceManager.applyMonitorConfigurationChange([sourceMonitor, neighborMonitor])
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        _ = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "6", createIfMissing: true)
+        )
+        _ = controller.workspaceManager.focusWorkspace(named: "1")
+        controller.niriLayoutHandler.enableNiriLayout()
+
+        let engine = try XCTUnwrap(controller.niriEngine)
+        XCTAssertEqual(engine.monitor(for: sourceMonitor.id)?.orientation, .vertical)
+        XCTAssertEqual(controller.workspaceManager.monitor(for: workspaceId)?.id, sourceMonitor.id)
+
+        let tokens = (0 ..< windowCount).map { index in
+            addWindow(
+                pid: pid_t(474_010 + index),
+                windowId: 474_110 + index,
+                to: workspaceId,
+                controller: controller
+            )
+        }
+        var nodes: [NiriWindow] = []
+        nodes.reserveCapacity(tokens.count)
+        for token in tokens {
+            let previousNode = nodes.last
+            nodes.append(
+                engine.addWindow(
+                    token: token,
+                    to: workspaceId,
+                    afterSelection: previousNode?.id,
+                    focusedToken: previousNode?.token
+                )
+            )
+        }
+        let firstNode = try XCTUnwrap(nodes.first)
+        let secondNode = try XCTUnwrap(nodes.dropFirst().first)
+        if startAsSiblings {
+            controller.workspaceManager.withEngineMutationScope(
+                in: workspaceId,
+                label: "directional_animation_siblings"
+            ) {
+                guard let firstColumn = engine.findColumn(containing: firstNode, in: workspaceId),
+                      let secondColumn = engine.findColumn(containing: secondNode, in: workspaceId)
+                else {
+                    XCTFail("Expected two Niri containers")
+                    return
+                }
+                firstColumn.appendChild(secondNode)
+                secondColumn.remove()
+            }
+        }
+        let selectedNode = nodes[selectedIndex]
+        let selectedToken = tokens[selectedIndex]
+
+        controller.workspaceManager.withEngineMutationScope(
+            in: workspaceId,
+            label: "directional_animation_fixture"
+        ) {
+            engine.activateWindow(selectedNode.id, in: workspaceId)
+        }
+        _ = controller.workspaceManager.commitWorkspaceSelection(
+            nodeId: selectedNode.id,
+            focusedToken: selectedToken,
+            in: workspaceId,
+            onMonitor: sourceMonitor.id
+        )
+
+        let workingFrame = controller.insetWorkingFrame(for: sourceMonitor)
+        let gap = controller.innerGap(for: sourceMonitor)
+        _ = engine.calculateCombinedLayoutWithVisibility(
+            in: workspaceId,
+            monitor: sourceMonitor,
+            gaps: LayoutGaps(
+                horizontal: gap,
+                vertical: gap,
+                outer: controller.workspaceManager.outerGaps
+            ),
+            state: controller.workspaceManager.niriViewportState(for: workspaceId),
+            workingArea: WorkingAreaContext(
+                workingFrame: workingFrame,
+                fullscreenLayoutFrame: controller.fullscreenLayoutFrame(for: sourceMonitor),
+                viewFrame: sourceMonitor.frame,
+                scale: 2
+            )
+        )
+
+        controller.motionPolicy.animationsEnabled = true
+        return StackedAnimationFixture(
+            controller: controller,
+            engine: engine,
+            workspaceId: workspaceId,
+            sourceMonitor: sourceMonitor,
+            neighborMonitor: neighborMonitor,
+            tokens: tokens,
+            selectedToken: selectedToken
+        )
+    }
+
+    private func assertVerticalMoveAnimationContained(
+        _ fixture: StackedAnimationFixture,
+        sampleOffsets: [TimeInterval] = [0, 1.0 / 120.0, 1.0 / 60.0, 0.05, 0.1, 0.2],
+        requiresActiveContainment: Bool = true,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        let state = fixture.controller.workspaceManager.niriViewportState(for: fixture.workspaceId)
+        let driver = fixture.controller.workspaceManager.animationDriver
+        let gap = fixture.controller.innerGap(for: fixture.sourceMonitor)
+        let gaps = LayoutGaps(
+            horizontal: gap,
+            vertical: gap,
+            outer: fixture.controller.workspaceManager.outerGaps
+        )
+        let area = WorkingAreaContext(
+            workingFrame: fixture.controller.insetWorkingFrame(for: fixture.sourceMonitor),
+            fullscreenLayoutFrame: fixture.controller.fullscreenLayoutFrame(for: fixture.sourceMonitor),
+            viewFrame: fixture.sourceMonitor.frame,
+            scale: 2
+        )
+        let startTime = fixture.controller.animationClock.now()
+        var containedAnimationCount = 0
+        var selectedWindowWasVisible = false
+
+        for offset in sampleOffsets {
+            let sampleTime = startTime + offset
+            let layout = fixture.engine.calculateCombinedLayoutWithVisibility(
+                in: fixture.workspaceId,
+                monitor: fixture.sourceMonitor,
+                gaps: gaps,
+                state: state,
+                workingArea: area,
+                animationTime: sampleTime,
+                viewOffsetOverride: driver.liveViewOffset(
+                    in: fixture.workspaceId,
+                    semanticOffset: state.viewOffset,
+                    at: sampleTime
+                ),
+                settledVisibilityOffset: driver.settledVisibilityOffset(
+                    in: fixture.workspaceId,
+                    semanticOffset: state.viewOffset
+                )
+            )
+            if layout.hiddenHandles[fixture.selectedToken] == nil {
+                selectedWindowWasVisible = true
+            }
+
+            let neighborIsAbove =
+                fixture.neighborMonitor.frame.minY >= fixture.sourceMonitor.frame.maxY
+            for token in fixture.tokens where layout.hiddenHandles[token] == nil {
+                let frame = try XCTUnwrap(layout.frames[token], file: file, line: line)
+                if neighborIsAbove {
+                    XCTAssertLessThanOrEqual(
+                        frame.maxY,
+                        fixture.sourceMonitor.frame.maxY,
+                        file: file,
+                        line: line
+                    )
+                } else {
+                    XCTAssertGreaterThanOrEqual(
+                        frame.minY,
+                        fixture.sourceMonitor.frame.minY,
+                        file: file,
+                        line: line
+                    )
+                }
+                XCTAssertFalse(
+                    frame.intersects(fixture.neighborMonitor.frame),
+                    file: file,
+                    line: line
+                )
+            }
+            for frame in layout.frames.values {
+                XCTAssertFalse(
+                    frame.intersects(fixture.neighborMonitor.frame),
+                    file: file,
+                    line: line
+                )
+            }
+        }
+
+        for token in fixture.tokens {
+            if fixture.engine.findNode(for: token, in: fixture.workspaceId)?.moveYContainmentFrame
+                == fixture.sourceMonitor.frame
+            {
+                containedAnimationCount += 1
+            }
+        }
+        if requiresActiveContainment {
+            XCTAssertGreaterThan(containedAnimationCount, 0, file: file, line: line)
+        }
+        XCTAssertTrue(selectedWindowWasVisible, file: file, line: line)
     }
 
     private func configureTopology(

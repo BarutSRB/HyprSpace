@@ -47,11 +47,6 @@ private enum ContainerVisibilityState {
     case hidden(AxisHideEdge)
 }
 
-private struct ContainerOverflowRegion {
-    let edge: AxisHideEdge
-    let rect: CGRect
-}
-
 extension NiriLayoutEngine {
     func calculateLayout(
         state: ViewportState,
@@ -233,8 +228,7 @@ extension NiriLayoutEngine {
                 scale: effectiveScale,
                 orientation: orientation
             )
-            let renderedContainerRect: CGRect
-            switch sampledContainerVisibilityState(
+            var visibilityState = sampledContainerVisibilityState(
                 canonicalRect: canonicalContainerRect,
                 viewPositions: visibilityViewPositions,
                 workspaceOffset: workspaceOffset,
@@ -246,7 +240,25 @@ extension NiriLayoutEngine {
                 orientation: orientation,
                 hiddenPlacementMonitor: hiddenPlacementMonitor,
                 hiddenPlacementMonitors: hiddenPlacementMonitors
-            ) {
+            )
+            if case .visible = visibilityState {
+                let clampedVisibilityRect = monitorPlaneClampedFrame(
+                    visibilityRect,
+                    screenClampRect: viewFrame,
+                    orientation: orientation
+                )
+                if let liveOverflowEdge = overflowEdgeIntersectingNeighboringMonitor(
+                    clampedVisibilityRect,
+                    viewportFrame: workingFrame,
+                    orientation: orientation,
+                    hiddenPlacementMonitor: hiddenPlacementMonitor,
+                    hiddenPlacementMonitors: hiddenPlacementMonitors
+                ) {
+                    visibilityState = .hidden(liveOverflowEdge)
+                }
+            }
+            let renderedContainerRect: CGRect
+            switch visibilityState {
             case .visible:
                 renderedContainerRect = visibilityRect
                 if containers[idx].isTabbed {
@@ -442,106 +454,74 @@ extension NiriLayoutEngine {
         hiddenPlacementMonitor: HiddenPlacementMonitorContext?,
         hiddenPlacementMonitors: [HiddenPlacementMonitorContext]
     ) -> AxisHideEdge? {
-        let overflowRegions = containerOverflowRegions(
-            for: renderedRect,
-            viewportFrame: viewportFrame,
-            orientation: orientation
-        )
-        guard !overflowRegions.isEmpty else { return nil }
+        let minimumOverflow: CGRect?
+        let maximumOverflow: CGRect?
+        switch orientation {
+        case .horizontal:
+            let minimumMaxX = min(renderedRect.maxX, viewportFrame.minX)
+            minimumOverflow = minimumMaxX > renderedRect.minX
+                ? CGRect(
+                    x: renderedRect.minX,
+                    y: renderedRect.minY,
+                    width: minimumMaxX - renderedRect.minX,
+                    height: renderedRect.height
+                )
+                : nil
+            let maximumMinX = max(renderedRect.minX, viewportFrame.maxX)
+            maximumOverflow = renderedRect.maxX > maximumMinX
+                ? CGRect(
+                    x: maximumMinX,
+                    y: renderedRect.minY,
+                    width: renderedRect.maxX - maximumMinX,
+                    height: renderedRect.height
+                )
+                : nil
+        case .vertical:
+            let minimumMaxY = min(renderedRect.maxY, viewportFrame.minY)
+            minimumOverflow = minimumMaxY > renderedRect.minY
+                ? CGRect(
+                    x: renderedRect.minX,
+                    y: renderedRect.minY,
+                    width: renderedRect.width,
+                    height: minimumMaxY - renderedRect.minY
+                )
+                : nil
+            let maximumMinY = max(renderedRect.minY, viewportFrame.maxY)
+            maximumOverflow = renderedRect.maxY > maximumMinY
+                ? CGRect(
+                    x: renderedRect.minX,
+                    y: maximumMinY,
+                    width: renderedRect.width,
+                    height: renderedRect.maxY - maximumMinY
+                )
+                : nil
+        }
 
-        for overflowRegion in overflowRegions {
+        if let minimumOverflow {
             for otherMonitor in hiddenPlacementMonitors where !ownsViewport(
                 otherMonitor,
                 hiddenPlacementMonitor: hiddenPlacementMonitor,
                 viewportFrame: viewportFrame
             ) {
-                if overflowRegion.rect.intersects(otherMonitor.frame) {
-                    return overflowRegion.edge
+                if minimumOverflow.intersects(otherMonitor.frame) {
+                    return .minimum
+                }
+            }
+        }
+
+        if let maximumOverflow {
+            for otherMonitor in hiddenPlacementMonitors where !ownsViewport(
+                otherMonitor,
+                hiddenPlacementMonitor: hiddenPlacementMonitor,
+                viewportFrame: viewportFrame
+            ) {
+                if maximumOverflow.intersects(otherMonitor.frame) {
+                    return .maximum
                 }
             }
         }
 
         return nil
-    }
-
-    private func containerOverflowRegions(
-        for renderedRect: CGRect,
-        viewportFrame: CGRect,
-        orientation: Monitor.Orientation
-    ) -> [ContainerOverflowRegion] {
-        var overflowRegions: [ContainerOverflowRegion] = []
-        overflowRegions.reserveCapacity(2)
-
-        switch orientation {
-        case .horizontal:
-            if renderedRect.minX < viewportFrame.minX {
-                let overflowMaxX = min(renderedRect.maxX, viewportFrame.minX)
-                if overflowMaxX > renderedRect.minX {
-                    overflowRegions.append(
-                        ContainerOverflowRegion(
-                            edge: .minimum,
-                            rect: CGRect(
-                                x: renderedRect.minX,
-                                y: renderedRect.minY,
-                                width: overflowMaxX - renderedRect.minX,
-                                height: renderedRect.height
-                            )
-                        )
-                    )
-                }
-            }
-            if renderedRect.maxX > viewportFrame.maxX {
-                let overflowMinX = max(renderedRect.minX, viewportFrame.maxX)
-                if renderedRect.maxX > overflowMinX {
-                    overflowRegions.append(
-                        ContainerOverflowRegion(
-                            edge: .maximum,
-                            rect: CGRect(
-                                x: overflowMinX,
-                                y: renderedRect.minY,
-                                width: renderedRect.maxX - overflowMinX,
-                                height: renderedRect.height
-                            )
-                        )
-                    )
-                }
-            }
-        case .vertical:
-            if renderedRect.minY < viewportFrame.minY {
-                let overflowMaxY = min(renderedRect.maxY, viewportFrame.minY)
-                if overflowMaxY > renderedRect.minY {
-                    overflowRegions.append(
-                        ContainerOverflowRegion(
-                            edge: .minimum,
-                            rect: CGRect(
-                                x: renderedRect.minX,
-                                y: renderedRect.minY,
-                                width: renderedRect.width,
-                                height: overflowMaxY - renderedRect.minY
-                            )
-                        )
-                    )
-                }
-            }
-            if renderedRect.maxY > viewportFrame.maxY {
-                let overflowMinY = max(renderedRect.minY, viewportFrame.maxY)
-                if renderedRect.maxY > overflowMinY {
-                    overflowRegions.append(
-                        ContainerOverflowRegion(
-                            edge: .maximum,
-                            rect: CGRect(
-                                x: renderedRect.minX,
-                                y: overflowMinY,
-                                width: renderedRect.width,
-                                height: renderedRect.maxY - overflowMinY
-                            )
-                        )
-                    )
-                }
-            }
-        }
-
-        return overflowRegions
     }
 
     private func ownsViewport(
@@ -862,23 +842,24 @@ extension NiriLayoutEngine {
                     if maxX >= minX {
                         offsetFrame.origin.x = min(max(offsetFrame.origin.x, minX), maxX)
                     }
+                    if let containmentFrame = windows[i].moveYContainmentFrame,
+                       renderedBaseFrame.minY >= containmentFrame.minY,
+                       renderedBaseFrame.maxY <= containmentFrame.maxY
+                    {
+                        let minY = containmentFrame.minY
+                        let maxY = containmentFrame.maxY - offsetFrame.height
+                        if maxY >= minY {
+                            offsetFrame.origin.y = min(max(offsetFrame.origin.y, minY), maxY)
+                        }
+                    }
                 }
                 animatedFrame = offsetFrame
             }
-            switch orientation {
-            case .horizontal:
-                let minX = screenClampRect.minX - animatedFrame.width + 1
-                let maxX = screenClampRect.maxX - 1
-                if maxX >= minX {
-                    animatedFrame.origin.x = min(max(animatedFrame.origin.x, minX), maxX)
-                }
-            case .vertical:
-                let minY = screenClampRect.minY - animatedFrame.height + 1
-                let maxY = screenClampRect.maxY - 1
-                if maxY >= minY {
-                    animatedFrame.origin.y = min(max(animatedFrame.origin.y, minY), maxY)
-                }
-            }
+            animatedFrame = monitorPlaneClampedFrame(
+                animatedFrame,
+                screenClampRect: screenClampRect,
+                orientation: orientation
+            )
             let roundedAnimatedFrame = animatedFrame.roundedToPhysicalPixels(scale: scale)
             windows[i].renderedFrame = roundedAnimatedFrame
             result[windowTokens[i]] = roundedAnimatedFrame
@@ -890,6 +871,29 @@ extension NiriLayoutEngine {
                 }
             }
         }
+    }
+
+    private func monitorPlaneClampedFrame(
+        _ frame: CGRect,
+        screenClampRect: CGRect,
+        orientation: Monitor.Orientation
+    ) -> CGRect {
+        var clampedFrame = frame
+        switch orientation {
+        case .horizontal:
+            let minX = screenClampRect.minX - clampedFrame.width + 1
+            let maxX = screenClampRect.maxX - 1
+            if maxX >= minX {
+                clampedFrame.origin.x = min(max(clampedFrame.origin.x, minX), maxX)
+            }
+        case .vertical:
+            let minY = screenClampRect.minY - clampedFrame.height + 1
+            let maxY = screenClampRect.maxY - 1
+            if maxY >= minY {
+                clampedFrame.origin.y = min(max(clampedFrame.origin.y, minY), maxY)
+            }
+        }
+        return clampedFrame
     }
 
     private func resolveWindowSpans(

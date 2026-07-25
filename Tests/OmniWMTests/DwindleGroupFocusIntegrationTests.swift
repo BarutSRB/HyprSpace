@@ -1052,7 +1052,7 @@ final class DwindleGroupFocusIntegrationTests: XCTestCase {
             ),
             autosaveEnabled: false
         )
-        return WMController(
+        let controller = WMController(
             settings: settings,
             windowFocusOperations: WindowFocusOperations(
                 activateApp: { _ in },
@@ -1060,6 +1060,16 @@ final class DwindleGroupFocusIntegrationTests: XCTestCase {
                 raiseWindow: { _ in }
             )
         )
+        let monitor = Monitor(
+            id: .init(displayId: 97_000),
+            displayId: 97_000,
+            frame: CGRect(x: 0, y: 0, width: 1_200, height: 800),
+            visibleFrame: CGRect(x: 0, y: 0, width: 1_200, height: 800),
+            hasNotch: false,
+            name: "Dwindle Group Focus"
+        )
+        controller.workspaceManager.applyMonitorConfigurationChange([monitor])
+        return controller
     }
 
     private func addGroupedMember(to fixture: Fixture) -> WindowToken {

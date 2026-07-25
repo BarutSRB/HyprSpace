@@ -328,6 +328,7 @@ extension NiriLayoutEngine {
         oldFrames: [WindowToken: CGRect],
         newFrames: [WindowToken: CGRect],
         motion: MotionSnapshot,
+        yContainmentFrame: CGRect? = nil,
         threshold: CGFloat = 1.0
     ) -> Bool {
         guard let root = root(for: workspaceId) else { return false }
@@ -346,6 +347,7 @@ extension NiriLayoutEngine {
             if abs(dx) > threshold || abs(dy) > threshold {
                 window.animateMoveFrom(
                     displacement: CGPoint(x: dx, y: dy),
+                    yContainmentFrame: yContainmentFrame,
                     clock: animationClock,
                     config: windowMovementAnimationConfig,
                     displayRefreshRate: displayRefreshRate(in: workspaceId),

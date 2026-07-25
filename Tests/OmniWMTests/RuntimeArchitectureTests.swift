@@ -3295,8 +3295,11 @@ final class RuntimeArchitectureTests: XCTestCase {
             in: workspaceId,
             onMonitor: controller.workspaceManager.monitorId(for: workspaceId)
         )
+        let forwardDirection: Direction = engine.monitorForWorkspace(workspaceId)?.orientation == .vertical
+            ? .up
+            : .right
 
-        _ = controller.niriLayoutHandler.focusNeighbor(direction: .right)
+        _ = controller.niriLayoutHandler.focusNeighbor(direction: forwardDirection)
         for _ in 0 ..< 40 where focusedTokens.last != secondToken {
             if let refreshTask = controller.layoutRefreshController.layoutState.activeRefreshTask {
                 await refreshTask.value
@@ -3440,6 +3443,9 @@ final class RuntimeArchitectureTests: XCTestCase {
             in: workspaceId,
             onMonitor: controller.workspaceManager.monitorId(for: workspaceId)
         )
+        let orientation = engine.monitorForWorkspace(workspaceId)?.orientation ?? .horizontal
+        let forwardDirection: Direction = orientation == .vertical ? .up : .right
+        let backwardDirection: Direction = orientation == .vertical ? .down : .left
 
         let blocker = Task { @MainActor in
             while !Task.isCancelled {
@@ -3459,9 +3465,9 @@ final class RuntimeArchitectureTests: XCTestCase {
             controller.layoutRefreshController.layoutState.pendingRefresh = nil
         }
 
-        XCTAssertTrue(controller.niriLayoutHandler.focusNeighbor(direction: .right))
-        XCTAssertTrue(controller.niriLayoutHandler.focusNeighbor(direction: .right))
-        XCTAssertTrue(controller.niriLayoutHandler.focusNeighbor(direction: .left))
+        XCTAssertTrue(controller.niriLayoutHandler.focusNeighbor(direction: forwardDirection))
+        XCTAssertTrue(controller.niriLayoutHandler.focusNeighbor(direction: forwardDirection))
+        XCTAssertTrue(controller.niriLayoutHandler.focusNeighbor(direction: backwardDirection))
 
         XCTAssertEqual(controller.workspaceManager.niriViewportState(for: workspaceId).selectedNodeId, secondNode.id)
         XCTAssertEqual(thirdNode.token, thirdToken)
@@ -5751,7 +5757,7 @@ final class RuntimeArchitectureTests: XCTestCase {
     }
 
     @MainActor
-    func testMoveAtRightEdgeReportsWorkspaceEdgeWhenCrossEnabled() throws {
+    func testMoveAtPrimaryEdgeReportsWorkspaceEdgeWhenCrossEnabled() throws {
         let controller = Self.controller()
         let wsId = try XCTUnwrap(controller.workspaceManager.workspaceId(for: "1", createIfMissing: true))
         _ = controller.workspaceManager.focusWorkspace(named: "1")
@@ -5775,8 +5781,11 @@ final class RuntimeArchitectureTests: XCTestCase {
             nodeId: rightNode.id, focusedToken: rightToken, in: wsId,
             onMonitor: controller.workspaceManager.monitorId(for: wsId)
         )
+        let forwardDirection: Direction = engine.monitorForWorkspace(wsId)?.orientation == .vertical
+            ? .up
+            : .right
 
-        let outcome = controller.niriLayoutHandler.moveWindow(direction: .right)
+        let outcome = controller.niriLayoutHandler.moveWindow(direction: forwardDirection)
 
         XCTAssertEqual(outcome, .atWorkspaceEdge)
         XCTAssertEqual(controller.workspaceManager.workspace(for: rightToken), wsId)
@@ -6300,8 +6309,11 @@ final class RuntimeArchitectureTests: XCTestCase {
             nodeId: rightNode.id, focusedToken: rightToken, in: wsId,
             onMonitor: controller.workspaceManager.monitorId(for: wsId)
         )
+        let forwardDirection: Direction = engine.monitorForWorkspace(wsId)?.orientation == .vertical
+            ? .up
+            : .right
 
-        let outcome = controller.niriLayoutHandler.moveWindow(direction: .right)
+        let outcome = controller.niriLayoutHandler.moveWindow(direction: forwardDirection)
 
         XCTAssertEqual(outcome, .movedWithinWorkspace)
         XCTAssertEqual(controller.workspaceManager.workspace(for: rightToken), wsId)

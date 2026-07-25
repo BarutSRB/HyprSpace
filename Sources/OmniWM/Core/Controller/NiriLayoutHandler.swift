@@ -2105,7 +2105,10 @@ enum StructuralMutationOutcome: Equatable {
             if usesPredictedAnimation {
                 ctx.preparePredictedAnimation(
                     state: state,
-                    oldFrames: oldFrames
+                    oldFrames: oldFrames,
+                    yContainmentFrame: ctx.orientation == .vertical
+                        ? ctx.monitor.frame
+                        : nil
                 )
             }
             return NiriStructuralMutation(
@@ -2602,7 +2605,8 @@ struct NodeActivationOptions {
 
     func preparePredictedAnimation(
         state: ViewportState,
-        oldFrames: [WindowToken: CGRect]
+        oldFrames: [WindowToken: CGRect],
+        yContainmentFrame: CGRect? = nil
     ) {
         let scale = NSScreen.screens.first(where: { $0.displayId == monitor.displayId })?
             .backingScaleFactor ?? 2.0
@@ -2630,7 +2634,8 @@ struct NodeActivationOptions {
             in: wsId,
             oldFrames: oldFrames,
             newFrames: newFrames,
-            motion: motion
+            motion: motion,
+            yContainmentFrame: yContainmentFrame
         )
     }
 
