@@ -180,6 +180,12 @@ extension NiriLayoutEngine {
         previousActiveContainerPosition: CGFloat? = nil
     ) {
         assertSanctionedMutation()
+        let orientation = resolvePrimaryContainerSpans(
+            in: workspaceId,
+            workingFrame: workingFrame,
+            gaps: gaps,
+            orientation: orientation
+        )
         let containers = columns(in: workspaceId)
         guard !containers.isEmpty else { return }
 
@@ -244,6 +250,27 @@ extension NiriLayoutEngine {
         )
 
         state.selectionProgress = 0.0
+    }
+
+    func resolvePrimaryContainerSpans(
+        in workspaceId: WorkspaceDescriptor.ID,
+        workingFrame: CGRect,
+        gaps: CGFloat,
+        orientation: Monitor.Orientation? = nil
+    ) -> Monitor.Orientation {
+        let orientation = orientation ?? monitorForWorkspace(workspaceId)?.orientation ?? .horizontal
+        for container in columns(in: workspaceId) {
+            switch orientation {
+            case .horizontal where container.cachedWidth <= 0:
+                container.resolveAndCacheWidth(workingAreaWidth: workingFrame.width, gaps: gaps)
+            case .vertical where container.cachedHeight <= 0:
+                container.resolveAndCacheHeight(workingAreaHeight: workingFrame.height, gaps: gaps)
+            case .horizontal,
+                 .vertical:
+                break
+            }
+        }
+        return orientation
     }
 
     func focusTarget(

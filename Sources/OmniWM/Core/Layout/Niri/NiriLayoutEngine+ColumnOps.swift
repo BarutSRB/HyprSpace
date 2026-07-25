@@ -484,6 +484,7 @@ extension NiriLayoutEngine {
         state: inout ViewportState,
         workingFrame: CGRect,
         gaps: CGFloat,
+        orientation: Monitor.Orientation = .horizontal,
         allowEdgeWrap: Bool = true
     ) -> Bool {
         assertSanctionedMutation()
@@ -503,7 +504,8 @@ extension NiriLayoutEngine {
                 motion: motion,
                 state: &state,
                 workingFrame: workingFrame,
-                gaps: gaps
+                gaps: gaps,
+                orientation: orientation
             )
         }
 
@@ -536,7 +538,8 @@ extension NiriLayoutEngine {
             motion: motion,
             state: &state,
             workingFrame: workingFrame,
-            gaps: gaps
+            gaps: gaps,
+            orientation: orientation
         )
     }
 
@@ -570,7 +573,8 @@ extension NiriLayoutEngine {
         motion: MotionSnapshot,
         state: inout ViewportState,
         workingFrame: CGRect,
-        gaps: CGFloat
+        gaps: CGFloat,
+        orientation: Monitor.Orientation = .horizontal
     ) -> Bool {
         assertSanctionedMutation()
         guard let currentColumn = findColumn(containing: window, in: workspaceId),
@@ -595,10 +599,15 @@ extension NiriLayoutEngine {
         let cols = columns(in: workspaceId)
         let now = animationClock?.now() ?? CACurrentMediaTime()
         let previousActiveColumnIndex = state.activeColumnIndex
-        let previousActiveColumnPosition = state.columnX(
+        let sizeKeyPath: KeyPath<NiriContainer, CGFloat> = switch orientation {
+        case .horizontal: \.cachedWidth
+        case .vertical: \.cachedHeight
+        }
+        let previousActiveColumnPosition = state.containerPosition(
             at: previousActiveColumnIndex,
-            columns: cols,
-            gap: gaps
+            containers: cols,
+            gap: gaps,
+            sizeKeyPath: sizeKeyPath
         )
         let sourceTileIdx = currentColumn.windowNodes.firstIndex(where: { $0 === window }) ?? 0
         let sourceColX = state.columnX(at: currentIdx, columns: cols, gap: gaps)
@@ -622,7 +631,8 @@ extension NiriLayoutEngine {
                 in: workspaceId,
                 motion: motion,
                 state: &state,
-                gaps: gaps
+                gaps: gaps,
+                orientation: orientation
             )
             cleanupEmptyColumn(currentColumn, in: workspaceId, state: &state)
         }
@@ -658,6 +668,7 @@ extension NiriLayoutEngine {
             state: &state,
             workingFrame: workingFrame,
             gaps: gaps,
+            orientation: orientation,
             fromContainerIndex: previousActiveColumnIndex,
             previousActiveContainerPosition: previousActiveColumnPosition
         )
@@ -832,7 +843,8 @@ extension NiriLayoutEngine {
         motion: MotionSnapshot,
         state: inout ViewportState,
         workingFrame: CGRect,
-        gaps: CGFloat
+        gaps: CGFloat,
+        orientation: Monitor.Orientation = .horizontal
     ) -> Bool {
         guard direction == .left || direction == .right else { return false }
 
@@ -913,7 +925,8 @@ extension NiriLayoutEngine {
             motion: motion,
             state: &state,
             workingFrame: workingFrame,
-            gaps: gaps
+            gaps: gaps,
+            orientation: orientation
         )
 
         return true

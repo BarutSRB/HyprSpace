@@ -15,7 +15,8 @@ extension NiriLayoutEngine {
         in workspaceId: WorkspaceDescriptor.ID,
         motion: MotionSnapshot,
         state: inout ViewportState,
-        gaps: CGFloat
+        gaps: CGFloat,
+        orientation: Monitor.Orientation = .horizontal
     ) -> ColumnRemovalResult {
         let cols = columns(in: workspaceId)
         guard removedIdx >= 0, removedIdx < cols.count else {
@@ -26,7 +27,12 @@ extension NiriLayoutEngine {
         }
 
         let activeIdx = state.activeColumnIndex
-        let offset = columnX(at: removedIdx + 1, columns: cols, gaps: gaps)
+        let primarySpan = switch orientation {
+        case .horizontal: cols[removedIdx].cachedWidth
+        case .vertical: cols[removedIdx].cachedHeight
+        }
+        let viewportOffset = primarySpan + gaps
+        let animationOffset = columnX(at: removedIdx + 1, columns: cols, gaps: gaps)
             - columnX(at: removedIdx, columns: cols, gaps: gaps)
         let postRemovalCount = cols.count - 1
 
@@ -34,7 +40,7 @@ extension NiriLayoutEngine {
             columns: cols,
             removedIdx: removedIdx,
             activeIdx: activeIdx,
-            offset: offset,
+            offset: animationOffset,
             in: workspaceId,
             motion: motion
         )
@@ -44,7 +50,7 @@ extension NiriLayoutEngine {
 
         if removedIdx < activeIdx {
             state.activeColumnIndex = activeIdx - 1
-            state.rebaseOffset(by: offset)
+            state.rebaseOffset(by: viewportOffset)
             state.activatePrevColumnOnRemoval = nil
             return ColumnRemovalResult(
                 fallbackSelectionId: fallback,
@@ -86,6 +92,19 @@ extension NiriLayoutEngine {
         motion: MotionSnapshot
     ) {
         guard removedIdx >= 0, removedIdx < cols.count else { return }
+
+        guard motion.animationsEnabled else {
+            for col in cols {
+                col.animateMoveFrom(
+                    displacement: .zero,
+                    clock: animationClock,
+                    config: windowMovementAnimationConfig,
+                    displayRefreshRate: displayRefreshRate(in: workspaceId),
+                    animated: false
+                )
+            }
+            return
+        }
 
         let animatedColumns: ArraySlice<NiriContainer>
         let displacement: CGFloat
@@ -129,6 +148,19 @@ extension NiriLayoutEngine {
 
         if addedCol.cachedWidth <= 0 {
             addedCol.resolveAndCacheWidth(workingAreaWidth: workingAreaWidth, gaps: gaps)
+        }
+
+        guard motion.animationsEnabled else {
+            for col in cols {
+                col.animateMoveFrom(
+                    displacement: .zero,
+                    clock: animationClock,
+                    config: windowMovementAnimationConfig,
+                    displayRefreshRate: displayRefreshRate(in: workspaceId),
+                    animated: false
+                )
+            }
+            return
         }
 
         let offset = addedCol.cachedWidth + gaps

@@ -26,8 +26,8 @@ enum Direction: String, Codable {
             }
         case .vertical:
             switch self {
-            case .down: 1
-            case .up: -1
+            case .up: 1
+            case .down: -1
             case .left,
                  .right: nil
             }

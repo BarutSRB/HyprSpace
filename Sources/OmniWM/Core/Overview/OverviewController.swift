@@ -319,10 +319,16 @@ final class OverviewController {
             return outcome
         case .moveWindowDown:
             guard isNiri else { return .unchanged }
-            return wmController.niriLayoutHandler.moveWindow(handle: selectedHandle, direction: .down)
+            return wmController.niriLayoutHandler.moveWindowWithinContainer(
+                handle: selectedHandle,
+                direction: .down
+            )
         case .moveWindowUp:
             guard isNiri else { return .unchanged }
-            return wmController.niriLayoutHandler.moveWindow(handle: selectedHandle, direction: .up)
+            return wmController.niriLayoutHandler.moveWindowWithinContainer(
+                handle: selectedHandle,
+                direction: .up
+            )
         case .moveWindowDownOrToWorkspaceDown:
             guard isNiri else { return .unchanged }
             return wmController.niriLayoutHandler.moveWindowOrToAdjacentWorkspace(

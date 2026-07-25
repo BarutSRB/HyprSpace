@@ -1416,12 +1416,9 @@ enum StructuralMutationOutcome: Equatable {
         guard let monitor = controller.workspaceManager.monitor(for: wsId) else { return false }
         let gap = controller.innerGap(for: monitor)
         let workingFrame = controller.insetWorkingFrame(for: monitor)
+        let orientation = engine.monitorForWorkspace(wsId)?.orientation ?? .horizontal
 
         let newNode = controller.workspaceManager.withEngineMutationScope { () -> NiriNode? in
-            for col in engine.columns(in: wsId) where col.cachedWidth <= 0 {
-                col.resolveAndCacheWidth(workingAreaWidth: workingFrame.width, gaps: gap)
-            }
-
             return engine.focusTarget(
                 direction: direction,
                 currentSelection: currentNode,
@@ -1429,7 +1426,8 @@ enum StructuralMutationOutcome: Equatable {
                 motion: controller.motionPolicy.snapshot(),
                 state: &state,
                 workingFrame: workingFrame,
-                gaps: gap
+                gaps: gap,
+                orientation: orientation
             )
         }
         guard let newNode else { return false }
@@ -1957,6 +1955,7 @@ enum StructuralMutationOutcome: Equatable {
 
     private func performStructuralMutation(
         handle: WindowHandle,
+        usesMonitorOrientationForSelection: Bool = false,
         operation: (NiriOperationContext, inout ViewportState) -> NiriStructuralMutation?
     ) -> StructuralMutationOutcome {
         guard let controller,
@@ -1972,6 +1971,7 @@ enum StructuralMutationOutcome: Equatable {
         let workspaceId = entry.workspaceId
         let workingFrame = controller.insetWorkingFrame(for: monitor)
         let gaps = controller.innerGap(for: monitor)
+        let orientation = engine.monitorForWorkspace(workspaceId)?.orientation ?? .horizontal
         let context = NiriOperationContext(
             controller: controller,
             engine: engine,
@@ -1979,6 +1979,7 @@ enum StructuralMutationOutcome: Equatable {
             wsId: workspaceId,
             windowNode: windowNode,
             monitor: monitor,
+            orientation: orientation,
             workingFrame: workingFrame,
             gaps: gaps
         )
@@ -2001,7 +2002,8 @@ enum StructuralMutationOutcome: Equatable {
                 motion: context.motion,
                 state: &state,
                 workingFrame: workingFrame,
-                gaps: gaps
+                gaps: gaps,
+                orientation: usesMonitorOrientationForSelection ? orientation : .horizontal
             )
             completedMutation = mutation
             committedState = state
@@ -2049,6 +2051,10 @@ enum StructuralMutationOutcome: Equatable {
     func moveWindow(direction: Direction) -> WindowMoveOutcome {
         guard let handle = selectedWindowHandleInActiveWorkspace() else { return .blocked }
         let outcome = moveWindow(handle: handle, direction: direction)
+        return commitWindowMoveOutcome(outcome)
+    }
+
+    private func commitWindowMoveOutcome(_ outcome: StructuralMutationOutcome) -> WindowMoveOutcome {
         commitNormalStructuralMutation(outcome)
         return switch outcome {
         case .changed:
@@ -2063,21 +2069,31 @@ enum StructuralMutationOutcome: Equatable {
     func moveWindow(handle: WindowHandle, direction: Direction) -> StructuralMutationOutcome {
         let allowEdgeWrap = !(controller?.settings.moveCrossesMonitorAtEdge ?? false)
         var edgeOutcome = WindowMoveOutcome.blocked
-        let outcome = performStructuralMutation(handle: handle) { ctx, state in
+        let outcome = performStructuralMutation(
+            handle: handle,
+            usesMonitorOrientationForSelection: true
+        ) { ctx, state in
+            let movesAcrossContainers = direction.primaryStep(for: ctx.orientation) != nil
+            let usesPredictedAnimation = ctx.orientation == .vertical || !movesAcrossContainers
             edgeOutcome = windowMoveOutcomeAtEdge(
                 for: ctx.windowNode,
                 direction: direction,
                 engine: ctx.engine,
-                in: ctx.wsId
+                in: ctx.wsId,
+                orientation: ctx.orientation
             )
-            let oldFrames = direction == .left || direction == .right
-                ? [:]
-                : ctx.engine.captureWindowFrames(in: ctx.wsId)
+            let oldFrames = usesPredictedAnimation
+                ? ctx.engine.captureWindowFrames(in: ctx.wsId)
+                : [:]
+            let motion = ctx.orientation == .vertical && movesAcrossContainers
+                ? MotionSnapshot.disabled
+                : ctx.motion
             guard ctx.engine.moveWindow(
                 ctx.windowNode,
                 direction: direction,
                 in: ctx.wsId,
-                motion: ctx.motion,
+                orientation: ctx.orientation,
+                motion: motion,
                 state: &state,
                 workingFrame: ctx.workingFrame,
                 gaps: ctx.gaps,
@@ -2086,11 +2102,51 @@ enum StructuralMutationOutcome: Equatable {
                 return nil
             }
 
-            if direction == .left || direction == .right {
-                return NiriStructuralMutation(
-                    movedTokens: [ctx.windowNode.token],
-                    operation: .windowConsumedOrExpelled(token: ctx.windowNode.token)
+            if usesPredictedAnimation {
+                ctx.preparePredictedAnimation(
+                    state: state,
+                    oldFrames: oldFrames
                 )
+            }
+            return NiriStructuralMutation(
+                movedTokens: [ctx.windowNode.token],
+                operation: movesAcrossContainers
+                    ? .windowConsumedOrExpelled(token: ctx.windowNode.token)
+                    : .windowMovedInColumn(token: ctx.windowNode.token)
+            )
+        }
+
+        if case .unchanged = outcome, edgeOutcome == .atWorkspaceEdge {
+            return .atWorkspaceEdge
+        }
+        return outcome
+    }
+
+    @discardableResult
+    func moveWindowWithinContainer(direction: Direction) -> WindowMoveOutcome {
+        guard let handle = selectedWindowHandleInActiveWorkspace() else { return .blocked }
+        return commitWindowMoveOutcome(
+            moveWindowWithinContainer(handle: handle, direction: direction)
+        )
+    }
+
+    func moveWindowWithinContainer(
+        handle: WindowHandle,
+        direction: Direction
+    ) -> StructuralMutationOutcome {
+        guard let step = direction.secondaryStep(for: .horizontal) else { return .unchanged }
+        var edgeOutcome = WindowMoveOutcome.blocked
+        let outcome = performStructuralMutation(handle: handle) { ctx, state in
+            edgeOutcome = windowMoveOutcomeAtEdge(
+                for: ctx.windowNode,
+                direction: direction,
+                engine: ctx.engine,
+                in: ctx.wsId,
+                orientation: .horizontal
+            )
+            let oldFrames = ctx.engine.captureWindowFrames(in: ctx.wsId)
+            guard ctx.engine.moveWindowWithinContainer(ctx.windowNode, step: step) else {
+                return nil
             }
             ctx.preparePredictedAnimation(
                 state: state,
@@ -2110,7 +2166,7 @@ enum StructuralMutationOutcome: Equatable {
 
     func moveWindowOrToAdjacentWorkspace(direction: Direction) {
         guard direction == .down || direction == .up else { return }
-        guard moveWindow(direction: direction) == .atWorkspaceEdge else { return }
+        guard moveWindowWithinContainer(direction: direction) == .atWorkspaceEdge else { return }
         controller?.workspaceNavigationHandler.moveWindowToAdjacentWorkspace(direction: direction)
     }
 
@@ -2119,7 +2175,7 @@ enum StructuralMutationOutcome: Equatable {
         direction: Direction
     ) -> StructuralMutationOutcome {
         guard direction == .down || direction == .up else { return .unchanged }
-        let outcome = moveWindow(handle: handle, direction: direction)
+        let outcome = moveWindowWithinContainer(handle: handle, direction: direction)
         guard case .atWorkspaceEdge = outcome else { return outcome }
         return controller?.workspaceNavigationHandler.moveWindowToAdjacentWorkspace(
             handle: handle,
@@ -2383,27 +2439,26 @@ enum StructuralMutationOutcome: Equatable {
         for node: NiriWindow,
         direction: Direction,
         engine: NiriLayoutEngine,
-        in workspaceId: WorkspaceDescriptor.ID
+        in workspaceId: WorkspaceDescriptor.ID,
+        orientation: Monitor.Orientation
     ) -> WindowMoveOutcome {
         guard node.parent is NiriContainer else {
             return .blocked
         }
 
-        switch direction {
-        case .down:
-            return node.prevSibling() == nil ? .atWorkspaceEdge : .blocked
-        case .up:
-            return node.nextSibling() == nil ? .atWorkspaceEdge : .blocked
-        case .left,
-             .right:
-            return isAtHorizontalWorkspaceEdge(node, direction: direction, engine: engine, in: workspaceId)
-                ? .atWorkspaceEdge : .blocked
+        if let step = direction.secondaryStep(for: orientation) {
+            let sibling = step > 0 ? node.nextSibling() : node.prevSibling()
+            return sibling == nil ? .atWorkspaceEdge : .blocked
         }
+
+        guard let step = direction.primaryStep(for: orientation) else { return .blocked }
+        return isAtPrimaryWorkspaceEdge(node, step: step, engine: engine, in: workspaceId)
+            ? .atWorkspaceEdge : .blocked
     }
 
-    private func isAtHorizontalWorkspaceEdge(
+    private func isAtPrimaryWorkspaceEdge(
         _ node: NiriWindow,
-        direction: Direction,
+        step: Int,
         engine: NiriLayoutEngine,
         in workspaceId: WorkspaceDescriptor.ID
     ) -> Bool {
@@ -2414,15 +2469,9 @@ enum StructuralMutationOutcome: Equatable {
             return false
         }
 
-        switch direction {
-        case .left:
-            return index == 0
-        case .right:
-            return index == engine.columns(in: workspaceId).count - 1
-        case .up,
-             .down:
-            return false
-        }
+        return step > 0
+            ? index == engine.columns(in: workspaceId).count - 1
+            : index == 0
     }
 
     func withNiriWorkspaceContext(
@@ -2547,6 +2596,7 @@ struct NodeActivationOptions {
     let wsId: WorkspaceDescriptor.ID
     let windowNode: NiriWindow
     let monitor: Monitor
+    let orientation: Monitor.Orientation
     let workingFrame: CGRect
     let gaps: CGFloat
 

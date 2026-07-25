@@ -611,7 +611,7 @@ final class CommandHandler {
             controller?.dwindleLayoutHandler.moveGroupMember(direction: direction)
         case .niri,
              .defaultLayout:
-            controller?.niriLayoutHandler.moveWindow(direction: direction)
+            controller?.niriLayoutHandler.moveWindowWithinContainer(direction: direction)
         }
     }
 

@@ -9,6 +9,7 @@ extension NiriLayoutEngine {
         _ node: NiriWindow,
         direction: Direction,
         in workspaceId: WorkspaceDescriptor.ID,
+        orientation: Monitor.Orientation? = nil,
         motion: MotionSnapshot,
         state: inout ViewportState,
         workingFrame: CGRect,
@@ -16,40 +17,38 @@ extension NiriLayoutEngine {
         allowEdgeWrap: Bool = true
     ) -> Bool {
         assertSanctionedMutation()
-        return switch direction {
-        case .down,
-             .up:
-            moveWindowVertical(node, direction: direction)
-        case .left,
-             .right:
-            consumeOrExpelWindow(
+        let orientation = resolvePrimaryContainerSpans(
+            in: workspaceId,
+            workingFrame: workingFrame,
+            gaps: gaps,
+            orientation: orientation
+        )
+
+        if let step = direction.primaryStep(for: orientation) {
+            return consumeOrExpelWindow(
                 node,
-                direction: direction,
+                direction: step > 0 ? .right : .left,
                 in: workspaceId,
                 motion: motion,
                 state: &state,
                 workingFrame: workingFrame,
                 gaps: gaps,
+                orientation: orientation,
                 allowEdgeWrap: allowEdgeWrap
             )
         }
+
+        guard let step = direction.secondaryStep(for: orientation) else { return false }
+        return moveWindowWithinContainer(node, step: step)
     }
 
-    private func moveWindowVertical(_ node: NiriWindow, direction: Direction) -> Bool {
+    func moveWindowWithinContainer(_ node: NiriWindow, step: Int) -> Bool {
+        assertSanctionedMutation()
         guard let column = node.parent as? NiriContainer else {
             return false
         }
 
-        let sibling: NiriNode?
-        switch direction {
-        case .up:
-            sibling = node.nextSibling()
-        case .down:
-            sibling = node.prevSibling()
-        default:
-            return false
-        }
-
+        let sibling = step > 0 ? node.nextSibling() : node.prevSibling()
         guard let targetSibling = sibling else {
             return false
         }
