@@ -591,7 +591,7 @@ A true quake/sticky terminal (powered by Ghostty's libghostty) that slides in fr
 - Supports multiple tabs and splits within tabs
 - Tab and pane shortcuts are listed in **Quake Terminal (Inside Terminal)**
 - Mouse resize by dragging edges; `Option + drag` to move (remembers size/position per monitor)
-- Configure position (top/bottom/left/right/center), size, and opacity in Settings
+- Configure position (top/bottom/left/right/center), size, opacity, and background blur in Settings
 - Auto-hides on focus loss (optional)
 
 #### Command Palette
