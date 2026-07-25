@@ -138,6 +138,82 @@
 </table>
 
 
+### 🎓 By Education
+
+<table align="center">
+  <tr>
+    <td align="center" valign="top">
+      <a href="https://www.au.edu/">
+        <img src="https://www.google.com/s2/favicons?domain=www.au.edu&sz=96" width="72" alt="Assumption University of Thailand">
+      </a>
+      <br>
+      <a href="https://www.au.edu/"><strong>Assumption University of Thailand</strong></a>
+      <br>
+      <sub>━━━━━━━━</sub>
+      <br>
+      <a href="https://github.com/t1dotdev" title="Panuphong Burakitphachai">
+        <img src="https://github.com/t1dotdev.png?size=96" width="72" alt="Panuphong Burakitphachai">
+      </a>
+      <br>
+      <a href="https://github.com/t1dotdev"><strong>Panuphong Burakitphachai</strong></a>
+      <br>
+      <sub>@t1dotdev</sub>
+    </td>
+    <td align="center" valign="top">
+      <a href="https://lnu.se/en/">
+        <img src="https://www.google.com/s2/favicons?domain=lnu.se&sz=96" width="72" alt="Linnaeus University">
+      </a>
+      <br>
+      <a href="https://lnu.se/en/"><strong>Linnaeus University</strong></a>
+      <br>
+      <sub>━━━━━━━━</sub>
+      <br>
+      <a href="https://github.com/balazshevesi" title="Balazs Hevesi">
+        <img src="https://github.com/balazshevesi.png?size=96" width="72" alt="Balazs Hevesi">
+      </a>
+      <br>
+      <a href="https://github.com/balazshevesi"><strong>Balazs Hevesi</strong></a>
+      <br>
+      <sub>@balazshevesi</sub>
+    </td>
+    <td align="center" valign="top">
+      <a href="https://www.ntu.edu.sg/">
+        <img src="https://www.google.com/s2/favicons?domain=www.ntu.edu.sg&sz=96" width="72" alt="NTU Singapore">
+      </a>
+      <br>
+      <a href="https://www.ntu.edu.sg/"><strong>NTU Singapore</strong></a>
+      <br>
+      <sub>━━━━━━━━</sub>
+      <br>
+      <a href="https://github.com/holmns" title="Nawat Suangburanakul">
+        <img src="https://github.com/holmns.png?size=96" width="72" alt="Nawat Suangburanakul">
+      </a>
+      <br>
+      <a href="https://github.com/holmns"><strong>Nawat Suangburanakul</strong></a>
+      <br>
+      <sub>@holmns</sub>
+    </td>
+    <td align="center" valign="top">
+      <a href="https://www.sustech.edu.cn/en/">
+        <img src="https://www.google.com/s2/favicons?domain=www.sustech.edu.cn&sz=96" width="72" alt="SUSTech">
+      </a>
+      <br>
+      <a href="https://www.sustech.edu.cn/en/"><strong>SUSTech</strong></a>
+      <br>
+      <sub>━━━━━━━━</sub>
+      <br>
+      <a href="https://github.com/Yang-Yiming" title="Yang-Yiming">
+        <img src="https://github.com/Yang-Yiming.png?size=96" width="72" alt="Yang-Yiming">
+      </a>
+      <br>
+      <a href="https://github.com/Yang-Yiming"><strong>Yang-Yiming</strong></a>
+      <br>
+      <sub>@Yang-Yiming</sub>
+    </td>
+  </tr>
+</table>
+
+
 ### ✨ All Contributors
 
 <table align="center">
@@ -190,6 +266,9 @@
       </a>
       <a href="https://github.com/siketyan" title="Naoki Ikeguchi">
         <img src="https://github.com/siketyan.png?size=96" width="72" alt="Naoki Ikeguchi">
+      </a>
+      <a href="https://github.com/holmns" title="Nawat Suangburanakul">
+        <img src="https://github.com/holmns.png?size=96" width="72" alt="Nawat Suangburanakul">
       </a>
       <a href="https://github.com/t1dotdev" title="Panuphong Burakitphachai">
         <img src="https://github.com/t1dotdev.png?size=96" width="72" alt="Panuphong Burakitphachai">
