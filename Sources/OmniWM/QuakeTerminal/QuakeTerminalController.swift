@@ -43,6 +43,7 @@ final class QuakeTerminalController: NSObject, NSWindowDelegate, QuakeTerminalTa
     private var animationGeneration: UInt64 = 0
     private var appearanceObserver: NSKeyValueObservation?
     private var appliedColorScheme: ghostty_color_scheme_e?
+    private var appliedBackgroundBlurRadius: Int?
 
     private let settings: SettingsStore
     private let motionPolicy: MotionPolicy
@@ -195,6 +196,7 @@ final class QuakeTerminalController: NSObject, NSWindowDelegate, QuakeTerminalTa
         surfaceCoordinator.unregister(id: surfaceID)
         window?.close()
         window = nil
+        appliedBackgroundBlurRadius = nil
         containerView = nil
         tabBar = nil
         restoreTarget = nil
@@ -215,6 +217,24 @@ final class QuakeTerminalController: NSObject, NSWindowDelegate, QuakeTerminalTa
         ghostty_app_update_config(ghosttyApp, newConfig)
         ghostty_config_free(newConfig)
         applyCurrentGhosttyColorScheme()
+    }
+
+    func reloadBackgroundBlur() {
+        applyBackgroundBlur()
+    }
+
+    /// The blur lives on the window-server window, so libghostty never sees it: it is applied
+    /// to our own panel and shows through wherever the terminal background is translucent.
+    private func applyBackgroundBlur() {
+        guard let window else { return }
+        let windowNumber = window.windowNumber
+        guard windowNumber > 0 else { return }
+
+        let radius = QuakeTerminalAppearancePolicy
+            .normalizedBackgroundBlurRadius(settings.quakeTerminalBackgroundBlurRadius)
+        guard appliedBackgroundBlurRadius != radius else { return }
+        guard SkyLight.shared.setWindowBackgroundBlurRadius(UInt32(windowNumber), radius: radius) else { return }
+        appliedBackgroundBlurRadius = radius
     }
 
     private func startGhosttyAppearanceSync() {
@@ -310,6 +330,8 @@ final class QuakeTerminalController: NSObject, NSWindowDelegate, QuakeTerminalTa
         )
         container.addSubview(bar)
         self.tabBar = bar
+
+        applyBackgroundBlur()
     }
 
     private var surfaceID: String {
@@ -518,6 +540,9 @@ final class QuakeTerminalController: NSObject, NSWindowDelegate, QuakeTerminalTa
         if tabs.isEmpty {
             createInitialSurface()
         }
+
+        // No-op once applied; covers a window whose device was not backed yet at creation.
+        applyBackgroundBlur()
 
         animateWindowIn(window: window)
     }

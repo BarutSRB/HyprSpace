@@ -517,6 +517,20 @@ final class SettingsStore {
         didSet { scheduleSave() }
     }
 
+    var quakeTerminalBackgroundBlurRadius = SettingsStore.defaultExport.quakeTerminalBackgroundBlurRadius
+        ?? QuakeTerminalAppearancePolicy.disabledBackgroundBlurRadius
+    {
+        didSet {
+            let normalized = QuakeTerminalAppearancePolicy
+                .normalizedBackgroundBlurRadius(quakeTerminalBackgroundBlurRadius)
+            if normalized != quakeTerminalBackgroundBlurRadius {
+                quakeTerminalBackgroundBlurRadius = normalized
+                return
+            }
+            scheduleSave()
+        }
+    }
+
     var quakeTerminalMonitorMode = QuakeTerminalMonitorMode(
         rawValue: SettingsStore.defaultExport.quakeTerminalMonitorMode ?? ""
     ) ?? .focusedWindow {
@@ -724,6 +738,7 @@ final class SettingsStore {
             quakeTerminalAnimationDuration: quakeTerminalAnimationDuration,
             quakeTerminalAutoHide: quakeTerminalAutoHide,
             quakeTerminalOpacity: quakeTerminalOpacity,
+            quakeTerminalBackgroundBlurRadius: quakeTerminalBackgroundBlurRadius,
             quakeTerminalMonitorMode: quakeTerminalMonitorMode.rawValue,
             appearanceMode: appearanceMode.rawValue
         )
@@ -868,6 +883,11 @@ final class SettingsStore {
         quakeTerminalAnimationDuration = export.quakeTerminalAnimationDuration
         quakeTerminalAutoHide = export.quakeTerminalAutoHide
         quakeTerminalOpacity = export.quakeTerminalOpacity ?? baseline.quakeTerminalOpacity ?? 1.0
+        quakeTerminalBackgroundBlurRadius = QuakeTerminalAppearancePolicy.normalizedBackgroundBlurRadius(
+            export.quakeTerminalBackgroundBlurRadius
+                ?? baseline.quakeTerminalBackgroundBlurRadius
+                ?? QuakeTerminalAppearancePolicy.disabledBackgroundBlurRadius
+        )
         quakeTerminalMonitorMode = QuakeTerminalMonitorMode(
             rawValue: export.quakeTerminalMonitorMode ?? baseline.quakeTerminalMonitorMode ?? ""
         ) ?? .focusedWindow
