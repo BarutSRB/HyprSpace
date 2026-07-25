@@ -87,6 +87,46 @@ final class WindowRuleEngineTests: XCTestCase {
         XCTAssertNotEqual(popover.source, .userRule(rule.id))
     }
 
+    func testCleanShotRecordingOverlaySurvivesTheElevatedLevelGate() {
+        // CleanShot's recording overlay sits at level 103, above the transient-surface gate, but is
+        // a real window the user works with. Its built-in rule must still win, and must still be
+        // reached at the point where a matching user rule's workspace and sizing effects apply.
+        let engine = WindowRuleEngine()
+        let rule = AppRule(
+            bundleId: WindowRuleEngine.cleanShotBundleId,
+            layout: .float,
+            assignToWorkspace: "5",
+            minWidth: 320
+        )
+        engine.rebuild(rules: [rule])
+
+        let base = facts(
+            appName: "CleanShot X",
+            bundleId: WindowRuleEngine.cleanShotBundleId
+        )
+        let overlay = WindowRuleFacts(
+            appName: base.appName,
+            ax: base.ax,
+            sizeConstraints: base.sizeConstraints,
+            windowServer: WindowServerInfo(
+                id: 2,
+                pid: 8765,
+                level: 103,
+                frame: CGRect(x: 0, y: 0, width: 900, height: 600)
+            )
+        )
+        let decision = evaluate(engine, overlay)
+
+        XCTAssertEqual(decision.disposition, .floating)
+        XCTAssertNotEqual(
+            decision.source,
+            .builtInRule(WindowRuleEngine.elevatedWindowLevelRuleName),
+            "the elevated-level gate must not intercept the recording overlay"
+        )
+        XCTAssertEqual(decision.workspaceName, "5", "it still picks up the matching user rule")
+        XCTAssertEqual(decision.ruleEffects.minWidth, 320)
+    }
+
     func testOrdinaryAndFloatingLevelWindowsStayManageable() {
         // The gate must sit above the levels apps use for panels and dialogs, so those keep being
         // classified normally rather than being dropped wholesale.

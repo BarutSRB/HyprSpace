@@ -414,8 +414,13 @@ final class WindowRuleEngine {
         // AX facts separates it from a utility panel the user would want floated - only its window
         // level does. Tracking one is never right: the popover dismisses itself as soon as we front
         // it or move it, and it leaves a workspace-bar entry behind. Takes precedence over user
-        // rules, because no rule should be able to make OmniWM manage a menu.
-        if let level = facts.windowServer?.level, level >= Self.transientSurfaceWindowLevel {
+        // rules, because no rule should be able to make OmniWM manage a menu. CleanShot's recording
+        // overlay is the one elevated surface that is a real window, and keeps being decided by its
+        // own built-in rule further down, where it still picks up any matching user rule's effects.
+        if let level = facts.windowServer?.level,
+           level >= Self.transientSurfaceWindowLevel,
+           !Self.isCleanShotRecordingOverlay(facts)
+        {
             return WindowDecision(
                 disposition: .unmanaged,
                 source: .builtInRule(Self.elevatedWindowLevelRuleName),
@@ -573,18 +578,22 @@ final class WindowRuleEngine {
         )
     }
 
+    /// CleanShot's recording overlay is a genuine window the user works with, even though it sits
+    /// above the transient-surface level. It is the one known exception to the elevated-level gate,
+    /// so both that gate and the decision below read the same predicate.
+    static func isCleanShotRecordingOverlay(_ facts: WindowRuleFacts) -> Bool {
+        facts.ax.bundleId == cleanShotBundleId
+            && facts.ax.subrole == (kAXStandardWindowSubrole as String)
+            && facts.windowServer?.level == 103
+    }
+
     private func cleanShotRecordingOverlayDecision(
         for facts: WindowRuleFacts,
         workspaceName: String?,
         effects: ManagedWindowRuleEffects,
         admissionHints: ManagedWindowAdmissionHints
     ) -> WindowDecision? {
-        guard facts.ax.bundleId == Self.cleanShotBundleId,
-              facts.ax.subrole == (kAXStandardWindowSubrole as String),
-              facts.windowServer?.level == 103
-        else {
-            return nil
-        }
+        guard Self.isCleanShotRecordingOverlay(facts) else { return nil }
 
         return WindowDecision(
             disposition: .floating,
