@@ -61,6 +61,33 @@ extension LayoutRefreshController {
         isNewEntry && trackedMode == .floating && hasCreatePlacementContext
     }
 
+    /// Focuses a just-admitted floating window that qualifies under
+    /// `shouldFocusNewlyAdmittedFloatingWindow`, routing through the focus-operation seam
+    /// (`raiseFloatingWindow` -> `focusWindow` -> `WindowFocusOperations`). No-op before services
+    /// start or if the token is no longer a live floating entry. Returns whether it raised.
+    @discardableResult
+    func focusNewlyAdmittedFloatingWindow(
+        token: WindowToken,
+        isNewEntry: Bool,
+        trackedMode: TrackedWindowMode,
+        hasCreatePlacementContext: Bool
+    ) -> Bool {
+        guard Self.shouldFocusNewlyAdmittedFloatingWindow(
+            isNewEntry: isNewEntry,
+            trackedMode: trackedMode,
+            hasCreatePlacementContext: hasCreatePlacementContext
+        ) else {
+            return false
+        }
+        guard let controller,
+              controller.hasStartedServices,
+              controller.workspaceManager.entry(for: token)?.mode == .floating
+        else {
+            return false
+        }
+        return controller.windowActionHandler.raiseFloatingWindow(token)
+    }
+
     func observedWindowFrame(_ entry: WindowState) -> CGRect? {
         fastFrame(for: entry.token, axRef: entry.axRef)
     }
