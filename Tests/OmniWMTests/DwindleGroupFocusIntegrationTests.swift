@@ -1105,7 +1105,7 @@ final class DwindleGroupFocusIntegrationTests: XCTestCase {
         let screen = fixture.controller.workspaceManager.monitor(for: fixture.workspaceId)?.visibleFrame
             ?? CGRect(x: 0, y: 0, width: 1200, height: 800)
         fixture.controller.workspaceManager.withEngineMutationScope {
-            XCTAssertTrue(fixture.engine.setPreselection(.up, in: fixture.workspaceId))
+            XCTAssertTrue(fixture.engine.setPreselection(.down, in: fixture.workspaceId))
             _ = fixture.engine.addWindow(
                 token: token,
                 to: fixture.workspaceId,
@@ -1131,7 +1131,7 @@ final class DwindleGroupFocusIntegrationTests: XCTestCase {
         let screen = fixture.controller.workspaceManager.monitor(for: fixture.workspaceId)?.visibleFrame
             ?? CGRect(x: 0, y: 0, width: 1200, height: 800)
         fixture.controller.workspaceManager.withEngineMutationScope {
-            XCTAssertTrue(fixture.engine.setPreselection(.down, in: fixture.workspaceId))
+            XCTAssertTrue(fixture.engine.setPreselection(.up, in: fixture.workspaceId))
             _ = fixture.engine.addWindow(
                 token: token,
                 to: fixture.workspaceId,

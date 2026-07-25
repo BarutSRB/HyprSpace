@@ -117,7 +117,7 @@ final class DwindleGroupingEngineTests: XCTestCase {
                 direction.dwindleOrientation,
                 direction.rawValue
             )
-            let extractedFirst = direction == .left || direction == .up
+            let extractedFirst = direction == .left || direction == .down
             XCTAssertEqual(
                 extractedFirst
                     ? engine.root(for: workspace)?.firstChild()?.windowToken
@@ -127,6 +127,40 @@ final class DwindleGroupingEngineTests: XCTestCase {
             )
             XCTAssertTrue(engine.isWindowFullscreen(second, in: workspace), direction.rawValue)
             XCTAssertEqual(engine.activeToken(in: workspace), second, direction.rawValue)
+        }
+    }
+
+    func testUngroupPlacesWindowOnRequestedSideOfFormerGroup() throws {
+        for direction in [Direction.left, .right, .up, .down] {
+            let (engine, workspace, first, second) = makeTwoWindowEngine()
+
+            XCTAssertTrue(engine.groupWindow(direction: .left, in: workspace), direction.rawValue)
+            XCTAssertTrue(engine.ungroupWindow(direction: direction, in: workspace), direction.rawValue)
+
+            let frames = engine.calculateLayout(for: workspace, screen: screen)
+            let firstFrame = try XCTUnwrap(frames[first], direction.rawValue)
+            let secondFrame = try XCTUnwrap(frames[second], direction.rawValue)
+
+            switch direction {
+            case .left:
+                XCTAssertLessThan(secondFrame.midX, firstFrame.midX, direction.rawValue)
+            case .right:
+                XCTAssertGreaterThan(secondFrame.midX, firstFrame.midX, direction.rawValue)
+            case .up:
+                XCTAssertGreaterThan(secondFrame.midY, firstFrame.midY, direction.rawValue)
+            case .down:
+                XCTAssertLessThan(secondFrame.midY, firstFrame.midY, direction.rawValue)
+            }
+
+            XCTAssertNil(
+                engine.findGeometricNeighbor(from: second, direction: direction, in: workspace),
+                direction.rawValue
+            )
+            XCTAssertEqual(
+                engine.findGeometricNeighbor(from: second, direction: opposite(direction), in: workspace),
+                first,
+                direction.rawValue
+            )
         }
     }
 
@@ -222,7 +256,7 @@ final class DwindleGroupingEngineTests: XCTestCase {
             _ = engine.addWindow(token: second, to: workspace, activeWindowFrame: nil)
             _ = engine.calculateLayout(for: workspace, screen: screen)
             XCTAssertTrue(engine.groupWindow(direction: .left, in: workspace))
-            XCTAssertTrue(engine.setPreselection(containerNeighborPreselection(for: direction), in: workspace))
+            XCTAssertTrue(engine.setPreselection(direction, in: workspace))
             _ = engine.addWindow(token: third, to: workspace, activeWindowFrame: nil)
             _ = engine.calculateLayout(for: workspace, screen: screen)
 
@@ -514,29 +548,16 @@ final class DwindleGroupingEngineTests: XCTestCase {
         lhs.windowId < rhs.windowId
     }
 
-    private func preselection(for neighborDirection: Direction) -> Direction {
-        switch neighborDirection {
-        case .left:
-            .right
-        case .right:
-            .left
-        case .up:
-            .up
-        case .down:
-            .down
+    private func opposite(_ direction: Direction) -> Direction {
+        switch direction {
+        case .left: .right
+        case .right: .left
+        case .up: .down
+        case .down: .up
         }
     }
 
-    private func containerNeighborPreselection(for direction: Direction) -> Direction {
-        switch direction {
-        case .left:
-            .left
-        case .right:
-            .right
-        case .up:
-            .down
-        case .down:
-            .up
-        }
+    private func preselection(for neighborDirection: Direction) -> Direction {
+        opposite(neighborDirection)
     }
 }
