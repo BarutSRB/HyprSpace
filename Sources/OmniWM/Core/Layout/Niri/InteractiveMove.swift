@@ -12,6 +12,7 @@ struct InteractiveMove {
     let originalColumnIndex: Int
     let originalFrame: CGRect
     let isInsertMode: Bool
+    let orientation: Monitor.Orientation
 
     var currentHoverTarget: MoveHoverTarget?
 }

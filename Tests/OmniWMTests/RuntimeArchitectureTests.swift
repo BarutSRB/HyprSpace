@@ -3966,6 +3966,7 @@ final class RuntimeArchitectureTests: XCTestCase {
         let columnWidth: CGFloat = 320
         let controller = Self.controller()
         let workspaceId = try XCTUnwrap(controller.workspaceManager.workspaceId(for: "1", createIfMissing: true))
+        try Self.configureOrientation(.horizontal, for: workspaceId, controller: controller)
         _ = controller.workspaceManager.focusWorkspace(named: "1")
         controller.niriLayoutHandler.enableNiriLayout()
         controller.layoutRefreshController.layoutState.hasCompletedInitialRefresh = true
@@ -4551,7 +4552,8 @@ final class RuntimeArchitectureTests: XCTestCase {
                     motion: .disabled,
                     state: &state,
                     workingFrame: monitor.visibleFrame,
-                    gaps: 8
+                    gaps: 8,
+                    orientation: .horizontal
                 )
             }
         )
@@ -4698,7 +4700,8 @@ final class RuntimeArchitectureTests: XCTestCase {
                     motion: .disabled,
                     state: &state,
                     workingFrame: CGRect(x: 0, y: 0, width: 1920, height: 1080),
-                    gaps: CGFloat(controller.workspaceManager.gaps)
+                    gaps: CGFloat(controller.workspaceManager.gaps),
+                    orientation: .horizontal
                 )
             }
         )
@@ -5576,6 +5579,13 @@ final class RuntimeArchitectureTests: XCTestCase {
             file: file,
             line: line
         )
+        try Self.configureOrientation(
+            .horizontal,
+            for: workspaceId,
+            controller: controller,
+            file: file,
+            line: line
+        )
         _ = controller.workspaceManager.focusWorkspace(named: "1")
         controller.niriLayoutHandler.enableNiriLayout()
         controller.layoutRefreshController.layoutState.hasCompletedInitialRefresh = true
@@ -5848,7 +5858,7 @@ final class RuntimeArchitectureTests: XCTestCase {
 
         controller.motionPolicy.animationsEnabled = false
         XCTAssertEqual(
-            controller.commandHandler.handleHotkeyCommand(.setColumnWidth(.setProportion(50))),
+            controller.commandHandler.handleHotkeyCommand(.setContainerPrimarySpan(.setProportion(50))),
             .executed
         )
         let sourceColumn = try XCTUnwrap(engine.findColumn(containing: node, in: leftWs))
@@ -5906,7 +5916,7 @@ final class RuntimeArchitectureTests: XCTestCase {
 
         controller.motionPolicy.animationsEnabled = false
         XCTAssertEqual(
-            controller.commandHandler.handleHotkeyCommand(.setColumnWidth(.setProportion(50))),
+            controller.commandHandler.handleHotkeyCommand(.setContainerPrimarySpan(.setProportion(50))),
             .executed
         )
         let sourceColumn = try XCTUnwrap(engine.findColumn(containing: node, in: leftWs))
@@ -5956,7 +5966,7 @@ final class RuntimeArchitectureTests: XCTestCase {
             sourceToken, in: leftWs, onMonitor: leftMonitor.id, activateWorkspaceOnMonitor: true
         )
         XCTAssertEqual(
-            controller.commandHandler.handleHotkeyCommand(.setColumnWidth(.setProportion(50))),
+            controller.commandHandler.handleHotkeyCommand(.setContainerPrimarySpan(.setProportion(50))),
             .executed
         )
         let sourceColumn = try XCTUnwrap(engine.findColumn(containing: sourceNode, in: leftWs))
@@ -6527,6 +6537,29 @@ final class RuntimeArchitectureTests: XCTestCase {
         WMController(
             settings: settingsStore(file: file, line: line),
             windowFocusOperations: windowFocusOperations
+        )
+    }
+
+    @MainActor
+    private static func configureOrientation(
+        _ orientation: Monitor.Orientation,
+        for workspaceId: WorkspaceDescriptor.ID,
+        controller: WMController,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        let monitor = try XCTUnwrap(
+            controller.workspaceManager.monitor(for: workspaceId),
+            file: file,
+            line: line
+        )
+        controller.settings.updateOrientationSettings(
+            MonitorOrientationSettings(
+                monitorName: monitor.name,
+                monitorDisplayId: monitor.displayId,
+                orientation: orientation
+            ),
+            for: monitor
         )
     }
 

@@ -42,43 +42,69 @@ final class AppRuleTests: XCTestCase {
         XCTAssertFalse(AppRule(bundleId: "com.test.app", appNameSubstring: "Test").hasEffect)
         XCTAssertTrue(AppRule(bundleId: "com.test.app", layout: .float).hasEffect)
         XCTAssertTrue(AppRule(bundleId: "com.test.app", assignToWorkspace: "2").hasEffect)
-        XCTAssertTrue(AppRule(bundleId: "com.test.app", initialColumnWidth: 0.05).hasEffect)
-        XCTAssertTrue(AppRule(bundleId: "com.test.app", initialColumnWidth: 1.0).hasEffect)
+        XCTAssertTrue(AppRule(bundleId: "com.test.app", initialContainerPrimarySpan: 0.05).hasEffect)
+        XCTAssertTrue(AppRule(bundleId: "com.test.app", initialContainerPrimarySpan: 1.0).hasEffect)
         XCTAssertTrue(AppRule(bundleId: "com.test.app", minWidth: 400).hasEffect)
         XCTAssertTrue(AppRule(bundleId: "com.test.app", minHeight: 300).hasEffect)
     }
 
-    func testInvalidInitialColumnWidthDoesNotCountAsEffect() {
+    func testInvalidInitialContainerPrimarySpanDoesNotCountAsEffect() {
         for value in [0.049, 1.001, .nan, .infinity, -.infinity] {
-            let rule = AppRule(bundleId: "com.test.app", initialColumnWidth: value)
-            XCTAssertNil(rule.validInitialColumnWidth)
+            let rule = AppRule(bundleId: "com.test.app", initialContainerPrimarySpan: value)
+            XCTAssertNil(rule.validInitialContainerPrimarySpan)
             XCTAssertFalse(rule.hasEffect)
         }
     }
 
-    func testInitialColumnWidthRoundTripsThroughTOML() throws {
+    func testInitialContainerPrimarySpanRoundTripsThroughTOML() throws {
         var export = SettingsExport.defaults()
-        export.appRules = [AppRule(bundleId: "com.test.app", initialColumnWidth: 0.5)]
+        export.appRules = [AppRule(bundleId: "com.test.app", initialContainerPrimarySpan: 0.5)]
 
         let data = try SettingsTOMLCodec.encode(export)
         let toml = try XCTUnwrap(String(data: data, encoding: .utf8))
-        XCTAssertTrue(toml.contains("initialColumnWidth = 0.5"))
-        XCTAssertEqual(try SettingsTOMLCodec.decode(data).appRules.first?.initialColumnWidth, 0.5)
+        XCTAssertTrue(toml.contains("initialContainerPrimarySpan = 0.5"))
+        XCTAssertEqual(try SettingsTOMLCodec.decode(data).appRules.first?.initialContainerPrimarySpan, 0.5)
     }
 
-    func testNilInitialColumnWidthIsOmittedFromJSONAndTOML() throws {
+    func testNilInitialContainerPrimarySpanIsOmittedFromJSONAndTOML() throws {
         let rule = AppRule(bundleId: "com.test.app", layout: .float)
         let json = try XCTUnwrap(
             JSONSerialization.jsonObject(with: JSONEncoder().encode(rule)) as? [String: Any]
         )
-        XCTAssertNil(json["initialColumnWidth"])
+        XCTAssertNil(json["initialContainerPrimarySpan"])
 
         var export = SettingsExport.defaults()
         export.appRules = [rule]
         let tomlData = try SettingsTOMLCodec.encode(export)
         let toml = try XCTUnwrap(String(data: tomlData, encoding: .utf8))
-        XCTAssertFalse(toml.contains("initialColumnWidth"))
-        XCTAssertNil(try SettingsTOMLCodec.decode(tomlData).appRules.first?.initialColumnWidth)
+        XCTAssertFalse(toml.contains("initialContainerPrimarySpan"))
+        XCTAssertNil(try SettingsTOMLCodec.decode(tomlData).appRules.first?.initialContainerPrimarySpan)
+    }
+
+    func testLegacyInitialColumnWidthTOMLKeyIsIgnoredAndDiagnosed() throws {
+        var export = SettingsExport.defaults()
+        export.appRules = [
+            AppRule(
+                bundleId: "com.test.app",
+                layout: .float,
+                initialContainerPrimarySpan: 0.5
+            )
+        ]
+        let canonical = String(decoding: try SettingsTOMLCodec.encode(export), as: UTF8.self)
+        let legacy = Data(
+            canonical.replacingOccurrences(
+                of: "initialContainerPrimarySpan",
+                with: "initialColumnWidth"
+            ).utf8
+        )
+
+        let decoded = try SettingsTOMLCodec.decode(legacy)
+
+        XCTAssertNil(decoded.appRules.first?.initialContainerPrimarySpan)
+        XCTAssertEqual(
+            SettingsTOMLCodec.unknownKeyPaths(in: legacy),
+            ["appRules[0].initialColumnWidth"]
+        )
     }
 
     @MainActor
@@ -108,8 +134,8 @@ final class AppRuleTests: XCTestCase {
     }
 
     @MainActor
-    func testIPCProjectionRoundTripsInitialColumnWidth() {
-        let rule = AppRule(bundleId: "com.test.app", initialColumnWidth: 0.5)
+    func testIPCProjectionRoundTripsInitialContainerPrimarySpan() {
+        let rule = AppRule(bundleId: "com.test.app", initialContainerPrimarySpan: 0.5)
         let definition = IPCRuleProjection.definition(from: rule)
         let projectedRule = IPCRuleProjection.appRule(from: definition, id: rule.id)
         let snapshot = IPCRuleProjection.snapshot(
@@ -118,15 +144,15 @@ final class AppRuleTests: XCTestCase {
             invalidRegexMessagesByRuleId: [:]
         )
 
-        XCTAssertEqual(definition.initialColumnWidth, 0.5)
+        XCTAssertEqual(definition.initialContainerPrimarySpan, 0.5)
         XCTAssertEqual(projectedRule, rule)
-        XCTAssertEqual(snapshot.initialColumnWidth, 0.5)
+        XCTAssertEqual(snapshot.initialContainerPrimarySpan, 0.5)
         XCTAssertTrue(snapshot.isValid)
     }
 
     @MainActor
-    func testIPCProjectionReportsInvalidInitialColumnWidth() {
-        let rule = AppRule(bundleId: "com.test.app", initialColumnWidth: 1.001)
+    func testIPCProjectionReportsInvalidInitialContainerPrimarySpan() {
+        let rule = AppRule(bundleId: "com.test.app", initialContainerPrimarySpan: 1.001)
         let snapshot = IPCRuleProjection.snapshot(
             from: rule,
             position: 1,
@@ -134,19 +160,19 @@ final class AppRuleTests: XCTestCase {
         )
 
         XCTAssertFalse(snapshot.isValid)
-        XCTAssertTrue(snapshot.validationMessages.contains { $0.hasPrefix("Initial column width") })
+        XCTAssertTrue(snapshot.validationMessages.contains { $0.hasPrefix("Initial container primary span") })
     }
 
-    func testDraftDefaultsAndRoundTripsInitialColumnWidth() {
+    func testDraftDefaultsAndRoundTripsInitialContainerPrimarySpan() {
         let emptyDraft = AppRuleDraft()
-        XCTAssertFalse(emptyDraft.initialColumnWidthEnabled)
-        XCTAssertEqual(emptyDraft.initialColumnWidth, 0.5)
+        XCTAssertFalse(emptyDraft.initialContainerPrimarySpanEnabled)
+        XCTAssertEqual(emptyDraft.initialContainerPrimarySpan, 0.5)
 
-        let rule = AppRule(bundleId: "com.test.app", initialColumnWidth: 0.75)
+        let rule = AppRule(bundleId: "com.test.app", initialContainerPrimarySpan: 0.75)
         let draft = AppRuleDraft(rule: rule)
-        XCTAssertTrue(draft.initialColumnWidthEnabled)
-        XCTAssertEqual(draft.initialColumnWidth, 0.75)
-        XCTAssertNil(draft.initialColumnWidthError)
+        XCTAssertTrue(draft.initialContainerPrimarySpanEnabled)
+        XCTAssertEqual(draft.initialContainerPrimarySpan, 0.75)
+        XCTAssertNil(draft.initialContainerPrimarySpanError)
         XCTAssertEqual(draft.makeRule(), rule)
     }
 
@@ -176,30 +202,30 @@ final class AppRuleTests: XCTestCase {
         assertUnrelatedSelectionState(draft)
     }
 
-    func testInitialColumnWidthPercentConversionHandlesFractionsAndExtremeValues() {
+    func testInitialContainerPrimarySpanPercentConversionHandlesFractionsAndExtremeValues() {
         let proportion = 0.5555
-        let percent = AppRuleInitialColumnWidthPercent.percent(from: proportion)
+        let percent = AppRuleInitialContainerPrimarySpanPercent.percent(from: proportion)
         XCTAssertEqual(percent, 55.55, accuracy: 0.000_000_1)
         XCTAssertEqual(
-            AppRuleInitialColumnWidthPercent.proportion(from: percent),
+            AppRuleInitialContainerPrimarySpanPercent.proportion(from: percent),
             proportion,
             accuracy: 0.000_000_1
         )
-        XCTAssertTrue(AppRuleInitialColumnWidthPercent.percent(from: .greatestFiniteMagnitude).isInfinite)
-        XCTAssertTrue(AppRuleInitialColumnWidthPercent.percent(from: .nan).isNaN)
-        XCTAssertEqual(AppRuleInitialColumnWidthPercent.percent(from: .infinity), .infinity)
-        XCTAssertEqual(AppRuleInitialColumnWidthPercent.percent(from: -.infinity), -.infinity)
-        XCTAssertEqual(AppRuleInitialColumnWidthPercent.displayText(for: proportion), "55.55")
+        XCTAssertTrue(AppRuleInitialContainerPrimarySpanPercent.percent(from: .greatestFiniteMagnitude).isInfinite)
+        XCTAssertTrue(AppRuleInitialContainerPrimarySpanPercent.percent(from: .nan).isNaN)
+        XCTAssertEqual(AppRuleInitialContainerPrimarySpanPercent.percent(from: .infinity), .infinity)
+        XCTAssertEqual(AppRuleInitialContainerPrimarySpanPercent.percent(from: -.infinity), -.infinity)
+        XCTAssertEqual(AppRuleInitialContainerPrimarySpanPercent.displayText(for: proportion), "55.55")
 
         var invalidDraft = AppRuleDraft(bundleId: "com.test.app")
-        invalidDraft.initialColumnWidthEnabled = true
-        invalidDraft.initialColumnWidth = AppRuleInitialColumnWidthPercent.proportion(from: 4.9)
-        XCTAssertEqual(invalidDraft.initialColumnWidth, 0.049, accuracy: 0.000_000_1)
-        XCTAssertNotNil(invalidDraft.initialColumnWidthError)
+        invalidDraft.initialContainerPrimarySpanEnabled = true
+        invalidDraft.initialContainerPrimarySpan = AppRuleInitialContainerPrimarySpanPercent.proportion(from: 4.9)
+        XCTAssertEqual(invalidDraft.initialContainerPrimarySpan, 0.049, accuracy: 0.000_000_1)
+        XCTAssertNotNil(invalidDraft.initialContainerPrimarySpanError)
     }
 
     func testDraftEqualityAndRuleRepresentationAreNaNStable() {
-        let rule = AppRule(bundleId: "com.test.app", initialColumnWidth: .nan)
+        let rule = AppRule(bundleId: "com.test.app", initialContainerPrimarySpan: .nan)
         let lhs = AppRuleDraft(rule: rule)
         let rhs = AppRuleDraft(rule: rule)
 
@@ -207,7 +233,7 @@ final class AppRuleTests: XCTestCase {
         XCTAssertTrue(lhs.represents(rule))
 
         var changed = lhs
-        changed.initialColumnWidth = .infinity
+        changed.initialContainerPrimarySpan = .infinity
         XCTAssertNotEqual(changed, rhs)
         XCTAssertFalse(changed.represents(rule))
     }
@@ -217,8 +243,8 @@ final class AppRuleTests: XCTestCase {
         draft.layoutAction = .float
         draft.assignToWorkspaceEnabled = true
         draft.assignToWorkspace = "work"
-        draft.initialColumnWidthEnabled = true
-        draft.initialColumnWidth = 0.7
+        draft.initialContainerPrimarySpanEnabled = true
+        draft.initialContainerPrimarySpan = 0.7
         draft.minWidthEnabled = true
         draft.minWidth = 640
         draft.minHeightEnabled = true
@@ -239,8 +265,8 @@ final class AppRuleTests: XCTestCase {
         XCTAssertEqual(draft.layoutAction, .float)
         XCTAssertTrue(draft.assignToWorkspaceEnabled)
         XCTAssertEqual(draft.assignToWorkspace, "work")
-        XCTAssertTrue(draft.initialColumnWidthEnabled)
-        XCTAssertEqual(draft.initialColumnWidth, 0.7)
+        XCTAssertTrue(draft.initialContainerPrimarySpanEnabled)
+        XCTAssertEqual(draft.initialContainerPrimarySpan, 0.7)
         XCTAssertTrue(draft.minWidthEnabled)
         XCTAssertEqual(draft.minWidth, 640)
         XCTAssertTrue(draft.minHeightEnabled)

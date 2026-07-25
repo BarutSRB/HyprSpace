@@ -104,7 +104,7 @@ struct WindowClassificationDecisionDTO: Codable, Equatable, Sendable {
     var workspaceName: String?
     var minWidth: Double?
     var minHeight: Double?
-    var initialNiriColumnWidth: Double?
+    var initialNiriContainerPrimarySpan: Double?
 
     init(from decision: WindowDecision) {
         disposition = Self.string(from: decision.disposition)
@@ -115,7 +115,7 @@ struct WindowClassificationDecisionDTO: Codable, Equatable, Sendable {
         workspaceName = decision.workspaceName
         minWidth = decision.ruleEffects.minWidth
         minHeight = decision.ruleEffects.minHeight
-        initialNiriColumnWidth = decision.admissionHints.initialNiriColumnWidth
+        initialNiriContainerPrimarySpan = decision.admissionHints.initialNiriContainerPrimarySpan
     }
 
     static func string(from disposition: WindowDecisionDisposition) -> String {

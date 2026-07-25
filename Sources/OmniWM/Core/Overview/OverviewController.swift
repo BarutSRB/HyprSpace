@@ -1957,9 +1957,9 @@ private extension OverviewController {
 
         case let .niriColumnInsert(targetWsId, insertIndex):
             guard isNiriLayout(workspaceId: targetWsId) else { return .unchanged }
-            let shouldInheritWidth = targetWsId != session.workspaceId
+            let shouldInheritSizing = targetWsId != session.workspaceId
                 && isNiriLayout(workspaceId: session.workspaceId)
-            let widthPolicy: NiriLayoutEngine.NewColumnWidthPolicy = shouldInheritWidth
+            let sizingPolicy: NiriLayoutEngine.NewContainerSizingPolicy = shouldInheritSizing
                 ? .inheritSource
                 : .workspaceDefault
             var transferMutation: StructuralMutation?
@@ -1977,7 +1977,7 @@ private extension OverviewController {
                 handle: session.handle,
                 insertIndex: insertIndex,
                 in: targetWsId,
-                widthPolicy: widthPolicy,
+                sizingPolicy: sizingPolicy,
                 source: .mouse
             ) else {
                 return transferMutation.map(DragMutationOutcome.changed) ?? .unchanged
@@ -2074,7 +2074,7 @@ private extension OverviewController {
                 handle: mutation.selectedHandle,
                 insertIndex: resolvedInsertIndex,
                 in: workspaceId,
-                widthPolicy: .workspaceDefault,
+                sizingPolicy: .workspaceDefault,
                 source: .mouse
             )
         case .workspaceMove:

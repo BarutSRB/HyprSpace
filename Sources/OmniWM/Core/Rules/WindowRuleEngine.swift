@@ -49,7 +49,7 @@ struct ManagedWindowRuleEffects: Equatable, Sendable {
 }
 
 struct ManagedWindowAdmissionHints: Equatable, Sendable {
-    var initialNiriColumnWidth: Double?
+    var initialNiriContainerPrimarySpan: Double?
 
     static let none = ManagedWindowAdmissionHints()
 }
@@ -170,7 +170,7 @@ struct WindowDecisionDebugSnapshot: Equatable, Sendable {
     let workspaceName: String?
     let minWidth: Double?
     let minHeight: Double?
-    let initialNiriColumnWidth: Double?
+    let initialNiriContainerPrimarySpan: Double?
     let matchedRuleId: UUID?
     let heuristicReasons: [AXWindowHeuristicReason]
     let attributeFetchSucceeded: Bool
@@ -210,7 +210,7 @@ struct WindowDecisionDebugSnapshot: Equatable, Sendable {
             "workspaceName=\(workspaceName ?? "nil")",
             "minWidth=\(stringValue(minWidth))",
             "minHeight=\(stringValue(minHeight))",
-            "initialNiriColumnWidth=\(stringValue(initialNiriColumnWidth))",
+            "initialNiriContainerPrimarySpan=\(stringValue(initialNiriContainerPrimarySpan))",
             "matchedRuleId=\(matchedRuleId?.uuidString ?? "nil")",
             "heuristicReasons=\(heuristicReasons.map(\.rawValue).joined(separator: ","))",
             "attributeFetchSucceeded=\(attributeFetchSucceeded)"
@@ -413,7 +413,7 @@ final class WindowRuleEngine {
             matchedRuleId: userRule?.rule.id
         )
         let admissionHints = ManagedWindowAdmissionHints(
-            initialNiriColumnWidth: userRule?.rule.validInitialColumnWidth
+            initialNiriContainerPrimarySpan: userRule?.rule.validInitialContainerPrimarySpan
         )
 
         if let userRule,

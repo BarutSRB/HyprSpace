@@ -76,20 +76,20 @@ struct CanonicalTOMLConfig: Codable, Equatable {
     }
 
     struct Niri: Codable, Equatable {
-        var maxVisibleColumns: Int
+        var visibleContainerCount: Int
         var infiniteLoop: Bool
         var centerFocusedColumn: String
         var alwaysCenterSingleColumn: Bool
-        var singleWindowAspectRatio: String
-        var columnWidthPresets: [Double]?
-        var defaultColumnWidth: Double?
+        var singleWindowFit: String
+        var containerPrimarySpanPresets: [Double]?
+        var defaultContainerPrimarySpan: Double?
     }
 
     struct Dwindle: Codable, Equatable {
         var smartSplit: Bool
         var defaultSplitRatio: Double
         var splitWidthMultiplier: Double
-        var singleWindowAspectRatio: String
+        var singleWindowFit: String
         var useGlobalGaps: Bool
         var moveToRootStable: Bool
     }
@@ -594,10 +594,10 @@ extension CanonicalTOMLConfig.Niri {
         let recovering = decoder.recoversMissingSettingsTOMLKeys
         let defaults = CanonicalTOMLConfig.recoveryDefaults().niri
 
-        maxVisibleColumns = try container.decode(
+        visibleContainerCount = try container.decode(
             Int.self,
-            forKey: .maxVisibleColumns,
-            default: defaults.maxVisibleColumns,
+            forKey: .visibleContainerCount,
+            default: defaults.visibleContainerCount,
             recovering: recovering
         )
         infiniteLoop = try container.decode(
@@ -618,14 +618,14 @@ extension CanonicalTOMLConfig.Niri {
             default: defaults.alwaysCenterSingleColumn,
             recovering: recovering
         )
-        singleWindowAspectRatio = try container.decode(
+        singleWindowFit = try container.decode(
             String.self,
-            forKey: .singleWindowAspectRatio,
-            default: defaults.singleWindowAspectRatio,
+            forKey: .singleWindowFit,
+            default: defaults.singleWindowFit,
             recovering: recovering
         )
-        columnWidthPresets = try container.decodeIfPresent([Double].self, forKey: .columnWidthPresets)
-        defaultColumnWidth = try container.decodeIfPresent(Double.self, forKey: .defaultColumnWidth)
+        containerPrimarySpanPresets = try container.decodeIfPresent([Double].self, forKey: .containerPrimarySpanPresets)
+        defaultContainerPrimarySpan = try container.decodeIfPresent(Double.self, forKey: .defaultContainerPrimarySpan)
     }
 }
 
@@ -653,10 +653,10 @@ extension CanonicalTOMLConfig.Dwindle {
             default: defaults.splitWidthMultiplier,
             recovering: recovering
         )
-        singleWindowAspectRatio = try container.decode(
+        singleWindowFit = try container.decode(
             String.self,
-            forKey: .singleWindowAspectRatio,
-            default: defaults.singleWindowAspectRatio,
+            forKey: .singleWindowFit,
+            default: defaults.singleWindowFit,
             recovering: recovering
         )
         useGlobalGaps = try container.decode(
@@ -1137,19 +1137,19 @@ extension CanonicalTOMLConfig {
             )
         )
         niri = Niri(
-            maxVisibleColumns: export.niriMaxVisibleColumns,
+            visibleContainerCount: export.niriVisibleContainerCount,
             infiniteLoop: export.niriInfiniteLoop,
             centerFocusedColumn: export.niriCenterFocusedColumn,
             alwaysCenterSingleColumn: export.niriAlwaysCenterSingleColumn,
-            singleWindowAspectRatio: export.niriSingleWindowAspectRatio,
-            columnWidthPresets: export.niriColumnWidthPresets,
-            defaultColumnWidth: export.niriDefaultColumnWidth
+            singleWindowFit: export.niriSingleWindowFit,
+            containerPrimarySpanPresets: export.niriContainerPrimarySpanPresets,
+            defaultContainerPrimarySpan: export.niriDefaultContainerPrimarySpan
         )
         dwindle = Dwindle(
             smartSplit: export.dwindleSmartSplit,
             defaultSplitRatio: export.dwindleDefaultSplitRatio,
             splitWidthMultiplier: export.dwindleSplitWidthMultiplier,
-            singleWindowAspectRatio: export.dwindleSingleWindowAspectRatio,
+            singleWindowFit: export.dwindleSingleWindowFit,
             useGlobalGaps: export.dwindleUseGlobalGaps,
             moveToRootStable: export.dwindleMoveToRootStable
         )
@@ -1263,13 +1263,13 @@ extension CanonicalTOMLConfig {
             outerGapRight: gaps.outer.right,
             outerGapTop: gaps.outer.top,
             outerGapBottom: gaps.outer.bottom,
-            niriMaxVisibleColumns: niri.maxVisibleColumns,
+            niriVisibleContainerCount: niri.visibleContainerCount,
             niriInfiniteLoop: niri.infiniteLoop,
             niriCenterFocusedColumn: niri.centerFocusedColumn,
             niriAlwaysCenterSingleColumn: niri.alwaysCenterSingleColumn,
-            niriSingleWindowAspectRatio: niri.singleWindowAspectRatio,
-            niriColumnWidthPresets: niri.columnWidthPresets,
-            niriDefaultColumnWidth: niri.defaultColumnWidth,
+            niriSingleWindowFit: niri.singleWindowFit,
+            niriContainerPrimarySpanPresets: niri.containerPrimarySpanPresets,
+            niriDefaultContainerPrimarySpan: niri.defaultContainerPrimarySpan,
             workspaceConfigurations: workspaces,
             defaultLayoutType: general.defaultLayoutType,
             bordersEnabled: borders.enabled,
@@ -1312,7 +1312,7 @@ extension CanonicalTOMLConfig {
             dwindleSmartSplit: dwindle.smartSplit,
             dwindleDefaultSplitRatio: dwindle.defaultSplitRatio,
             dwindleSplitWidthMultiplier: dwindle.splitWidthMultiplier,
-            dwindleSingleWindowAspectRatio: dwindle.singleWindowAspectRatio,
+            dwindleSingleWindowFit: dwindle.singleWindowFit,
             dwindleUseGlobalGaps: dwindle.useGlobalGaps,
             dwindleMoveToRootStable: dwindle.moveToRootStable,
             monitorDwindleSettings: monitorDwindleOverrides,

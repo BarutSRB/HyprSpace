@@ -225,28 +225,28 @@ struct RuleWindowBehaviorSection: View {
                 }
             }
 
-            Toggle("Initial Column Width", isOn: $draft.initialColumnWidthEnabled)
-            if draft.initialColumnWidthEnabled {
-                LabeledContent("Width") {
+            Toggle("Initial Container Primary Span", isOn: $draft.initialContainerPrimarySpanEnabled)
+            if draft.initialContainerPrimarySpanEnabled {
+                LabeledContent("Primary Span") {
                     HStack {
                         TextField(
-                            "Initial Column Width",
-                            value: initialColumnWidthPercent,
+                            "Initial Container Primary Span",
+                            value: initialContainerPrimarySpanPercent,
                             format: .number.precision(.significantDigits(1 ... 15)).grouping(.never)
                         )
                         .labelsHidden()
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 80)
                         .multilineTextAlignment(.trailing)
-                        .accessibilityLabel("Initial column width percentage")
-                        .accessibilityValue(initialColumnWidthAccessibilityValue)
-                        .accessibilityHint(initialColumnWidthAccessibilityHint)
+                        .accessibilityLabel("Initial container primary span percentage")
+                        .accessibilityValue(initialContainerPrimarySpanAccessibilityValue)
+                        .accessibilityHint(initialContainerPrimarySpanAccessibilityHint)
                         Text("%")
                             .foregroundStyle(.secondary)
                     }
                 }
 
-                if let error = draft.initialColumnWidthError {
+                if let error = draft.initialContainerPrimarySpanError {
                     Text(error)
                         .font(.caption)
                         .foregroundStyle(.red)
@@ -254,30 +254,30 @@ struct RuleWindowBehaviorSection: View {
             }
 
             SettingsCaption(
-                "Only affects resizable windows in Niri layout when they create or claim a new column. "
-                    + "The column remains resizable afterward."
+                "Only affects resizable windows in Niri when they create or claim a container. "
+                    + "Primary span is width in horizontal orientation and height in vertical orientation."
             )
         }
     }
 
-    private var initialColumnWidthPercent: Binding<Double> {
+    private var initialContainerPrimarySpanPercent: Binding<Double> {
         Binding(
-            get: { AppRuleInitialColumnWidthPercent.percent(from: draft.initialColumnWidth) },
+            get: { AppRuleInitialContainerPrimarySpanPercent.percent(from: draft.initialContainerPrimarySpan) },
             set: { percent in
-                draft.initialColumnWidth = AppRuleInitialColumnWidthPercent.proportion(from: percent)
+                draft.initialContainerPrimarySpan = AppRuleInitialContainerPrimarySpanPercent.proportion(from: percent)
             }
         )
     }
 
-    private var initialColumnWidthAccessibilityValue: String {
-        let value = AppRuleInitialColumnWidthPercent.displayText(for: draft.initialColumnWidth) + " percent"
-        guard draft.initialColumnWidthError != nil else { return value }
+    private var initialContainerPrimarySpanAccessibilityValue: String {
+        let value = AppRuleInitialContainerPrimarySpanPercent.displayText(for: draft.initialContainerPrimarySpan) + " percent"
+        guard draft.initialContainerPrimarySpanError != nil else { return value }
         return value + ", invalid"
     }
 
-    private var initialColumnWidthAccessibilityHint: String {
+    private var initialContainerPrimarySpanAccessibilityHint: String {
         let range = "Enter a value from 5 through 100 percent."
-        guard let error = draft.initialColumnWidthError else { return range }
+        guard let error = draft.initialContainerPrimarySpanError else { return range }
         return error + ". " + range
     }
 

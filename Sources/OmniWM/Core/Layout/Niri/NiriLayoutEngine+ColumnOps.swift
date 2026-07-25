@@ -40,6 +40,49 @@ extension NiriLayoutEngine {
         window.widthFixedByConstraint = false
     }
 
+    private func primarySizeKeyPath(
+        for orientation: Monitor.Orientation
+    ) -> KeyPath<NiriContainer, CGFloat> {
+        switch orientation {
+        case .horizontal: \.cachedWidth
+        case .vertical: \.cachedHeight
+        }
+    }
+
+    private func primaryDisplacement(
+        _ primary: CGFloat,
+        secondary: CGFloat = 0,
+        orientation: Monitor.Orientation
+    ) -> CGPoint {
+        switch orientation {
+        case .horizontal: CGPoint(x: primary, y: secondary)
+        case .vertical: CGPoint(x: secondary, y: primary)
+        }
+    }
+
+    private func transferDisplacement(
+        sourcePosition: CGFloat,
+        sourceRenderOffset: CGPoint,
+        targetPosition: CGFloat,
+        targetRenderOffset: CGPoint,
+        secondary: CGFloat,
+        orientation: Monitor.Orientation
+    ) -> CGPoint {
+        let sourceRender = switch orientation {
+        case .horizontal: sourceRenderOffset.x
+        case .vertical: sourceRenderOffset.y
+        }
+        let targetRender = switch orientation {
+        case .horizontal: targetRenderOffset.x
+        case .vertical: targetRenderOffset.y
+        }
+        return primaryDisplacement(
+            sourcePosition + sourceRender - targetPosition - targetRender,
+            secondary: secondary,
+            orientation: orientation
+        )
+    }
+
     @discardableResult
     private func moveWindowToColumn(
         _ node: NiriWindow,
@@ -100,7 +143,8 @@ extension NiriLayoutEngine {
         motion: MotionSnapshot,
         state: inout ViewportState,
         gaps: CGFloat,
-        workingAreaWidth: CGFloat
+        workingFrame: CGRect,
+        orientation: Monitor.Orientation
     ) {
         guard let root = root(for: workspaceId) else { return }
 
@@ -108,7 +152,7 @@ extension NiriLayoutEngine {
         sourceColumn.adjustActiveTileIdxForRemoval(of: node)
 
         let newColumn = NiriContainer()
-        initializeNewColumnWidth(newColumn, in: workspaceId)
+        initializeNewContainerSizing(newColumn, in: workspaceId)
 
         if direction == .right {
             root.insertAfter(newColumn, reference: sourceColumn)
@@ -126,7 +170,8 @@ extension NiriLayoutEngine {
                 motion: motion,
                 state: state,
                 gaps: gaps,
-                workingAreaWidth: workingAreaWidth
+                workingFrame: workingFrame,
+                orientation: orientation
             )
         }
 
@@ -151,7 +196,8 @@ extension NiriLayoutEngine {
         state: inout ViewportState,
         workingFrame: CGRect,
         gaps: CGFloat,
-        widthPolicy: NewColumnWidthPolicy = .workspaceDefault
+        orientation: Monitor.Orientation,
+        sizingPolicy: NewContainerSizingPolicy = .workspaceDefault
     ) -> Bool {
         assertSanctionedMutation()
         guard let root = root(for: workspaceId) else { return false }
@@ -161,11 +207,11 @@ extension NiriLayoutEngine {
         sourceColumn.adjustActiveTileIdxForRemoval(of: window)
 
         let newColumn = NiriContainer()
-        switch widthPolicy {
+        switch sizingPolicy {
         case .workspaceDefault:
-            initializeNewColumnWidth(newColumn, in: workspaceId)
+            initializeNewContainerSizing(newColumn, in: workspaceId)
         case .inheritSource:
-            copyColumnWidthState(from: sourceColumn, to: newColumn)
+            copyContainerSizingState(from: sourceColumn, to: newColumn)
         }
 
         let cols = columns(in: workspaceId)
@@ -183,7 +229,8 @@ extension NiriLayoutEngine {
                 motion: motion,
                 state: state,
                 gaps: gaps,
-                workingAreaWidth: workingFrame.width
+                workingFrame: workingFrame,
+                orientation: orientation
             )
         }
 
@@ -204,7 +251,8 @@ extension NiriLayoutEngine {
             motion: motion,
             state: &state,
             workingFrame: workingFrame,
-            gaps: gaps
+            gaps: gaps,
+            orientation: orientation
         )
 
         return true
@@ -251,33 +299,52 @@ extension NiriLayoutEngine {
     func balanceSizes(
         in workspaceId: WorkspaceDescriptor.ID,
         motion: MotionSnapshot,
-        workingAreaWidth: CGFloat,
-        gaps: CGFloat
+        workingFrame: CGRect,
+        gaps: CGFloat,
+        orientation: Monitor.Orientation
     ) -> Bool {
         assertSanctionedMutation()
         let cols = columns(in: workspaceId)
         guard !cols.isEmpty else { return false }
 
-        let resolvedWidth = resolvedColumnResetWidth(in: workspaceId)
-        let targetPixels = (workingAreaWidth - gaps) * resolvedWidth.proportion - gaps
+        let resolvedWidth = resolvedContainerResetPrimarySpan(in: workspaceId)
+        switch orientation {
+        case .horizontal:
+            let targetPixels = (workingFrame.width - gaps) * resolvedWidth.proportion - gaps
+            for column in cols {
+                column.width = .proportion(resolvedWidth.proportion)
+                column.isFullWidth = false
+                column.savedWidth = nil
+                column.presetWidthIdx = resolvedWidth.presetWidthIdx
+                column.hasManualSingleWindowWidthOverride = false
 
-        for column in cols {
-            column.width = .proportion(resolvedWidth.proportion)
-            column.isFullWidth = false
-            column.savedWidth = nil
-            column.presetWidthIdx = resolvedWidth.presetWidthIdx
-            column.hasManualSingleWindowWidthOverride = false
+                column.animateWidthTo(
+                    newWidth: column.clampedToWidthBounds(
+                        targetPixels,
+                        contentInset: tabContentInset(for: column)
+                    ),
+                    clock: animationClock,
+                    config: windowMovementAnimationConfig,
+                    displayRefreshRate: displayRefreshRate(in: workspaceId),
+                    animated: motion.animationsEnabled
+                )
 
-            column.animateWidthTo(
-                newWidth: column.clampedToWidthBounds(targetPixels),
-                clock: animationClock,
-                config: windowMovementAnimationConfig,
-                displayRefreshRate: displayRefreshRate(in: workspaceId),
-                animated: motion.animationsEnabled
-            )
+                for window in column.windowNodes {
+                    window.size = 1.0
+                }
+            }
+        case .vertical:
+            let targetPixels = (workingFrame.height - gaps) * resolvedWidth.proportion - gaps
+            for column in cols {
+                column.height = .proportion(resolvedWidth.proportion)
+                column.isFullHeight = false
+                column.savedHeight = nil
+                column.hasManualSingleWindowHeightOverride = false
+                column.cachedHeight = column.clampedToHeightBounds(targetPixels)
 
-            for window in column.windowNodes {
-                window.size = 1.0
+                for window in column.windowNodes {
+                    window.windowWidth = .auto(weight: 1)
+                }
             }
         }
         return true
@@ -290,15 +357,15 @@ extension NiriLayoutEngine {
         motion: MotionSnapshot,
         state: inout ViewportState,
         workingFrame: CGRect,
-        gaps: CGFloat
+        gaps: CGFloat,
+        orientation: Monitor.Orientation
     ) -> Bool {
         assertSanctionedMutation()
-        guard direction == .left || direction == .right else { return false }
+        guard let step = direction.primaryStep(for: orientation) else { return false }
 
         let cols = columns(in: workspaceId)
         guard let currentIdx = columnIndex(of: column, in: workspaceId) else { return false }
 
-        let step = (direction == .right) ? 1 : -1
         let targetIdx = currentIdx + step
         guard targetIdx >= 0, targetIdx < cols.count else { return false }
         return moveColumn(
@@ -308,7 +375,8 @@ extension NiriLayoutEngine {
             motion: motion,
             state: &state,
             workingFrame: workingFrame,
-            gaps: gaps
+            gaps: gaps,
+            orientation: orientation
         )
     }
 
@@ -318,7 +386,8 @@ extension NiriLayoutEngine {
         motion: MotionSnapshot,
         state: inout ViewportState,
         workingFrame: CGRect,
-        gaps: CGFloat
+        gaps: CGFloat,
+        orientation: Monitor.Orientation
     ) -> Bool {
         assertSanctionedMutation()
         return moveColumnToIndex(
@@ -328,7 +397,8 @@ extension NiriLayoutEngine {
             motion: motion,
             state: &state,
             workingFrame: workingFrame,
-            gaps: gaps
+            gaps: gaps,
+            orientation: orientation
         )
     }
 
@@ -338,7 +408,8 @@ extension NiriLayoutEngine {
         motion: MotionSnapshot,
         state: inout ViewportState,
         workingFrame: CGRect,
-        gaps: CGFloat
+        gaps: CGFloat,
+        orientation: Monitor.Orientation
     ) -> Bool {
         assertSanctionedMutation()
         return moveColumnToIndex(
@@ -348,7 +419,8 @@ extension NiriLayoutEngine {
             motion: motion,
             state: &state,
             workingFrame: workingFrame,
-            gaps: gaps
+            gaps: gaps,
+            orientation: orientation
         )
     }
 
@@ -359,7 +431,8 @@ extension NiriLayoutEngine {
         motion: MotionSnapshot,
         state: inout ViewportState,
         workingFrame: CGRect,
-        gaps: CGFloat
+        gaps: CGFloat,
+        orientation: Monitor.Orientation
     ) -> Bool {
         assertSanctionedMutation()
         let cols = columns(in: workspaceId)
@@ -373,7 +446,8 @@ extension NiriLayoutEngine {
             motion: motion,
             state: &state,
             workingFrame: workingFrame,
-            gaps: gaps
+            gaps: gaps,
+            orientation: orientation
         )
     }
 
@@ -384,7 +458,8 @@ extension NiriLayoutEngine {
         motion: MotionSnapshot,
         state: inout ViewportState,
         workingFrame: CGRect,
-        gaps: CGFloat
+        gaps: CGFloat,
+        orientation: Monitor.Orientation
     ) -> Bool {
         let cols = columns(in: workspaceId)
         guard let currentIdx = columnIndex(of: column, in: workspaceId),
@@ -392,13 +467,31 @@ extension NiriLayoutEngine {
         else { return false }
         if targetIdx == currentIdx { return false }
 
-        let currentColX = state.columnX(at: currentIdx, columns: cols, gap: gaps)
-        let nextColX = currentIdx + 1 < cols.count
-            ? state.columnX(at: currentIdx + 1, columns: cols, gap: gaps)
-            : currentColX + (
-                column.cachedWidth > 0
-                    ? column.cachedWidth
-                    : workingFrame.width / CGFloat(effectiveMaxVisibleColumns(in: workspaceId))
+        resolvePrimaryContainerSpans(
+            in: workspaceId,
+            workingFrame: workingFrame,
+            gaps: gaps,
+            orientation: orientation
+        )
+        let sizeKeyPath = primarySizeKeyPath(for: orientation)
+        let currentPosition = state.containerPosition(
+            at: currentIdx,
+            containers: cols,
+            gap: gaps,
+            sizeKeyPath: sizeKeyPath
+        )
+        let nextPosition = currentIdx + 1 < cols.count
+            ? state.containerPosition(
+                at: currentIdx + 1,
+                containers: cols,
+                gap: gaps,
+                sizeKeyPath: sizeKeyPath
+            )
+            : currentPosition + (
+                column[keyPath: sizeKeyPath] > 0
+                    ? column[keyPath: sizeKeyPath]
+                    : (orientation == .horizontal ? workingFrame.width : workingFrame.height)
+                    / CGFloat(effectiveVisibleContainerCount(in: workspaceId))
             ) + gaps
 
         guard let root = root(for: workspaceId) else { return false }
@@ -406,25 +499,42 @@ extension NiriLayoutEngine {
         root.insertChild(column, at: targetIdx)
 
         let newCols = columns(in: workspaceId)
-        let viewOffsetDelta = -state.columnX(at: currentIdx, columns: newCols, gap: gaps) + currentColX
+        let positionAtOldIndex = state.containerPosition(
+            at: currentIdx,
+            containers: newCols,
+            gap: gaps,
+            sizeKeyPath: sizeKeyPath
+        )
+        let viewOffsetDelta = currentPosition - positionAtOldIndex
         state.offsetViewport(by: viewOffsetDelta)
 
-        let newColX = state.columnX(at: targetIdx, columns: newCols, gap: gaps)
+        let newPosition = state.containerPosition(
+            at: targetIdx,
+            containers: newCols,
+            gap: gaps,
+            sizeKeyPath: sizeKeyPath
+        )
         column.animateMoveFrom(
-            displacement: CGPoint(x: currentColX - newColX, y: 0),
+            displacement: primaryDisplacement(
+                currentPosition - newPosition,
+                orientation: orientation
+            ),
             clock: animationClock,
             config: windowMovementAnimationConfig,
             displayRefreshRate: displayRefreshRate(in: workspaceId),
             animated: motion.animationsEnabled
         )
 
-        let othersXOffset = nextColX - currentColX
+        let othersOffset = nextPosition - currentPosition
         if currentIdx < targetIdx {
             for i in currentIdx ..< targetIdx {
                 let col = newCols[i]
                 if col.id != column.id {
                     col.animateMoveFrom(
-                        displacement: CGPoint(x: othersXOffset, y: 0),
+                        displacement: primaryDisplacement(
+                            othersOffset,
+                            orientation: orientation
+                        ),
                         clock: animationClock,
                         config: windowMovementAnimationConfig,
                         displayRefreshRate: displayRefreshRate(in: workspaceId),
@@ -437,7 +547,10 @@ extension NiriLayoutEngine {
                 let col = newCols[i]
                 if col.id != column.id {
                     col.animateMoveFrom(
-                        displacement: CGPoint(x: -othersXOffset, y: 0),
+                        displacement: primaryDisplacement(
+                            -othersOffset,
+                            orientation: orientation
+                        ),
                         clock: animationClock,
                         config: windowMovementAnimationConfig,
                         displayRefreshRate: displayRefreshRate(in: workspaceId),
@@ -454,6 +567,7 @@ extension NiriLayoutEngine {
             state: &state,
             workingFrame: workingFrame,
             gaps: gaps,
+            orientation: orientation,
             animationConfig: windowMovementAnimationConfig,
             fromContainerIndex: currentIdx
         )
@@ -484,7 +598,7 @@ extension NiriLayoutEngine {
         state: inout ViewportState,
         workingFrame: CGRect,
         gaps: CGFloat,
-        orientation: Monitor.Orientation = .horizontal,
+        orientation: Monitor.Orientation,
         allowEdgeWrap: Bool = true
     ) -> Bool {
         assertSanctionedMutation()
@@ -549,10 +663,10 @@ extension NiriLayoutEngine {
         removing removedWindow: NiriWindow? = nil,
         in workspaceId: WorkspaceDescriptor.ID,
         workingFrame: CGRect,
-        gaps: CGFloat
+        gaps: CGFloat,
+        orientation: Monitor.Orientation
     ) -> Bool {
         guard !column.isTabbed else { return true }
-        let orientation = monitorForWorkspace(workspaceId)?.orientation ?? .horizontal
         let axisSpace = orientation == .horizontal ? workingFrame.height : workingFrame.width
         func axisMinimum(_ tile: NiriWindow) -> CGFloat {
             let minSize = tile.constraints.normalized().minSize
@@ -574,7 +688,7 @@ extension NiriLayoutEngine {
         state: inout ViewportState,
         workingFrame: CGRect,
         gaps: CGFloat,
-        orientation: Monitor.Orientation = .horizontal
+        orientation: Monitor.Orientation
     ) -> Bool {
         assertSanctionedMutation()
         guard let currentColumn = findColumn(containing: window, in: workspaceId),
@@ -589,20 +703,24 @@ extension NiriLayoutEngine {
             adding: window,
             in: workspaceId,
             workingFrame: workingFrame,
-            gaps: gaps
+            gaps: gaps,
+            orientation: orientation
         ) else {
             return false
         }
 
         let targetInsertionPolicy: TargetColumnInsertionPolicy = direction == .down ? .append : .visualBottom
 
+        resolvePrimaryContainerSpans(
+            in: workspaceId,
+            workingFrame: workingFrame,
+            gaps: gaps,
+            orientation: orientation
+        )
         let cols = columns(in: workspaceId)
         let now = animationClock?.now() ?? CACurrentMediaTime()
         let previousActiveColumnIndex = state.activeColumnIndex
-        let sizeKeyPath: KeyPath<NiriContainer, CGFloat> = switch orientation {
-        case .horizontal: \.cachedWidth
-        case .vertical: \.cachedHeight
-        }
+        let sizeKeyPath = primarySizeKeyPath(for: orientation)
         let previousActiveColumnPosition = state.containerPosition(
             at: previousActiveColumnIndex,
             containers: cols,
@@ -610,9 +728,19 @@ extension NiriLayoutEngine {
             sizeKeyPath: sizeKeyPath
         )
         let sourceTileIdx = currentColumn.windowNodes.firstIndex(where: { $0 === window }) ?? 0
-        let sourceColX = state.columnX(at: currentIdx, columns: cols, gap: gaps)
+        let sourcePosition = state.containerPosition(
+            at: currentIdx,
+            containers: cols,
+            gap: gaps,
+            sizeKeyPath: sizeKeyPath
+        )
         let sourceColRenderOffset = currentColumn.renderOffset(at: now)
-        let sourceTileOffset = computeTileOffset(column: currentColumn, tileIdx: sourceTileIdx, gaps: gaps)
+        let sourceTileOffset = computeTileOffset(
+            column: currentColumn,
+            tileIdx: sourceTileIdx,
+            gaps: gaps,
+            orientation: orientation
+        )
 
         let transfer = moveWindowToColumn(
             window,
@@ -639,17 +767,27 @@ extension NiriLayoutEngine {
 
         let newCols = columns(in: workspaceId)
         let targetColIdx = columnIndex(of: targetColumn, in: workspaceId) ?? transfer.targetColumnIndexAfterInsert
-        let targetColX = state.columnX(at: targetColIdx, columns: newCols, gap: gaps)
+        let targetPosition = state.containerPosition(
+            at: targetColIdx,
+            containers: newCols,
+            gap: gaps,
+            sizeKeyPath: sizeKeyPath
+        )
         let targetColRenderOffset = targetColumn.renderOffset()
         let targetTileOffset = computeTileOffset(
             column: targetColumn,
             tileIdx: transfer.insertedTileIndex,
-            gaps: gaps
+            gaps: gaps,
+            orientation: orientation
         )
 
-        let displacement = CGPoint(
-            x: sourceColX + sourceColRenderOffset.x - (targetColX + targetColRenderOffset.x),
-            y: sourceTileOffset - targetTileOffset
+        let displacement = transferDisplacement(
+            sourcePosition: sourcePosition,
+            sourceRenderOffset: sourceColRenderOffset,
+            targetPosition: targetPosition,
+            targetRenderOffset: targetColRenderOffset,
+            secondary: sourceTileOffset - targetTileOffset,
+            orientation: orientation
         )
         if displacement.x != 0 || displacement.y != 0 {
             window.animateMoveFrom(
@@ -682,7 +820,8 @@ extension NiriLayoutEngine {
         motion: MotionSnapshot,
         state: inout ViewportState,
         workingFrame: CGRect,
-        gaps: CGFloat
+        gaps: CGFloat,
+        orientation: Monitor.Orientation
     ) -> Bool {
         assertSanctionedMutation()
         let cols = columns(in: workspaceId)
@@ -705,15 +844,33 @@ extension NiriLayoutEngine {
             adding: window,
             in: workspaceId,
             workingFrame: workingFrame,
-            gaps: gaps
+            gaps: gaps,
+            orientation: orientation
         ) else {
             return false
         }
 
+        resolvePrimaryContainerSpans(
+            in: workspaceId,
+            workingFrame: workingFrame,
+            gaps: gaps,
+            orientation: orientation
+        )
+        let sizeKeyPath = primarySizeKeyPath(for: orientation)
         let now = animationClock?.now() ?? CACurrentMediaTime()
-        let sourceColX = state.columnX(at: sourceColumnIdx, columns: cols, gap: gaps)
+        let sourcePosition = state.containerPosition(
+            at: sourceColumnIdx,
+            containers: cols,
+            gap: gaps,
+            sizeKeyPath: sizeKeyPath
+        )
         let sourceColRenderOffset = sourceColumn.renderOffset(at: now)
-        let sourceTileOffset = computeTileOffset(column: sourceColumn, tileIdx: sourceTileIdx, gaps: gaps)
+        let sourceTileOffset = computeTileOffset(
+            column: sourceColumn,
+            tileIdx: sourceTileIdx,
+            gaps: gaps,
+            orientation: orientation
+        )
 
         let transfer = moveWindowToColumn(
             window,
@@ -729,24 +886,35 @@ extension NiriLayoutEngine {
                 in: workspaceId,
                 motion: motion,
                 state: &state,
-                gaps: gaps
+                gaps: gaps,
+                orientation: orientation
             )
             cleanupEmptyColumn(sourceColumn, in: workspaceId, state: &state)
         }
 
         let newCols = columns(in: workspaceId)
         let targetColIdx = columnIndex(of: targetColumn, in: workspaceId) ?? targetColumnIdx
-        let targetColX = state.columnX(at: targetColIdx, columns: newCols, gap: gaps)
+        let targetPosition = state.containerPosition(
+            at: targetColIdx,
+            containers: newCols,
+            gap: gaps,
+            sizeKeyPath: sizeKeyPath
+        )
         let targetColRenderOffset = targetColumn.renderOffset(at: now)
         let targetTileOffset = computeTileOffset(
             column: targetColumn,
             tileIdx: transfer.insertedTileIndex,
-            gaps: gaps
+            gaps: gaps,
+            orientation: orientation
         )
 
-        let displacement = CGPoint(
-            x: sourceColX + sourceColRenderOffset.x - (targetColX + targetColRenderOffset.x),
-            y: sourceTileOffset - targetTileOffset
+        let displacement = transferDisplacement(
+            sourcePosition: sourcePosition,
+            sourceRenderOffset: sourceColRenderOffset,
+            targetPosition: targetPosition,
+            targetRenderOffset: targetColRenderOffset,
+            secondary: sourceTileOffset - targetTileOffset,
+            orientation: orientation
         )
         if displacement.x != 0 || displacement.y != 0 {
             window.animateMoveFrom(
@@ -767,7 +935,8 @@ extension NiriLayoutEngine {
         motion: MotionSnapshot,
         state: inout ViewportState,
         workingFrame: CGRect,
-        gaps: CGFloat
+        gaps: CGFloat,
+        orientation: Monitor.Orientation
     ) -> Bool {
         assertSanctionedMutation()
         guard sourceColumn.windowNodes.count > 1,
@@ -778,17 +947,34 @@ extension NiriLayoutEngine {
             return false
         }
 
+        resolvePrimaryContainerSpans(
+            in: workspaceId,
+            workingFrame: workingFrame,
+            gaps: gaps,
+            orientation: orientation
+        )
+        let sizeKeyPath = primarySizeKeyPath(for: orientation)
         let now = animationClock?.now() ?? CACurrentMediaTime()
         let cols = columns(in: workspaceId)
         let sourceTileIdx = sourceColumn.windowNodes.firstIndex(where: { $0 === window }) ?? 0
-        let sourceColX = state.columnX(at: sourceColumnIdx, columns: cols, gap: gaps)
+        let sourcePosition = state.containerPosition(
+            at: sourceColumnIdx,
+            containers: cols,
+            gap: gaps,
+            sizeKeyPath: sizeKeyPath
+        )
         let sourceColRenderOffset = sourceColumn.renderOffset(at: now)
-        let sourceTileOffset = computeTileOffset(column: sourceColumn, tileIdx: sourceTileIdx, gaps: gaps)
+        let sourceTileOffset = computeTileOffset(
+            column: sourceColumn,
+            tileIdx: sourceTileIdx,
+            gaps: gaps,
+            orientation: orientation
+        )
         let replacementSelectionId = sourceColumn.windowNodes.dropFirst().first?.id
         let selectedExpelledWindow = state.selectedNodeId == window.id
 
         let newColumn = NiriContainer()
-        copyColumnWidthState(from: sourceColumn, to: newColumn)
+        copyContainerSizingState(from: sourceColumn, to: newColumn)
         root.insertAfter(newColumn, reference: sourceColumn)
 
         _ = moveWindowToColumn(
@@ -805,17 +991,27 @@ extension NiriLayoutEngine {
                 motion: motion,
                 state: state,
                 gaps: gaps,
-                workingAreaWidth: workingFrame.width
+                workingFrame: workingFrame,
+                orientation: orientation
             )
         }
 
         let newCols = columns(in: workspaceId)
         if let newColIdx = columnIndex(of: newColumn, in: workspaceId) {
-            let targetColX = state.columnX(at: newColIdx, columns: newCols, gap: gaps)
+            let targetPosition = state.containerPosition(
+                at: newColIdx,
+                containers: newCols,
+                gap: gaps,
+                sizeKeyPath: sizeKeyPath
+            )
             let targetColRenderOffset = newColumn.renderOffset(at: now)
-            let displacement = CGPoint(
-                x: sourceColX + sourceColRenderOffset.x - (targetColX + targetColRenderOffset.x),
-                y: sourceTileOffset
+            let displacement = transferDisplacement(
+                sourcePosition: sourcePosition,
+                sourceRenderOffset: sourceColRenderOffset,
+                targetPosition: targetPosition,
+                targetRenderOffset: targetColRenderOffset,
+                secondary: sourceTileOffset,
+                orientation: orientation
             )
 
             if displacement.x != 0 || displacement.y != 0 {
@@ -844,7 +1040,7 @@ extension NiriLayoutEngine {
         state: inout ViewportState,
         workingFrame: CGRect,
         gaps: CGFloat,
-        orientation: Monitor.Orientation = .horizontal
+        orientation: Monitor.Orientation
     ) -> Bool {
         guard direction == .left || direction == .right else { return false }
 
@@ -855,19 +1051,36 @@ extension NiriLayoutEngine {
             return false
         }
 
+        resolvePrimaryContainerSpans(
+            in: workspaceId,
+            workingFrame: workingFrame,
+            gaps: gaps,
+            orientation: orientation
+        )
+        let sizeKeyPath = primarySizeKeyPath(for: orientation)
         let now = animationClock?.now() ?? CACurrentMediaTime()
         let cols = columns(in: workspaceId)
 
         let sourceTileIdx = currentColumn.windowNodes.firstIndex(where: { $0 === window }) ?? 0
-        let sourceColX = state.columnX(at: currentColIdx, columns: cols, gap: gaps)
+        let sourcePosition = state.containerPosition(
+            at: currentColIdx,
+            containers: cols,
+            gap: gaps,
+            sizeKeyPath: sizeKeyPath
+        )
         let sourceColRenderOffset = currentColumn.renderOffset(at: now)
-        let sourceTileOffset = computeTileOffset(column: currentColumn, tileIdx: sourceTileIdx, gaps: gaps)
+        let sourceTileOffset = computeTileOffset(
+            column: currentColumn,
+            tileIdx: sourceTileIdx,
+            gaps: gaps,
+            orientation: orientation
+        )
 
         let wasTabbed = currentColumn.displayMode == .tabbed
         currentColumn.adjustActiveTileIdxForRemoval(of: window)
 
         let newColumn = NiriContainer()
-        copyColumnWidthState(from: currentColumn, to: newColumn)
+        copyContainerSizingState(from: currentColumn, to: newColumn)
 
         if direction == .right {
             root.insertAfter(newColumn, reference: currentColumn)
@@ -887,18 +1100,28 @@ extension NiriLayoutEngine {
                 motion: motion,
                 state: state,
                 gaps: gaps,
-                workingAreaWidth: workingFrame.width
+                workingFrame: workingFrame,
+                orientation: orientation
             )
         }
 
         let newCols = columns(in: workspaceId)
         if let newColIdx = columnIndex(of: newColumn, in: workspaceId) {
-            let targetColX = state.columnX(at: newColIdx, columns: newCols, gap: gaps)
+            let targetPosition = state.containerPosition(
+                at: newColIdx,
+                containers: newCols,
+                gap: gaps,
+                sizeKeyPath: sizeKeyPath
+            )
             let targetColRenderOffset = newColumn.renderOffset(at: now)
 
-            let displacement = CGPoint(
-                x: sourceColX + sourceColRenderOffset.x - (targetColX + targetColRenderOffset.x),
-                y: sourceTileOffset
+            let displacement = transferDisplacement(
+                sourcePosition: sourcePosition,
+                sourceRenderOffset: sourceColRenderOffset,
+                targetPosition: targetPosition,
+                targetRenderOffset: targetColRenderOffset,
+                secondary: sourceTileOffset,
+                orientation: orientation
             )
 
             if displacement.x != 0 || displacement.y != 0 {
@@ -939,6 +1162,7 @@ extension NiriLayoutEngine {
         state: inout ViewportState,
         workingFrame: CGRect,
         gaps: CGFloat,
+        orientation: Monitor.Orientation,
         animationConfig: SpringConfig? = nil,
         fromContainerIndex: Int? = nil
     ) {
@@ -950,6 +1174,7 @@ extension NiriLayoutEngine {
                 state: &state,
                 workingFrame: workingFrame,
                 gaps: gaps,
+                orientation: orientation,
                 animationConfig: animationConfig,
                 fromContainerIndex: fromContainerIndex
             )

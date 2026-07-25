@@ -188,6 +188,12 @@ final class NiriWorkspaceIsolationTests: XCTestCase {
         let node1InA = engine.addWindow(token: token1, to: workspaceA, afterSelection: nil)
         _ = engine.addWindow(token: token2, to: workspaceA, afterSelection: nil)
         let nodeInB = engine.addWindow(token: token1, to: workspaceB, afterSelection: nil)
+        let sourceColumn = engine.column(of: node1InA)
+        sourceColumn?.height = .fixed(720)
+        sourceColumn?.isFullHeight = true
+        sourceColumn?.savedHeight = .proportion(0.6)
+        sourceColumn?.hasManualSingleWindowHeightOverride = true
+        node1InA.windowWidth = .fixed(420)
         let placements = engine.persistedPlacements(in: workspaceA)
 
         XCTAssertTrue(engine.restoreInitialPlacements(placements, matching: [token1, token2], in: workspaceC))
@@ -195,9 +201,15 @@ final class NiriWorkspaceIsolationTests: XCTestCase {
         XCTAssertTrue(engine.findNode(for: token1, in: workspaceA) === node1InA)
         XCTAssertTrue(engine.findNode(for: token1, in: workspaceB) === nodeInB)
         let nodeInC = engine.findNode(for: token1, in: workspaceC)
+        let restoredColumn = nodeInC.flatMap { engine.column(of: $0) }
         XCTAssertNotNil(nodeInC)
         XCTAssertFalse(nodeInC === node1InA)
         XCTAssertNotNil(engine.findNode(for: token2, in: workspaceC))
+        XCTAssertEqual(restoredColumn?.height, .fixed(720))
+        XCTAssertEqual(restoredColumn?.isFullHeight, true)
+        XCTAssertEqual(restoredColumn?.savedHeight, .proportion(0.6))
+        XCTAssertEqual(restoredColumn?.hasManualSingleWindowHeightOverride, true)
+        XCTAssertEqual(nodeInC?.windowWidth, .fixed(420))
         assertIndexMatchesTree(engine, in: workspaceA)
         assertIndexMatchesTree(engine, in: workspaceB)
         assertIndexMatchesTree(engine, in: workspaceC)
@@ -360,6 +372,7 @@ extension NiriWorkspaceIsolationTests {
             motion: .disabled,
             workingFrame: workingFrame,
             gaps: 0,
+            orientation: .horizontal,
             selectedNodeId: nil,
             removedNodeIds: []
         )

@@ -8,7 +8,7 @@ struct SingleWindowFit: Equatable {
     enum Mode: String, CaseIterable, Identifiable, Equatable {
         case fill
         case custom
-        case columnWidth
+        case containerPrimarySpan
 
         var id: String {
             rawValue
@@ -18,7 +18,7 @@ struct SingleWindowFit: Equatable {
             switch self {
             case .fill: "Full Screen"
             case .custom: "Custom (W:H)"
-            case .columnWidth: "Column Width"
+            case .containerPrimarySpan: "Container Primary Span"
             }
         }
     }
@@ -42,7 +42,7 @@ struct SingleWindowFit: Equatable {
     static let fullScreen = SingleWindowFit(mode: .fill)
 
     static let dwindleModes: [Mode] = [.fill, .custom]
-    static let niriModes: [Mode] = [.fill, .custom, .columnWidth]
+    static let niriModes: [Mode] = [.fill, .custom, .containerPrimarySpan]
 
     var hasValidCustomSize: Bool {
         width > 0 && height > 0 && width.isFinite && height.isFinite
@@ -51,7 +51,7 @@ struct SingleWindowFit: Equatable {
     func frame(in workingFrame: CGRect) -> CGRect {
         switch mode {
         case .fill,
-             .columnWidth:
+             .containerPrimarySpan:
             return workingFrame
         case .custom:
             guard hasValidCustomSize else { return workingFrame }
@@ -71,7 +71,7 @@ extension SingleWindowFit {
     var serialized: String {
         switch mode {
         case .fill: "fill"
-        case .columnWidth: "column_width"
+        case .containerPrimarySpan: "container_primary_span"
         case .custom: "\(Self.format(width))x\(Self.format(height))"
         }
     }
@@ -82,10 +82,8 @@ extension SingleWindowFit {
         case "fill",
              "":
             self = .fullScreen
-        case "column_width",
-             "column-width",
-             "columnwidth":
-            self = SingleWindowFit(mode: .columnWidth)
+        case "container_primary_span":
+            self = SingleWindowFit(mode: .containerPrimarySpan)
         default:
             if token.contains("x"), let fit = Self.parseCustom(token) {
                 self = fit

@@ -27,14 +27,14 @@
       "source": "userRule(22222222-2222-2222-2222-222222222222)",
       "heuristicReasons": [],
       "layoutDecisionKind": "fallbackLayout",
-      "initialNiriColumnWidth": 0.75
+      "initialNiriContainerPrimarySpan": 0.75
     }
   },
   "rules": [
     {
       "id": "22222222-2222-2222-2222-222222222222",
       "bundleId": "com.example.wide",
-      "initialColumnWidth": 0.75
+      "initialContainerPrimarySpan": 0.75
     }
   ],
   "expectedDecision": {
@@ -42,6 +42,6 @@
     "source": "userRule(22222222-2222-2222-2222-222222222222)",
     "heuristicReasons": [],
     "layoutDecisionKind": "fallbackLayout",
-    "initialNiriColumnWidth": 0.75
+    "initialNiriContainerPrimarySpan": 0.75
   }
 }

@@ -131,6 +131,7 @@ final class NiriRemovalViewportTests: XCTestCase {
             motion: .disabled,
             workingFrame: fixture.workingFrame,
             gaps: fixture.gap,
+            orientation: fixture.orientation,
             selectedNodeId: fixture.state.selectedNodeId,
             removedNodeIds: []
         )
@@ -304,7 +305,8 @@ final class NiriRemovalViewportTests: XCTestCase {
                 motion: .disabled,
                 state: &fixture.state,
                 workingFrame: fixture.workingFrame,
-                gaps: fixture.gap
+                gaps: fixture.gap,
+                orientation: fixture.orientation
             )
         )
         for column in fixture.engine.columns(in: fixture.workspaceId) {

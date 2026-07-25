@@ -684,77 +684,75 @@ public enum IPCAutomationManifest {
             layoutCompatibility: .niri
         ),
         command(
-            ["cycle-column-width", "forward"],
-            name: .cycleColumnWidthForward,
-            summary: "Cycle Niri column width presets forward.",
+            ["cycle-size", "forward"],
+            name: .cycleSizeForward,
+            summary: "Cycle layout sizing presets forward."
+        ),
+        command(
+            ["cycle-size", "backward"],
+            name: .cycleSizeBackward,
+            summary: "Cycle layout sizing presets backward."
+        ),
+        command(
+            ["cycle-window-primary-span", "forward"],
+            name: .cycleWindowPrimarySpanForward,
+            summary: "Cycle Niri window primary-span presets forward.",
             layoutCompatibility: .niri
         ),
         command(
-            ["cycle-column-width", "backward"],
-            name: .cycleColumnWidthBackward,
-            summary: "Cycle Niri column width presets backward.",
+            ["cycle-window-primary-span", "backward"],
+            name: .cycleWindowPrimarySpanBackward,
+            summary: "Cycle Niri window primary-span presets backward.",
             layoutCompatibility: .niri
         ),
         command(
-            ["cycle-window-width", "forward"],
-            name: .cycleWindowWidthForward,
-            summary: "Cycle Niri window width presets forward.",
+            ["cycle-window-secondary-span", "forward"],
+            name: .cycleWindowSecondarySpanForward,
+            summary: "Cycle Niri window secondary-span presets forward.",
             layoutCompatibility: .niri
         ),
         command(
-            ["cycle-window-width", "backward"],
-            name: .cycleWindowWidthBackward,
-            summary: "Cycle Niri window width presets backward.",
+            ["cycle-window-secondary-span", "backward"],
+            name: .cycleWindowSecondarySpanBackward,
+            summary: "Cycle Niri window secondary-span presets backward.",
             layoutCompatibility: .niri
         ),
         command(
-            ["cycle-window-height", "forward"],
-            name: .cycleWindowHeightForward,
-            summary: "Cycle Niri window height presets forward.",
+            ["toggle-container-full-primary-span"],
+            name: .toggleContainerFullPrimarySpan,
+            summary: "Toggle full-primary-span mode for the focused Niri container.",
             layoutCompatibility: .niri
         ),
         command(
-            ["cycle-window-height", "backward"],
-            name: .cycleWindowHeightBackward,
-            summary: "Cycle Niri window height presets backward.",
+            ["expand-container-to-available-primary-span"],
+            name: .expandContainerToAvailablePrimarySpan,
+            summary: "Expand the focused Niri container into available primary-axis space.",
             layoutCompatibility: .niri
         ),
         command(
-            ["toggle-column-full-width"],
-            name: .toggleColumnFullWidth,
-            summary: "Toggle full-width mode for the focused Niri column.",
+            ["reset-window-secondary-span"],
+            name: .resetWindowSecondarySpan,
+            summary: "Reset the focused Niri window secondary span.",
             layoutCompatibility: .niri
         ),
         command(
-            ["expand-column-to-available-width"],
-            name: .expandColumnToAvailableWidth,
-            summary: "Expand the focused Niri column into available visible space.",
-            layoutCompatibility: .niri
-        ),
-        command(
-            ["reset-window-height"],
-            name: .resetWindowHeight,
-            summary: "Reset the focused Niri window height.",
-            layoutCompatibility: .niri
-        ),
-        command(
-            ["set-column-width"],
-            name: .setColumnWidth,
-            summary: "Set or adjust the focused Niri column width.",
+            ["set-container-primary-span"],
+            name: .setContainerPrimarySpan,
+            summary: "Set or adjust the focused Niri container primary span.",
             arguments: [sizeChangeArgument],
             layoutCompatibility: .niri
         ),
         command(
-            ["set-window-width"],
-            name: .setWindowWidth,
-            summary: "Set or adjust the focused Niri window width.",
+            ["set-window-primary-span"],
+            name: .setWindowPrimarySpan,
+            summary: "Set or adjust the focused Niri window primary span.",
             arguments: [sizeChangeArgument],
             layoutCompatibility: .niri
         ),
         command(
-            ["set-window-height"],
-            name: .setWindowHeight,
-            summary: "Set or adjust the focused Niri window height.",
+            ["set-window-secondary-span"],
+            name: .setWindowSecondarySpan,
+            summary: "Set or adjust the focused Niri window secondary span.",
             arguments: [sizeChangeArgument],
             layoutCompatibility: .niri
         ),
@@ -937,8 +935,8 @@ public enum IPCAutomationManifest {
             valuePlaceholder: "<name>"
         ),
         .init(
-            flag: "--initial-column-width",
-            summary: "Set the initial Niri column width proportion for resizable windows (0.05 through 1.0).",
+            flag: "--initial-container-primary-span",
+            summary: "Set the initial Niri container primary-span proportion for resizable windows (0.05 through 1.0).",
             valuePlaceholder: "<proportion>"
         ),
         .init(

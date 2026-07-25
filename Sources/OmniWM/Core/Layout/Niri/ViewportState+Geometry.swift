@@ -106,7 +106,7 @@ extension ViewportState {
         viewportSpan: CGFloat,
         workingArea: CGRect? = nil,
         viewFrame: CGRect? = nil,
-        orientation: Monitor.Orientation = .horizontal,
+        orientation: Monitor.Orientation,
         scale: CGFloat = 2.0
     ) -> ViewportFittingAreas {
         let crossSpan: CGFloat = switch orientation {
@@ -175,7 +175,7 @@ extension ViewportState {
         sizeKeyPath: KeyPath<NiriContainer, CGFloat>,
         workingArea: CGRect? = nil,
         viewFrame: CGRect? = nil,
-        orientation: Monitor.Orientation = .horizontal,
+        orientation: Monitor.Orientation,
         scale: CGFloat = 2.0
     ) -> CGFloat {
         guard !containers.isEmpty, containerIndex >= 0, containerIndex < containers.count else { return 0 }
@@ -316,7 +316,7 @@ extension ViewportState {
         scale: CGFloat = 2.0,
         workingArea: CGRect? = nil,
         viewFrame: CGRect? = nil,
-        orientation: Monitor.Orientation = .horizontal
+        orientation: Monitor.Orientation
     ) -> CGFloat {
         guard !containers.isEmpty, containerIndex >= 0, containerIndex < containers.count else { return 0 }
 

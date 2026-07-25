@@ -47,7 +47,8 @@ final class NiriColumnTransferFeasibilityTests: XCTestCase {
             motion: .disabled,
             state: &fixture.state,
             workingFrame: workingFrame,
-            gaps: gaps
+            gaps: gaps,
+            orientation: .horizontal
         )
     }
 
@@ -97,7 +98,8 @@ final class NiriColumnTransferFeasibilityTests: XCTestCase {
             motion: .disabled,
             state: &fixture.state,
             workingFrame: workingFrame,
-            gaps: gaps
+            gaps: gaps,
+            orientation: .horizontal
         )
 
         XCTAssertFalse(consumed)
@@ -116,7 +118,8 @@ final class NiriColumnTransferFeasibilityTests: XCTestCase {
             motion: .disabled,
             state: &fixture.state,
             workingFrame: workingFrame,
-            gaps: gaps
+            gaps: gaps,
+            orientation: .horizontal
         )
 
         XCTAssertFalse(inserted)
@@ -135,7 +138,8 @@ final class NiriColumnTransferFeasibilityTests: XCTestCase {
             motion: .disabled,
             state: &fixture.state,
             workingFrame: workingFrame,
-            gaps: gaps
+            gaps: gaps,
+            orientation: .horizontal
         )
 
         XCTAssertFalse(swapped)
@@ -154,7 +158,8 @@ final class NiriColumnTransferFeasibilityTests: XCTestCase {
             motion: .disabled,
             state: &fixture.state,
             workingFrame: workingFrame,
-            gaps: gaps
+            gaps: gaps,
+            orientation: .horizontal
         )
 
         XCTAssertTrue(swapped)
@@ -201,7 +206,8 @@ final class NiriColumnTransferFeasibilityTests: XCTestCase {
                 adding: windows[1],
                 in: workspaceId,
                 workingFrame: frame,
-                gaps: gaps
+                gaps: gaps,
+                orientation: .vertical
             )
         )
         XCTAssertTrue(
@@ -210,7 +216,8 @@ final class NiriColumnTransferFeasibilityTests: XCTestCase {
                 adding: windows[1],
                 in: workspaceId,
                 workingFrame: CGRect(x: 0, y: 0, width: 1000, height: 1200),
-                gaps: gaps
+                gaps: gaps,
+                orientation: .vertical
             )
         )
     }

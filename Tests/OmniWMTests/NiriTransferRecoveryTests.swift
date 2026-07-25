@@ -214,7 +214,7 @@ final class NiriTransferRecoveryTests: XCTestCase {
         assertIndexMatchesTree(engine, in: targetWorkspace)
     }
 
-    func testNewColumnWidthPolicySelectsWorkspaceDefaultOrSourceState() throws {
+    func testNewContainerSizingPolicySelectsWorkspaceDefaultOrSourceState() throws {
         let defaultFixture = try makeStackedColumnFixture(pid: 950)
         defaultFixture.column.width = .proportion(2.0 / 3.0)
         defaultFixture.column.presetWidthIdx = 2
@@ -230,7 +230,8 @@ final class NiriTransferRecoveryTests: XCTestCase {
                 state: &defaultState,
                 workingFrame: workingFrame,
                 gaps: 0,
-                widthPolicy: .workspaceDefault
+                orientation: .horizontal,
+                sizingPolicy: .workspaceDefault
             )
         )
 
@@ -256,7 +257,8 @@ final class NiriTransferRecoveryTests: XCTestCase {
                 state: &inheritedState,
                 workingFrame: workingFrame,
                 gaps: 0,
-                widthPolicy: .inheritSource
+                orientation: .horizontal,
+                sizingPolicy: .inheritSource
             )
         )
 
@@ -286,7 +288,8 @@ final class NiriTransferRecoveryTests: XCTestCase {
             from: fixture.sourceWorkspace,
             to: fixture.targetWorkspace,
             sourceState: &sourceState,
-            targetState: &targetState
+            targetState: &targetState,
+            targetOrientation: .horizontal
         )
 
         XCTAssertNotNil(result)
@@ -372,7 +375,8 @@ final class NiriTransferRecoveryTests: XCTestCase {
                 motion: .disabled,
                 state: &state,
                 workingFrame: workingFrame,
-                gaps: 0
+                gaps: 0,
+                orientation: .horizontal
             )
         )
         let staleSharedNode = engine.addWindow(token: sharedToken, to: targetWorkspace, afterSelection: nil)
@@ -422,7 +426,8 @@ final class NiriTransferRecoveryTests: XCTestCase {
                 motion: .disabled,
                 state: &state,
                 workingFrame: workingFrame,
-                gaps: 0
+                gaps: 0,
+                orientation: .horizontal
             )
         )
         return (engine, workspaceId, first, second, column)
@@ -498,6 +503,7 @@ final class NiriTransferRecoveryTests: XCTestCase {
             motion: .disabled,
             workingFrame: workingFrame,
             gaps: 0,
+            orientation: .horizontal,
             selectedNodeId: state.selectedNodeId,
             removedNodeIds: []
         )

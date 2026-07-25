@@ -14,14 +14,17 @@ final class SingleWindowFitTests: XCTestCase {
 
     func testSerializedRoundTrips() {
         XCTAssertEqual(SingleWindowFit(mode: .fill).serialized, "fill")
-        XCTAssertEqual(SingleWindowFit(mode: .columnWidth).serialized, "column_width")
+        XCTAssertEqual(SingleWindowFit(mode: .containerPrimarySpan).serialized, "container_primary_span")
         XCTAssertEqual(SingleWindowFit(mode: .custom, width: 1920, height: 1080).serialized, "1920x1080")
         XCTAssertEqual(SingleWindowFit(mode: .custom, width: 1600, height: 900).serialized, "1600x900")
     }
 
     func testDecodeNewFormats() {
         XCTAssertEqual(SingleWindowFit(serialized: "fill"), SingleWindowFit(mode: .fill))
-        XCTAssertEqual(SingleWindowFit(serialized: "column_width"), SingleWindowFit(mode: .columnWidth))
+        XCTAssertEqual(
+            SingleWindowFit(serialized: "container_primary_span"),
+            SingleWindowFit(mode: .containerPrimarySpan)
+        )
         XCTAssertEqual(
             SingleWindowFit(serialized: "1920x1080"),
             SingleWindowFit(mode: .custom, width: 1920, height: 1080)
@@ -38,12 +41,15 @@ final class SingleWindowFitTests: XCTestCase {
         XCTAssertEqual(SingleWindowFit(serialized: "0x0").mode, .fill)
         XCTAssertEqual(SingleWindowFit(serialized: "-5x100").mode, .fill)
         XCTAssertEqual(SingleWindowFit(serialized: "ax9").mode, .fill)
+        XCTAssertEqual(SingleWindowFit(serialized: "column_width").mode, .fill)
+        XCTAssertEqual(SingleWindowFit(serialized: "column-width").mode, .fill)
+        XCTAssertEqual(SingleWindowFit(serialized: "columnwidth").mode, .fill)
     }
 
     func testFrameFillReturnsWorkingFrame() {
         let working = CGRect(x: 100, y: 50, width: 2000, height: 1200)
         XCTAssertEqual(SingleWindowFit(mode: .fill).frame(in: working), working)
-        XCTAssertEqual(SingleWindowFit(mode: .columnWidth).frame(in: working), working)
+        XCTAssertEqual(SingleWindowFit(mode: .containerPrimarySpan).frame(in: working), working)
     }
 
     func testFrameCustomCentersWhenSmaller() {
@@ -62,6 +68,72 @@ final class SingleWindowFitTests: XCTestCase {
         let working = CGRect(x: 0, y: 0, width: 1440, height: 900)
         XCTAssertEqual(SingleWindowFit(mode: .custom, width: 0, height: 1080).frame(in: working), working)
         XCTAssertEqual(SingleWindowFit(mode: .custom, width: 1920, height: -1).frame(in: working), working)
+    }
+
+    func testSettingsTOMLRoundTripsSingleWindowFitKeys() throws {
+        var export = SettingsExport.defaults()
+        export.niriSingleWindowFit = SingleWindowFit(mode: .containerPrimarySpan).serialized
+        export.dwindleSingleWindowFit = SingleWindowFit(mode: .custom, width: 1280, height: 720).serialized
+        export.monitorNiriSettings = [
+            MonitorNiriSettings(
+                monitorName: "Portrait",
+                singleWindowFit: SingleWindowFit(mode: .containerPrimarySpan)
+            )
+        ]
+        export.monitorDwindleSettings = [
+            MonitorDwindleSettings(
+                monitorName: "Landscape",
+                singleWindowFit: SingleWindowFit(mode: .custom, width: 1024, height: 768)
+            )
+        ]
+
+        let data = try SettingsTOMLCodec.encode(export)
+        let toml = String(decoding: data, as: UTF8.self)
+        let decoded = try SettingsTOMLCodec.decode(data)
+
+        XCTAssertTrue(toml.contains("singleWindowFit"))
+        XCTAssertFalse(toml.contains("singleWindowAspectRatio"))
+        XCTAssertEqual(decoded.niriSingleWindowFit, "container_primary_span")
+        XCTAssertEqual(decoded.dwindleSingleWindowFit, "1280x720")
+        XCTAssertEqual(decoded.monitorNiriSettings.first?.singleWindowFit?.serialized, "container_primary_span")
+        XCTAssertEqual(decoded.monitorDwindleSettings.first?.singleWindowFit?.serialized, "1024x768")
+    }
+
+    func testLegacySingleWindowAspectRatioKeysAreIgnoredAndDiagnosed() throws {
+        var export = SettingsExport.defaults()
+        export.niriSingleWindowFit = SingleWindowFit(mode: .containerPrimarySpan).serialized
+        export.dwindleSingleWindowFit = SingleWindowFit(mode: .custom, width: 1280, height: 720).serialized
+        export.monitorNiriSettings = [
+            MonitorNiriSettings(
+                monitorName: "Portrait",
+                singleWindowFit: SingleWindowFit(mode: .containerPrimarySpan)
+            )
+        ]
+        export.monitorDwindleSettings = [
+            MonitorDwindleSettings(
+                monitorName: "Landscape",
+                singleWindowFit: SingleWindowFit(mode: .custom, width: 1024, height: 768)
+            )
+        ]
+
+        let canonical = String(decoding: try SettingsTOMLCodec.encode(export), as: UTF8.self)
+        let legacy = Data(
+            canonical.replacingOccurrences(
+                of: "singleWindowFit",
+                with: "singleWindowAspectRatio"
+            ).utf8
+        )
+        let decoded = try SettingsTOMLCodec.decode(legacy)
+        let unknownKeys = Set(SettingsTOMLCodec.unknownKeyPaths(in: legacy))
+
+        XCTAssertEqual(decoded.niriSingleWindowFit, SingleWindowFit.fullScreen.serialized)
+        XCTAssertEqual(decoded.dwindleSingleWindowFit, SingleWindowFit.fullScreen.serialized)
+        XCTAssertNil(decoded.monitorNiriSettings.first?.singleWindowFit)
+        XCTAssertNil(decoded.monitorDwindleSettings.first?.singleWindowFit)
+        XCTAssertTrue(unknownKeys.contains("niri.singleWindowAspectRatio"))
+        XCTAssertTrue(unknownKeys.contains("dwindle.singleWindowAspectRatio"))
+        XCTAssertTrue(unknownKeys.contains("monitorNiriOverrides[0].singleWindowAspectRatio"))
+        XCTAssertTrue(unknownKeys.contains("monitorDwindleOverrides[0].singleWindowAspectRatio"))
     }
 }
 
@@ -197,7 +269,8 @@ final class NiriSingleWindowFitEngineTests: XCTestCase {
             workspaceId: fixture.workspaceId,
             monitorFrame: workingFrame,
             gaps: (horizontal: 12, vertical: 12),
-            workingArea: area
+            workingArea: area,
+            orientation: .horizontal
         )[fixture.token]
 
         XCTAssertEqual(frame, fullscreenFrame)
@@ -221,7 +294,8 @@ final class NiriSingleWindowFitEngineTests: XCTestCase {
             workspaceId: fixture.workspaceId,
             monitorFrame: workingFrame,
             gaps: (horizontal: 12, vertical: 12),
-            workingArea: area
+            workingArea: area,
+            orientation: .horizontal
         )[fixture.token]
 
         XCTAssertEqual(frame, fullscreenFrame)
@@ -244,7 +318,8 @@ final class NiriSingleWindowFitEngineTests: XCTestCase {
             workspaceId: fixture.workspaceId,
             monitorFrame: workingFrame,
             gaps: (horizontal: 12, vertical: 12),
-            workingArea: area
+            workingArea: area,
+            orientation: .horizontal
         )[fixture.token]
 
         XCTAssertEqual(frame, CGRect(x: 224, y: 96, width: 800, height: 600))
@@ -270,7 +345,8 @@ final class NiriSingleWindowFitEngineTests: XCTestCase {
             workspaceId: fixture.workspaceId,
             monitorFrame: workingFrame,
             gaps: (horizontal: 12, vertical: 12),
-            workingArea: area
+            workingArea: area,
+            orientation: .horizontal
         )[fixture.token]
 
         XCTAssertEqual(frame, CGRect(x: 274, y: 16, width: 700, height: 760))
@@ -348,7 +424,8 @@ final class NiriSingleWindowMinimumSizeTests: XCTestCase {
             workspaceId: fixture.workspaceId,
             monitorFrame: workingFrame,
             gaps: (horizontal: 12, vertical: 12),
-            workingArea: area
+            workingArea: area,
+            orientation: .horizontal
         )[fixture.token]
     }
 

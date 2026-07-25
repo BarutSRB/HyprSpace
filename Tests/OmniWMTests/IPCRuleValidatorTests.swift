@@ -93,39 +93,39 @@ final class IPCRuleValidatorTests: XCTestCase {
         XCTAssertTrue(report.isValid)
     }
 
-    func testInitialColumnWidthInclusiveBoundsAccepted() {
+    func testInitialContainerPrimarySpanInclusiveBoundsAccepted() {
         for value in [0.05, 0.5, 1.0] {
             let report = IPCRuleValidator.validate(
-                IPCRuleDefinition(bundleId: "com.test.app", initialColumnWidth: value)
+                IPCRuleDefinition(bundleId: "com.test.app", initialContainerPrimarySpan: value)
             )
-            XCTAssertNil(report.initialColumnWidthError)
+            XCTAssertNil(report.initialContainerPrimarySpanError)
             XCTAssertNil(report.effectError)
             XCTAssertTrue(report.isValid)
         }
     }
 
-    func testInvalidInitialColumnWidthRejectedWithoutCountingAsEffect() {
+    func testInvalidInitialContainerPrimarySpanRejectedWithoutCountingAsEffect() {
         for value in [0.049, 1.001, .nan, .infinity, -.infinity] {
             let report = IPCRuleValidator.validate(
-                IPCRuleDefinition(bundleId: "com.test.app", initialColumnWidth: value)
+                IPCRuleDefinition(bundleId: "com.test.app", initialContainerPrimarySpan: value)
             )
-            XCTAssertNotNil(report.initialColumnWidthError)
+            XCTAssertNotNil(report.initialContainerPrimarySpanError)
             XCTAssertNotNil(report.effectError)
             XCTAssertFalse(report.isValid)
         }
     }
 
-    func testInvalidInitialColumnWidthDoesNotHideAnotherEffect() {
+    func testInvalidInitialContainerPrimarySpanDoesNotHideAnotherEffect() {
         let report = IPCRuleValidator.validate(
-            IPCRuleDefinition(bundleId: "com.test.app", layout: .float, initialColumnWidth: 1.001)
+            IPCRuleDefinition(bundleId: "com.test.app", layout: .float, initialContainerPrimarySpan: 1.001)
         )
-        XCTAssertNotNil(report.initialColumnWidthError)
+        XCTAssertNotNil(report.initialContainerPrimarySpanError)
         XCTAssertNil(report.effectError)
         XCTAssertFalse(report.isValid)
     }
 
-    func testInitialColumnWidthIPCModelsRoundTrip() throws {
-        let definition = IPCRuleDefinition(bundleId: "com.test.app", initialColumnWidth: 0.5)
+    func testInitialContainerPrimarySpanIPCModelsRoundTrip() throws {
+        let definition = IPCRuleDefinition(bundleId: "com.test.app", initialContainerPrimarySpan: 0.5)
         let definitionData = try JSONEncoder().encode(definition)
         XCTAssertEqual(try JSONDecoder().decode(IPCRuleDefinition.self, from: definitionData), definition)
 
@@ -134,7 +134,7 @@ final class IPCRuleValidatorTests: XCTestCase {
             position: 1,
             bundleId: "com.test.app",
             layout: .auto,
-            initialColumnWidth: 0.5,
+            initialContainerPrimarySpan: 0.5,
             specificity: 2,
             isValid: true
         )
@@ -142,13 +142,28 @@ final class IPCRuleValidatorTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(IPCRuleSnapshot.self, from: snapshotData), snapshot)
     }
 
-    func testInitialColumnWidthManifestOption() throws {
+    func testInitialContainerPrimarySpanManifestOption() throws {
         let descriptor = try XCTUnwrap(
             IPCAutomationManifest.ruleDefinitionOptionDescriptors.first {
-                $0.flag == "--initial-column-width"
+                $0.flag == "--initial-container-primary-span"
             }
         )
         XCTAssertEqual(descriptor.valuePlaceholder, "<proportion>")
+        XCTAssertFalse(
+            IPCAutomationManifest.ruleDefinitionOptionDescriptors.contains {
+                $0.flag == "--initial-column-width"
+            }
+        )
+    }
+
+    func testLegacyInitialColumnWidthWireFieldDoesNotAliasPrimarySpan() throws {
+        let data = Data(
+            #"{"bundleId":"com.test.app","layout":"float","initialColumnWidth":0.5}"#.utf8
+        )
+
+        let decoded = try JSONDecoder().decode(IPCRuleDefinition.self, from: data)
+
+        XCTAssertNil(decoded.initialContainerPrimarySpan)
     }
 
     func testMessagesAggregateAllErrors() {

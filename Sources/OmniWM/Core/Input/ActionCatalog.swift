@@ -560,114 +560,114 @@ enum ActionCatalog {
 
         specs.append(contentsOf: [
             action(
-                id: "cycleColumnWidthForward",
-                command: .cycleColumnWidthForward,
-                category: .column,
+                id: "cycleSizeForward",
+                command: .cycleSizeForward,
+                category: .layout,
                 binding: KeyBinding(keyCode: UInt32(kVK_ANSI_Period), modifiers: UInt32(optionKey)),
                 visibility: .advanced
             ),
             action(
-                id: "cycleColumnWidthBackward",
-                command: .cycleColumnWidthBackward,
-                category: .column,
+                id: "cycleSizeBackward",
+                command: .cycleSizeBackward,
+                category: .layout,
                 binding: KeyBinding(keyCode: UInt32(kVK_ANSI_Comma), modifiers: UInt32(optionKey)),
                 visibility: .advanced
             ),
             action(
-                id: "cycleWindowWidthForward",
-                command: .cycleWindowWidthForward,
+                id: "cycleWindowPrimarySpanForward",
+                command: .cycleWindowPrimarySpanForward,
                 category: .column,
                 binding: .unassigned,
                 visibility: .advanced
             ),
             action(
-                id: "cycleWindowWidthBackward",
-                command: .cycleWindowWidthBackward,
+                id: "cycleWindowPrimarySpanBackward",
+                command: .cycleWindowPrimarySpanBackward,
                 category: .column,
                 binding: .unassigned,
                 visibility: .advanced
             ),
             action(
-                id: "cycleWindowHeightForward",
-                command: .cycleWindowHeightForward,
+                id: "cycleWindowSecondarySpanForward",
+                command: .cycleWindowSecondarySpanForward,
                 category: .column,
                 binding: .unassigned,
                 visibility: .advanced
             ),
             action(
-                id: "cycleWindowHeightBackward",
-                command: .cycleWindowHeightBackward,
+                id: "cycleWindowSecondarySpanBackward",
+                command: .cycleWindowSecondarySpanBackward,
                 category: .column,
                 binding: .unassigned,
                 visibility: .advanced
             ),
             action(
-                id: "toggleColumnFullWidth",
-                command: .toggleColumnFullWidth,
+                id: "toggleContainerFullPrimarySpan",
+                command: .toggleContainerFullPrimarySpan,
                 category: .column,
                 binding: KeyBinding(keyCode: UInt32(kVK_ANSI_F), modifiers: UInt32(optionKey | shiftKey))
             ),
             action(
-                id: "expandColumnToAvailableWidth",
-                command: .expandColumnToAvailableWidth,
+                id: "expandContainerToAvailablePrimarySpan",
+                command: .expandContainerToAvailablePrimarySpan,
                 category: .column,
                 binding: KeyBinding(keyCode: UInt32(kVK_ANSI_F), modifiers: UInt32(optionKey | controlKey)),
                 visibility: .advanced
             ),
             action(
-                id: "resetWindowHeight",
-                command: .resetWindowHeight,
+                id: "resetWindowSecondarySpan",
+                command: .resetWindowSecondarySpan,
                 category: .column,
                 binding: KeyBinding(keyCode: UInt32(kVK_ANSI_R), modifiers: UInt32(optionKey | controlKey)),
                 visibility: .advanced
             ),
             action(
-                id: "setColumnWidth.decrease10Percent",
-                command: .setColumnWidth(.adjustProportion(-10)),
+                id: "setContainerPrimarySpan.decrease10Percent",
+                command: .setContainerPrimarySpan(.adjustProportion(-10)),
                 category: .column,
                 binding: KeyBinding(keyCode: UInt32(kVK_ANSI_Minus), modifiers: UInt32(optionKey)),
                 visibility: .advanced,
-                keywords: ["shrink column", "resize column"]
+                keywords: ["shrink container", "resize primary span"]
             ),
             action(
-                id: "setColumnWidth.increase10Percent",
-                command: .setColumnWidth(.adjustProportion(10)),
+                id: "setContainerPrimarySpan.increase10Percent",
+                command: .setContainerPrimarySpan(.adjustProportion(10)),
                 category: .column,
                 binding: KeyBinding(keyCode: UInt32(kVK_ANSI_Equal), modifiers: UInt32(optionKey)),
                 visibility: .advanced,
-                keywords: ["grow column", "resize column"]
+                keywords: ["grow container", "resize primary span"]
             ),
             action(
-                id: "setWindowWidth.decrease10Percent",
-                command: .setWindowWidth(.adjustProportion(-10)),
+                id: "setWindowPrimarySpan.decrease10Percent",
+                command: .setWindowPrimarySpan(.adjustProportion(-10)),
                 category: .column,
                 binding: .unassigned,
                 visibility: .advanced,
-                keywords: ["shrink window", "resize window"]
+                keywords: ["shrink window", "resize primary span"]
             ),
             action(
-                id: "setWindowWidth.increase10Percent",
-                command: .setWindowWidth(.adjustProportion(10)),
+                id: "setWindowPrimarySpan.increase10Percent",
+                command: .setWindowPrimarySpan(.adjustProportion(10)),
                 category: .column,
                 binding: .unassigned,
                 visibility: .advanced,
-                keywords: ["grow window", "resize window"]
+                keywords: ["grow window", "resize primary span"]
             ),
             action(
-                id: "setWindowHeight.decrease10Percent",
-                command: .setWindowHeight(.adjustProportion(-10)),
+                id: "setWindowSecondarySpan.decrease10Percent",
+                command: .setWindowSecondarySpan(.adjustProportion(-10)),
                 category: .column,
                 binding: KeyBinding(keyCode: UInt32(kVK_ANSI_Minus), modifiers: UInt32(optionKey | shiftKey)),
                 visibility: .advanced,
-                keywords: ["shorter window", "resize window"]
+                keywords: ["shrink window", "resize secondary span"]
             ),
             action(
-                id: "setWindowHeight.increase10Percent",
-                command: .setWindowHeight(.adjustProportion(10)),
+                id: "setWindowSecondarySpan.increase10Percent",
+                command: .setWindowSecondarySpan(.adjustProportion(10)),
                 category: .column,
                 binding: KeyBinding(keyCode: UInt32(kVK_ANSI_Equal), modifiers: UInt32(optionKey | shiftKey)),
                 visibility: .advanced,
-                keywords: ["taller window", "resize window"]
+                keywords: ["grow window", "resize secondary span"]
             ),
             action(
                 id: "balanceSizes",
@@ -942,17 +942,17 @@ enum ActionCatalog {
              .moveColumnToWorkspace,
              .moveColumnToWorkspaceUp,
              .moveColumnToWorkspaceDown,
-             .toggleColumnFullWidth,
+             .toggleContainerFullPrimarySpan,
              .toggleColumnTabbed,
-             .cycleWindowWidthForward,
-             .cycleWindowWidthBackward,
-             .cycleWindowHeightForward,
-             .cycleWindowHeightBackward,
-             .expandColumnToAvailableWidth,
-             .resetWindowHeight,
-             .setColumnWidth,
-             .setWindowWidth,
-             .setWindowHeight,
+             .cycleWindowPrimarySpanForward,
+             .cycleWindowPrimarySpanBackward,
+             .cycleWindowSecondarySpanForward,
+             .cycleWindowSecondarySpanBackward,
+             .expandContainerToAvailablePrimarySpan,
+             .resetWindowSecondarySpan,
+             .setContainerPrimarySpan,
+             .setWindowPrimarySpan,
+             .setWindowSecondarySpan,
              .focusPrevious,
              .focusDownOrLeft,
              .focusUpOrRight,
@@ -978,8 +978,8 @@ enum ActionCatalog {
              .moveColumn(.left),
              .moveColumn(.right),
              .toggleFullscreen,
-             .cycleColumnWidthForward,
-             .cycleColumnWidthBackward,
+             .cycleSizeForward,
+             .cycleSizeBackward,
              .balanceSizes,
              .move,
              .moveToWorkspace,
@@ -1059,18 +1059,18 @@ enum ActionCatalog {
         case let .focusColumn(idx): "Focus Column \(idx + 1)"
         case .centerColumn: "Center Column"
         case .centerVisibleColumns: "Center Visible Columns"
-        case .cycleColumnWidthForward: "Cycle Column Width Forward"
-        case .cycleColumnWidthBackward: "Cycle Column Width Backward"
-        case .cycleWindowWidthForward: "Cycle Window Width Forward"
-        case .cycleWindowWidthBackward: "Cycle Window Width Backward"
-        case .cycleWindowHeightForward: "Cycle Window Height Forward"
-        case .cycleWindowHeightBackward: "Cycle Window Height Backward"
-        case .toggleColumnFullWidth: "Toggle Column Full Width"
-        case .expandColumnToAvailableWidth: "Expand Column to Available Width"
-        case .resetWindowHeight: "Reset Window Height"
-        case let .setColumnWidth(change): "Set Column Width \(sizeChangeDisplayName(change))"
-        case let .setWindowWidth(change): "Set Window Width \(sizeChangeDisplayName(change))"
-        case let .setWindowHeight(change): "Set Window Height \(sizeChangeDisplayName(change))"
+        case .cycleSizeForward: "Cycle Size Forward"
+        case .cycleSizeBackward: "Cycle Size Backward"
+        case .cycleWindowPrimarySpanForward: "Cycle Window Primary Span Forward"
+        case .cycleWindowPrimarySpanBackward: "Cycle Window Primary Span Backward"
+        case .cycleWindowSecondarySpanForward: "Cycle Window Secondary Span Forward"
+        case .cycleWindowSecondarySpanBackward: "Cycle Window Secondary Span Backward"
+        case .toggleContainerFullPrimarySpan: "Toggle Container Full Primary Span"
+        case .expandContainerToAvailablePrimarySpan: "Expand Container to Available Primary Span"
+        case .resetWindowSecondarySpan: "Reset Window Secondary Span"
+        case let .setContainerPrimarySpan(change): "Set Container Primary Span \(sizeChangeDisplayName(change))"
+        case let .setWindowPrimarySpan(change): "Set Window Primary Span \(sizeChangeDisplayName(change))"
+        case let .setWindowSecondarySpan(change): "Set Window Secondary Span \(sizeChangeDisplayName(change))"
         case let .swapWorkspaceWithMonitor(dir): "Swap Workspace with \(dir.displayName) Monitor"
         case .balanceSizes: "Balance Sizes"
         case .moveToRoot: "Move to Root"
@@ -1191,30 +1191,30 @@ enum ActionCatalog {
             .moveColumnToWorkspaceDown
         case .toggleColumnTabbed:
             .toggleColumnTabbed
-        case .cycleColumnWidthForward:
-            .cycleColumnWidthForward
-        case .cycleColumnWidthBackward:
-            .cycleColumnWidthBackward
-        case .cycleWindowWidthForward:
-            .cycleWindowWidthForward
-        case .cycleWindowWidthBackward:
-            .cycleWindowWidthBackward
-        case .cycleWindowHeightForward:
-            .cycleWindowHeightForward
-        case .cycleWindowHeightBackward:
-            .cycleWindowHeightBackward
-        case .toggleColumnFullWidth:
-            .toggleColumnFullWidth
-        case .expandColumnToAvailableWidth:
-            .expandColumnToAvailableWidth
-        case .resetWindowHeight:
-            .resetWindowHeight
-        case .setColumnWidth:
-            .setColumnWidth
-        case .setWindowWidth:
-            .setWindowWidth
-        case .setWindowHeight:
-            .setWindowHeight
+        case .cycleSizeForward:
+            .cycleSizeForward
+        case .cycleSizeBackward:
+            .cycleSizeBackward
+        case .cycleWindowPrimarySpanForward:
+            .cycleWindowPrimarySpanForward
+        case .cycleWindowPrimarySpanBackward:
+            .cycleWindowPrimarySpanBackward
+        case .cycleWindowSecondarySpanForward:
+            .cycleWindowSecondarySpanForward
+        case .cycleWindowSecondarySpanBackward:
+            .cycleWindowSecondarySpanBackward
+        case .toggleContainerFullPrimarySpan:
+            .toggleContainerFullPrimarySpan
+        case .expandContainerToAvailablePrimarySpan:
+            .expandContainerToAvailablePrimarySpan
+        case .resetWindowSecondarySpan:
+            .resetWindowSecondarySpan
+        case .setContainerPrimarySpan:
+            .setContainerPrimarySpan
+        case .setWindowPrimarySpan:
+            .setWindowPrimarySpan
+        case .setWindowSecondarySpan:
+            .setWindowSecondarySpan
         case .swapWorkspaceWithMonitor:
             .swapWorkspaceWithMonitor
         case .balanceSizes:

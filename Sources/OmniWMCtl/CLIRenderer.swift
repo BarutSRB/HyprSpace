@@ -382,7 +382,7 @@ enum CLIRenderer {
                 rule.bundleId.isEmpty ? "—" : rule.bundleId,
                 rule.layout.rawValue,
                 rule.assignToWorkspace ?? "-",
-                percentageDescription(rule.initialColumnWidth),
+                percentageDescription(rule.initialContainerPrimarySpan),
                 rule.titleRegex ?? "-",
                 String(rule.specificity),
                 ruleValidityDescription(rule)
@@ -396,7 +396,7 @@ enum CLIRenderer {
                 "BUNDLE ID",
                 "LAYOUT",
                 "WORKSPACE",
-                "INITIAL WIDTH",
+                "INITIAL PRIMARY SPAN",
                 "TITLE REGEX",
                 "SPECIFICITY",
                 "VALID"

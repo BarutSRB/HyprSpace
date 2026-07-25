@@ -9,7 +9,7 @@ extension NiriLayoutEngine {
         _ node: NiriWindow,
         direction: Direction,
         in workspaceId: WorkspaceDescriptor.ID,
-        orientation: Monitor.Orientation? = nil,
+        orientation: Monitor.Orientation,
         motion: MotionSnapshot,
         state: inout ViewportState,
         workingFrame: CGRect,
@@ -17,7 +17,7 @@ extension NiriLayoutEngine {
         allowEdgeWrap: Bool = true
     ) -> Bool {
         assertSanctionedMutation()
-        let orientation = resolvePrimaryContainerSpans(
+        resolvePrimaryContainerSpans(
             in: workspaceId,
             workingFrame: workingFrame,
             gaps: gaps,

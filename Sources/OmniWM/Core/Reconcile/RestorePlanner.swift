@@ -58,7 +58,7 @@ struct RestorePlanner {
         let targetMode: TrackedWindowMode
         let floatingFrame: CGRect?
         let niriPlacement: PersistedNiriPlacement?
-        let detachedNiriColumnWidthState: NiriColumnWidthState?
+        let detachedNiriContainerSizingState: NiriContainerSizingState?
         let consumedKey: PersistedWindowRestoreKey
         let consumedEntry: PersistedWindowRestoreConsumptionKey
     }
@@ -305,8 +305,8 @@ struct RestorePlanner {
             preferredMonitorId: preferredMonitor?.id,
             targetMode: targetMode,
             floatingFrame: floatingFrame,
-            niriPlacement: targetMode == .tiling ? persistedEntry.restoreIntent.niriPlacement : nil,
-            detachedNiriColumnWidthState: persistedEntry.restoreIntent.detachedNiriColumnWidthState,
+            niriPlacement: persistedEntry.restoreIntent.niriPlacement,
+            detachedNiriContainerSizingState: persistedEntry.restoreIntent.detachedNiriContainerSizingState,
             consumedKey: persistedEntry.key,
             consumedEntry: PersistedWindowRestoreConsumptionKey(entry: persistedEntry)
         )

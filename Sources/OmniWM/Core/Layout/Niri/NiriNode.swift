@@ -374,7 +374,10 @@ class NiriContainer: NiriNode {
 
     var savedHeight: ProportionalSize?
 
+    var hasManualSingleWindowHeightOverride: Bool = false
+
     var moveAnimation: MoveAnimation?
+    private var moveAnimationOrientation: Monitor.Orientation?
 
     var widthAnimation: SpringAnimation?
     var targetWidth: CGFloat?
@@ -399,36 +402,66 @@ class NiriContainer: NiriNode {
     ) {
         guard animated else {
             moveAnimation = nil
+            moveAnimationOrientation = nil
+            return
+        }
+
+        let orientation: Monitor.Orientation
+        let displacementValue: CGFloat
+        if displacement.x != 0 {
+            orientation = .horizontal
+            displacementValue = displacement.x
+        } else if displacement.y != 0 {
+            orientation = .vertical
+            displacementValue = displacement.y
+        } else {
+            moveAnimation = nil
+            moveAnimationOrientation = nil
             return
         }
 
         let now = clock?.now() ?? CACurrentMediaTime()
         let currentOffset = renderOffset(at: now)
-        let currentVel = moveAnimation?.currentVelocity(at: now) ?? 0
-
-        if displacement.x != 0 {
-            let totalOffsetX = displacement.x + currentOffset.x
-            let anim = SpringAnimation(
-                from: 1,
-                to: 0,
-                initialVelocity: currentVel,
-                startTime: now,
-                config: config,
-                displayRefreshRate: displayRefreshRate
-            )
-            moveAnimation = MoveAnimation(animation: anim, fromOffset: totalOffsetX)
+        let currentValue = switch orientation {
+        case .horizontal: currentOffset.x
+        case .vertical: currentOffset.y
         }
+        let currentVelocity = moveAnimationOrientation == orientation
+            ? moveAnimation?.currentVelocity(at: now) ?? 0
+            : 0
+        let animation = SpringAnimation(
+            from: 1,
+            to: 0,
+            initialVelocity: currentVelocity,
+            startTime: now,
+            config: config,
+            displayRefreshRate: displayRefreshRate
+        )
+        moveAnimation = MoveAnimation(
+            animation: animation,
+            fromOffset: displacementValue + currentValue
+        )
+        moveAnimationOrientation = orientation
     }
 
     func renderOffset(at time: TimeInterval = CACurrentMediaTime()) -> CGPoint {
-        guard let anim = moveAnimation else { return .zero }
-        return CGPoint(x: anim.currentOffset(at: time), y: 0)
+        guard let animation = moveAnimation,
+              let orientation = moveAnimationOrientation
+        else {
+            return .zero
+        }
+        let value = animation.currentOffset(at: time)
+        return switch orientation {
+        case .horizontal: CGPoint(x: value, y: 0)
+        case .vertical: CGPoint(x: 0, y: value)
+        }
     }
 
     func tickMoveAnimation(at time: TimeInterval) -> Bool {
         guard let anim = moveAnimation else { return false }
         if anim.isComplete(at: time) {
             moveAnimation = nil
+            moveAnimationOrientation = nil
             return false
         }
         return true
@@ -438,16 +471,25 @@ class NiriContainer: NiriNode {
         moveAnimation != nil
     }
 
-    func offsetMoveAnimCurrent(_ offsetX: CGFloat) {
-        guard let anim = moveAnimation else { return }
+    @discardableResult
+    func offsetMoveAnimCurrent(
+        _ offset: CGFloat,
+        orientation: Monitor.Orientation
+    ) -> Bool {
+        guard let anim = moveAnimation,
+              moveAnimationOrientation == orientation
+        else {
+            return false
+        }
         let now = CACurrentMediaTime()
         let value = anim.animation.value(at: now)
         if value > 0.001 {
             moveAnimation = MoveAnimation(
                 animation: anim.animation,
-                fromOffset: anim.fromOffset + offsetX / CGFloat(value)
+                fromOffset: anim.fromOffset + offset / CGFloat(value)
             )
         }
+        return true
     }
 
     @discardableResult
@@ -524,7 +566,7 @@ class NiriContainer: NiriNode {
         return result
     }
 
-    func widthBounds() -> (min: CGFloat, max: CGFloat?) {
+    func widthBounds(contentInset: CGFloat = 0) -> (min: CGFloat, max: CGFloat?) {
         var minWidth: CGFloat = 1
         var maxWidth: CGFloat?
 
@@ -537,7 +579,10 @@ class NiriContainer: NiriNode {
             }
         }
 
-        return (minWidth, maxWidth.map { max($0, minWidth) })
+        return (
+            minWidth + contentInset,
+            maxWidth.map { max($0, minWidth) + contentInset }
+        )
     }
 
     func heightBounds() -> (min: CGFloat, max: CGFloat?) {
@@ -556,8 +601,8 @@ class NiriContainer: NiriNode {
         return (minHeight, maxHeight.map { max($0, minHeight) })
     }
 
-    func clampedToWidthBounds(_ width: CGFloat) -> CGFloat {
-        let bounds = widthBounds()
+    func clampedToWidthBounds(_ width: CGFloat, contentInset: CGFloat = 0) -> CGFloat {
+        let bounds = widthBounds(contentInset: contentInset)
         let clamped = max(width, bounds.min)
         guard let maxWidth = bounds.max else { return clamped }
         return min(clamped, maxWidth)
@@ -570,8 +615,12 @@ class NiriContainer: NiriNode {
         return min(clamped, maxHeight)
     }
 
-    func resolveAndCacheWidth(workingAreaWidth: CGFloat, gaps: CGFloat) {
-        let bounds = widthBounds()
+    func resolveAndCacheWidth(
+        workingAreaWidth: CGFloat,
+        gaps: CGFloat,
+        contentInset: CGFloat = 0
+    ) {
+        let bounds = widthBounds(contentInset: contentInset)
         cachedWidth = resolveSpan(
             spec: width,
             isFull: isFullWidth,
@@ -592,6 +641,17 @@ class NiriContainer: NiriNode {
             minConstraint: bounds.min,
             maxConstraint: bounds.max
         )
+    }
+
+    func invalidateCachedPrimarySpan(orientation: Monitor.Orientation) {
+        switch orientation {
+        case .horizontal:
+            cachedWidth = 0
+            widthAnimation = nil
+            targetWidth = nil
+        case .vertical:
+            cachedHeight = 0
+        }
     }
 
     override var size: CGFloat {

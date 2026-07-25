@@ -35,18 +35,26 @@ enum TrackpadGestureIntent {
         fingerCount: Int,
         cumulativeX: CGFloat,
         cumulativeY: CGFloat,
+        columnScrollAxis: WorkspaceSwipeAxis,
         columnContextAvailable: Bool
     ) -> TrackpadGestureMode? {
-        let horizontalDominant = abs(cumulativeX) > abs(cumulativeY)
+        let dominantAxis: WorkspaceSwipeAxis = abs(cumulativeX) > abs(cumulativeY) ? .horizontal : .vertical
         let columnCandidate = config.columnScrollEnabled
             && fingerCount == config.columnScrollFingerCount
             && columnContextAvailable
-        if columnCandidate, horizontalDominant {
+        if columnCandidate, dominantAxis == columnScrollAxis {
             return .columnScroll
         }
         guard config.workspaceSwipeEnabled, fingerCount == config.workspaceSwipeFingerCount else { return nil }
-        let axis: WorkspaceSwipeAxis = columnCandidate ? .vertical : config.workspaceSwipeAxis
-        guard (axis == .horizontal) == horizontalDominant else { return nil }
+        let axis = if columnCandidate {
+            switch columnScrollAxis {
+            case .horizontal: WorkspaceSwipeAxis.vertical
+            case .vertical: WorkspaceSwipeAxis.horizontal
+            }
+        } else {
+            config.workspaceSwipeAxis
+        }
+        guard axis == dominantAxis else { return nil }
         return .workspaceSwitch(axis: axis)
     }
 

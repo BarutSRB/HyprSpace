@@ -10,7 +10,8 @@ extension ViewportState {
         projectedOffset: Double,
         columns: [NiriContainer],
         gap: CGFloat,
-        viewportWidth: CGFloat,
+        viewportSpan: CGFloat,
+        orientation: Monitor.Orientation,
         motion: MotionSnapshot,
         snapToColumn: Bool = true,
         centerMode: CenterFocusedColumn = .never,
@@ -24,8 +25,12 @@ extension ViewportState {
             return
         }
 
-        let totalColumnWidth = Double(totalWidth(columns: columns, gap: gap))
-        guard totalColumnWidth.isFinite, totalColumnWidth > 0 else {
+        let sizeKeyPath: KeyPath<NiriContainer, CGFloat> = switch orientation {
+        case .horizontal: \.cachedWidth
+        case .vertical: \.cachedHeight
+        }
+        let totalContentSpan = Double(totalSpan(containers: columns, gap: gap, sizeKeyPath: sizeKeyPath))
+        guard totalContentSpan.isFinite, totalContentSpan > 0 else {
             endGestureWithoutSnap(currentOffset: currentOffset)
             return
         }
@@ -35,20 +40,26 @@ extension ViewportState {
                 projectedOffset: projectedOffset,
                 columns: columns,
                 gap: gap,
-                viewportWidth: viewportWidth,
-                totalColumnWidth: totalColumnWidth,
+                viewportSpan: viewportSpan,
+                totalContentSpan: totalContentSpan,
+                sizeKeyPath: sizeKeyPath,
                 motion: motion
             )
             return
         }
 
-        let activeColX = columnX(at: activeColumnIndex, columns: columns, gap: gap)
-        let projectedViewPos = Double(activeColX) + projectedOffset
+        let activeContainerPosition = containerPosition(
+            at: activeColumnIndex,
+            containers: columns,
+            gap: gap,
+            sizeKeyPath: sizeKeyPath
+        )
+        let projectedViewPos = Double(activeContainerPosition) + projectedOffset
         let areas = normalizedFittingAreas(
-            viewportSpan: viewportWidth,
+            viewportSpan: viewportSpan,
             workingArea: workingArea,
             viewFrame: viewFrame,
-            orientation: .horizontal,
+            orientation: orientation,
             scale: scale
         )
 
@@ -58,13 +69,19 @@ extension ViewportState {
             currentOffset: currentOffset,
             columns: columns,
             gap: gap,
+            sizeKeyPath: sizeKeyPath,
             areas: areas,
             centerMode: centerMode,
             alwaysCenterSingleColumn: alwaysCenterSingleColumn
         )
 
-        let newColX = columnX(at: result.columnIndex, columns: columns, gap: gap)
-        let offsetDelta = activeColX - newColX
+        let newContainerPosition = containerPosition(
+            at: result.columnIndex,
+            containers: columns,
+            gap: gap,
+            sizeKeyPath: sizeKeyPath
+        )
+        let offsetDelta = activeContainerPosition - newContainerPosition
 
         let previousActiveColumnIndex = activeColumnIndex
         activeColumnIndex = result.columnIndex
@@ -72,12 +89,13 @@ extension ViewportState {
             viewOffsetToRestore = nil
         }
 
-        let snapTargetOffset = result.viewPos - Double(newColX)
+        let snapTargetOffset = result.viewPos - Double(newContainerPosition)
         let correctedTargetOffset = correctedGestureTargetOffset(
             targetViewPos: result.viewPos,
             columnIndex: result.columnIndex,
             columns: columns,
             gap: gap,
+            sizeKeyPath: sizeKeyPath,
             areas: areas,
             centerMode: centerMode,
             alwaysCenterSingleColumn: alwaysCenterSingleColumn
@@ -122,6 +140,7 @@ extension ViewportState {
         currentOffset: Double,
         columns: [NiriContainer],
         gap: CGFloat,
+        sizeKeyPath: KeyPath<NiriContainer, CGFloat>,
         areas: ViewportFittingAreas,
         centerMode: CenterFocusedColumn,
         alwaysCenterSingleColumn: Bool = false
@@ -129,111 +148,126 @@ extension ViewportState {
         guard !columns.isEmpty else { return SnapResult(viewPos: 0, columnIndex: 0) }
 
         let isCentering = centerMode == .always || (alwaysCenterSingleColumn && columns.count <= 1)
-        let viewWidth = Double(areas.viewSpan)
+        let viewSpan = Double(areas.viewSpan)
         let gaps = Double(gap)
         var snapPoints: [SnapPoint] = []
 
         if isCentering {
-            var colX = 0.0
+            var containerPosition = 0.0
             for (idx, col) in columns.enumerated() {
-                let colW = Double(col.cachedWidth)
+                let containerSpan = Double(col[keyPath: sizeKeyPath])
                 let mode = col.effectiveSizingMode
                 let area = areas.area(for: mode)
-                let areaWidth = Double(areas.span(of: area))
-                let leftStrut = Double(areas.origin(of: area))
+                let areaSpan = Double(areas.span(of: area))
+                let leadingStrut = Double(areas.origin(of: area))
 
                 let viewPos: Double
                 if mode.isFullscreen {
-                    viewPos = colX
-                } else if areaWidth <= colW {
-                    viewPos = colX - leftStrut
+                    viewPos = containerPosition
+                } else if areaSpan <= containerSpan {
+                    viewPos = containerPosition - leadingStrut
                 } else {
-                    viewPos = colX - (areaWidth - colW) / 2.0 - leftStrut
+                    viewPos = containerPosition - (areaSpan - containerSpan) / 2.0 - leadingStrut
                 }
                 appendSnapPoint(viewPos, idx, to: &snapPoints)
 
-                colX += colW + gaps
+                containerPosition += containerSpan + gaps
             }
         } else {
             let centerOnOverflow = centerMode == .onOverflow
 
             func snapPair(
-                colX: Double,
+                containerPosition: Double,
                 column: NiriContainer,
-                prevColWidth: Double?,
-                nextColWidth: Double?
-            ) -> (left: Double, right: Double) {
-                let colW = Double(column.cachedWidth)
+                previousContainerSpan: Double?,
+                nextContainerSpan: Double?
+            ) -> (leading: Double, trailing: Double) {
+                let containerSpan = Double(column[keyPath: sizeKeyPath])
                 let mode = column.effectiveSizingMode
 
                 if mode.isFullscreen {
-                    return (colX, colX + colW)
+                    return (containerPosition, containerPosition + containerSpan)
                 }
 
                 let area = areas.area(for: mode)
-                let areaWidth = Double(areas.span(of: area))
-                let leftStrut = Double(areas.origin(of: area))
-                let rightStrut = viewWidth - areaWidth - leftStrut
-                let padding = mode.isMaximized ? 0 : ((areaWidth - colW) / 2.0).clamped(to: 0 ... gaps)
-                let center = if areaWidth <= colW {
-                    colX - leftStrut
+                let areaSpan = Double(areas.span(of: area))
+                let leadingStrut = Double(areas.origin(of: area))
+                let trailingStrut = viewSpan - areaSpan - leadingStrut
+                let padding = mode.isMaximized ? 0 : ((areaSpan - containerSpan) / 2.0).clamped(to: 0 ... gaps)
+                let center = if areaSpan <= containerSpan {
+                    containerPosition - leadingStrut
                 } else {
-                    colX - (areaWidth - colW) / 2.0 - leftStrut
+                    containerPosition - (areaSpan - containerSpan) / 2.0 - leadingStrut
                 }
 
-                let isOverflowing: (Double?) -> Bool = { adjacentWidth in
-                    guard centerOnOverflow, let adjacentWidth else { return false }
-                    return adjacentWidth + 3.0 * gaps + colW > areaWidth
+                let isOverflowing: (Double?) -> Bool = { adjacentSpan in
+                    guard centerOnOverflow, let adjacentSpan else { return false }
+                    return adjacentSpan + 3.0 * gaps + containerSpan > areaSpan
                 }
 
-                let left = isOverflowing(nextColWidth) ? center : colX - padding - leftStrut
-                let right = isOverflowing(prevColWidth) ? center + viewWidth : colX + colW + padding + rightStrut
-                return (left, right)
+                let leading = isOverflowing(nextContainerSpan)
+                    ? center
+                    : containerPosition - padding - leadingStrut
+                let trailing = isOverflowing(previousContainerSpan)
+                    ? center + viewSpan
+                    : containerPosition + containerSpan + padding + trailingStrut
+                return (leading, trailing)
             }
 
             // Match Niri's snap-boundary guard: gestures may only snap within the first and last
             // column boundary points, which prevents high momentum at the strip ends from wrapping
             // or choosing an interior snap that would feel like scrolling past the content.
-            let leftmostSnap = snapPair(
-                colX: 0,
+            let leadingSnap = snapPair(
+                containerPosition: 0,
                 column: columns[0],
-                prevColWidth: nil,
-                nextColWidth: columns.dropFirst().first.map { Double($0.cachedWidth) }
-            ).left
+                previousContainerSpan: nil,
+                nextContainerSpan: columns.dropFirst().first.map { Double($0[keyPath: sizeKeyPath]) }
+            ).leading
             let lastColIdx = columns.count - 1
-            let lastColX = Double(columnX(at: lastColIdx, columns: columns, gap: gap))
-            let rightmostSnap = snapPair(
-                colX: lastColX,
+            let lastContainerPosition = Double(containerPosition(
+                at: lastColIdx,
+                containers: columns,
+                gap: gap,
+                sizeKeyPath: sizeKeyPath
+            ))
+            let trailingSnap = snapPair(
+                containerPosition: lastContainerPosition,
                 column: columns[lastColIdx],
-                prevColWidth: lastColIdx > 0 ? Double(columns[lastColIdx - 1].cachedWidth) : nil,
-                nextColWidth: nil
-            ).right - viewWidth
+                previousContainerSpan: lastColIdx > 0
+                    ? Double(columns[lastColIdx - 1][keyPath: sizeKeyPath])
+                    : nil,
+                nextContainerSpan: nil
+            ).trailing - viewSpan
 
-            appendSnapPoint(leftmostSnap, 0, to: &snapPoints)
-            appendSnapPoint(rightmostSnap, lastColIdx, to: &snapPoints)
+            appendSnapPoint(leadingSnap, 0, to: &snapPoints)
+            appendSnapPoint(trailingSnap, lastColIdx, to: &snapPoints)
 
-            func push(_ colIdx: Int, _ left: Double, _ right: Double) {
-                if leftmostSnap < left, left < rightmostSnap {
-                    appendSnapPoint(left, colIdx, to: &snapPoints)
+            func push(_ colIdx: Int, _ leading: Double, _ trailing: Double) {
+                if leadingSnap < leading, leading < trailingSnap {
+                    appendSnapPoint(leading, colIdx, to: &snapPoints)
                 }
 
-                let rightViewPos = right - viewWidth
-                if leftmostSnap < rightViewPos, rightViewPos < rightmostSnap {
-                    appendSnapPoint(rightViewPos, colIdx, to: &snapPoints)
+                let trailingViewPos = trailing - viewSpan
+                if leadingSnap < trailingViewPos, trailingViewPos < trailingSnap {
+                    appendSnapPoint(trailingViewPos, colIdx, to: &snapPoints)
                 }
             }
 
-            var colX = 0.0
+            var containerPosition = 0.0
             for (idx, col) in columns.enumerated() {
                 let pair = snapPair(
-                    colX: colX,
+                    containerPosition: containerPosition,
                     column: col,
-                    prevColWidth: idx > 0 ? Double(columns[idx - 1].cachedWidth) : nil,
-                    nextColWidth: idx + 1 < columns.count ? Double(columns[idx + 1].cachedWidth) : nil
+                    previousContainerSpan: idx > 0
+                        ? Double(columns[idx - 1][keyPath: sizeKeyPath])
+                        : nil,
+                    nextContainerSpan: idx + 1 < columns.count
+                        ? Double(columns[idx + 1][keyPath: sizeKeyPath])
+                        : nil
                 )
-                push(idx, pair.left, pair.right)
+                push(idx, pair.leading, pair.trailing)
 
-                colX += Double(col.cachedWidth) + gaps
+                containerPosition += Double(col[keyPath: sizeKeyPath]) + gaps
             }
         }
 
@@ -247,23 +281,32 @@ extension ViewportState {
         var newColIdx = closest.columnIndex
 
         if !isCentering {
-            let scrollingRight = projectedOffset >= currentOffset
-            if scrollingRight {
+            let scrollingForward = projectedOffset >= currentOffset
+            if scrollingForward {
                 for idx in (newColIdx + 1) ..< columns.count {
-                    let colX = Double(columnX(at: idx, columns: columns, gap: gap))
-                    let colW = Double(columns[idx].cachedWidth)
+                    let containerPosition = Double(containerPosition(
+                        at: idx,
+                        containers: columns,
+                        gap: gap,
+                        sizeKeyPath: sizeKeyPath
+                    ))
+                    let containerSpan = Double(columns[idx][keyPath: sizeKeyPath])
                     let mode = columns[idx].effectiveSizingMode
                     let area = areas.area(for: mode)
 
                     if mode.isFullscreen {
-                        if closest.viewPos + viewWidth < colX + colW {
+                        if closest.viewPos + viewSpan < containerPosition + containerSpan {
                             break
                         }
                     } else {
-                        let areaWidth = Double(areas.span(of: area))
-                        let leftStrut = Double(areas.origin(of: area))
-                        let padding = mode.isMaximized ? 0 : ((areaWidth - colW) / 2.0).clamped(to: 0 ... gaps)
-                        if closest.viewPos + leftStrut + areaWidth < colX + colW + padding {
+                        let areaSpan = Double(areas.span(of: area))
+                        let leadingStrut = Double(areas.origin(of: area))
+                        let padding = mode.isMaximized
+                            ? 0
+                            : ((areaSpan - containerSpan) / 2.0).clamped(to: 0 ... gaps)
+                        if closest.viewPos + leadingStrut + areaSpan
+                            < containerPosition + containerSpan + padding
+                        {
                             break
                         }
                     }
@@ -272,20 +315,27 @@ extension ViewportState {
                 }
             } else {
                 for idx in stride(from: newColIdx - 1, through: 0, by: -1) {
-                    let colX = Double(columnX(at: idx, columns: columns, gap: gap))
-                    let colW = Double(columns[idx].cachedWidth)
+                    let containerPosition = Double(containerPosition(
+                        at: idx,
+                        containers: columns,
+                        gap: gap,
+                        sizeKeyPath: sizeKeyPath
+                    ))
+                    let containerSpan = Double(columns[idx][keyPath: sizeKeyPath])
                     let mode = columns[idx].effectiveSizingMode
                     let area = areas.area(for: mode)
 
                     if mode.isFullscreen {
-                        if colX < closest.viewPos {
+                        if containerPosition < closest.viewPos {
                             break
                         }
                     } else {
-                        let areaWidth = Double(areas.span(of: area))
-                        let leftStrut = Double(areas.origin(of: area))
-                        let padding = mode.isMaximized ? 0 : ((areaWidth - colW) / 2.0).clamped(to: 0 ... gaps)
-                        if colX - padding < closest.viewPos + leftStrut {
+                        let areaSpan = Double(areas.span(of: area))
+                        let leadingStrut = Double(areas.origin(of: area))
+                        let padding = mode.isMaximized
+                            ? 0
+                            : ((areaSpan - containerSpan) / 2.0).clamped(to: 0 ... gaps)
+                        if containerPosition - padding < closest.viewPos + leadingStrut {
                             break
                         }
                     }
@@ -303,21 +353,27 @@ extension ViewportState {
         columnIndex: Int,
         columns: [NiriContainer],
         gap: CGFloat,
+        sizeKeyPath: KeyPath<NiriContainer, CGFloat>,
         areas: ViewportFittingAreas,
         centerMode: CenterFocusedColumn,
         alwaysCenterSingleColumn: Bool
     ) -> Double {
         guard columns.indices.contains(columnIndex) else { return 0 }
-        let colX = Double(columnX(at: columnIndex, columns: columns, gap: gap))
-        let colW = Double(columns[columnIndex].cachedWidth)
+        let containerPosition = Double(containerPosition(
+            at: columnIndex,
+            containers: columns,
+            gap: gap,
+            sizeKeyPath: sizeKeyPath
+        ))
+        let containerSpan = Double(columns[columnIndex][keyPath: sizeKeyPath])
         let mode = columns[columnIndex].effectiveSizingMode
         let isCentering = centerMode == .always || (alwaysCenterSingleColumn && columns.count <= 1)
 
         let offset = if isCentering {
             computeModeAwareCenteredOffset(
                 currentViewStart: CGFloat(targetViewPos),
-                targetPos: CGFloat(colX),
-                targetSpan: CGFloat(colW),
+                targetPos: CGFloat(containerPosition),
+                targetSpan: CGFloat(containerSpan),
                 mode: mode,
                 areas: areas,
                 gap: gap
@@ -325,8 +381,8 @@ extension ViewportState {
         } else {
             computeModeAwareFitOffset(
                 currentViewStart: CGFloat(targetViewPos),
-                targetPos: CGFloat(colX),
-                targetSpan: CGFloat(colW),
+                targetPos: CGFloat(containerPosition),
+                targetSpan: CGFloat(containerSpan),
                 mode: mode,
                 areas: areas,
                 gap: gap
@@ -344,18 +400,25 @@ extension ViewportState {
         projectedOffset: Double,
         columns: [NiriContainer],
         gap: CGFloat,
-        viewportWidth: CGFloat,
-        totalColumnWidth: Double,
+        viewportSpan: CGFloat,
+        totalContentSpan: Double,
+        sizeKeyPath: KeyPath<NiriContainer, CGFloat>,
         motion: MotionSnapshot
     ) {
-        let oldActiveX = columnX(at: activeColumnIndex, columns: columns, gap: gap)
+        let oldActivePosition = containerPosition(
+            at: activeColumnIndex,
+            containers: columns,
+            gap: gap,
+            sizeKeyPath: sizeKeyPath
+        )
 
         guard let preserved = normalizedPreservedGestureOffset(
             currentOffset: projectedOffset,
             columns: columns,
             gap: gap,
-            viewportWidth: Double(viewportWidth),
-            totalColumnWidth: totalColumnWidth
+            viewportSpan: Double(viewportSpan),
+            totalContentSpan: totalContentSpan,
+            sizeKeyPath: sizeKeyPath
         ) else {
             jumpOffset(to: CGFloat(projectedOffset))
             activatePrevColumnOnRemoval = nil
@@ -363,17 +426,22 @@ extension ViewportState {
             return
         }
 
-        let newActiveX = columnX(at: preserved.normalizedActiveColumn, columns: columns, gap: gap)
-        let offsetDelta = oldActiveX - newActiveX
+        let newActivePosition = containerPosition(
+            at: preserved.normalizedActiveColumn,
+            containers: columns,
+            gap: gap,
+            sizeKeyPath: sizeKeyPath
+        )
+        let offsetDelta = oldActivePosition - newActivePosition
 
         if activeColumnIndex != preserved.normalizedActiveColumn {
             viewOffsetToRestore = nil
         }
         activeColumnIndex = preserved.normalizedActiveColumn
 
-        let maxViewStart = max(0, totalColumnWidth - Double(viewportWidth))
-        let overscrolled = Double(oldActiveX) + projectedOffset < 0
-            || Double(oldActiveX) + projectedOffset > maxViewStart
+        let maxViewStart = max(0, totalContentSpan - Double(viewportSpan))
+        let overscrolled = Double(oldActivePosition) + projectedOffset < 0
+            || Double(oldActivePosition) + projectedOffset > maxViewStart
 
         guard motion.animationsEnabled else {
             jumpOffset(to: CGFloat(preserved.finalOffset))
@@ -396,14 +464,15 @@ extension ViewportState {
         currentOffset: Double,
         columns: [NiriContainer],
         gap: CGFloat,
-        viewportWidth: Double,
-        totalColumnWidth: Double
+        viewportSpan: Double,
+        totalContentSpan: Double,
+        sizeKeyPath: KeyPath<NiriContainer, CGFloat>
     ) -> PreservedGestureOffset? {
         guard !columns.isEmpty,
-              totalColumnWidth.isFinite,
-              totalColumnWidth > 0,
-              viewportWidth.isFinite,
-              viewportWidth > 0
+              totalContentSpan.isFinite,
+              totalContentSpan > 0,
+              viewportSpan.isFinite,
+              viewportSpan > 0
         else {
             return nil
         }
@@ -415,35 +484,35 @@ extension ViewportState {
         var runningPosition = 0.0
         for column in columns {
             positions.append(runningPosition)
-            runningPosition += Double(column.cachedWidth) + gap
+            runningPosition += Double(column[keyPath: sizeKeyPath]) + gap
         }
 
-        let previousActiveX = positions[previousActiveColumn]
-        let rawViewStart = previousActiveX + currentOffset
-        let maxViewStart = max(0, totalColumnWidth - viewportWidth)
+        let previousActivePosition = positions[previousActiveColumn]
+        let rawViewStart = previousActivePosition + currentOffset
+        let maxViewStart = max(0, totalContentSpan - viewportSpan)
         let viewStart = rawViewStart.clamped(to: 0 ... maxViewStart)
-        let viewEnd = viewStart + viewportWidth
+        let viewEnd = viewStart + viewportSpan
 
-        let currentColumnWidth = max(0, Double(columns[previousActiveColumn].cachedWidth))
+        let currentContainerSpan = max(0, Double(columns[previousActiveColumn][keyPath: sizeKeyPath]))
         let currentColumnOverlap = visibleOverlap(
-            start: previousActiveX,
-            end: previousActiveX + currentColumnWidth,
+            start: previousActivePosition,
+            end: previousActivePosition + currentContainerSpan,
             viewStart: viewStart,
             viewEnd: viewEnd
         )
         let normalizedActiveColumn: Int
-        if currentColumnWidth > 0, currentColumnOverlap + 0.001 >= currentColumnWidth / 2.0 {
+        if currentContainerSpan > 0, currentColumnOverlap + 0.001 >= currentContainerSpan / 2.0 {
             normalizedActiveColumn = previousActiveColumn
         } else {
-            let viewportCenter = viewStart + viewportWidth / 2.0
+            let viewportCenter = viewStart + viewportSpan / 2.0
             var bestIndex = previousActiveColumn
             var bestOverlap = -Double.infinity
             var bestCenterDistance = Double.infinity
 
             for (index, column) in columns.enumerated() {
                 let columnStart = positions[index]
-                let columnWidth = max(0, Double(column.cachedWidth))
-                let columnEnd = columnStart + columnWidth
+                let columnSpan = max(0, Double(column[keyPath: sizeKeyPath]))
+                let columnEnd = columnStart + columnSpan
                 let overlap = visibleOverlap(
                     start: columnStart,
                     end: columnEnd,
@@ -464,9 +533,9 @@ extension ViewportState {
             normalizedActiveColumn = bestIndex
         }
 
-        let normalizedActiveX = positions[normalizedActiveColumn]
+        let normalizedActivePosition = positions[normalizedActiveColumn]
         return PreservedGestureOffset(
-            finalOffset: viewStart - normalizedActiveX,
+            finalOffset: viewStart - normalizedActivePosition,
             normalizedActiveColumn: normalizedActiveColumn
         )
     }

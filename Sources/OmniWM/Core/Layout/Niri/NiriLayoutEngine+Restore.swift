@@ -4,6 +4,53 @@
 import Foundation
 
 extension NiriLayoutEngine {
+    func persistedPlacementsInColumn(
+        containing token: WindowToken,
+        in workspaceId: WorkspaceDescriptor.ID
+    ) -> [WindowToken: PersistedNiriPlacement] {
+        guard let window = findNode(for: token, in: workspaceId),
+              let column = window.parent as? NiriContainer,
+              let root = column.parent as? NiriRoot,
+              let columnIndex = root.children.firstIndex(where: { $0 === column })
+        else {
+            return [:]
+        }
+
+        let columnState = persistedColumnState(for: column)
+        var placements: [WindowToken: PersistedNiriPlacement] = [:]
+        placements.reserveCapacity(column.windowNodes.count)
+        for (tileIndex, sibling) in column.windowNodes.enumerated() {
+            placements[sibling.token] = PersistedNiriPlacement(
+                columnIndex: columnIndex,
+                tileIndex: tileIndex,
+                column: columnState,
+                window: persistedWindowState(for: sibling)
+            )
+        }
+        return placements
+    }
+
+    func persistedPlacement(
+        for token: WindowToken,
+        in workspaceId: WorkspaceDescriptor.ID
+    ) -> PersistedNiriPlacement? {
+        guard let window = findNode(for: token, in: workspaceId),
+              let column = window.parent as? NiriContainer,
+              let root = column.parent as? NiriRoot,
+              let columnIndex = root.children.firstIndex(where: { $0 === column }),
+              let tileIndex = column.children.firstIndex(where: { $0 === window })
+        else {
+            return nil
+        }
+
+        return PersistedNiriPlacement(
+            columnIndex: columnIndex,
+            tileIndex: tileIndex,
+            column: persistedColumnState(for: column),
+            window: persistedWindowState(for: window)
+        )
+    }
+
     func persistedPlacements(in workspaceId: WorkspaceDescriptor.ID) -> [WindowToken: PersistedNiriPlacement] {
         let columns = columns(in: workspaceId)
         guard !columns.isEmpty else { return [:] }
@@ -12,32 +59,44 @@ extension NiriLayoutEngine {
         placements.reserveCapacity(columns.reduce(0) { $0 + $1.windowNodes.count })
 
         for (columnIndex, column) in columns.enumerated() {
-            let columnState = PersistedNiriColumnState(
-                displayMode: column.displayMode,
-                activeTileIndex: column.activeTileIdx,
-                width: column.width,
-                presetWidthIndex: column.presetWidthIdx,
-                isFullWidth: column.isFullWidth,
-                savedWidth: column.savedWidth,
-                hasManualSingleWindowWidthOverride: column.hasManualSingleWindowWidthOverride
-            )
+            let columnState = persistedColumnState(for: column)
 
             for (tileIndex, window) in column.windowNodes.enumerated() {
                 placements[window.token] = PersistedNiriPlacement(
                     columnIndex: columnIndex,
                     tileIndex: tileIndex,
                     column: columnState,
-                    window: PersistedNiriWindowState(
-                        sizingMode: window.sizingMode,
-                        height: window.height,
-                        savedHeight: window.savedHeight,
-                        windowWidth: window.windowWidth
-                    )
+                    window: persistedWindowState(for: window)
                 )
             }
         }
 
         return placements
+    }
+
+    private func persistedColumnState(for column: NiriContainer) -> PersistedNiriColumnState {
+        PersistedNiriColumnState(
+            displayMode: column.displayMode,
+            activeTileIndex: column.activeTileIdx,
+            width: column.width,
+            presetWidthIndex: column.presetWidthIdx,
+            isFullWidth: column.isFullWidth,
+            savedWidth: column.savedWidth,
+            hasManualSingleWindowWidthOverride: column.hasManualSingleWindowWidthOverride,
+            height: column.height,
+            isFullHeight: column.isFullHeight,
+            savedHeight: column.savedHeight,
+            hasManualSingleWindowHeightOverride: column.hasManualSingleWindowHeightOverride
+        )
+    }
+
+    private func persistedWindowState(for window: NiriWindow) -> PersistedNiriWindowState {
+        PersistedNiriWindowState(
+            sizingMode: window.sizingMode,
+            height: window.height,
+            savedHeight: window.savedHeight,
+            windowWidth: window.windowWidth
+        )
     }
 
     @discardableResult
@@ -132,7 +191,12 @@ extension NiriLayoutEngine {
         column.isFullWidth = state.isFullWidth
         column.savedWidth = state.savedWidth
         column.hasManualSingleWindowWidthOverride = state.hasManualSingleWindowWidthOverride
+        column.height = state.height
+        column.isFullHeight = state.isFullHeight
+        column.savedHeight = state.savedHeight
+        column.hasManualSingleWindowHeightOverride = state.hasManualSingleWindowHeightOverride
         column.cachedWidth = 0
+        column.cachedHeight = 0
         column.widthAnimation = nil
         column.targetWidth = nil
     }

@@ -60,6 +60,7 @@ final class NiriScrollVisibilityTests: XCTestCase {
             gaps: (horizontal: 0, vertical: 0),
             scale: 1,
             workingArea: fixture.area,
+            orientation: .horizontal,
             viewOffsetOverride: viewOffsetOverride,
             settledVisibilityOffset: settledVisibilityOffset
         ).hiddenHandles
@@ -456,6 +457,7 @@ final class NiriScrollVisibilityTests: XCTestCase {
             gaps: (horizontal: 0, vertical: 0),
             scale: 1,
             workingArea: fixture.area,
+            orientation: .horizontal,
             viewOffsetOverride: 2000,
             settledVisibilityOffset: 4000
         )

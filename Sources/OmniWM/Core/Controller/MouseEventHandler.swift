@@ -78,6 +78,7 @@ final class MouseEventHandler {
             let monitorId: Monitor.ID
             let fingerCount: Int
             let columnScrollCandidate: Bool
+            let columnScrollAxis: WorkspaceSwipeAxis
             let workspaceAxis: WorkspaceSwipeAxis?
         }
 
@@ -673,6 +674,16 @@ final class MouseEventHandler {
         return controller.workspaceManager.activeWorkspaceOrFirst(on: monitor.id)?.id
     }
 
+    private func resolvedNiriOrientation(
+        engine: NiriLayoutEngine,
+        workspaceId: WorkspaceDescriptor.ID,
+        monitor: Monitor
+    ) -> Monitor.Orientation {
+        controller?.settings.effectiveOrientation(for: monitor)
+            ?? engine.monitorForWorkspace(workspaceId)?.orientation
+            ?? monitor.autoOrientation
+    }
+
     private func shouldBlockOwnWindowInput(at location: CGPoint) -> Bool {
         guard let controller else { return false }
         return controller.isPointInOwnWindow(location)
@@ -791,6 +802,11 @@ final class MouseEventHandler {
             {
                 let workingFrame = controller.insetWorkingFrame(for: monitor)
                 let gaps = controller.innerGap(for: monitor)
+                let orientation = resolvedNiriOrientation(
+                    engine: engine,
+                    workspaceId: wsId,
+                    monitor: monitor
+                )
 
                 let isInsertMode = modifiers.contains(.maskShift)
                 var moveStarted = false
@@ -804,7 +820,8 @@ final class MouseEventHandler {
                         motion: controller.motionPolicy.snapshot(),
                         state: &vstate,
                         workingFrame: workingFrame,
-                        gaps: gaps
+                        gaps: gaps,
+                        orientation: orientation
                     ) {
                         moveStarted = true
                     }
@@ -838,16 +855,23 @@ final class MouseEventHandler {
         else { return false }
 
         guard let tiledWindow = engine.hitTestTiled(point: location, in: wsId),
-              let frame = tiledWindow.renderedFrame ?? tiledWindow.frame
+              let frame = tiledWindow.renderedFrame ?? tiledWindow.frame,
+              let monitor = controller.workspaceManager.monitor(for: wsId)
         else { return false }
 
         let edges = resizeEdges(for: location, in: frame)
         let currentViewOffset = controller.workspaceManager.niriViewportState(for: wsId).viewOffset
+        let orientation = resolvedNiriOrientation(
+            engine: engine,
+            workspaceId: wsId,
+            monitor: monitor
+        )
         if engine.interactiveResizeBegin(
             windowId: tiledWindow.id,
             edges: edges,
             startLocation: location,
             in: wsId,
+            orientation: orientation,
             viewOffset: currentViewOffset
         ) {
             state.isResizing = true
@@ -970,7 +994,8 @@ final class MouseEventHandler {
                         targetWindowId: nodeId,
                         position: insertPosition,
                         in: wsId,
-                        gaps: controller.innerGap(for: wsId)
+                        gaps: controller.innerGap(for: wsId),
+                        orientation: move.orientation
                     ) {
                         state.dragGhostController?.showSwapTarget(frame: dropFrame)
                     }
@@ -1410,12 +1435,32 @@ final class MouseEventHandler {
             && fingerCount == config.columnScrollFingerCount
             && supportsColumnScroll
         let isWorkspaceCandidate = config.workspaceSwipeEnabled && fingerCount == config.workspaceSwipeFingerCount
+        let columnScrollAxis: WorkspaceSwipeAxis
+        if let engine = controller.niriEngine, supportsColumnScroll {
+            columnScrollAxis = resolvedNiriOrientation(
+                engine: engine,
+                workspaceId: workspace.id,
+                monitor: monitor
+            ) == .horizontal ? .horizontal : .vertical
+        } else {
+            columnScrollAxis = .horizontal
+        }
+        let workspaceAxis: WorkspaceSwipeAxis? = if isWorkspaceCandidate {
+            if columnScrollCandidate {
+                columnScrollAxis == .horizontal ? .vertical : .horizontal
+            } else {
+                config.workspaceSwipeAxis
+            }
+        } else {
+            nil
+        }
         return .init(
             workspaceId: workspace.id,
             monitorId: monitor.id,
             fingerCount: fingerCount,
             columnScrollCandidate: columnScrollCandidate,
-            workspaceAxis: isWorkspaceCandidate ? config.workspaceSwipeAxis : nil
+            columnScrollAxis: columnScrollAxis,
+            workspaceAxis: workspaceAxis
         )
     }
 
@@ -1489,6 +1534,7 @@ final class MouseEventHandler {
             fingerCount: lockedContext.fingerCount,
             cumulativeX: metrics.cumulativeX,
             cumulativeY: metrics.cumulativeY,
+            columnScrollAxis: lockedContext.columnScrollAxis,
             columnContextAvailable: lockedContext.columnScrollCandidate && controller.niriEngine != nil
         ) else {
             state.suppressGestureStartUntilAllTouchesLift = true
@@ -1513,7 +1559,13 @@ final class MouseEventHandler {
                 abortActiveGestureIfNeeded()
                 return
             }
-            var deltaUnits = metrics.rawDeltaX * CGFloat(controller.settings.scrollSensitivity)
+            let orientation: Monitor.Orientation = lockedContext.columnScrollAxis == .horizontal
+                ? .horizontal
+                : .vertical
+            let primaryDelta = lockedContext.columnScrollAxis == .horizontal
+                ? metrics.rawDeltaX
+                : metrics.rawDeltaY
+            var deltaUnits = primaryDelta * CGFloat(controller.settings.scrollSensitivity)
             if controller.settings.gestureInvertDirection {
                 deltaUnits = -deltaUnits
             }
@@ -1522,6 +1574,7 @@ final class MouseEventHandler {
                 engine: engine,
                 wsId: lockedContext.workspaceId,
                 monitor: monitor,
+                orientation: orientation,
                 timestamp: timestamp
             )
         case let .workspaceSwitch(axis):
@@ -1611,11 +1664,13 @@ final class MouseEventHandler {
         engine: NiriLayoutEngine,
         wsId: WorkspaceDescriptor.ID,
         monitor: Monitor,
+        orientation: Monitor.Orientation,
         timestamp: TimeInterval = CACurrentMediaTime()
     ) {
         guard let controller else { return }
         let insetFrame = controller.insetWorkingFrame(for: monitor)
         let driver = controller.workspaceManager.animationDriver
+        let viewportSpan = orientation == .horizontal ? insetFrame.width : insetFrame.height
 
         if !driver.hasGesture(in: wsId) {
             guard !engine.columns(in: wsId).isEmpty else { return }
@@ -1633,7 +1688,7 @@ final class MouseEventHandler {
             delta: Double(delta),
             timestamp: timestamp,
             isTrackpad: true,
-            viewportWidth: Double(insetFrame.width)
+            viewportWidth: Double(viewportSpan)
         )
         controller.layoutRefreshController.startScrollAnimation(for: wsId, forGesture: true)
     }
@@ -1649,6 +1704,11 @@ final class MouseEventHandler {
         let gap = controller.innerGap(for: monitor)
         let step = ticks > 0 ? 1 : -1
         let motion = controller.motionPolicy.snapshot()
+        let orientation = resolvedNiriOrientation(
+            engine: engine,
+            workspaceId: wsId,
+            monitor: monitor
+        )
 
         if controller.workspaceManager.animationDriver.trackpadGestureActive(in: wsId) {
             return
@@ -1669,7 +1729,8 @@ final class MouseEventHandler {
                           motion: motion,
                           state: &vstate,
                           workingFrame: insetFrame,
-                          gaps: gap
+                          gaps: gap,
+                          orientation: orientation
                       )
                 else {
                     break
@@ -1719,11 +1780,15 @@ final class MouseEventHandler {
         let gap = controller.innerGap(for: monitor)
         let scale = NSScreen.screens.first(where: { $0.displayId == monitor.displayId })?
             .backingScaleFactor ?? 2.0
+        let orientation: Monitor.Orientation = lockedContext.columnScrollAxis == .horizontal
+            ? .horizontal
+            : .vertical
+        let viewportSpan = orientation == .horizontal ? insetFrame.width : insetFrame.height
 
         guard let sample = controller.workspaceManager.animationDriver.sampleGestureEnd(
             in: wsId,
             isTrackpad: true,
-            viewportWidth: Double(insetFrame.width),
+            viewportWidth: Double(viewportSpan),
             timestamp: timestamp
         ) else { return }
 
@@ -1736,7 +1801,8 @@ final class MouseEventHandler {
                 projectedOffset: baseOffset + sample.relativeProjectedOffset,
                 columns: columns,
                 gap: gap,
-                viewportWidth: insetFrame.width,
+                viewportSpan: viewportSpan,
+                orientation: orientation,
                 motion: controller.motionPolicy.snapshot(),
                 snapToColumn: controller.settings.trackpadScrollStyle == .snap,
                 centerMode: engine.centerFocusedColumn,

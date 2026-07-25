@@ -71,18 +71,18 @@ enum HotkeyCommand: Codable, Equatable, Hashable {
     case focusColumn(Int)
     case centerColumn
     case centerVisibleColumns
-    case cycleColumnWidthForward
-    case cycleColumnWidthBackward
-    case cycleWindowWidthForward
-    case cycleWindowWidthBackward
-    case cycleWindowHeightForward
-    case cycleWindowHeightBackward
-    case toggleColumnFullWidth
-    case expandColumnToAvailableWidth
-    case resetWindowHeight
-    case setColumnWidth(NiriSizeChange)
-    case setWindowWidth(NiriSizeChange)
-    case setWindowHeight(NiriSizeChange)
+    case cycleSizeForward
+    case cycleSizeBackward
+    case cycleWindowPrimarySpanForward
+    case cycleWindowPrimarySpanBackward
+    case cycleWindowSecondarySpanForward
+    case cycleWindowSecondarySpanBackward
+    case toggleContainerFullPrimarySpan
+    case expandContainerToAvailablePrimarySpan
+    case resetWindowSecondarySpan
+    case setContainerPrimarySpan(NiriSizeChange)
+    case setWindowPrimarySpan(NiriSizeChange)
+    case setWindowSecondarySpan(NiriSizeChange)
 
     case swapWorkspaceWithMonitor(Direction)
 

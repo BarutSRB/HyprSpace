@@ -4,12 +4,38 @@
 import CoreGraphics
 import Foundation
 
-struct NiriColumnWidthState: Codable, Equatable, Sendable {
+struct NiriContainerSizingState: Codable, Equatable, Sendable {
     let width: ProportionalSize
     let presetWidthIndex: Int?
     let isFullWidth: Bool
     let savedWidth: ProportionalSize?
     let hasManualSingleWindowWidthOverride: Bool
+    let height: ProportionalSize
+    let isFullHeight: Bool
+    let savedHeight: ProportionalSize?
+    let hasManualSingleWindowHeightOverride: Bool
+
+    init(
+        width: ProportionalSize,
+        presetWidthIndex: Int?,
+        isFullWidth: Bool,
+        savedWidth: ProportionalSize?,
+        hasManualSingleWindowWidthOverride: Bool,
+        height: ProportionalSize = .default,
+        isFullHeight: Bool = false,
+        savedHeight: ProportionalSize? = nil,
+        hasManualSingleWindowHeightOverride: Bool = false
+    ) {
+        self.width = width
+        self.presetWidthIndex = presetWidthIndex
+        self.isFullWidth = isFullWidth
+        self.savedWidth = savedWidth
+        self.hasManualSingleWindowWidthOverride = hasManualSingleWindowWidthOverride
+        self.height = height
+        self.isFullHeight = isFullHeight
+        self.savedHeight = savedHeight
+        self.hasManualSingleWindowHeightOverride = hasManualSingleWindowHeightOverride
+    }
 }
 
 struct PersistedNiriColumnState: Codable, Equatable, Sendable {
@@ -20,6 +46,36 @@ struct PersistedNiriColumnState: Codable, Equatable, Sendable {
     let isFullWidth: Bool
     let savedWidth: ProportionalSize?
     let hasManualSingleWindowWidthOverride: Bool
+    let height: ProportionalSize
+    let isFullHeight: Bool
+    let savedHeight: ProportionalSize?
+    let hasManualSingleWindowHeightOverride: Bool
+
+    init(
+        displayMode: ColumnDisplay,
+        activeTileIndex: Int,
+        width: ProportionalSize,
+        presetWidthIndex: Int?,
+        isFullWidth: Bool,
+        savedWidth: ProportionalSize?,
+        hasManualSingleWindowWidthOverride: Bool,
+        height: ProportionalSize = .default,
+        isFullHeight: Bool = false,
+        savedHeight: ProportionalSize? = nil,
+        hasManualSingleWindowHeightOverride: Bool = false
+    ) {
+        self.displayMode = displayMode
+        self.activeTileIndex = activeTileIndex
+        self.width = width
+        self.presetWidthIndex = presetWidthIndex
+        self.isFullWidth = isFullWidth
+        self.savedWidth = savedWidth
+        self.hasManualSingleWindowWidthOverride = hasManualSingleWindowWidthOverride
+        self.height = height
+        self.isFullHeight = isFullHeight
+        self.savedHeight = savedHeight
+        self.hasManualSingleWindowHeightOverride = hasManualSingleWindowHeightOverride
+    }
 }
 
 struct PersistedNiriWindowState: Codable, Equatable, Sendable {
@@ -45,7 +101,7 @@ struct PersistedRestoreIntent: Codable, Equatable, Sendable {
     let restoreToFloating: Bool
     let rescueEligible: Bool
     let niriPlacement: PersistedNiriPlacement?
-    let detachedNiriColumnWidthState: NiriColumnWidthState?
+    let detachedNiriContainerSizingState: NiriContainerSizingState?
 
     init(
         workspaceName: String,
@@ -56,7 +112,7 @@ struct PersistedRestoreIntent: Codable, Equatable, Sendable {
         restoreToFloating: Bool,
         rescueEligible: Bool,
         niriPlacement: PersistedNiriPlacement? = nil,
-        detachedNiriColumnWidthState: NiriColumnWidthState? = nil
+        detachedNiriContainerSizingState: NiriContainerSizingState? = nil
     ) {
         self.workspaceName = workspaceName
         self.topologyProfile = topologyProfile
@@ -66,7 +122,7 @@ struct PersistedRestoreIntent: Codable, Equatable, Sendable {
         self.restoreToFloating = restoreToFloating
         self.rescueEligible = rescueEligible
         self.niriPlacement = niriPlacement
-        self.detachedNiriColumnWidthState = detachedNiriColumnWidthState
+        self.detachedNiriContainerSizingState = detachedNiriContainerSizingState
     }
 }
 

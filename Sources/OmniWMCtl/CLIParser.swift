@@ -348,7 +348,7 @@ enum CLIParser {
         var axSubrole: String?
         var layout: IPCRuleLayout = .auto
         var assignToWorkspace: String?
-        var initialColumnWidth: Double?
+        var initialContainerPrimarySpan: Double?
         var minWidth: Double?
         var minHeight: Double?
         var seenFlags: Set<String> = []
@@ -385,8 +385,8 @@ enum CLIParser {
                 layout = parsedLayout
             case "--assign-to-workspace":
                 assignToWorkspace = value
-            case "--initial-column-width":
-                initialColumnWidth = try parseInitialColumnWidth(value)
+            case "--initial-container-primary-span":
+                initialContainerPrimarySpan = try parseInitialContainerPrimarySpan(value)
             case "--min-width":
                 minWidth = try parsePositiveDouble(value)
             case "--min-height":
@@ -407,7 +407,7 @@ enum CLIParser {
             axSubrole: axSubrole,
             layout: layout,
             assignToWorkspace: assignToWorkspace,
-            initialColumnWidth: initialColumnWidth,
+            initialContainerPrimarySpan: initialContainerPrimarySpan,
             minWidth: minWidth,
             minHeight: minHeight
         )
@@ -633,7 +633,7 @@ enum CLIParser {
         return value
     }
 
-    private static func parseInitialColumnWidth(_ rawValue: String) throws -> Double {
+    private static func parseInitialContainerPrimarySpan(_ rawValue: String) throws -> Double {
         guard let value = Double(rawValue), value.isFinite, (0.05 ... 1.0).contains(value) else {
             throw CLIParseError.usage(usageText)
         }

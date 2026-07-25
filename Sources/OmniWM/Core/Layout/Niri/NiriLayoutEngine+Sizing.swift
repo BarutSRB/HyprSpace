@@ -5,11 +5,6 @@ import AppKit
 import Foundation
 
 extension NiriLayoutEngine {
-    private enum ResolvedPresetWidth {
-        case tile(CGFloat)
-        case window(CGFloat)
-    }
-
     private func cachedWidthForResizeStart(
         _ column: NiriContainer,
         in workspaceId: WorkspaceDescriptor.ID,
@@ -24,26 +19,36 @@ extension NiriLayoutEngine {
                     for: singleWindowContext,
                     in: workingFrame,
                     scale: 1.0,
-                    gaps: gaps
+                    primaryGap: gaps,
+                    secondaryGap: 0,
+                    orientation: .horizontal
                 ).width
             } else {
-                column.resolveAndCacheWidth(workingAreaWidth: workingFrame.width, gaps: gaps)
+                column.resolveAndCacheWidth(
+                    workingAreaWidth: workingFrame.width,
+                    gaps: gaps,
+                    contentInset: tabContentInset(for: column)
+                )
             }
         }
 
         return column.cachedWidth
     }
 
-    private func tabOffset(for column: NiriContainer) -> CGFloat {
+    private func cachedHeightForResizeStart(
+        _ column: NiriContainer,
+        workingFrame: CGRect,
+        gaps: CGFloat
+    ) -> CGFloat {
+        if column.cachedHeight <= 0 {
+            column.resolveAndCacheHeight(workingAreaHeight: workingFrame.height, gaps: gaps)
+        }
+
+        return column.cachedHeight
+    }
+
+    func tabContentInset(for column: NiriContainer) -> CGFloat {
         column.isTabbed ? renderStyle.tabIndicatorWidth : 0
-    }
-
-    private func columnWidth(forWindowWidth windowWidth: CGFloat, in column: NiriContainer) -> CGFloat {
-        windowWidth + tabOffset(for: column)
-    }
-
-    private func windowWidth(forColumnWidth columnWidth: CGFloat, in column: NiriContainer) -> CGFloat {
-        max(0, columnWidth - tabOffset(for: column))
     }
 
     private func resolvedColumnPixels(
@@ -59,56 +64,66 @@ extension NiriLayoutEngine {
             fixed
         }
 
-        return column.clampedToWidthBounds(rawWidth)
+        return column.clampedToWidthBounds(
+            rawWidth,
+            contentInset: tabContentInset(for: column)
+        )
     }
 
-    private func resolvedPresetWidth(
+    private func resolvedContainerWidthPreset(
         _ preset: PresetSize,
         for column: NiriContainer,
         workingFrame: CGRect,
         gaps: CGFloat
-    ) -> ResolvedPresetWidth {
-        switch preset.kind {
-        case let .proportion(proportion):
-            .tile(
-                resolvedColumnPixels(
-                    .proportion(proportion),
-                    for: column,
-                    workingFrame: workingFrame,
-                    gaps: gaps
-                )
-            )
-        case let .fixed(fixed):
-            .window(fixed)
-        }
-    }
-
-    private func currentWindowWidth(
-        _ window: NiriWindow?,
-        in column: NiriContainer,
-        fallbackColumnWidth: CGFloat
     ) -> CGFloat {
-        if let resolved = window?.resolvedWidth, resolved > 0 {
-            return resolved
-        }
-        if let frameWidth = window?.frame?.width, frameWidth > 0 {
-            return frameWidth
-        }
-        return windowWidth(forColumnWidth: fallbackColumnWidth, in: column)
+        resolvedColumnPixels(
+            preset.asProportionalSize,
+            for: column,
+            workingFrame: workingFrame,
+            gaps: gaps
+        )
     }
 
-    private func columnWidthSpec(
+    private func resolvedContainerHeightPixels(
+        _ height: ProportionalSize,
+        for column: NiriContainer,
+        workingFrame: CGRect,
+        gaps: CGFloat
+    ) -> CGFloat {
+        let rawHeight: CGFloat = switch height {
+        case let .proportion(proportion):
+            (workingFrame.height - gaps) * proportion - gaps
+        case let .fixed(fixed):
+            fixed
+        }
+
+        return column.clampedToHeightBounds(rawHeight)
+    }
+
+    private func resolvedContainerHeightPreset(
+        _ preset: PresetSize,
+        for column: NiriContainer,
+        workingFrame: CGRect,
+        gaps: CGFloat
+    ) -> CGFloat {
+        resolvedContainerHeightPixels(
+            preset.asProportionalSize,
+            for: column,
+            workingFrame: workingFrame,
+            gaps: gaps
+        )
+    }
+
+    private func containerPrimarySpanSpec(
         for change: NiriSizeChange,
         currentSpec: ProportionalSize,
         currentPixels: CGFloat,
-        column: NiriContainer,
-        workingFrame: CGRect,
+        axisSpan: CGFloat,
         gaps: CGFloat
     ) -> ProportionalSize {
         switch change {
         case let .setFixed(fixed):
-            let windowWidth = fixed.clamped(to: 1 ... NiriSizeChange.maxPixels)
-            return .fixed(columnWidth(forWindowWidth: windowWidth, in: column))
+            return .fixed(fixed.clamped(to: 1 ... NiriSizeChange.maxPixels))
         case let .setProportion(proportion):
             return .proportion((proportion / 100).clamped(to: 0 ... NiriSizeChange.maxProportion))
         case let .adjustFixed(delta):
@@ -119,14 +134,47 @@ extension NiriLayoutEngine {
             case let .proportion(proportion):
                 currentProportion = proportion
             case .fixed:
-                let full = workingFrame.width - gaps
-                if full == 0 {
+                let proportionalSpan = axisSpan - gaps
+                if proportionalSpan == 0 {
                     currentProportion = 1
                 } else {
-                    currentProportion = (currentPixels + gaps) / full
+                    currentProportion = (currentPixels + gaps) / proportionalSpan
                 }
             }
             return .proportion((currentProportion + delta / 100).clamped(to: 0 ... NiriSizeChange.maxProportion))
+        }
+    }
+
+    private func changedWindowSecondaryPixels(
+        for change: NiriSizeChange,
+        currentPixels: CGFloat,
+        availableSpan: CGFloat,
+        gaps: CGFloat
+    ) -> CGFloat {
+        let proportionalSpan = availableSpan - gaps
+        let currentProportion = proportionalSpan == 0 ? 1 : (currentPixels + gaps) / proportionalSpan
+        switch change {
+        case let .setFixed(fixed):
+            return fixed
+        case let .setProportion(proportion):
+            return proportionalSpan * (proportion / 100) - gaps
+        case let .adjustFixed(delta):
+            return currentPixels + delta
+        case let .adjustProportion(delta):
+            return proportionalSpan * (currentProportion + delta / 100) - gaps
+        }
+    }
+
+    private func resolvedPresetWindowSecondarySpan(
+        _ preset: PresetSize,
+        availableSpan: CGFloat,
+        gaps: CGFloat
+    ) -> CGFloat {
+        switch preset.kind {
+        case let .proportion(proportion):
+            (availableSpan - gaps) * proportion - gaps
+        case let .fixed(fixed):
+            fixed
         }
     }
 
@@ -139,7 +187,8 @@ extension NiriLayoutEngine {
         motion: MotionSnapshot,
         state: inout ViewportState,
         workingFrame: CGRect,
-        gaps: CGFloat
+        gaps: CGFloat,
+        orientation: Monitor.Orientation
     ) {
         cancelInteractiveResize(for: column, in: workspaceId)
 
@@ -173,7 +222,8 @@ extension NiriLayoutEngine {
             motion: motion,
             state: &state,
             workingFrame: workingFrame,
-            gaps: gaps
+            gaps: gaps,
+            orientation: orientation
         )
     }
 
@@ -186,8 +236,10 @@ extension NiriLayoutEngine {
         motion: MotionSnapshot,
         state: inout ViewportState,
         workingFrame: CGRect,
-        gaps: CGFloat
+        gaps: CGFloat,
+        orientation: Monitor.Orientation
     ) {
+        guard orientation == .horizontal else { return }
         guard let window = column.windowNodes.first else { return }
 
         // Expose the target width only for viewport-fit math. Animated width
@@ -202,7 +254,8 @@ extension NiriLayoutEngine {
                 motion: motion,
                 state: &state,
                 workingFrame: workingFrame,
-                gaps: gaps
+                gaps: gaps,
+                orientation: orientation
             )
         } else {
             column.cachedWidth = targetWidth
@@ -212,9 +265,176 @@ extension NiriLayoutEngine {
                 motion: motion,
                 state: &state,
                 workingFrame: workingFrame,
-                gaps: gaps
+                gaps: gaps,
+                orientation: orientation
             )
         }
+    }
+
+    private func applyContainerHeight(
+        _ column: NiriContainer,
+        height newHeight: ProportionalSize,
+        in workspaceId: WorkspaceDescriptor.ID,
+        motion: MotionSnapshot,
+        state: inout ViewportState,
+        workingFrame: CGRect,
+        gaps: CGFloat
+    ) {
+        cancelInteractiveResize(for: column, in: workspaceId)
+
+        column.height = newHeight
+        column.isFullHeight = false
+        column.savedHeight = nil
+        column.hasManualSingleWindowHeightOverride = true
+        column.cachedHeight = resolvedContainerHeightPixels(
+            newHeight,
+            for: column,
+            workingFrame: workingFrame,
+            gaps: gaps
+        )
+
+        if let window = column.activeWindow ?? column.windowNodes.first {
+            ensureSelectionVisible(
+                node: window,
+                in: workspaceId,
+                motion: motion,
+                state: &state,
+                workingFrame: workingFrame,
+                gaps: gaps,
+                orientation: .vertical
+            )
+        }
+    }
+
+    private func toggleContainerHeight(
+        _ column: NiriContainer,
+        forwards: Bool,
+        in workspaceId: WorkspaceDescriptor.ID,
+        motion: MotionSnapshot,
+        state: inout ViewportState,
+        workingFrame: CGRect,
+        gaps: CGFloat
+    ) {
+        let currentHeight = cachedHeightForResizeStart(
+            column,
+            workingFrame: workingFrame,
+            gaps: gaps
+        )
+        let nextIndex: Int
+        if forwards {
+            nextIndex = presetContainerPrimarySpans.firstIndex { preset in
+                currentHeight + 1 < resolvedContainerHeightPreset(
+                    preset,
+                    for: column,
+                    workingFrame: workingFrame,
+                    gaps: gaps
+                )
+            } ?? 0
+        } else {
+            nextIndex = presetContainerPrimarySpans.lastIndex { preset in
+                resolvedContainerHeightPreset(
+                    preset,
+                    for: column,
+                    workingFrame: workingFrame,
+                    gaps: gaps
+                ) + 1 < currentHeight
+            } ?? (presetContainerPrimarySpans.count - 1)
+        }
+
+        let currentSpec = column.isFullHeight ? ProportionalSize.proportion(1) : column.height
+        let newHeight = containerPrimarySpanSpec(
+            for: NiriSizeChange(presetContainerPrimarySpans[nextIndex]),
+            currentSpec: currentSpec,
+            currentPixels: currentHeight,
+            axisSpan: workingFrame.height,
+            gaps: gaps
+        )
+        applyContainerHeight(
+            column,
+            height: newHeight,
+            in: workspaceId,
+            motion: motion,
+            state: &state,
+            workingFrame: workingFrame,
+            gaps: gaps
+        )
+    }
+
+    private func toggleFullHeight(
+        _ column: NiriContainer,
+        in workspaceId: WorkspaceDescriptor.ID,
+        motion: MotionSnapshot,
+        state: inout ViewportState,
+        workingFrame: CGRect,
+        gaps: CGFloat
+    ) {
+        resolvePrimaryContainerSpans(
+            in: workspaceId,
+            workingFrame: workingFrame,
+            gaps: gaps,
+            orientation: .vertical
+        )
+        let containers = columns(in: workspaceId)
+        let activeIndex = state.activeColumnIndex.clamped(to: 0 ... max(0, containers.count - 1))
+        let previousActivePosition = state.containerPosition(
+            at: activeIndex,
+            containers: containers,
+            gap: gaps,
+            sizeKeyPath: \.cachedHeight
+        )
+        let previousHeight = cachedHeightForResizeStart(
+            column,
+            workingFrame: workingFrame,
+            gaps: gaps
+        )
+        cancelInteractiveResize(for: column, in: workspaceId)
+        column.hasManualSingleWindowHeightOverride = true
+
+        if column.isFullHeight {
+            column.isFullHeight = false
+            if let savedHeight = column.savedHeight {
+                column.height = savedHeight
+                column.savedHeight = nil
+            }
+        } else {
+            column.savedHeight = column.height
+            column.isFullHeight = true
+        }
+
+        let effectiveHeight = column.isFullHeight ? ProportionalSize.proportion(1) : column.height
+        column.cachedHeight = resolvedContainerHeightPixels(
+            effectiveHeight,
+            for: column,
+            workingFrame: workingFrame,
+            gaps: gaps
+        )
+
+        guard abs(column.cachedHeight - previousHeight) > 0.001 else { return }
+
+        let settings = effectiveSettings(in: workspaceId)
+        if settings.centerFocusedColumn == .always
+            || (settings.alwaysCenterSingleColumn && containers.count == 1)
+        {
+            guard let window = column.activeWindow ?? column.windowNodes.first else { return }
+            ensureSelectionVisible(
+                node: window,
+                in: workspaceId,
+                motion: motion,
+                state: &state,
+                workingFrame: workingFrame,
+                gaps: gaps,
+                orientation: .vertical
+            )
+            return
+        }
+
+        let currentActivePosition = state.containerPosition(
+            at: activeIndex,
+            containers: containers,
+            gap: gaps,
+            sizeKeyPath: \.cachedHeight
+        )
+        state.rebaseOffset(by: previousActivePosition - currentActivePosition)
     }
 
     private func cancelInteractiveResize(
@@ -291,18 +511,30 @@ extension NiriLayoutEngine {
         setWindowSizingMode(window, motion: motion, mode: newMode, state: &state)
     }
 
-    func toggleColumnWidth(
+    func toggleContainerPrimarySpan(
         _ column: NiriContainer,
         forwards: Bool,
-        targetWindow: NiriWindow? = nil,
         in workspaceId: WorkspaceDescriptor.ID,
         motion: MotionSnapshot = .enabled,
         state: inout ViewportState,
         workingFrame: CGRect,
-        gaps: CGFloat
+        gaps: CGFloat,
+        orientation: Monitor.Orientation
     ) {
         assertSanctionedMutation()
-        guard !presetColumnWidths.isEmpty else { return }
+        guard !presetContainerPrimarySpans.isEmpty else { return }
+        if orientation == .vertical {
+            toggleContainerHeight(
+                column,
+                forwards: forwards,
+                in: workspaceId,
+                motion: motion,
+                state: &state,
+                workingFrame: workingFrame,
+                gaps: gaps
+            )
+            return
+        }
 
         let previousWidth = cachedWidthForResizeStart(
             column,
@@ -311,8 +543,7 @@ extension NiriLayoutEngine {
             gaps: gaps
         )
 
-        let presetCount = presetColumnWidths.count
-        let targetWindow = targetWindow ?? column.activeWindow ?? column.windowNodes.first
+        let presetCount = presetContainerPrimarySpans.count
 
         let nextIdx: Int
         if !column.isFullWidth, let currentIdx = column.presetWidthIdx {
@@ -336,41 +567,35 @@ extension NiriLayoutEngine {
             } else {
                 currentTile = previousWidth
             }
-            let currentWindow = currentWindowWidth(
-                targetWindow,
-                in: column,
-                fallbackColumnWidth: currentTile
-            )
 
             if forwards {
-                nextIdx = presetColumnWidths.firstIndex { preset in
-                    switch resolvedPresetWidth(preset, for: column, workingFrame: workingFrame, gaps: gaps) {
-                    case let .tile(resolved):
-                        currentTile + 1 < resolved
-                    case let .window(resolved):
-                        currentWindow + 1 < resolved
-                    }
+                nextIdx = presetContainerPrimarySpans.firstIndex { preset in
+                    currentTile + 1 < resolvedContainerWidthPreset(
+                        preset,
+                        for: column,
+                        workingFrame: workingFrame,
+                        gaps: gaps
+                    )
                 } ?? 0
             } else {
-                let matchingIndex = presetColumnWidths.lastIndex { preset in
-                    switch resolvedPresetWidth(preset, for: column, workingFrame: workingFrame, gaps: gaps) {
-                    case let .tile(resolved):
-                        resolved + 1 < currentTile
-                    case let .window(resolved):
-                        resolved + 1 < currentWindow
-                    }
+                let matchingIndex = presetContainerPrimarySpans.lastIndex { preset in
+                    resolvedContainerWidthPreset(
+                        preset,
+                        for: column,
+                        workingFrame: workingFrame,
+                        gaps: gaps
+                    ) + 1 < currentTile
                 }
                 nextIdx = matchingIndex ?? (presetCount - 1)
             }
         }
 
         let currentSpec = column.isFullWidth ? ProportionalSize.proportion(1) : column.width
-        let newWidth = columnWidthSpec(
-            for: NiriSizeChange(presetColumnWidths[nextIdx]),
+        let newWidth = containerPrimarySpanSpec(
+            for: NiriSizeChange(presetContainerPrimarySpans[nextIdx]),
             currentSpec: currentSpec,
             currentPixels: previousWidth,
-            column: column,
-            workingFrame: workingFrame,
+            axisSpan: workingFrame.width,
             gaps: gaps
         )
 
@@ -383,43 +608,72 @@ extension NiriLayoutEngine {
             motion: motion,
             state: &state,
             workingFrame: workingFrame,
-            gaps: gaps
+            gaps: gaps,
+            orientation: orientation
         )
     }
 
-    func toggleWindowWidth(
+    func toggleWindowPrimarySpan(
         _ window: NiriWindow,
         forwards: Bool,
         in workspaceId: WorkspaceDescriptor.ID,
         motion: MotionSnapshot = .enabled,
         state: inout ViewportState,
         workingFrame: CGRect,
-        gaps: CGFloat
+        gaps: CGFloat,
+        orientation: Monitor.Orientation
     ) {
         assertSanctionedMutation()
         guard let column = findColumn(containing: window, in: workspaceId) else { return }
-        toggleColumnWidth(
+        toggleContainerPrimarySpan(
             column,
             forwards: forwards,
-            targetWindow: window,
             in: workspaceId,
             motion: motion,
             state: &state,
             workingFrame: workingFrame,
-            gaps: gaps
+            gaps: gaps,
+            orientation: orientation
         )
     }
 
-    func setColumnWidth(
+    func setContainerPrimarySpan(
         _ column: NiriContainer,
         change: NiriSizeChange,
         in workspaceId: WorkspaceDescriptor.ID,
         motion: MotionSnapshot = .enabled,
         state: inout ViewportState,
         workingFrame: CGRect,
-        gaps: CGFloat
+        gaps: CGFloat,
+        orientation: Monitor.Orientation
     ) {
         assertSanctionedMutation()
+        if orientation == .vertical {
+            let previousHeight = cachedHeightForResizeStart(
+                column,
+                workingFrame: workingFrame,
+                gaps: gaps
+            )
+            let currentSpec = column.isFullHeight ? ProportionalSize.proportion(1) : column.height
+            let newHeight = containerPrimarySpanSpec(
+                for: change,
+                currentSpec: currentSpec,
+                currentPixels: previousHeight,
+                axisSpan: workingFrame.height,
+                gaps: gaps
+            )
+            applyContainerHeight(
+                column,
+                height: newHeight,
+                in: workspaceId,
+                motion: motion,
+                state: &state,
+                workingFrame: workingFrame,
+                gaps: gaps
+            )
+            return
+        }
+
         let previousWidth = cachedWidthForResizeStart(
             column,
             in: workspaceId,
@@ -433,12 +687,11 @@ extension NiriLayoutEngine {
             workingFrame: workingFrame,
             gaps: gaps
         )
-        let newWidth = columnWidthSpec(
+        let newWidth = containerPrimarySpanSpec(
             for: change,
             currentSpec: currentSpec,
             currentPixels: currentPixels,
-            column: column,
-            workingFrame: workingFrame,
+            axisSpan: workingFrame.width,
             gaps: gaps
         )
 
@@ -451,41 +704,57 @@ extension NiriLayoutEngine {
             motion: motion,
             state: &state,
             workingFrame: workingFrame,
-            gaps: gaps
+            gaps: gaps,
+            orientation: orientation
         )
     }
 
-    func setWindowWidth(
+    func setWindowPrimarySpan(
         _ window: NiriWindow,
         change: NiriSizeChange,
         in workspaceId: WorkspaceDescriptor.ID,
         motion: MotionSnapshot = .enabled,
         state: inout ViewportState,
         workingFrame: CGRect,
-        gaps: CGFloat
+        gaps: CGFloat,
+        orientation: Monitor.Orientation
     ) {
         assertSanctionedMutation()
         guard let column = findColumn(containing: window, in: workspaceId) else { return }
-        setColumnWidth(
+        setContainerPrimarySpan(
             column,
             change: change,
             in: workspaceId,
             motion: motion,
             state: &state,
             workingFrame: workingFrame,
-            gaps: gaps
+            gaps: gaps,
+            orientation: orientation
         )
     }
 
-    func toggleFullWidth(
+    func toggleContainerFullPrimarySpan(
         _ column: NiriContainer,
         in workspaceId: WorkspaceDescriptor.ID,
         motion: MotionSnapshot = .enabled,
         state: inout ViewportState,
         workingFrame: CGRect,
-        gaps: CGFloat
+        gaps: CGFloat,
+        orientation: Monitor.Orientation
     ) {
         assertSanctionedMutation()
+        if orientation == .vertical {
+            toggleFullHeight(
+                column,
+                in: workspaceId,
+                motion: motion,
+                state: &state,
+                workingFrame: workingFrame,
+                gaps: gaps
+            )
+            return
+        }
+
         let previousWidth = cachedWidthForResizeStart(
             column,
             in: workspaceId,
@@ -528,30 +797,38 @@ extension NiriLayoutEngine {
             motion: motion,
             state: &state,
             workingFrame: workingFrame,
-            gaps: gaps
+            gaps: gaps,
+            orientation: orientation
         )
     }
 
-    func expandColumnToAvailableWidth(
+    func expandContainerToAvailablePrimarySpan(
         _ column: NiriContainer,
         in workspaceId: WorkspaceDescriptor.ID,
         motion: MotionSnapshot = .enabled,
         state: inout ViewportState,
         workingFrame: CGRect,
-        gaps: CGFloat
+        gaps: CGFloat,
+        orientation: Monitor.Orientation
     ) {
         assertSanctionedMutation()
-        guard !column.isFullWidth else { return }
+        switch orientation {
+        case .horizontal:
+            guard !column.isFullWidth else { return }
+        case .vertical:
+            guard !column.isFullHeight else { return }
+        }
         guard column.windowNodes.allSatisfy({ $0.sizingMode == .normal }) else { return }
 
-        if centerFocusedColumn == .always {
-            toggleFullWidth(
+        if centerFocusedColumn == .always || orientation == .vertical {
+            toggleContainerFullPrimarySpan(
                 column,
                 in: workspaceId,
                 motion: motion,
                 state: &state,
                 workingFrame: workingFrame,
-                gaps: gaps
+                gaps: gaps,
+                orientation: orientation
             )
             return
         }
@@ -560,7 +837,11 @@ extension NiriLayoutEngine {
         guard let activeColumnIndex = columnIndex(of: column, in: workspaceId) else { return }
 
         for candidate in columns where candidate.cachedWidth <= 0 {
-            candidate.resolveAndCacheWidth(workingAreaWidth: workingFrame.width, gaps: gaps)
+            candidate.resolveAndCacheWidth(
+                workingAreaWidth: workingFrame.width,
+                gaps: gaps,
+                contentInset: tabContentInset(for: candidate)
+            )
         }
 
         let viewX = state.columnX(
@@ -606,13 +887,14 @@ extension NiriLayoutEngine {
         guard availableWidth > 0 else { return }
 
         if !countedNonActiveColumn {
-            toggleFullWidth(
+            toggleContainerFullPrimarySpan(
                 column,
                 in: workspaceId,
                 motion: motion,
                 state: &state,
                 workingFrame: workingFrame,
-                gaps: gaps
+                gaps: gaps,
+                orientation: orientation
             )
             return
         }
@@ -635,7 +917,8 @@ extension NiriLayoutEngine {
             motion: motion,
             state: &state,
             workingFrame: workingFrame,
-            gaps: gaps
+            gaps: gaps,
+            orientation: orientation
         )
 
         let targetOffset = leftmostColX - gaps - activeColX
@@ -644,6 +927,75 @@ extension NiriLayoutEngine {
             motion: motion,
             scale: displayScale(in: workspaceId)
         )
+    }
+
+    private func currentWindowWidth(_ window: NiriWindow) -> CGFloat {
+        switch window.windowWidth {
+        case let .fixed(width):
+            width
+        case .auto,
+             .preset:
+            window.resolvedWidth ?? window.frame?.width ?? max(1, window.widthWeight)
+        }
+    }
+
+    private func convertWidthsToAuto(in column: NiriContainer) {
+        let windows = column.windowNodes
+        guard !windows.isEmpty else { return }
+
+        let widths = windows.map { max(1, $0.resolvedWidth ?? $0.frame?.width ?? $0.widthWeight) }
+        let median = max(1, widths.sorted()[widths.count / 2])
+
+        for (window, width) in zip(windows, widths) {
+            window.windowWidth = .auto(weight: width / median)
+        }
+    }
+
+    private func availableWindowWidth(
+        in column: NiriContainer,
+        workingFrame: CGRect
+    ) -> CGFloat {
+        max(1, workingFrame.width - tabContentInset(for: column))
+    }
+
+    private func setVerticalWindowWidth(
+        _ window: NiriWindow,
+        change: NiriSizeChange,
+        in column: NiriContainer,
+        workingFrame: CGRect,
+        gaps: CGFloat
+    ) {
+        if window.windowWidth.isAuto {
+            convertWidthsToAuto(in: column)
+        }
+
+        let currentWindowPixels = currentWindowWidth(window)
+        let availableWidth = availableWindowWidth(in: column, workingFrame: workingFrame)
+        var windowWidth = changedWindowSecondaryPixels(
+            for: change,
+            currentPixels: currentWindowPixels,
+            availableSpan: availableWidth,
+            gaps: gaps
+        )
+
+        let minWidthTaken: CGFloat
+        if column.isTabbed {
+            minWidthTaken = 0
+        } else {
+            minWidthTaken = column.windowNodes
+                .filter { $0 !== window }
+                .reduce(CGFloat(0)) { partial, otherWindow in
+                    partial + max(1, otherWindow.constraints.minSize.width) + gaps
+                }
+        }
+
+        let widthLeft = max(1, availableWidth - gaps - minWidthTaken - gaps)
+        windowWidth = min(widthLeft, windowWidth)
+        windowWidth = window.constraints.clampWidth(windowWidth)
+        window.windowWidth = .fixed(windowWidth.clamped(to: 1 ... NiriSizeChange.maxPixels))
+        if window.sizingMode == .maximized {
+            window.sizingMode = .normal
+        }
     }
 
     private func currentWindowHeight(_ window: NiriWindow) -> CGFloat {
@@ -668,48 +1020,39 @@ extension NiriLayoutEngine {
         }
     }
 
-    private func resolvedPresetHeight(
-        _ preset: PresetSize,
-        workingFrame: CGRect,
-        gaps: CGFloat
-    ) -> CGFloat {
-        switch preset.kind {
-        case let .proportion(proportion):
-            (workingFrame.height - gaps) * proportion - gaps
-        case let .fixed(fixed):
-            fixed
-        }
-    }
-
-    func setWindowHeight(
+    func setWindowSecondarySpan(
         _ window: NiriWindow,
         change: NiriSizeChange,
         in workspaceId: WorkspaceDescriptor.ID,
         workingFrame: CGRect,
-        gaps: CGFloat
+        gaps: CGFloat,
+        orientation: Monitor.Orientation
     ) {
         assertSanctionedMutation()
         guard let column = findColumn(containing: window, in: workspaceId) else { return }
         cancelInteractiveResize(for: column, in: workspaceId)
+        if orientation == .vertical {
+            setVerticalWindowWidth(
+                window,
+                change: change,
+                in: column,
+                workingFrame: workingFrame,
+                gaps: gaps
+            )
+            return
+        }
 
         if window.height.isAuto {
             convertHeightsToAuto(in: column)
         }
 
         let currentWindowPixels = currentWindowHeight(window)
-        let full = workingFrame.height - gaps
-        let currentProportion = full == 0 ? 1 : (currentWindowPixels + gaps) / full
-
-        var windowHeight: CGFloat = switch change {
-        case let .setFixed(fixed):
-            fixed
-        case let .setProportion(proportion):
-            (workingFrame.height - gaps) * (proportion / 100) - gaps
-        case let .adjustFixed(delta):
-            currentWindowPixels + delta
-        case let .adjustProportion(delta):
-            (workingFrame.height - gaps) * (currentProportion + delta / 100) - gaps
-        }
+        var windowHeight = changedWindowSecondaryPixels(
+            for: change,
+            currentPixels: currentWindowPixels,
+            availableSpan: workingFrame.height,
+            gaps: gaps
+        )
 
         let minHeightTaken: CGFloat
         if column.isTabbed {
@@ -732,13 +1075,24 @@ extension NiriLayoutEngine {
         }
     }
 
-    func resetWindowHeight(
+    func resetWindowSecondarySpan(
         _ window: NiriWindow,
-        in workspaceId: WorkspaceDescriptor.ID
+        in workspaceId: WorkspaceDescriptor.ID,
+        orientation: Monitor.Orientation
     ) {
         assertSanctionedMutation()
         guard let column = findColumn(containing: window, in: workspaceId) else { return }
         cancelInteractiveResize(for: column, in: workspaceId)
+        if orientation == .vertical {
+            if column.isTabbed {
+                for tile in column.windowNodes {
+                    tile.windowWidth = .auto(weight: 1)
+                }
+            } else {
+                window.windowWidth = .auto(weight: 1)
+            }
+            return
+        }
 
         if column.isTabbed {
             for tile in column.windowNodes {
@@ -751,23 +1105,65 @@ extension NiriLayoutEngine {
         }
     }
 
-    func toggleWindowHeight(
+    func toggleWindowSecondarySpan(
         _ window: NiriWindow,
         forwards: Bool,
         in workspaceId: WorkspaceDescriptor.ID,
         workingFrame: CGRect,
-        gaps: CGFloat
+        gaps: CGFloat,
+        orientation: Monitor.Orientation
     ) {
         assertSanctionedMutation()
-        guard !presetWindowHeights.isEmpty else { return }
+        guard !presetWindowSecondarySpans.isEmpty else { return }
         guard let column = findColumn(containing: window, in: workspaceId) else { return }
         cancelInteractiveResize(for: column, in: workspaceId)
+        if orientation == .vertical {
+            if window.windowWidth.isAuto {
+                convertWidthsToAuto(in: column)
+            }
+
+            let presetCount = presetWindowSecondarySpans.count
+            let nextIndex: Int
+            switch window.windowWidth {
+            case let .preset(currentIndex) where window.sizingMode != .maximized:
+                if forwards {
+                    nextIndex = (currentIndex + 1) % presetCount
+                } else {
+                    nextIndex = (currentIndex - 1 + presetCount) % presetCount
+                }
+            default:
+                let current = currentWindowWidth(window)
+                if forwards {
+                    nextIndex = presetWindowSecondarySpans.firstIndex { preset in
+                        current + 1 < resolvedPresetWindowSecondarySpan(
+                            preset,
+                            availableSpan: availableWindowWidth(in: column, workingFrame: workingFrame),
+                            gaps: gaps
+                        )
+                    } ?? 0
+                } else {
+                    nextIndex = presetWindowSecondarySpans.lastIndex { preset in
+                        resolvedPresetWindowSecondarySpan(
+                            preset,
+                            availableSpan: availableWindowWidth(in: column, workingFrame: workingFrame),
+                            gaps: gaps
+                        ) + 1 < current
+                    } ?? (presetCount - 1)
+                }
+            }
+
+            window.windowWidth = .preset(nextIndex)
+            if window.sizingMode == .maximized {
+                window.sizingMode = .normal
+            }
+            return
+        }
 
         if window.height.isAuto {
             convertHeightsToAuto(in: column)
         }
 
-        let presetCount = presetWindowHeights.count
+        let presetCount = presetWindowSecondarySpans.count
         let nextIdx: Int
         switch window.height {
         case let .preset(currentIdx) where window.sizingMode != .maximized:
@@ -779,12 +1175,20 @@ extension NiriLayoutEngine {
         default:
             let current = currentWindowHeight(window)
             if forwards {
-                nextIdx = presetWindowHeights.firstIndex { preset in
-                    current + 1 < resolvedPresetHeight(preset, workingFrame: workingFrame, gaps: gaps)
+                nextIdx = presetWindowSecondarySpans.firstIndex { preset in
+                    current + 1 < resolvedPresetWindowSecondarySpan(
+                        preset,
+                        availableSpan: workingFrame.height,
+                        gaps: gaps
+                    )
                 } ?? 0
             } else {
-                nextIdx = presetWindowHeights.lastIndex { preset in
-                    resolvedPresetHeight(preset, workingFrame: workingFrame, gaps: gaps) + 1 < current
+                nextIdx = presetWindowSecondarySpans.lastIndex { preset in
+                    resolvedPresetWindowSecondarySpan(
+                        preset,
+                        availableSpan: workingFrame.height,
+                        gaps: gaps
+                    ) + 1 < current
                 } ?? (presetCount - 1)
             }
         }

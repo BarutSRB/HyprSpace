@@ -57,7 +57,7 @@ extension NiriLayoutEngine {
 
     func globalResolvedSettings() -> ResolvedNiriSettings {
         ResolvedNiriSettings(
-            maxVisibleColumns: maxVisibleColumns,
+            visibleContainerCount: visibleContainerCount,
             centerFocusedColumn: centerFocusedColumn,
             alwaysCenterSingleColumn: alwaysCenterSingleColumn,
             singleWindowFit: singleWindowFit,
@@ -84,12 +84,12 @@ extension NiriLayoutEngine {
         monitorForWorkspace(workspaceId)?.refreshRate ?? 60.0
     }
 
-    func effectiveMaxVisibleColumns(for monitorId: Monitor.ID) -> Int {
-        effectiveSettings(for: monitorId).maxVisibleColumns
+    func effectiveVisibleContainerCount(for monitorId: Monitor.ID) -> Int {
+        effectiveSettings(for: monitorId).visibleContainerCount
     }
 
-    func effectiveMaxVisibleColumns(in workspaceId: WorkspaceDescriptor.ID) -> Int {
-        effectiveSettings(in: workspaceId).maxVisibleColumns
+    func effectiveVisibleContainerCount(in workspaceId: WorkspaceDescriptor.ID) -> Int {
+        effectiveSettings(in: workspaceId).visibleContainerCount
     }
 
     func effectiveCenterFocusedColumn(for monitorId: Monitor.ID) -> CenterFocusedColumn {

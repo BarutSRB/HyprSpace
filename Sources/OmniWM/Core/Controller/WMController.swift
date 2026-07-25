@@ -360,13 +360,13 @@ final class WMController {
             )
         }
         updateNiriConfig(
-            maxVisibleColumns: settings.niriMaxVisibleColumns,
+            visibleContainerCount: settings.niriVisibleContainerCount,
             infiniteLoop: settings.niriInfiniteLoop,
             centerFocusedColumn: settings.niriCenterFocusedColumn,
             alwaysCenterSingleColumn: settings.niriAlwaysCenterSingleColumn,
             singleWindowFit: settings.niriSingleWindowFit,
-            columnWidthPresets: settings.niriColumnWidthPresets,
-            defaultColumnWidth: settings.niriDefaultColumnWidth
+            containerPrimarySpanPresets: settings.niriContainerPrimarySpanPresets,
+            defaultContainerPrimarySpan: settings.niriDefaultContainerPrimarySpan
         )
 
         if dwindleEngine == nil {
@@ -1034,22 +1034,22 @@ final class WMController {
     }
 
     func updateNiriConfig(
-        maxVisibleColumns: Int? = nil,
+        visibleContainerCount: Int? = nil,
         infiniteLoop: Bool? = nil,
         centerFocusedColumn: CenterFocusedColumn? = nil,
         alwaysCenterSingleColumn: Bool? = nil,
         singleWindowFit: SingleWindowFit? = nil,
-        columnWidthPresets: [Double]? = nil,
-        defaultColumnWidth: Double?? = nil
+        containerPrimarySpanPresets: [Double]? = nil,
+        defaultContainerPrimarySpan: Double?? = nil
     ) {
         niriLayoutHandler.updateNiriConfig(
-            maxVisibleColumns: maxVisibleColumns,
+            visibleContainerCount: visibleContainerCount,
             infiniteLoop: infiniteLoop,
             centerFocusedColumn: centerFocusedColumn,
             alwaysCenterSingleColumn: alwaysCenterSingleColumn,
             singleWindowFit: singleWindowFit,
-            columnWidthPresets: columnWidthPresets,
-            defaultColumnWidth: defaultColumnWidth
+            containerPrimarySpanPresets: containerPrimarySpanPresets,
+            defaultContainerPrimarySpan: defaultContainerPrimarySpan
         )
     }
 
@@ -2070,7 +2070,7 @@ final class WMController {
             workspaceName: evaluation.decision.workspaceName,
             minWidth: evaluation.decision.ruleEffects.minWidth,
             minHeight: evaluation.decision.ruleEffects.minHeight,
-            initialNiriColumnWidth: evaluation.decision.admissionHints.initialNiriColumnWidth,
+            initialNiriContainerPrimarySpan: evaluation.decision.admissionHints.initialNiriContainerPrimarySpan,
             matchedRuleId: evaluation.decision.ruleEffects.matchedRuleId,
             heuristicReasons: evaluation.decision.heuristicReasons,
             attributeFetchSucceeded: evaluation.facts.ax.attributeFetchSucceeded

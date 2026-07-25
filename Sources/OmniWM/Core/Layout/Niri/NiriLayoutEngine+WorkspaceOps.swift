@@ -52,7 +52,7 @@ extension NiriLayoutEngine {
             targetRoot.appendChild(newColumn)
             targetColumn = newColumn
         }
-        copyColumnWidthState(from: sourceColumn, to: targetColumn)
+        copyContainerSizingState(from: sourceColumn, to: targetColumn)
         targetColumn.appendChild(window)
         targetWorkspaceState.index(window)
 
@@ -74,7 +74,8 @@ extension NiriLayoutEngine {
         from sourceWorkspaceId: WorkspaceDescriptor.ID,
         to targetWorkspaceId: WorkspaceDescriptor.ID,
         sourceState: inout ViewportState,
-        targetState: inout ViewportState
+        targetState: inout ViewportState,
+        targetOrientation: Monitor.Orientation
     ) -> WorkspaceMoveResult? {
         assertSanctionedMutation()
         guard sourceWorkspaceId != targetWorkspaceId else { return nil }
@@ -110,6 +111,7 @@ extension NiriLayoutEngine {
 
         column.detach()
         targetRoot.appendChild(column)
+        column.invalidateCachedPrimarySpan(orientation: targetOrientation)
 
         for window in movedWindows {
             sourceWorkspaceState.unindex(window)

@@ -163,7 +163,7 @@ Turning **Enable IPC** on starts the server immediately and creates the Unix soc
 
 ## IPC Protocol
 
-**Protocol version:** 7
+**Protocol version:** 8
 
 ### Socket & Authorization
 
@@ -320,9 +320,18 @@ Workspace IDs are positive numeric strings. Direct hotkeys stay limited to `1-9`
 | `command move-column-to-workspace up` | — | niri | Move focused column to the adjacent workspace above |
 | `command move-column-to-workspace down` | — | niri | Move focused column to the adjacent workspace below |
 | `command toggle-column-tabbed` | — | niri | Toggle tabbed mode for the focused column |
-| `command toggle-column-full-width` | — | niri | Toggle full-width mode for the focused column |
-| `command cycle-column-width forward` | — | shared | Cycle column width presets forward |
-| `command cycle-column-width backward` | — | shared | Cycle column width presets backward |
+| `command toggle-container-full-primary-span` | — | niri | Toggle full-primary-span mode for the focused container |
+| `command expand-container-to-available-primary-span` | — | niri | Expand the focused container into available primary-axis space |
+| `command cycle-window-primary-span forward` | — | niri | Cycle window primary-span presets forward |
+| `command cycle-window-primary-span backward` | — | niri | Cycle window primary-span presets backward |
+| `command cycle-window-secondary-span forward` | — | niri | Cycle window secondary-span presets forward |
+| `command cycle-window-secondary-span backward` | — | niri | Cycle window secondary-span presets backward |
+| `command reset-window-secondary-span` | — | niri | Reset the focused window secondary span |
+| `command set-container-primary-span` | `<size-change>` | niri | Set or adjust the focused container primary span |
+| `command set-window-primary-span` | `<size-change>` | niri | Set or adjust the focused window primary span |
+| `command set-window-secondary-span` | `<size-change>` | niri | Set or adjust the focused window secondary span |
+
+`<size-change>` accepts fixed pixels (`100`), proportions (`50%`), fixed deltas (`+10`), or proportional deltas (`-10%`).
 
 ### Dwindle Operations
 
@@ -341,6 +350,8 @@ Workspace IDs are positive numeric strings. Direct hotkeys stay limited to `1-9`
 | Command | Arguments | Layout | Description |
 |---------|-----------|--------|-------------|
 | `command balance-sizes` | — | shared | Balance layout sizes in the active workspace |
+| `command cycle-size forward` | — | shared | Cycle layout sizing presets forward |
+| `command cycle-size backward` | — | shared | Cycle layout sizing presets backward |
 | `command toggle-workspace-layout` | — | shared | Toggle the workspace between Niri and Dwindle |
 | `command set-workspace-layout` | `<default\|niri\|dwindle>` | shared | Set the workspace layout explicitly |
 | `command toggle-fullscreen` | — | shared | Toggle OmniWM-managed fullscreen |
@@ -499,8 +510,12 @@ Numeric inputs are resolved as raw workspace IDs first. Display-name lookup is a
 
 ## Rules
 
-Manage persisted window rules that control layout behavior, default workspace placement, and initial Niri column width for matching windows.
-Rule add, replace, and config reload update admission defaults; existing managed windows stay on their current workspace unless `rule apply` is used. Initial column width is a one-shot Niri admission hint and never resizes an existing column.
+Manage persisted window rules that control layout behavior, default workspace placement, and the initial Niri
+container primary span for matching windows. Primary span is width in horizontal orientation and height in
+vertical orientation.
+Rule add, replace, and config reload update admission defaults; existing managed windows stay on their current
+workspace unless `rule apply` is used. Initial container primary span is a one-shot Niri admission hint and
+never resizes an existing container.
 
 ```
 omniwmctl rule <action> [arguments...] [options...]
@@ -518,7 +533,7 @@ omniwmctl rule <action> [arguments...] [options...]
 | `--ax-subrole` | `<subrole>` | Match accessibility subrole |
 | `--layout` | `<auto\|tile\|float>` | Layout action (`auto` = default behavior) |
 | `--assign-to-workspace` | `<raw-name>` | Open first matching app windows on this workspace raw name |
-| `--initial-column-width` | `<proportion>` | Initial Niri column width for a resizable window, from `0.05` through `1.0` inclusive |
+| `--initial-container-primary-span` | `<proportion>` | Initial Niri container primary span for a resizable window, from `0.05` through `1.0` inclusive |
 | `--min-width` | `<points>` | Minimum window width in points |
 | `--min-height` | `<points>` | Minimum window height in points |
 
@@ -528,9 +543,13 @@ the app's *runtime* identifier (`NSRunningApplication.bundleIdentifier`); apps w
 or wrapper apps) are matched by app name and/or title. AX role/subrole refine an existing match but cannot
 identify a rule on their own.
 
-`initialColumnWidth` is stored and returned over IPC as a proportion. `omniwmctl query rules` renders it as a percentage in human-readable table or text output. It applies only when a matching resizable window creates or claims a new Niri column, and the user can resize that column afterward.
+`initialContainerPrimarySpan` is stored and returned over IPC as a proportion. `omniwmctl query rules` renders
+it as a percentage in human-readable table or text output. It applies only when a matching resizable window
+creates or claims a new Niri container, and the user can resize that container afterward.
 
-Niri's Single Window Fit policy retains precedence for a lone window, so it can visually mask the seeded column width. A rule's `minWidth` can clamp the resolved width in pixels, but that constraint does not rewrite the stored `initialColumnWidth` proportion.
+Niri's Single Window Fit policy retains precedence for a lone window, so it can visually mask the seeded
+primary span. Physical minimum-size constraints can clamp the resolved span in pixels, but they do not rewrite
+the stored `initialContainerPrimarySpan` proportion.
 
 ### Rule Actions
 
@@ -572,7 +591,9 @@ Moves a rule to a new one-based position in the rule list.
 omniwmctl rule apply [--focused | --window <opaque-id> | --pid <pid>]
 ```
 
-Re-evaluates the current rule set against the target. Defaults to `--focused` if no target is specified. This is the explicit path for applying ongoing rule effects to already managed windows; the one-shot initial column-width hint is not reasserted on an existing column.
+Re-evaluates the current rule set against the target. Defaults to `--focused` if no target is specified. This is
+the explicit path for applying ongoing rule effects to already managed windows; the one-shot initial container
+primary-span hint is not reasserted on an existing container.
 
 | Target | Description |
 |--------|-------------|
@@ -589,8 +610,8 @@ omniwmctl rule add --bundle-id com.apple.finder --layout float
 # Tile initial Safari windows on workspace 2
 omniwmctl rule add --bundle-id com.apple.Safari --layout tile --assign-to-workspace 2
 
-# Start new Kitty columns at 50% width in Niri
-omniwmctl rule add --bundle-id net.kovidgoyal.kitty --initial-column-width 0.5
+# Start new Kitty containers at 50% of the primary axis in Niri
+omniwmctl rule add --bundle-id net.kovidgoyal.kitty --initial-container-primary-span 0.5
 
 # Float windows with "Preferences" in the title
 omniwmctl rule add --bundle-id com.apple.Safari --title-substring Preferences --layout float

@@ -22,7 +22,7 @@ enum TitleMatcherMode: String, CaseIterable, Identifiable {
     }
 }
 
-enum AppRuleInitialColumnWidthPercent {
+enum AppRuleInitialContainerPrimarySpanPercent {
     static func percent(from proportion: Double) -> Double {
         proportion * 100
     }
@@ -57,8 +57,8 @@ struct AppRuleDraft: Identifiable, Equatable {
     var layoutAction: WindowRuleLayoutAction
     var assignToWorkspaceEnabled: Bool
     var assignToWorkspace: String
-    var initialColumnWidthEnabled: Bool
-    var initialColumnWidth: Double
+    var initialContainerPrimarySpanEnabled: Bool
+    var initialContainerPrimarySpan: Double
     var minWidthEnabled: Bool
     var minWidth: Double
     var minHeightEnabled: Bool
@@ -79,8 +79,8 @@ struct AppRuleDraft: Identifiable, Equatable {
         layoutAction = .auto
         assignToWorkspaceEnabled = false
         assignToWorkspace = ""
-        initialColumnWidthEnabled = false
-        initialColumnWidth = 0.5
+        initialContainerPrimarySpanEnabled = false
+        initialContainerPrimarySpan = 0.5
         minWidthEnabled = false
         minWidth = 400
         minHeightEnabled = false
@@ -102,8 +102,8 @@ struct AppRuleDraft: Identifiable, Equatable {
         layoutAction = rule.effectiveLayoutAction
         assignToWorkspaceEnabled = rule.assignToWorkspace != nil
         assignToWorkspace = rule.assignToWorkspace ?? ""
-        initialColumnWidthEnabled = rule.initialColumnWidth != nil
-        initialColumnWidth = rule.initialColumnWidth ?? 0.5
+        initialContainerPrimarySpanEnabled = rule.initialContainerPrimarySpan != nil
+        initialContainerPrimarySpan = rule.initialContainerPrimarySpan ?? 0.5
         minWidthEnabled = rule.minWidth != nil
         minWidth = rule.minWidth ?? 400
         minHeightEnabled = rule.minHeight != nil
@@ -131,8 +131,8 @@ struct AppRuleDraft: Identifiable, Equatable {
             lhs.layoutAction == rhs.layoutAction &&
             lhs.assignToWorkspaceEnabled == rhs.assignToWorkspaceEnabled &&
             lhs.assignToWorkspace == rhs.assignToWorkspace &&
-            lhs.initialColumnWidthEnabled == rhs.initialColumnWidthEnabled &&
-            nanStableEqual(lhs.initialColumnWidth, rhs.initialColumnWidth) &&
+            lhs.initialContainerPrimarySpanEnabled == rhs.initialContainerPrimarySpanEnabled &&
+            nanStableEqual(lhs.initialContainerPrimarySpan, rhs.initialContainerPrimarySpan) &&
             lhs.minWidthEnabled == rhs.minWidthEnabled &&
             nanStableEqual(lhs.minWidth, rhs.minWidth) &&
             lhs.minHeightEnabled == rhs.minHeightEnabled &&
@@ -205,22 +205,23 @@ struct AppRuleDraft: Identifiable, Equatable {
         return nil
     }
 
-    var initialColumnWidthError: String? {
-        IPCRuleValidator.initialColumnWidthError(
-            for: initialColumnWidthEnabled ? initialColumnWidth : nil
+    var initialContainerPrimarySpanError: String? {
+        IPCRuleValidator.initialContainerPrimarySpanError(
+            for: initialContainerPrimarySpanEnabled ? initialContainerPrimarySpan : nil
         )
     }
 
     var effectHint: String? {
         let rule = makeRule()
         guard rule.hasIdentifyingMatcher, !rule.hasEffect else { return nil }
-        return "This rule matches windows but has no effect — set a layout, workspace, initial column width, "
+        return "This rule matches windows but has no effect — set a layout, workspace, initial container primary span, "
             + "or minimum size."
     }
 
     var isValid: Bool {
         let rule = makeRule()
-        return bundleIdError == nil && titleRegexError == nil && initialColumnWidthError == nil && minSizeError == nil
+        return bundleIdError == nil && titleRegexError == nil && initialContainerPrimarySpanError == nil &&
+            minSizeError == nil
             && rule.hasIdentifyingMatcher && rule.hasEffect
     }
 
@@ -251,7 +252,7 @@ struct AppRuleDraft: Identifiable, Equatable {
             axSubrole: axSubroleEnabled ? axSubrole.trimmedNonEmpty : nil,
             layout: layoutAction == .auto ? nil : layoutAction,
             assignToWorkspace: assignToWorkspaceEnabled ? assignToWorkspace.trimmedNonEmpty : nil,
-            initialColumnWidth: initialColumnWidthEnabled ? initialColumnWidth : nil,
+            initialContainerPrimarySpan: initialContainerPrimarySpanEnabled ? initialContainerPrimarySpan : nil,
             minWidth: minWidthEnabled ? minWidth : nil,
             minHeight: minHeightEnabled ? minHeight : nil
         )

@@ -6,7 +6,7 @@ import Foundation
 @testable import OmniWM
 import XCTest
 
-final class NiriVisibleColumnsTests: XCTestCase {
+final class NiriVisibleContainerCountTests: XCTestCase {
     private func proportion(of column: NiriContainer) -> CGFloat? {
         if case let .proportion(value) = column.width { return value }
         return nil
@@ -25,21 +25,22 @@ final class NiriVisibleColumnsTests: XCTestCase {
         return (engine, workspaceId)
     }
 
-    func testBalanceSizesReTilesExistingColumnsToOneOverN() throws {
+    func testBalanceSizesReTilesExistingContainersToOneOverN() throws {
         let (engine, workspaceId) = makeEngineWithColumns(3)
         XCTAssertEqual(engine.columns(in: workspaceId).count, 3)
         for column in engine.columns(in: workspaceId) {
             XCTAssertEqual(try XCTUnwrap(proportion(of: column)), 0.5, accuracy: 0.0001)
         }
 
-        engine.maxVisibleColumns = 3
-        engine.defaultColumnWidth = nil
+        engine.visibleContainerCount = 3
+        engine.defaultContainerPrimarySpan = nil
 
         let didChange = engine.balanceSizes(
             in: workspaceId,
             motion: .disabled,
-            workingAreaWidth: 1200,
-            gaps: 12
+            workingFrame: CGRect(x: 0, y: 0, width: 1200, height: 800),
+            gaps: 12,
+            orientation: .horizontal
         )
 
         XCTAssertTrue(didChange)
@@ -55,34 +56,35 @@ final class NiriVisibleColumnsTests: XCTestCase {
         let didChange = engine.balanceSizes(
             in: workspaceId,
             motion: .disabled,
-            workingAreaWidth: 1200,
-            gaps: 12
+            workingFrame: CGRect(x: 0, y: 0, width: 1200, height: 800),
+            gaps: 12,
+            orientation: .horizontal
         )
 
         XCTAssertFalse(didChange)
     }
 
-    func testResolvedColumnResetWidthDerivesFromVisibleColumnsWhenAuto() {
+    func testResolvedContainerResetPrimarySpanDerivesFromVisibleContainerCountWhenAuto() {
         let engine = NiriLayoutEngine()
         let workspaceId = WorkspaceDescriptor.ID()
-        engine.maxVisibleColumns = 3
-        engine.defaultColumnWidth = nil
+        engine.visibleContainerCount = 3
+        engine.defaultContainerPrimarySpan = nil
 
         XCTAssertEqual(
-            engine.resolvedColumnResetWidth(in: workspaceId).proportion,
+            engine.resolvedContainerResetPrimarySpan(in: workspaceId).proportion,
             1.0 / 3.0,
             accuracy: 0.0001
         )
     }
 
-    func testResolvedColumnResetWidthHonorsExplicitDefaultWidth() {
+    func testResolvedContainerResetPrimarySpanHonorsExplicitDefault() {
         let engine = NiriLayoutEngine()
         let workspaceId = WorkspaceDescriptor.ID()
-        engine.maxVisibleColumns = 3
-        engine.defaultColumnWidth = 0.5
+        engine.visibleContainerCount = 3
+        engine.defaultContainerPrimarySpan = 0.5
 
         XCTAssertEqual(
-            engine.resolvedColumnResetWidth(in: workspaceId).proportion,
+            engine.resolvedContainerResetPrimarySpan(in: workspaceId).proportion,
             0.5,
             accuracy: 0.0001
         )

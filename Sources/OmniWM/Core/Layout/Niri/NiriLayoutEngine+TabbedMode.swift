@@ -9,7 +9,8 @@ extension NiriLayoutEngine {
     func toggleColumnTabbed(
         in workspaceId: WorkspaceDescriptor.ID,
         state: ViewportState,
-        motion: MotionSnapshot
+        motion: MotionSnapshot,
+        orientation: Monitor.Orientation
     ) -> Bool {
         assertSanctionedMutation()
         guard let selectedId = state.selectedNodeId,
@@ -20,7 +21,13 @@ extension NiriLayoutEngine {
         }
 
         let newMode: ColumnDisplay = column.displayMode == .normal ? .tabbed : .normal
-        return setColumnDisplay(newMode, for: column, in: workspaceId, motion: motion)
+        return setColumnDisplay(
+            newMode,
+            for: column,
+            in: workspaceId,
+            motion: motion,
+            orientation: orientation
+        )
     }
 
     @discardableResult
@@ -29,6 +36,7 @@ extension NiriLayoutEngine {
         for column: NiriContainer,
         in workspaceId: WorkspaceDescriptor.ID,
         motion: MotionSnapshot,
+        orientation: Monitor.Orientation,
         gaps: CGFloat = 0
     ) -> Bool {
         guard column.displayMode != mode else { return false }
@@ -54,17 +62,30 @@ extension NiriLayoutEngine {
         let originDelta = CGPoint(x: prevOrigin.x - newOrigin.x, y: prevOrigin.y - newOrigin.y)
 
         column.displayMode = .normal
-        let tileOffsets = computeTileOffsets(column: column, gaps: gaps)
+        let tileOffsets = computeTileOffsets(
+            column: column,
+            gaps: gaps,
+            orientation: orientation
+        )
 
         for (idx, window) in windows.enumerated() {
-            var yDelta = idx < tileOffsets.count ? tileOffsets[idx] : 0
-            yDelta -= prevOrigin.y
+            let previousSecondaryOrigin = switch orientation {
+            case .horizontal: prevOrigin.y
+            case .vertical: prevOrigin.x
+            }
+            var secondaryDelta = idx < tileOffsets.count ? tileOffsets[idx] : 0
+            secondaryDelta -= previousSecondaryOrigin
 
             if mode == .normal {
-                yDelta *= -1
+                secondaryDelta *= -1
             }
 
-            let delta = CGPoint(x: originDelta.x, y: originDelta.y + yDelta)
+            let delta = switch orientation {
+            case .horizontal:
+                CGPoint(x: originDelta.x, y: originDelta.y + secondaryDelta)
+            case .vertical:
+                CGPoint(x: originDelta.x + secondaryDelta, y: originDelta.y)
+            }
             if delta.x != 0 || delta.y != 0 {
                 window.animateMoveFrom(
                     displacement: delta,
@@ -77,6 +98,22 @@ extension NiriLayoutEngine {
         }
 
         column.displayMode = mode
+        let currentTarget = column.targetWidth ?? column.cachedWidth
+        if currentTarget > 0 {
+            let clampedTarget = column.clampedToWidthBounds(
+                currentTarget,
+                contentInset: tabContentInset(for: column)
+            )
+            if clampedTarget != currentTarget {
+                column.animateWidthTo(
+                    newWidth: clampedTarget,
+                    clock: animationClock,
+                    config: windowMovementAnimationConfig,
+                    displayRefreshRate: displayRefreshRate(in: workspaceId),
+                    animated: motion.animationsEnabled
+                )
+            }
+        }
         updateTabbedColumnVisibility(column: column)
 
         return true

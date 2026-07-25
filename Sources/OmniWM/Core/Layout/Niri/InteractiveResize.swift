@@ -69,19 +69,26 @@ struct ResizeEdge: OptionSet, Hashable {
 }
 
 struct InteractiveResize {
+    enum WindowBaseline {
+        case fixedPixels(CGFloat)
+        case weight(CGFloat)
+    }
+
     let windowId: NodeId
 
     let workspaceId: WorkspaceDescriptor.ID
 
-    let originalColumnWidth: CGFloat?
+    let originalContainerSpan: CGFloat?
 
-    let originalWindowHeight: CGFloat?
+    let originalWindowBaseline: WindowBaseline?
 
     let edges: ResizeEdge
 
     let startMouseLocation: CGPoint
 
     let columnIndex: Int
+
+    let orientation: Monitor.Orientation
 
     let originalViewOffset: CGFloat?
 }

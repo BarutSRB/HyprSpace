@@ -49,19 +49,20 @@ final class SettingsStore {
         didSet { scheduleSave() }
     }
 
-    var niriColumnWidthPresets = SettingsStore.validatedPresets(
-        SettingsStore.defaultExport.niriColumnWidthPresets ?? BuiltInSettingsDefaults.niriColumnWidthPresets
+    var niriContainerPrimarySpanPresets = SettingsStore.validatedContainerPrimarySpanPresets(
+        SettingsStore.defaultExport.niriContainerPrimarySpanPresets ?? BuiltInSettingsDefaults
+            .niriContainerPrimarySpanPresets
     ) {
         didSet { scheduleSave() }
     }
 
-    var niriDefaultColumnWidth = SettingsStore.validatedDefaultColumnWidth(
-        SettingsStore.defaultExport.niriDefaultColumnWidth
+    var niriDefaultContainerPrimarySpan = SettingsStore.validatedDefaultContainerPrimarySpan(
+        SettingsStore.defaultExport.niriDefaultContainerPrimarySpan
     ) {
         didSet {
-            let validated = SettingsStore.validatedDefaultColumnWidth(niriDefaultColumnWidth)
-            if validated != niriDefaultColumnWidth {
-                niriDefaultColumnWidth = validated
+            let validated = SettingsStore.validatedDefaultContainerPrimarySpan(niriDefaultContainerPrimarySpan)
+            if validated != niriDefaultContainerPrimarySpan {
+                niriDefaultContainerPrimarySpan = validated
                 return
             }
             scheduleSave()
@@ -108,7 +109,7 @@ final class SettingsStore {
         didSet { scheduleSave() }
     }
 
-    var niriMaxVisibleColumns = SettingsStore.defaultExport.niriMaxVisibleColumns {
+    var niriVisibleContainerCount = SettingsStore.defaultExport.niriVisibleContainerCount {
         didSet { scheduleSave() }
     }
 
@@ -127,7 +128,7 @@ final class SettingsStore {
     }
 
     var niriSingleWindowFit = SingleWindowFit(
-        serialized: SettingsStore.defaultExport.niriSingleWindowAspectRatio
+        serialized: SettingsStore.defaultExport.niriSingleWindowFit
     ) {
         didSet { scheduleSave() }
     }
@@ -328,7 +329,7 @@ final class SettingsStore {
     }
 
     var dwindleSingleWindowFit = SingleWindowFit(
-        serialized: SettingsStore.defaultExport.dwindleSingleWindowAspectRatio
+        serialized: SettingsStore.defaultExport.dwindleSingleWindowFit
     ) {
         didSet { scheduleSave() }
     }
@@ -637,13 +638,13 @@ final class SettingsStore {
             outerGapRight: outerGapRight,
             outerGapTop: outerGapTop,
             outerGapBottom: outerGapBottom,
-            niriMaxVisibleColumns: niriMaxVisibleColumns,
+            niriVisibleContainerCount: niriVisibleContainerCount,
             niriInfiniteLoop: niriInfiniteLoop,
             niriCenterFocusedColumn: niriCenterFocusedColumn.rawValue,
             niriAlwaysCenterSingleColumn: niriAlwaysCenterSingleColumn,
-            niriSingleWindowAspectRatio: niriSingleWindowFit.serialized,
-            niriColumnWidthPresets: niriColumnWidthPresets,
-            niriDefaultColumnWidth: niriDefaultColumnWidth,
+            niriSingleWindowFit: niriSingleWindowFit.serialized,
+            niriContainerPrimarySpanPresets: niriContainerPrimarySpanPresets,
+            niriDefaultContainerPrimarySpan: niriDefaultContainerPrimarySpan,
             workspaceConfigurations: workspaceConfigurations,
             defaultLayoutType: defaultLayoutType.rawValue,
             bordersEnabled: bordersEnabled,
@@ -688,7 +689,7 @@ final class SettingsStore {
             dwindleSmartSplit: dwindleSmartSplit,
             dwindleDefaultSplitRatio: dwindleDefaultSplitRatio,
             dwindleSplitWidthMultiplier: dwindleSplitWidthMultiplier,
-            dwindleSingleWindowAspectRatio: dwindleSingleWindowFit.serialized,
+            dwindleSingleWindowFit: dwindleSingleWindowFit.serialized,
             dwindleUseGlobalGaps: dwindleUseGlobalGaps,
             dwindleMoveToRootStable: dwindleMoveToRootStable,
             monitorDwindleSettings: monitorDwindleSettings,
@@ -752,15 +753,17 @@ final class SettingsStore {
         outerGapTop = export.outerGapTop
         outerGapBottom = export.outerGapBottom
 
-        niriMaxVisibleColumns = export.niriMaxVisibleColumns
+        niriVisibleContainerCount = export.niriVisibleContainerCount
         niriInfiniteLoop = export.niriInfiniteLoop
         niriCenterFocusedColumn = CenterFocusedColumn(rawValue: export.niriCenterFocusedColumn) ?? .never
         niriAlwaysCenterSingleColumn = export.niriAlwaysCenterSingleColumn
-        niriSingleWindowFit = SingleWindowFit(serialized: export.niriSingleWindowAspectRatio)
-        niriColumnWidthPresets = SettingsStore.validatedPresets(
-            export.niriColumnWidthPresets ?? baseline.niriColumnWidthPresets ?? SettingsStore.defaultColumnWidthPresets
+        niriSingleWindowFit = SingleWindowFit(serialized: export.niriSingleWindowFit)
+        niriContainerPrimarySpanPresets = SettingsStore.validatedContainerPrimarySpanPresets(
+            export.niriContainerPrimarySpanPresets ?? baseline.niriContainerPrimarySpanPresets ?? SettingsStore
+                .defaultContainerPrimarySpanPresets
         )
-        niriDefaultColumnWidth = SettingsStore.validatedDefaultColumnWidth(export.niriDefaultColumnWidth)
+        niriDefaultContainerPrimarySpan = SettingsStore
+            .validatedDefaultContainerPrimarySpan(export.niriDefaultContainerPrimarySpan)
 
         workspaceConfigurations = SettingsStore.normalizedWorkspaceConfigurations(export.workspaceConfigurations)
         defaultLayoutType = LayoutType(rawValue: export.defaultLayoutType) ?? .niri
@@ -826,7 +829,7 @@ final class SettingsStore {
         dwindleSmartSplit = export.dwindleSmartSplit
         dwindleDefaultSplitRatio = export.dwindleDefaultSplitRatio
         dwindleSplitWidthMultiplier = export.dwindleSplitWidthMultiplier
-        dwindleSingleWindowFit = SingleWindowFit(serialized: export.dwindleSingleWindowAspectRatio)
+        dwindleSingleWindowFit = SingleWindowFit(serialized: export.dwindleSingleWindowFit)
         dwindleUseGlobalGaps = export.dwindleUseGlobalGaps
         dwindleMoveToRootStable = export.dwindleMoveToRootStable
         monitorDwindleSettings = export.monitorDwindleSettings
@@ -1111,7 +1114,7 @@ final class SettingsStore {
 
     private func resolvedNiriSettings(override: MonitorNiriSettings?) -> ResolvedNiriSettings {
         return ResolvedNiriSettings(
-            maxVisibleColumns: override?.maxVisibleColumns ?? niriMaxVisibleColumns,
+            visibleContainerCount: override?.visibleContainerCount ?? niriVisibleContainerCount,
             centerFocusedColumn: override?.centerFocusedColumn ?? niriCenterFocusedColumn,
             alwaysCenterSingleColumn: override?.alwaysCenterSingleColumn ?? niriAlwaysCenterSingleColumn,
             singleWindowFit: override?.singleWindowFit ?? niriSingleWindowFit,
@@ -1184,17 +1187,18 @@ final class SettingsStore {
         CGFloat(min(64, max(0, override ?? gapSize)))
     }
 
-    nonisolated static let defaultColumnWidthPresets: [Double] = BuiltInSettingsDefaults.niriColumnWidthPresets
+    nonisolated static let defaultContainerPrimarySpanPresets: [Double] = BuiltInSettingsDefaults
+        .niriContainerPrimarySpanPresets
 
-    static func validatedPresets(_ presets: [Double]) -> [Double] {
+    static func validatedContainerPrimarySpanPresets(_ presets: [Double]) -> [Double] {
         let result = presets.map { min(1.0, max(0.05, $0)) }
         if result.count < 2 {
-            return defaultColumnWidthPresets
+            return defaultContainerPrimarySpanPresets
         }
         return result
     }
 
-    static func validatedDefaultColumnWidth(_ width: Double?) -> Double? {
+    static func validatedDefaultContainerPrimarySpan(_ width: Double?) -> Double? {
         guard let width else { return nil }
         return min(1.0, max(0.05, width))
     }

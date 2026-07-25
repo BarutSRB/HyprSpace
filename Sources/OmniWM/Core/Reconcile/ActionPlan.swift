@@ -20,7 +20,7 @@ struct PersistedHydrationMutation: Equatable {
     let targetMode: TrackedWindowMode
     let floatingFrame: CGRect?
     let niriPlacement: PersistedNiriPlacement?
-    let detachedNiriColumnWidthState: NiriColumnWidthState?
+    let detachedNiriContainerSizingState: NiriContainerSizingState?
     let consumedKey: PersistedWindowRestoreKey
     let consumedEntry: PersistedWindowRestoreConsumptionKey
 }

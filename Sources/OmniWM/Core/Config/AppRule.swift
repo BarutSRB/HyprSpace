@@ -32,7 +32,7 @@ struct AppRule: Codable, Identifiable, Equatable, Sendable {
         case axSubrole
         case layout
         case assignToWorkspace
-        case initialColumnWidth
+        case initialContainerPrimarySpan
         case minWidth
         case minHeight
     }
@@ -46,7 +46,7 @@ struct AppRule: Codable, Identifiable, Equatable, Sendable {
     var axSubrole: String?
     var layout: WindowRuleLayoutAction?
     var assignToWorkspace: String?
-    var initialColumnWidth: Double?
+    var initialContainerPrimarySpan: Double?
     var minWidth: Double?
     var minHeight: Double?
 
@@ -60,7 +60,7 @@ struct AppRule: Codable, Identifiable, Equatable, Sendable {
         axSubrole: String? = nil,
         layout: WindowRuleLayoutAction? = nil,
         assignToWorkspace: String? = nil,
-        initialColumnWidth: Double? = nil,
+        initialContainerPrimarySpan: Double? = nil,
         minWidth: Double? = nil,
         minHeight: Double? = nil
     ) {
@@ -73,7 +73,7 @@ struct AppRule: Codable, Identifiable, Equatable, Sendable {
         self.axSubrole = axSubrole
         self.layout = layout
         self.assignToWorkspace = assignToWorkspace
-        self.initialColumnWidth = initialColumnWidth
+        self.initialContainerPrimarySpan = initialContainerPrimarySpan
         self.minWidth = minWidth
         self.minHeight = minHeight
         normalizeSingleTitle()
@@ -83,20 +83,20 @@ struct AppRule: Codable, Identifiable, Equatable, Sendable {
         layout ?? .auto
     }
 
-    var validInitialColumnWidth: Double? {
-        guard let initialColumnWidth,
-              initialColumnWidth.isFinite,
-              (0.05 ... 1.0).contains(initialColumnWidth)
+    var validInitialContainerPrimarySpan: Double? {
+        guard let initialContainerPrimarySpan,
+              initialContainerPrimarySpan.isFinite,
+              (0.05 ... 1.0).contains(initialContainerPrimarySpan)
         else {
             return nil
         }
-        return initialColumnWidth
+        return initialContainerPrimarySpan
     }
 
     var hasEffect: Bool {
         effectiveLayoutAction != .auto ||
             assignToWorkspace?.isEmpty == false ||
-            validInitialColumnWidth != nil ||
+            validInitialContainerPrimarySpan != nil ||
             minWidth != nil || minHeight != nil
     }
 
@@ -141,7 +141,7 @@ struct AppRule: Codable, Identifiable, Equatable, Sendable {
     var hasAnyRule: Bool {
         effectiveLayoutAction != .auto ||
             assignToWorkspace != nil ||
-            initialColumnWidth != nil ||
+            initialContainerPrimarySpan != nil ||
             minWidth != nil || minHeight != nil ||
             hasAdvancedMatchers
     }
@@ -157,7 +157,7 @@ struct AppRule: Codable, Identifiable, Equatable, Sendable {
         axSubrole = try container.decodeIfPresent(String.self, forKey: .axSubrole)
         layout = try container.decodeIfPresent(WindowRuleLayoutAction.self, forKey: .layout)
         assignToWorkspace = try container.decodeIfPresent(String.self, forKey: .assignToWorkspace)
-        initialColumnWidth = try container.decodeIfPresent(Double.self, forKey: .initialColumnWidth)
+        initialContainerPrimarySpan = try container.decodeIfPresent(Double.self, forKey: .initialContainerPrimarySpan)
         minWidth = try container.decodeIfPresent(Double.self, forKey: .minWidth)
         minHeight = try container.decodeIfPresent(Double.self, forKey: .minHeight)
         normalizeSingleTitle()
@@ -174,7 +174,7 @@ struct AppRule: Codable, Identifiable, Equatable, Sendable {
         try container.encodeIfPresent(axSubrole, forKey: .axSubrole)
         try container.encodeIfPresent(layout, forKey: .layout)
         try container.encodeIfPresent(assignToWorkspace, forKey: .assignToWorkspace)
-        try container.encodeIfPresent(initialColumnWidth, forKey: .initialColumnWidth)
+        try container.encodeIfPresent(initialContainerPrimarySpan, forKey: .initialContainerPrimarySpan)
         try container.encodeIfPresent(minWidth, forKey: .minWidth)
         try container.encodeIfPresent(minHeight, forKey: .minHeight)
     }

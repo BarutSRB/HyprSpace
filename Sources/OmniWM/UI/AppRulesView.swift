@@ -256,18 +256,18 @@ struct AppRuleSidebarRow: View {
         if let workspace = rule.assignToWorkspace {
             RuleBadge(text: "WS", color: .green, accessibilityLabel: "Assigned to workspace \(workspace)")
         }
-        if let width = rule.validInitialColumnWidth {
-            let percent = AppRuleInitialColumnWidthPercent.displayText(for: width)
+        if let width = rule.validInitialContainerPrimarySpan {
+            let percent = AppRuleInitialContainerPrimarySpanPercent.displayText(for: width)
             RuleBadge(
-                text: "Width \(percent)%",
+                text: "Primary \(percent)%",
                 color: .indigo,
-                accessibilityLabel: "Initial Niri column width \(percent) percent"
+                accessibilityLabel: "Initial Niri container primary span \(percent) percent"
             )
-        } else if rule.initialColumnWidth != nil {
+        } else if rule.initialContainerPrimarySpan != nil {
             RuleBadge(
-                text: "Width invalid",
+                text: "Primary invalid",
                 color: .red,
-                accessibilityLabel: "Invalid initial Niri column width"
+                accessibilityLabel: "Invalid initial Niri container primary span"
             )
         }
         if rule.minWidth != nil || rule.minHeight != nil {

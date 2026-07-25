@@ -56,7 +56,7 @@ extension NiriLayoutEngine {
         gaps: (horizontal: CGFloat, vertical: CGFloat),
         scale: CGFloat = 2.0,
         workingArea: WorkingAreaContext? = nil,
-        orientation: Monitor.Orientation = .horizontal
+        orientation: Monitor.Orientation
     ) -> [WindowToken: CGRect] {
         calculateLayoutWithVisibility(
             state: state,
@@ -78,7 +78,7 @@ extension NiriLayoutEngine {
         gaps: (horizontal: CGFloat, vertical: CGFloat),
         scale: CGFloat = 2.0,
         workingArea: WorkingAreaContext? = nil,
-        orientation: Monitor.Orientation = .horizontal,
+        orientation: Monitor.Orientation,
         animationTime: TimeInterval? = nil,
         hiddenPlacementMonitor: HiddenPlacementMonitorContext? = nil,
         hiddenPlacementMonitors: [HiddenPlacementMonitorContext] = [],
@@ -117,7 +117,7 @@ extension NiriLayoutEngine {
         gaps: (horizontal: CGFloat, vertical: CGFloat),
         scale: CGFloat = 2.0,
         workingArea: WorkingAreaContext? = nil,
-        orientation: Monitor.Orientation = .horizontal,
+        orientation: Monitor.Orientation,
         animationTime: TimeInterval? = nil,
         hiddenPlacementMonitor: HiddenPlacementMonitorContext? = nil,
         hiddenPlacementMonitors: [HiddenPlacementMonitorContext] = [],
@@ -159,7 +159,8 @@ extension NiriLayoutEngine {
                 renderedFullscreenRect: renderedFullscreenRect,
                 workspaceOffset: workspaceOffset,
                 scale: effectiveScale,
-                gaps: gaps.horizontal,
+                primaryGap: primaryGap,
+                secondaryGap: secondaryGap,
                 screenClampRect: viewFrame,
                 time: time,
                 result: &frames,
@@ -172,7 +173,11 @@ extension NiriLayoutEngine {
             switch orientation {
             case .horizontal:
                 if container.cachedWidth <= 0 {
-                    container.resolveAndCacheWidth(workingAreaWidth: workingFrame.width, gaps: primaryGap)
+                    container.resolveAndCacheWidth(
+                        workingAreaWidth: workingFrame.width,
+                        gaps: primaryGap,
+                        contentInset: tabContentInset(for: container)
+                    )
                 }
             case .vertical:
                 if container.cachedHeight <= 0 {
@@ -294,6 +299,7 @@ extension NiriLayoutEngine {
                 fullscreenRect: canonicalFullscreenRect,
                 renderedFullscreenRect: renderedFullscreenRect,
                 secondaryGap: secondaryGap,
+                secondarySpanOverride: nil,
                 scale: effectiveScale,
                 screenClampRect: viewFrame,
                 animationTime: time,
@@ -629,14 +635,14 @@ extension NiriLayoutEngine {
 
     private func centeredSingleWindowRect(
         in workingFrame: CGRect,
-        width: CGFloat,
+        size: CGSize,
         scale: CGFloat
     ) -> CGRect {
         CGRect(
-            x: workingFrame.minX + (workingFrame.width - width) / 2,
-            y: workingFrame.minY,
-            width: width,
-            height: workingFrame.height
+            x: workingFrame.minX + (workingFrame.width - size.width) / 2,
+            y: workingFrame.minY + (workingFrame.height - size.height) / 2,
+            width: size.width,
+            height: size.height
         ).roundedToPhysicalPixels(scale: scale)
     }
 
@@ -658,22 +664,74 @@ extension NiriLayoutEngine {
         in workingFrame: CGRect,
         fullscreenLayoutFrame: CGRect? = nil,
         scale: CGFloat,
-        gaps: CGFloat
+        primaryGap: CGFloat,
+        secondaryGap: CGFloat,
+        orientation: Monitor.Orientation
     ) -> CGRect {
         let minSize = context.window.constraints.normalized().minSize
-        guard context.container.hasManualSingleWindowWidthOverride else {
+        let hasManualPrimaryOverride = switch orientation {
+        case .horizontal:
+            context.container.hasManualSingleWindowWidthOverride
+        case .vertical:
+            context.container.hasManualSingleWindowHeightOverride
+        }
+        let hasManualSecondaryOverride = orientation == .vertical && context.window.windowWidth != .default
+        guard hasManualPrimaryOverride || hasManualSecondaryOverride else {
             let baseFrame = context.fit.mode == .fill ? fullscreenLayoutFrame ?? workingFrame : workingFrame
             return rectExpandedToMinimum(context.fit.frame(in: baseFrame), minSize: minSize)
                 .roundedToPhysicalPixels(scale: scale)
         }
 
-        if context.container.cachedWidth <= 0 {
-            context.container.resolveAndCacheWidth(workingAreaWidth: workingFrame.width, gaps: gaps)
+        let boundedSize: CGSize
+        switch orientation {
+        case .horizontal:
+            if context.container.cachedWidth <= 0 {
+                context.container.resolveAndCacheWidth(
+                    workingAreaWidth: workingFrame.width,
+                    gaps: primaryGap,
+                    contentInset: tabContentInset(for: context.container)
+                )
+            }
+            boundedSize = CGSize(
+                width: min(workingFrame.width, max(0, context.container.cachedWidth)),
+                height: workingFrame.height
+            )
+        case .vertical:
+            let windowWidth: CGFloat
+            if hasManualSecondaryOverride {
+                windowWidth = switch context.window.windowWidth {
+                case let .fixed(width):
+                    width
+                case let .preset(index):
+                    resolvePresetSpan(
+                        presetWindowSecondarySpans,
+                        index: index,
+                        availableSpace: workingFrame.width,
+                        gap: secondaryGap
+                    ) ?? workingFrame.width
+                case .auto:
+                    context.window.resolvedWidth ?? context.window.frame?.width ?? workingFrame.width
+                }
+            } else {
+                windowWidth = workingFrame.width
+            }
+            if context.container.cachedHeight <= 0 {
+                context.container.resolveAndCacheHeight(
+                    workingAreaHeight: workingFrame.height,
+                    gaps: primaryGap
+                )
+            }
+            let tabOffset = context.container.isTabbed ? renderStyle.tabIndicatorWidth : 0
+            let containerWidth = hasManualSecondaryOverride
+                ? context.window.constraints.clampWidth(windowWidth) + tabOffset
+                : windowWidth
+            boundedSize = CGSize(
+                width: min(workingFrame.width, max(0, containerWidth)),
+                height: min(workingFrame.height, max(0, context.container.cachedHeight))
+            )
         }
-
-        let resolvedWidth = min(workingFrame.width, max(0, context.container.cachedWidth))
         return rectExpandedToMinimum(
-            centeredSingleWindowRect(in: workingFrame, width: resolvedWidth, scale: scale),
+            centeredSingleWindowRect(in: workingFrame, size: boundedSize, scale: scale),
             minSize: minSize
         ).roundedToPhysicalPixels(scale: scale)
     }
@@ -686,7 +744,8 @@ extension NiriLayoutEngine {
         renderedFullscreenRect: CGRect,
         workspaceOffset: CGFloat,
         scale: CGFloat,
-        gaps: CGFloat,
+        primaryGap: CGFloat,
+        secondaryGap: CGFloat,
         screenClampRect: CGRect,
         time: TimeInterval,
         result: inout [WindowToken: CGRect],
@@ -697,12 +756,22 @@ extension NiriLayoutEngine {
             in: workingFrame,
             fullscreenLayoutFrame: fullscreenLayoutFrame,
             scale: scale,
-            gaps: gaps
+            primaryGap: primaryGap,
+            secondaryGap: secondaryGap,
+            orientation: orientation
         )
         let renderOffset = context.container.renderOffset(at: time)
         let renderedRect = canonicalRect
             .offsetBy(dx: workspaceOffset + renderOffset.x, dy: renderOffset.y)
             .roundedToPhysicalPixels(scale: scale)
+        let tabOffset = context.container.isTabbed ? renderStyle.tabIndicatorWidth : 0
+        let secondarySpanOverride: CGFloat? = if orientation == .vertical,
+                                                 context.window.windowWidth != .default
+        {
+            max(0, canonicalRect.width - tabOffset)
+        } else {
+            nil
+        }
 
         layoutContainer(
             container: context.container,
@@ -711,6 +780,7 @@ extension NiriLayoutEngine {
             fullscreenRect: fullscreenRect,
             renderedFullscreenRect: renderedFullscreenRect,
             secondaryGap: 0,
+            secondarySpanOverride: secondarySpanOverride,
             scale: scale,
             screenClampRect: screenClampRect,
             animationTime: time,
@@ -726,6 +796,7 @@ extension NiriLayoutEngine {
         fullscreenRect: CGRect,
         renderedFullscreenRect: CGRect,
         secondaryGap: CGFloat,
+        secondarySpanOverride: CGFloat?,
         scale: CGFloat,
         screenClampRect: CGRect,
         animationTime: TimeInterval? = nil,
@@ -754,13 +825,17 @@ extension NiriLayoutEngine {
         case .vertical: contentRect.width
         }
 
-        let resolvedSpans = resolveWindowSpans(
-            windows: windows,
-            availableSpace: availableSpace,
-            gap: secondaryGap,
-            isTabbed: isTabbed,
-            orientation: orientation
-        )
+        let resolvedSpans = if let secondarySpanOverride, windows.count == 1 {
+            [secondarySpanOverride]
+        } else {
+            resolveWindowSpans(
+                windows: windows,
+                availableSpace: availableSpace,
+                gap: secondaryGap,
+                isTabbed: isTabbed,
+                orientation: orientation
+            )
+        }
 
         let sizingModes = windows.map { $0.sizingMode }
         let windowRenderOffsets = windows.map { $0.renderOffset(at: time) }
@@ -920,7 +995,7 @@ extension NiriLayoutEngine {
                 case let .preset(index):
                     isFixed = true
                     fixedValue = resolvePresetSpan(
-                        presetWindowHeights,
+                        presetWindowSecondarySpans,
                         index: index,
                         availableSpace: availableSpace,
                         gap: gap
@@ -948,7 +1023,7 @@ extension NiriLayoutEngine {
                 case let .preset(index):
                     isFixed = true
                     fixedValue = resolvePresetSpan(
-                        presetWindowHeights,
+                        presetWindowSecondarySpans,
                         index: index,
                         availableSpace: availableSpace,
                         gap: gap

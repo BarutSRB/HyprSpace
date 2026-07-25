@@ -7,10 +7,10 @@ import Foundation
 @testable import OmniWM
 import XCTest
 
-final class NiriInitialColumnWidthTests: XCTestCase {
-    func testNilSeedUsesConfiguredDefaultColumnWidth() throws {
+final class NiriInitialContainerPrimarySpanTests: XCTestCase {
+    func testNilSeedUsesConfiguredDefaultContainerPrimarySpan() throws {
         let engine = NiriLayoutEngine()
-        engine.defaultColumnWidth = 0.6
+        engine.defaultContainerPrimarySpan = 0.6
         let workspaceId = WorkspaceDescriptor.ID()
         let token = WindowToken(pid: 283, windowId: 0)
 
@@ -18,16 +18,81 @@ final class NiriInitialColumnWidthTests: XCTestCase {
         let column = try XCTUnwrap(engine.column(of: window))
 
         XCTAssertEqual(column.width, .proportion(0.6))
+        XCTAssertEqual(column.height, .proportion(0.6))
         XCTAssertNil(column.presetWidthIdx)
         XCTAssertFalse(column.isFullWidth)
+        XCTAssertFalse(column.isFullHeight)
         XCTAssertFalse(column.hasManualSingleWindowWidthOverride)
+        XCTAssertFalse(column.hasManualSingleWindowHeightOverride)
+    }
+
+    func testExplicitInitialProportionSeedsBothPrimaryAxes() {
+        let engine = NiriLayoutEngine()
+
+        let state = engine.initialContainerSizingState(for: 0.5)
+
+        XCTAssertEqual(state.width, .proportion(0.5))
+        XCTAssertEqual(state.height, .proportion(0.5))
+        XCTAssertEqual(state.presetWidthIndex, 1)
+        XCTAssertFalse(state.isFullWidth)
+        XCTAssertFalse(state.isFullHeight)
+        XCTAssertNil(state.savedWidth)
+        XCTAssertNil(state.savedHeight)
+        XCTAssertFalse(state.hasManualSingleWindowWidthOverride)
+        XCTAssertFalse(state.hasManualSingleWindowHeightOverride)
+    }
+
+    func testAutomaticInitialProportionSeedsBothAxesFromVisibleContainerCount() throws {
+        let engine = NiriLayoutEngine(visibleContainerCount: 4)
+        engine.defaultContainerPrimarySpan = nil
+        let workspaceId = WorkspaceDescriptor.ID()
+        let token = WindowToken(pid: 283, windowId: 11)
+
+        let window = engine.addWindow(token: token, to: workspaceId, afterSelection: nil)
+        let column = try XCTUnwrap(engine.column(of: window))
+
+        XCTAssertEqual(column.width, .proportion(0.25))
+        XCTAssertEqual(column.height, .proportion(0.25))
+        XCTAssertNil(column.presetWidthIdx)
+    }
+
+    func testInitialPrimaryProportionSurvivesOrientationRotation() throws {
+        let engine = NiriLayoutEngine()
+        engine.defaultContainerPrimarySpan = 0.5
+        let workspaceId = WorkspaceDescriptor.ID()
+        let firstToken = WindowToken(pid: 283, windowId: 12)
+        let secondToken = WindowToken(pid: 283, windowId: 13)
+        let first = engine.addWindow(token: firstToken, to: workspaceId, afterSelection: nil)
+        _ = engine.addWindow(token: secondToken, to: workspaceId, afterSelection: first.id)
+        var state = ViewportState()
+        state.selectedNodeId = first.id
+        let frame = CGRect(x: 0, y: 0, width: 1000, height: 800)
+
+        let horizontalFrames = engine.calculateLayout(
+            state: state,
+            workspaceId: workspaceId,
+            monitorFrame: frame,
+            gaps: (horizontal: 0, vertical: 0),
+            orientation: .horizontal
+        )
+        let verticalFrames = engine.calculateLayout(
+            state: state,
+            workspaceId: workspaceId,
+            monitorFrame: frame,
+            gaps: (horizontal: 0, vertical: 0),
+            orientation: .vertical
+        )
+
+        XCTAssertEqual(try XCTUnwrap(horizontalFrames[firstToken]).width, 500, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(verticalFrames[firstToken]).height, 400, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(verticalFrames[secondToken]).height, 400, accuracy: 0.001)
     }
 
     func testInitialFullWidthProportionUsesNormalWidthStateAndMatchingPreset() {
         let engine = NiriLayoutEngine()
-        engine.presetColumnWidths = [.proportion(0.5), .proportion(1)]
+        engine.presetContainerPrimarySpans = [.proportion(0.5), .proportion(1)]
 
-        let state = engine.initialColumnWidthState(for: 1)
+        let state = engine.initialContainerSizingState(for: 1)
 
         XCTAssertEqual(state.width, .proportion(1))
         XCTAssertEqual(state.presetWidthIndex, 1)
@@ -40,7 +105,7 @@ final class NiriInitialColumnWidthTests: XCTestCase {
         let engine = NiriLayoutEngine()
         let workspaceId = WorkspaceDescriptor.ID()
         let token = WindowToken(pid: 283, windowId: 1)
-        let state = NiriColumnWidthState(
+        let state = NiriContainerSizingState(
             width: .fixed(640),
             presetWidthIndex: nil,
             isFullWidth: true,
@@ -52,11 +117,11 @@ final class NiriInitialColumnWidthTests: XCTestCase {
             token: token,
             to: workspaceId,
             afterSelection: nil,
-            columnWidthState: state
+            containerSizingState: state
         )
         let column = try XCTUnwrap(engine.column(of: window))
 
-        XCTAssertEqual(engine.columnWidthState(for: token, in: workspaceId), state)
+        XCTAssertEqual(engine.containerSizingState(for: token, in: workspaceId), state)
         XCTAssertEqual(column.cachedWidth, 0)
         XCTAssertNil(column.widthAnimation)
         XCTAssertNil(column.targetWidth)
@@ -72,13 +137,13 @@ final class NiriInitialColumnWidthTests: XCTestCase {
         placeholder.widthAnimation = animation(from: 700, to: 900)
         placeholder.targetWidth = 900
         root.appendChild(placeholder)
-        let state = engine.initialColumnWidthState(for: 0.5)
+        let state = engine.initialContainerSizingState(for: 0.5)
 
         let window = engine.addWindow(
             token: WindowToken(pid: 283, windowId: 2),
             to: workspaceId,
             afterSelection: nil,
-            columnWidthState: state
+            containerSizingState: state
         )
 
         XCTAssertTrue(engine.column(of: window) === placeholder)
@@ -93,12 +158,12 @@ final class NiriInitialColumnWidthTests: XCTestCase {
         let engine = NiriLayoutEngine()
         let workspaceId = WorkspaceDescriptor.ID()
         let token = WindowToken(pid: 283, windowId: 3)
-        let originalState = engine.initialColumnWidthState(for: 0.5)
+        let originalState = engine.initialContainerSizingState(for: 0.5)
         let window = engine.addWindow(
             token: token,
             to: workspaceId,
             afterSelection: nil,
-            columnWidthState: originalState
+            containerSizingState: originalState
         )
         let column = try XCTUnwrap(engine.column(of: window))
         let widthAnimation = animation(from: 500, to: 600)
@@ -110,11 +175,11 @@ final class NiriInitialColumnWidthTests: XCTestCase {
             token: token,
             to: workspaceId,
             afterSelection: nil,
-            columnWidthState: engine.initialColumnWidthState(for: 0.75)
+            containerSizingState: engine.initialContainerSizingState(for: 0.75)
         )
 
         XCTAssertTrue(duplicate === window)
-        XCTAssertEqual(engine.columnWidthState(for: token, in: workspaceId), originalState)
+        XCTAssertEqual(engine.containerSizingState(for: token, in: workspaceId), originalState)
         XCTAssertEqual(column.cachedWidth, 500)
         XCTAssertTrue(column.widthAnimation === widthAnimation)
         XCTAssertEqual(column.targetWidth, 600)
@@ -125,14 +190,14 @@ final class NiriInitialColumnWidthTests: XCTestCase {
         let workspaceId = WorkspaceDescriptor.ID()
         let existingToken = WindowToken(pid: 283, windowId: 4)
         let missingToken = WindowToken(pid: 283, windowId: 5)
-        let existingState = engine.initialColumnWidthState(for: 0.5)
+        let existingState = engine.initialContainerSizingState(for: 0.5)
         _ = engine.addWindow(
             token: existingToken,
             to: workspaceId,
             afterSelection: nil,
-            columnWidthState: existingState
+            containerSizingState: existingState
         )
-        let missingState = NiriColumnWidthState(
+        let missingState = NiriContainerSizingState(
             width: .proportion(0.75),
             presetWidthIndex: nil,
             isFullWidth: false,
@@ -144,37 +209,37 @@ final class NiriInitialColumnWidthTests: XCTestCase {
             [existingToken, missingToken],
             in: workspaceId,
             selectedNodeId: nil,
-            columnWidthStates: [
-                existingToken: engine.initialColumnWidthState(for: 1),
+            containerSizingStates: [
+                existingToken: engine.initialContainerSizingState(for: 1),
                 missingToken: missingState
             ]
         )
 
-        XCTAssertEqual(engine.columnWidthState(for: existingToken, in: workspaceId), existingState)
-        XCTAssertEqual(engine.columnWidthState(for: missingToken, in: workspaceId), missingState)
+        XCTAssertEqual(engine.containerSizingState(for: existingToken, in: workspaceId), existingState)
+        XCTAssertEqual(engine.containerSizingState(for: missingToken, in: workspaceId), missingState)
     }
 
     func testSyncAppliesIndependentSeedsToTwoFreshWindows() {
         let engine = NiriLayoutEngine()
-        engine.presetColumnWidths = [.proportion(0.5), .proportion(1)]
+        engine.presetContainerPrimarySpans = [.proportion(0.5), .proportion(1)]
         let workspaceId = WorkspaceDescriptor.ID()
         let halfToken = WindowToken(pid: 283, windowId: 8)
         let fullToken = WindowToken(pid: 283, windowId: 9)
-        let halfState = engine.initialColumnWidthState(for: 0.5)
-        let fullState = engine.initialColumnWidthState(for: 1)
+        let halfState = engine.initialContainerSizingState(for: 0.5)
+        let fullState = engine.initialContainerSizingState(for: 1)
 
         _ = engine.syncWindows(
             [halfToken, fullToken],
             in: workspaceId,
             selectedNodeId: nil,
-            columnWidthStates: [
+            containerSizingStates: [
                 halfToken: halfState,
                 fullToken: fullState
             ]
         )
 
-        XCTAssertEqual(engine.columnWidthState(for: halfToken, in: workspaceId), halfState)
-        XCTAssertEqual(engine.columnWidthState(for: fullToken, in: workspaceId), fullState)
+        XCTAssertEqual(engine.containerSizingState(for: halfToken, in: workspaceId), halfState)
+        XCTAssertEqual(engine.containerSizingState(for: fullToken, in: workspaceId), fullState)
         XCTAssertEqual(engine.columns(in: workspaceId).count, 2)
     }
 
@@ -183,12 +248,12 @@ final class NiriInitialColumnWidthTests: XCTestCase {
         engine.singleWindowFit = .fullScreen
         let workspaceId = WorkspaceDescriptor.ID()
         let token = WindowToken(pid: 283, windowId: 6)
-        let initialState = engine.initialColumnWidthState(for: 0.5)
+        let initialState = engine.initialContainerSizingState(for: 0.5)
         _ = engine.addWindow(
             token: token,
             to: workspaceId,
             afterSelection: nil,
-            columnWidthState: initialState
+            containerSizingState: initialState
         )
         let workingFrame = CGRect(x: 24, y: 16, width: 1200, height: 760)
         let fullscreenFrame = CGRect(x: 0, y: 0, width: 1280, height: 800)
@@ -204,11 +269,12 @@ final class NiriInitialColumnWidthTests: XCTestCase {
             workspaceId: workspaceId,
             monitorFrame: workingFrame,
             gaps: (horizontal: 12, vertical: 12),
-            workingArea: area
+            workingArea: area,
+            orientation: .horizontal
         )[token]
 
         XCTAssertEqual(frame, fullscreenFrame)
-        XCTAssertEqual(engine.columnWidthState(for: token, in: workspaceId), initialState)
+        XCTAssertEqual(engine.containerSizingState(for: token, in: workspaceId), initialState)
     }
 
     func testInitialWidthResolvesAgainstInstalledMinimumConstraint() throws {
@@ -219,7 +285,7 @@ final class NiriInitialColumnWidthTests: XCTestCase {
             token: token,
             to: workspaceId,
             afterSelection: nil,
-            columnWidthState: engine.initialColumnWidthState(for: 0.25)
+            containerSizingState: engine.initialContainerSizingState(for: 0.25)
         )
         engine.updateWindowConstraints(
             for: token,
@@ -236,8 +302,8 @@ final class NiriInitialColumnWidthTests: XCTestCase {
 
         XCTAssertEqual(column.cachedWidth, 700)
         XCTAssertEqual(
-            engine.columnWidthState(for: token, in: workspaceId),
-            engine.initialColumnWidthState(for: 0.25)
+            engine.containerSizingState(for: token, in: workspaceId),
+            engine.initialContainerSizingState(for: 0.25)
         )
     }
 
@@ -246,6 +312,15 @@ final class NiriInitialColumnWidthTests: XCTestCase {
         let controller = makeController()
         let workspaceId = try XCTUnwrap(
             controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let monitor = try XCTUnwrap(controller.workspaceManager.monitor(for: workspaceId))
+        controller.settings.updateOrientationSettings(
+            MonitorOrientationSettings(
+                monitorName: monitor.name,
+                monitorDisplayId: monitor.displayId,
+                orientation: .horizontal
+            ),
+            for: monitor
         )
         _ = controller.workspaceManager.focusWorkspace(named: "1")
         controller.niriLayoutHandler.enableNiriLayout()
@@ -259,7 +334,7 @@ final class NiriInitialColumnWidthTests: XCTestCase {
                 minHeight: nil,
                 matchedRuleId: nil
             ),
-            admissionHints: ManagedWindowAdmissionHints(initialNiriColumnWidth: 0.25)
+            admissionHints: ManagedWindowAdmissionHints(initialNiriContainerPrimarySpan: 0.25)
         )
 
         let firstPlans = controller.workspaceManager.withEngineMutationScope {
@@ -269,10 +344,12 @@ final class NiriInitialColumnWidthTests: XCTestCase {
         let column = try XCTUnwrap(
             engine.findNode(for: token, in: workspaceId).flatMap { engine.column(of: $0) }
         )
-        let initialState = engine.initialColumnWidthState(for: 0.25)
+        let initialState = engine.initialContainerSizingState(for: 0.25)
 
         XCTAssertFalse(firstPlans.isEmpty)
-        XCTAssertEqual(engine.columnWidthState(for: token, in: workspaceId), initialState)
+        XCTAssertEqual(column.width, .proportion(0.25))
+        XCTAssertEqual(column.height, .proportion(0.25))
+        XCTAssertEqual(engine.containerSizingState(for: token, in: workspaceId), initialState)
         XCTAssertEqual(column.cachedWidth, 700)
 
         column.width = .fixed(720)
@@ -281,13 +358,13 @@ final class NiriInitialColumnWidthTests: XCTestCase {
         column.savedWidth = .proportion(0.25)
         column.hasManualSingleWindowWidthOverride = true
         column.cachedWidth = 720
-        let liveState = try XCTUnwrap(engine.columnWidthState(for: token, in: workspaceId))
+        let liveState = try XCTUnwrap(engine.containerSizingState(for: token, in: workspaceId))
 
         _ = controller.workspaceManager.withEngineMutationScope {
             controller.niriLayoutHandler.layoutWithNiriEngine(activeWorkspaces: [workspaceId])
         }
 
-        XCTAssertEqual(engine.columnWidthState(for: token, in: workspaceId), liveState)
+        XCTAssertEqual(engine.containerSizingState(for: token, in: workspaceId), liveState)
         XCTAssertEqual(column.cachedWidth, 720)
     }
 
@@ -304,7 +381,10 @@ final class NiriInitialColumnWidthTests: XCTestCase {
     @MainActor
     private func makeController() -> WMController {
         let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("OmniWMNiriInitialColumnWidthTests-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent(
+                "OmniWMNiriInitialContainerPrimarySpanTests-\(UUID().uuidString)",
+                isDirectory: true
+            )
         let settings = SettingsStore(
             persistence: SettingsFilePersistence(
                 directory: root.appendingPathComponent("config", isDirectory: true),

@@ -363,9 +363,10 @@ enum StateReducer {
             monitors.first { $0.id == id }
         }
         let floatingState = entry.floatingState
-        let niriPlacement = entry.mode == .tiling && entry.restoreIntent?.workspaceId == entry.workspaceId
-            ? entry.restoreIntent?.niriPlacement
-            : nil
+        let hasDetachedNiriPlacement = entry.restoreIntent?.detachedNiriContainerSizingState != nil
+        let preservesNiriPlacement = hasDetachedNiriPlacement
+            || (entry.mode == .tiling && entry.restoreIntent?.workspaceId == entry.workspaceId)
+        let niriPlacement = preservesNiriPlacement ? entry.restoreIntent?.niriPlacement : nil
         return RestoreIntent(
             topologyProfile: TopologyProfile(monitors: monitors),
             workspaceId: entry.workspaceId,
@@ -375,7 +376,7 @@ enum StateReducer {
             restoreToFloating: floatingState?.restoreToFloating ?? (entry.mode == .floating),
             rescueEligible: entry.desiredState.rescueEligible || floatingState?.restoreToFloating == true,
             niriPlacement: niriPlacement,
-            detachedNiriColumnWidthState: entry.restoreIntent?.detachedNiriColumnWidthState
+            detachedNiriContainerSizingState: entry.restoreIntent?.detachedNiriContainerSizingState
         )
     }
 

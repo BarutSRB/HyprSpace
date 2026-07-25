@@ -27,7 +27,7 @@ enum NativeFullscreenLayoutChange: Equatable {
 enum LayoutOperation: Equatable {
     case columnMoved
     case columnMovedToWorkspace(to: WorkspaceDescriptor.ID)
-    case columnWidthChanged
+    case containerPrimarySpanChanged
     case displayModeChanged
     case fullscreenToggled(token: WindowToken)
     case groupMemberMoved(token: WindowToken)
@@ -54,8 +54,8 @@ enum LayoutOperation: Equatable {
             "column_moved"
         case let .columnMovedToWorkspace(to):
             "column_moved_to_workspace to=\(to.uuidString)"
-        case .columnWidthChanged:
-            "column_width_changed"
+        case .containerPrimarySpanChanged:
+            "container_primary_span_changed"
         case .displayModeChanged:
             "display_mode_changed"
         case let .fullscreenToggled(token):
@@ -462,7 +462,7 @@ enum WMEvent: Equatable {
         case let .manualLayoutOverrideChanged(token, workspaceId, layoutOverride, _):
             "manual_layout_override_changed token=\(token) workspace=\(workspaceId.uuidString) override=\(layoutOverride.map(\.rawValue) ?? "nil")"
         case let .windowAdmissionHintsChanged(token, workspaceId, admissionHints, _):
-            "window_admission_hints_changed token=\(token) workspace=\(workspaceId.uuidString) initial_niri_width=\(admissionHints.initialNiriColumnWidth.map { String($0) } ?? "nil")"
+            "window_admission_hints_changed token=\(token) workspace=\(workspaceId.uuidString) initial_niri_container_primary_span=\(admissionHints.initialNiriContainerPrimarySpan.map { String($0) } ?? "nil")"
         case let .niriPlacementsResolved(placements, _):
             "niri_placements_resolved count=\(placements.count)"
         case let .hiddenStateChanged(token, workspaceId, _, hiddenState, _):

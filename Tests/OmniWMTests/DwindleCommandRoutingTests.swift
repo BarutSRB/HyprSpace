@@ -302,6 +302,44 @@ final class DwindleCommandRoutingTests: XCTestCase {
         XCTAssertNil(fixture.controller.layoutRefreshController.layoutState.pendingRefresh)
     }
 
+    func testSharedCycleSizeCommandRoutesToDwindleSplitRatio() throws {
+        let fixture = try makeFixture(groupedSource: false, includeTargetCandidate: false)
+        let secondToken = addWindow(
+            pid: 31_106,
+            windowId: 31_206,
+            to: fixture.sourceWorkspaceId,
+            controller: fixture.controller
+        )
+        fixture.controller.workspaceManager.withEngineMutationScope(in: fixture.sourceWorkspaceId) {
+            _ = fixture.engine.addWindow(
+                token: secondToken,
+                to: fixture.sourceWorkspaceId,
+                activeWindowFrame: nil
+            )
+            _ = fixture.engine.calculateLayout(
+                for: fixture.sourceWorkspaceId,
+                screen: fixture.sourceMonitor.visibleFrame
+            )
+        }
+        let before = try XCTUnwrap(fixture.engine.root(for: fixture.sourceWorkspaceId)?.splitRatio)
+        let blocker = blockLayoutRefresh(fixture)
+        defer { unblockLayoutRefresh(fixture.controller, blocker: blocker) }
+        fixture.controller.layoutRefreshController.layoutState.pendingRefresh = nil
+
+        XCTAssertEqual(
+            fixture.controller.commandHandler.handleHotkeyCommand(.cycleSizeForward),
+            .executed
+        )
+
+        let after = try XCTUnwrap(fixture.engine.root(for: fixture.sourceWorkspaceId)?.splitRatio)
+        XCTAssertNotEqual(after, before)
+        XCTAssertEqual(after, 0.3, accuracy: 0.000_001)
+        XCTAssertEqual(
+            fixture.controller.layoutRefreshController.layoutState.pendingRefresh?.reason,
+            .layoutCommand
+        )
+    }
+
     private func makeFixture(
         groupedSource: Bool,
         includeTargetCandidate: Bool

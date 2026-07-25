@@ -8,7 +8,7 @@ public struct IPCRuleValidationReport: Equatable, Sendable {
     public let invalidRegexMessage: String?
     public let identifierError: String?
     public let titleMatcherError: String?
-    public let initialColumnWidthError: String?
+    public let initialContainerPrimarySpanError: String?
     public let effectError: String?
     public let minSizeError: String?
 
@@ -17,7 +17,7 @@ public struct IPCRuleValidationReport: Equatable, Sendable {
         invalidRegexMessage: String?,
         identifierError: String? = nil,
         titleMatcherError: String? = nil,
-        initialColumnWidthError: String? = nil,
+        initialContainerPrimarySpanError: String? = nil,
         effectError: String? = nil,
         minSizeError: String? = nil
     ) {
@@ -25,7 +25,7 @@ public struct IPCRuleValidationReport: Equatable, Sendable {
         self.invalidRegexMessage = invalidRegexMessage
         self.identifierError = identifierError
         self.titleMatcherError = titleMatcherError
-        self.initialColumnWidthError = initialColumnWidthError
+        self.initialContainerPrimarySpanError = initialContainerPrimarySpanError
         self.effectError = effectError
         self.minSizeError = minSizeError
     }
@@ -36,7 +36,7 @@ public struct IPCRuleValidationReport: Equatable, Sendable {
             invalidRegexMessage,
             identifierError,
             titleMatcherError,
-            initialColumnWidthError,
+            initialContainerPrimarySpanError,
             effectError,
             minSizeError
         ]
@@ -80,18 +80,18 @@ public enum IPCRuleValidator {
     public static func effectError(for rule: IPCRuleDefinition) -> String? {
         let hasEffect = rule.layout != .auto
             || nonEmpty(rule.assignToWorkspace)
-            || rule.initialColumnWidth.map { initialColumnWidthError(for: $0) == nil } == true
+            || rule.initialContainerPrimarySpan.map { initialContainerPrimarySpanError(for: $0) == nil } == true
             || rule.minWidth != nil
             || rule.minHeight != nil
         return hasEffect
             ? nil
-            : "Set a layout, workspace, initial column width, or minimum size — this rule has no effect"
+            : "Set a layout, workspace, initial container primary span, or minimum size — this rule has no effect"
     }
 
-    public static func initialColumnWidthError(for value: Double?) -> String? {
+    public static func initialContainerPrimarySpanError(for value: Double?) -> String? {
         guard let value else { return nil }
         guard value.isFinite, (0.05 ... 1.0).contains(value) else {
-            return "Initial column width must be a finite proportion from 0.05 through 1.0 (5% through 100%)"
+            return "Initial container primary span must be a finite proportion from 0.05 through 1.0 (5% through 100%)"
         }
         return nil
     }
@@ -130,7 +130,7 @@ public enum IPCRuleValidator {
             invalidRegexMessage: invalidRegexMessage(for: rule.titleRegex),
             identifierError: identifierError(for: rule),
             titleMatcherError: titleMatcherError(for: rule),
-            initialColumnWidthError: initialColumnWidthError(for: rule.initialColumnWidth),
+            initialContainerPrimarySpanError: initialContainerPrimarySpanError(for: rule.initialContainerPrimarySpan),
             effectError: effectError(for: rule),
             minSizeError: minSizeError(for: rule)
         )

@@ -23,7 +23,7 @@ final class WindowModelTests: XCTestCase {
             minHeight: 480,
             matchedRuleId: nil
         )
-        let existingAdmissionHints = ManagedWindowAdmissionHints(initialNiriColumnWidth: 0.5)
+        let existingAdmissionHints = ManagedWindowAdmissionHints(initialNiriContainerPrimarySpan: 0.5)
         let existingToken = model.upsert(
             window: existingAXRef,
             pid: existingPid,

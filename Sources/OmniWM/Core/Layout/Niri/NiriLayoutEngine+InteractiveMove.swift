@@ -14,7 +14,8 @@ extension NiriLayoutEngine {
         motion: MotionSnapshot,
         state: inout ViewportState,
         workingFrame: CGRect,
-        gaps: CGFloat
+        gaps: CGFloat,
+        orientation: Monitor.Orientation
     ) -> Bool {
         assertSanctionedMutation()
         guard interactiveMove == nil else { return false }
@@ -36,22 +37,29 @@ extension NiriLayoutEngine {
             originalColumnIndex: colIdx,
             originalFrame: windowNode.renderedFrame ?? windowNode.frame ?? .zero,
             isInsertMode: isInsertMode,
+            orientation: orientation,
             currentHoverTarget: nil
         )
 
         let cols = columns(in: workspaceId)
+        resolvePrimaryContainerSpans(
+            in: workspaceId,
+            workingFrame: workingFrame,
+            gaps: gaps,
+            orientation: orientation
+        )
         let settings = effectiveSettings(in: workspaceId)
         state.transitionToColumn(
             colIdx,
             columns: cols,
             gap: gaps,
-            viewportWidth: workingFrame.width,
+            workingArea: workingFrame,
+            orientation: orientation,
             motion: motion,
             animate: false,
             centerMode: settings.centerFocusedColumn,
             alwaysCenterSingleColumn: settings.alwaysCenterSingleColumn,
             scale: displayScale(in: workspaceId),
-            workingArea: workingFrame,
             viewFrame: monitorForWorkspace(workspaceId)?.frame
         )
 
@@ -77,6 +85,7 @@ extension NiriLayoutEngine {
             point: currentLocation,
             excludingWindowId: move.windowId,
             isInsertMode: move.isInsertMode,
+            orientation: move.orientation,
             in: move.workspaceId
         )
 
@@ -112,7 +121,8 @@ extension NiriLayoutEngine {
                     motion: motion,
                     state: &state,
                     workingFrame: workingFrame,
-                    gaps: gaps
+                    gaps: gaps,
+                    orientation: move.orientation
                 )
             case .before,
                  .after:
@@ -124,7 +134,8 @@ extension NiriLayoutEngine {
                     motion: motion,
                     state: &state,
                     workingFrame: workingFrame,
-                    gaps: gaps
+                    gaps: gaps,
+                    orientation: move.orientation
                 )
             }
 
@@ -142,6 +153,7 @@ extension NiriLayoutEngine {
         point: CGPoint,
         excludingWindowId: NodeId,
         isInsertMode: Bool = false,
+        orientation: Monitor.Orientation,
         in workspaceId: WorkspaceDescriptor.ID
     ) -> MoveHoverTarget? {
         guard let root = root(for: workspaceId) else { return nil }
@@ -154,7 +166,12 @@ extension NiriLayoutEngine {
 
                 if frame.contains(point) {
                     let position: InsertPosition = if isInsertMode {
-                        point.y < frame.midY ? .before : .after
+                        switch orientation {
+                        case .horizontal:
+                            point.y < frame.midY ? .before : .after
+                        case .vertical:
+                            point.x < frame.midX ? .before : .after
+                        }
                     } else {
                         .swap
                     }
@@ -178,6 +195,7 @@ extension NiriLayoutEngine {
         state: inout ViewportState,
         workingFrame: CGRect,
         gaps: CGFloat,
+        orientation: Monitor.Orientation,
         fromColumnIndex: Int? = nil
     ) -> Bool {
         guard let sourceWindow = findNode(by: sourceWindowId, in: workspaceId) as? NiriWindow,
@@ -211,14 +229,16 @@ extension NiriLayoutEngine {
                 removing: targetWindow,
                 in: workspaceId,
                 workingFrame: workingFrame,
-                gaps: gaps
+                gaps: gaps,
+                orientation: orientation
             ), columnCanAcceptTransfer(
                 sourceColumn,
                 adding: targetWindow,
                 removing: sourceWindow,
                 in: workspaceId,
                 workingFrame: workingFrame,
-                gaps: gaps
+                gaps: gaps,
+                orientation: orientation
             ) else {
                 return false
             }
@@ -253,7 +273,8 @@ extension NiriLayoutEngine {
             motion: motion,
             state: &state,
             workingFrame: workingFrame,
-            gaps: gaps
+            gaps: gaps,
+            orientation: orientation
         )
 
         return true
@@ -267,7 +288,8 @@ extension NiriLayoutEngine {
         motion: MotionSnapshot,
         state: inout ViewportState,
         workingFrame: CGRect,
-        gaps: CGFloat
+        gaps: CGFloat,
+        orientation: Monitor.Orientation
     ) -> Bool {
         assertSanctionedMutation()
         guard let sourceWindow = findNode(by: sourceWindowId, in: workspaceId) as? NiriWindow,
@@ -295,7 +317,8 @@ extension NiriLayoutEngine {
                 adding: sourceWindow,
                 in: workspaceId,
                 workingFrame: workingFrame,
-                gaps: gaps
+                gaps: gaps,
+                orientation: orientation
             ) else {
                 return false
             }
@@ -333,7 +356,8 @@ extension NiriLayoutEngine {
             motion: motion,
             state: &state,
             workingFrame: workingFrame,
-            gaps: gaps
+            gaps: gaps,
+            orientation: orientation
         )
 
         return true
@@ -343,7 +367,8 @@ extension NiriLayoutEngine {
         targetWindowId: NodeId,
         position: InsertPosition,
         in workspaceId: WorkspaceDescriptor.ID,
-        gaps: CGFloat
+        gaps: CGFloat,
+        orientation: Monitor.Orientation
     ) -> CGRect? {
         guard let targetWindow = findNode(by: targetWindowId, in: workspaceId) as? NiriWindow,
               let targetFrame = targetWindow.renderedFrame ?? targetWindow.frame,
@@ -357,23 +382,35 @@ extension NiriLayoutEngine {
         let postInsertionCount = n + 1
         let firstFrame = windows.first?.renderedFrame ?? windows.first?.frame
         let lastFrame = windows.last?.renderedFrame ?? windows.last?.frame
-        guard let bottom = firstFrame?.minY, let top = lastFrame?.maxY else { return nil }
-
-        let columnHeight = top - bottom
         let totalGaps = CGFloat(postInsertionCount - 1) * gaps
-        let newHeight = max(0, (columnHeight - totalGaps) / CGFloat(postInsertionCount))
-        let x = targetFrame.minX
-        let width = targetFrame.width
 
-        let y: CGFloat = switch position {
-        case .before:
-            max(top, targetFrame.minY - gaps - newHeight)
-        case .after:
-            targetFrame.maxY + gaps
-        case .swap:
-            targetFrame.minY
+        switch orientation {
+        case .horizontal:
+            guard let bottom = firstFrame?.minY, let top = lastFrame?.maxY else { return nil }
+            let columnHeight = top - bottom
+            let newHeight = max(0, (columnHeight - totalGaps) / CGFloat(postInsertionCount))
+            let y: CGFloat = switch position {
+            case .before:
+                max(bottom, targetFrame.minY - gaps - newHeight)
+            case .after:
+                targetFrame.maxY + gaps
+            case .swap:
+                targetFrame.minY
+            }
+            return CGRect(x: targetFrame.minX, y: y, width: targetFrame.width, height: newHeight)
+        case .vertical:
+            guard let left = firstFrame?.minX, let right = lastFrame?.maxX else { return nil }
+            let rowWidth = right - left
+            let newWidth = max(0, (rowWidth - totalGaps) / CGFloat(postInsertionCount))
+            let x: CGFloat = switch position {
+            case .before:
+                max(left, targetFrame.minX - gaps - newWidth)
+            case .after:
+                targetFrame.maxX + gaps
+            case .swap:
+                targetFrame.minX
+            }
+            return CGRect(x: x, y: targetFrame.minY, width: newWidth, height: targetFrame.height)
         }
-
-        return CGRect(x: x, y: y, width: width, height: newHeight)
     }
 }

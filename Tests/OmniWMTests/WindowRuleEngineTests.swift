@@ -161,7 +161,7 @@ final class WindowRuleEngineTests: XCTestCase {
 
     func testMoreSpecificRuleWithoutInitialWidthShadowsGenericWidthRule() {
         let engine = WindowRuleEngine()
-        let generic = AppRule(bundleId: "com.test.app", initialColumnWidth: 0.5)
+        let generic = AppRule(bundleId: "com.test.app", initialContainerPrimarySpan: 0.5)
         let specific = AppRule(
             bundleId: "com.test.app",
             titleSubstring: "Inspector",
@@ -174,7 +174,7 @@ final class WindowRuleEngineTests: XCTestCase {
             facts(appName: "Test", bundleId: "com.test.app", title: "Inspector")
         )
         XCTAssertEqual(decision.source, .userRule(specific.id))
-        XCTAssertNil(decision.admissionHints.initialNiriColumnWidth)
+        XCTAssertNil(decision.admissionHints.initialNiriContainerPrimarySpan)
     }
 
     func testSystemTextInputPanelStaysUnmanagedWithWildcard() {

@@ -16,7 +16,7 @@ extension NiriLayoutEngine {
         motion: MotionSnapshot,
         state: inout ViewportState,
         gaps: CGFloat,
-        orientation: Monitor.Orientation = .horizontal
+        orientation: Monitor.Orientation
     ) -> ColumnRemovalResult {
         let cols = columns(in: workspaceId)
         guard removedIdx >= 0, removedIdx < cols.count else {
@@ -32,17 +32,16 @@ extension NiriLayoutEngine {
         case .vertical: cols[removedIdx].cachedHeight
         }
         let viewportOffset = primarySpan + gaps
-        let animationOffset = columnX(at: removedIdx + 1, columns: cols, gaps: gaps)
-            - columnX(at: removedIdx, columns: cols, gaps: gaps)
         let postRemovalCount = cols.count - 1
 
         animateColumnsAroundRemoval(
             columns: cols,
             removedIdx: removedIdx,
             activeIdx: activeIdx,
-            offset: animationOffset,
+            offset: viewportOffset,
             in: workspaceId,
-            motion: motion
+            motion: motion,
+            orientation: orientation
         )
 
         let removingNode = cols[removedIdx].windowNodes.first
@@ -89,7 +88,8 @@ extension NiriLayoutEngine {
         activeIdx: Int,
         offset: CGFloat,
         in workspaceId: WorkspaceDescriptor.ID,
-        motion: MotionSnapshot
+        motion: MotionSnapshot,
+        orientation: Monitor.Orientation
     ) {
         guard removedIdx >= 0, removedIdx < cols.count else { return }
 
@@ -117,12 +117,14 @@ extension NiriLayoutEngine {
             displacement = -offset
         }
 
+        let movement = switch orientation {
+        case .horizontal: CGPoint(x: displacement, y: 0)
+        case .vertical: CGPoint(x: 0, y: displacement)
+        }
         for col in animatedColumns {
-            if col.hasMoveAnimationRunning {
-                col.offsetMoveAnimCurrent(displacement)
-            } else {
+            if !col.offsetMoveAnimCurrent(displacement, orientation: orientation) {
                 col.animateMoveFrom(
-                    displacement: CGPoint(x: displacement, y: 0),
+                    displacement: movement,
                     clock: animationClock,
                     config: windowMovementAnimationConfig,
                     displayRefreshRate: displayRefreshRate(in: workspaceId),
@@ -138,7 +140,8 @@ extension NiriLayoutEngine {
         motion: MotionSnapshot,
         state: ViewportState,
         gaps: CGFloat,
-        workingAreaWidth: CGFloat
+        workingFrame: CGRect,
+        orientation: Monitor.Orientation
     ) {
         let cols = columns(in: workspaceId)
         guard addedIdx >= 0, addedIdx < cols.count else { return }
@@ -146,8 +149,22 @@ extension NiriLayoutEngine {
         let addedCol = cols[addedIdx]
         let activeIdx = state.activeColumnIndex
 
-        if addedCol.cachedWidth <= 0 {
-            addedCol.resolveAndCacheWidth(workingAreaWidth: workingAreaWidth, gaps: gaps)
+        let primarySpan: CGFloat
+        switch orientation {
+        case .horizontal:
+            if addedCol.cachedWidth <= 0 {
+                addedCol.resolveAndCacheWidth(
+                    workingAreaWidth: workingFrame.width,
+                    gaps: gaps,
+                    contentInset: tabContentInset(for: addedCol)
+                )
+            }
+            primarySpan = addedCol.cachedWidth
+        case .vertical:
+            if addedCol.cachedHeight <= 0 {
+                addedCol.resolveAndCacheHeight(workingAreaHeight: workingFrame.height, gaps: gaps)
+            }
+            primarySpan = addedCol.cachedHeight
         }
 
         guard motion.animationsEnabled else {
@@ -163,15 +180,17 @@ extension NiriLayoutEngine {
             return
         }
 
-        let offset = addedCol.cachedWidth + gaps
+        let offset = primarySpan + gaps
 
         if activeIdx <= addedIdx {
             for col in cols[(addedIdx + 1)...] {
-                if col.hasMoveAnimationRunning {
-                    col.offsetMoveAnimCurrent(-offset)
-                } else {
+                if !col.offsetMoveAnimCurrent(-offset, orientation: orientation) {
+                    let displacement = switch orientation {
+                    case .horizontal: CGPoint(x: -offset, y: 0)
+                    case .vertical: CGPoint(x: 0, y: -offset)
+                    }
                     col.animateMoveFrom(
-                        displacement: CGPoint(x: -offset, y: 0),
+                        displacement: displacement,
                         clock: animationClock,
                         config: windowMovementAnimationConfig,
                         displayRefreshRate: displayRefreshRate(in: workspaceId),
@@ -181,11 +200,13 @@ extension NiriLayoutEngine {
             }
         } else {
             for col in cols[..<addedIdx] {
-                if col.hasMoveAnimationRunning {
-                    col.offsetMoveAnimCurrent(offset)
-                } else {
+                if !col.offsetMoveAnimCurrent(offset, orientation: orientation) {
+                    let displacement = switch orientation {
+                    case .horizontal: CGPoint(x: offset, y: 0)
+                    case .vertical: CGPoint(x: 0, y: offset)
+                    }
                     col.animateMoveFrom(
-                        displacement: CGPoint(x: offset, y: 0),
+                        displacement: displacement,
                         clock: animationClock,
                         config: windowMovementAnimationConfig,
                         displayRefreshRate: displayRefreshRate(in: workspaceId),
@@ -376,7 +397,12 @@ extension NiriLayoutEngine {
         return anyRunning
     }
 
-    func computeTileOffset(column: NiriContainer, tileIdx: Int, gaps: CGFloat) -> CGFloat {
+    func computeTileOffset(
+        column: NiriContainer,
+        tileIdx: Int,
+        gaps: CGFloat,
+        orientation: Monitor.Orientation
+    ) -> CGFloat {
         let windows = column.windowNodes
         guard tileIdx >= 0, tileIdx < windows.count else { return 0 }
         guard !column.isTabbed else { return gaps }
@@ -384,23 +410,33 @@ extension NiriLayoutEngine {
         var offset: CGFloat = gaps
         guard tileIdx > 0 else { return offset }
         for i in 0 ..< tileIdx {
-            let height = windows[i].resolvedHeight ?? windows[i].frame?.height ?? 0
-            offset += height
+            let span = switch orientation {
+            case .horizontal: windows[i].resolvedHeight ?? windows[i].frame?.height ?? 0
+            case .vertical: windows[i].resolvedWidth ?? windows[i].frame?.width ?? 0
+            }
+            offset += span
             offset += gaps
         }
         return offset
     }
 
-    func computeTileOffsets(column: NiriContainer, gaps: CGFloat) -> [CGFloat] {
+    func computeTileOffsets(
+        column: NiriContainer,
+        gaps: CGFloat,
+        orientation: Monitor.Orientation
+    ) -> [CGFloat] {
         let windows = column.windowNodes
         guard !windows.isEmpty else { return [] }
 
         var offsets: [CGFloat] = [gaps]
-        var y: CGFloat = gaps
+        var position: CGFloat = gaps
         for i in 0 ..< windows.count - 1 {
-            let height = windows[i].resolvedHeight ?? windows[i].frame?.height ?? 0
-            y += height + gaps
-            offsets.append(y)
+            let span = switch orientation {
+            case .horizontal: windows[i].resolvedHeight ?? windows[i].frame?.height ?? 0
+            case .vertical: windows[i].resolvedWidth ?? windows[i].frame?.width ?? 0
+            }
+            position += span + gaps
+            offsets.append(position)
         }
         return offsets
     }

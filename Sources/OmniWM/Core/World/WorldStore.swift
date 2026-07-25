@@ -271,7 +271,7 @@ final class WorldStore {
                 guard let entry = model.entry(for: token), entry.mode == .tiling else { continue }
                 var restoreIntent = StateReducer.restoreIntent(for: entry, monitors: monitors)
                 restoreIntent.niriPlacement = placement
-                restoreIntent.detachedNiriColumnWidthState = nil
+                restoreIntent.detachedNiriContainerSizingState = nil
                 guard entry.restoreIntent != restoreIntent else { continue }
                 model.setRestoreIntent(restoreIntent, for: token)
             }
@@ -338,7 +338,7 @@ final class WorldStore {
 
     private func canUpdateAdmissionHints(for token: WindowToken) -> Bool {
         guard let entry = model.entry(for: token) else { return true }
-        guard entry.restoreIntent?.detachedNiriColumnWidthState == nil,
+        guard entry.restoreIntent?.detachedNiriContainerSizingState == nil,
               entry.restoreIntent?.niriPlacement == nil
         else {
             return false
@@ -564,18 +564,55 @@ extension WorldStore {
         monitors: [Monitor]
     ) {
         guard let engine = niriEngine else { return }
-        let authoritativeState = authoritativeWorkspaceId.flatMap {
-            engine.columnWidthState(for: token, in: $0)
+        let authoritativePlacement = authoritativeWorkspaceId.flatMap {
+            engine.persistedPlacement(for: token, in: $0)
         }
         let staleWorkspaceIds = engine.workspaceIds(containing: token)
             .filter { $0 != authoritativeWorkspaceId }
             .sorted { $0.uuidString < $1.uuidString }
-        if authoritativeState != nil, !staleWorkspaceIds.isEmpty {
-            _ = storeDetachedNiriColumnWidthState(nil, for: token, monitors: monitors)
-        } else if let state = staleWorkspaceIds.lazy.compactMap({
-            engine.columnWidthState(for: token, in: $0)
-        }).first {
-            _ = storeDetachedNiriColumnWidthState(state, for: token, monitors: monitors)
+        if let authoritativeWorkspaceId,
+           let authoritativePlacement,
+           !staleWorkspaceIds.isEmpty
+        {
+            let placements = engine.persistedPlacementsInColumn(
+                containing: token,
+                in: authoritativeWorkspaceId
+            )
+            if placements.isEmpty {
+                _ = storeNiriPlacement(
+                    authoritativePlacement,
+                    detached: false,
+                    for: token,
+                    monitors: monitors
+                )
+            } else {
+                _ = storeNiriPlacements(
+                    placements,
+                    in: authoritativeWorkspaceId,
+                    detachedToken: nil,
+                    monitors: monitors
+                )
+            }
+        } else if let staleWorkspaceId = staleWorkspaceIds.first {
+            let placements = engine.persistedPlacementsInColumn(
+                containing: token,
+                in: staleWorkspaceId
+            )
+            if placements[token] != nil {
+                _ = storeNiriPlacements(
+                    placements,
+                    in: staleWorkspaceId,
+                    detachedToken: token,
+                    monitors: monitors
+                )
+            } else if let placement = engine.persistedPlacement(for: token, in: staleWorkspaceId) {
+                _ = storeNiriPlacement(
+                    placement,
+                    detached: true,
+                    for: token,
+                    monitors: monitors
+                )
+            }
         }
         for staleWorkspaceId in staleWorkspaceIds {
             repairViewportSelection(in: staleWorkspaceId, removing: token, engine: engine)
@@ -584,29 +621,29 @@ extension WorldStore {
     }
 
     @discardableResult
-    private func storeDetachedNiriColumnWidthState(
-        _ state: NiriColumnWidthState?,
+    private func storeNiriPlacement(
+        _ placement: PersistedNiriPlacement,
+        detached: Bool,
         for token: WindowToken,
         monitors: [Monitor]
     ) -> Bool {
         guard let entry = model.entry(for: token) else { return false }
-        var restoreIntent = entry.restoreIntent ?? StateReducer.restoreIntent(for: entry, monitors: monitors)
-        restoreIntent.detachedNiriColumnWidthState = state
-        if let state, let placement = restoreIntent.niriPlacement {
-            restoreIntent.niriPlacement = PersistedNiriPlacement(
-                columnIndex: placement.columnIndex,
-                tileIndex: placement.tileIndex,
-                column: PersistedNiriColumnState(
-                    displayMode: placement.column.displayMode,
-                    activeTileIndex: placement.column.activeTileIndex,
-                    width: state.width,
-                    presetWidthIndex: state.presetWidthIndex,
-                    isFullWidth: state.isFullWidth,
-                    savedWidth: state.savedWidth,
-                    hasManualSingleWindowWidthOverride: state.hasManualSingleWindowWidthOverride
-                ),
-                window: placement.window
+        var restoreIntent = StateReducer.restoreIntent(for: entry, monitors: monitors)
+        restoreIntent.niriPlacement = placement
+        if detached {
+            restoreIntent.detachedNiriContainerSizingState = NiriContainerSizingState(
+                width: placement.column.width,
+                presetWidthIndex: placement.column.presetWidthIndex,
+                isFullWidth: placement.column.isFullWidth,
+                savedWidth: placement.column.savedWidth,
+                hasManualSingleWindowWidthOverride: placement.column.hasManualSingleWindowWidthOverride,
+                height: placement.column.height,
+                isFullHeight: placement.column.isFullHeight,
+                savedHeight: placement.column.savedHeight,
+                hasManualSingleWindowHeightOverride: placement.column.hasManualSingleWindowHeightOverride
             )
+        } else {
+            restoreIntent.detachedNiriContainerSizingState = nil
         }
         guard entry.restoreIntent != restoreIntent else { return false }
         model.setRestoreIntent(restoreIntent, for: token)
@@ -614,14 +651,91 @@ extension WorldStore {
     }
 
     @discardableResult
-    func captureNiriColumnWidthState(
+    private func storeNiriPlacements(
+        _ placements: [WindowToken: PersistedNiriPlacement],
+        in workspaceId: WorkspaceDescriptor.ID,
+        detachedToken: WindowToken?,
+        monitors: [Monitor]
+    ) -> Bool {
+        var changed = false
+        for (token, placement) in placements {
+            if token != detachedToken {
+                guard let entry = model.entry(for: token),
+                      entry.mode == .tiling,
+                      entry.workspaceId == workspaceId
+                else {
+                    continue
+                }
+            }
+            changed = storeNiriPlacement(
+                placement,
+                detached: token == detachedToken,
+                for: token,
+                monitors: monitors
+            ) || changed
+        }
+        return changed
+    }
+
+    @discardableResult
+    func captureDetachedNiriPlacement(
         for token: WindowToken,
         in workspaceId: WorkspaceDescriptor.ID,
         monitors: [Monitor]
     ) -> Bool {
-        assertInCommit("captureNiriColumnWidthState")
-        guard let state = niriEngine?.columnWidthState(for: token, in: workspaceId) else { return false }
-        return storeDetachedNiriColumnWidthState(state, for: token, monitors: monitors)
+        assertInCommit("captureDetachedNiriPlacement")
+        return captureNiriPlacements(
+            for: token,
+            in: workspaceId,
+            detachedToken: token,
+            monitors: monitors
+        )
+    }
+
+    @discardableResult
+    func captureLiveNiriPlacements(
+        containing tokens: [WindowToken],
+        in workspaceId: WorkspaceDescriptor.ID,
+        monitors: [Monitor]
+    ) -> Bool {
+        assertInCommit("captureLiveNiriPlacements")
+        guard let engine = niriEngine else { return false }
+        var visitedTokens = Set<WindowToken>()
+        var changed = false
+        for token in tokens where visitedTokens.insert(token).inserted {
+            let placements = engine.persistedPlacementsInColumn(
+                containing: token,
+                in: workspaceId
+            )
+            visitedTokens.formUnion(placements.keys)
+            changed = storeNiriPlacements(
+                placements,
+                in: workspaceId,
+                detachedToken: nil,
+                monitors: monitors
+            ) || changed
+        }
+        return changed
+    }
+
+    private func captureNiriPlacements(
+        for token: WindowToken,
+        in workspaceId: WorkspaceDescriptor.ID,
+        detachedToken: WindowToken?,
+        monitors: [Monitor]
+    ) -> Bool {
+        guard let engine = niriEngine else { return false }
+        let placements = engine.persistedPlacementsInColumn(
+            containing: token,
+            in: workspaceId
+        )
+        guard !placements.isEmpty else { return false }
+        return storeNiriPlacements(
+            placements,
+            in: workspaceId,
+            detachedToken: detachedToken,
+            monitors: monitors
+        )
     }
 
     private func repairViewportSelection(
@@ -654,7 +768,7 @@ extension WorldStore {
     @discardableResult
     func installNiriEngine(_ engine: NiriLayoutEngine?, monitors: [Monitor]) -> Bool {
         let captured = if let current = niriEngine, current !== engine {
-            captureNiriColumnWidthStates(from: current, monitors: monitors)
+            captureNiriPlacements(from: current, monitors: monitors)
         } else {
             false
         }
@@ -663,20 +777,30 @@ extension WorldStore {
         return captured
     }
 
-    private func captureNiriColumnWidthStates(
+    private func captureNiriPlacements(
         from engine: NiriLayoutEngine,
         monitors: [Monitor]
     ) -> Bool {
+        let entries = model.allEntries()
+        let authoritativeWorkspaceIds = Dictionary(
+            uniqueKeysWithValues: entries.map { ($0.token, $0.workspaceId) }
+        )
+        var placements: [WindowToken: PersistedNiriPlacement] = [:]
+        placements.reserveCapacity(entries.count)
+        for workspaceId in engine.workspaceIds().sorted(by: { $0.uuidString < $1.uuidString }) {
+            for (token, placement) in engine.persistedPlacements(in: workspaceId)
+                where placements[token] == nil || authoritativeWorkspaceIds[token] == workspaceId
+            {
+                placements[token] = placement
+            }
+        }
+
         var captured = false
-        for entry in model.allEntries() {
-            let workspaceIds = engine.workspaceIds(containing: entry.token)
-            let state = engine.columnWidthState(for: entry.token, in: entry.workspaceId)
-                ?? workspaceIds.sorted(by: { $0.uuidString < $1.uuidString }).lazy.compactMap {
-                    engine.columnWidthState(for: entry.token, in: $0)
-                }.first
-            if let state {
-                captured = storeDetachedNiriColumnWidthState(
-                    state,
+        for entry in entries {
+            if let placement = placements[entry.token] {
+                captured = storeNiriPlacement(
+                    placement,
+                    detached: true,
                     for: entry.token,
                     monitors: monitors
                 ) || captured

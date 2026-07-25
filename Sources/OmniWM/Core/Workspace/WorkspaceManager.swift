@@ -634,7 +634,7 @@ final class WorkspaceManager {
             targetMode: hydrationPlan.targetMode,
             floatingFrame: hydrationPlan.floatingFrame,
             niriPlacement: hydrationPlan.niriPlacement,
-            detachedNiriColumnWidthState: hydrationPlan.detachedNiriColumnWidthState,
+            detachedNiriContainerSizingState: hydrationPlan.detachedNiriContainerSizingState,
             consumedKey: hydrationPlan.consumedKey,
             consumedEntry: hydrationPlan.consumedEntry
         )
@@ -703,7 +703,7 @@ final class WorkspaceManager {
         if let entry = world.entry(for: token) {
             var restoreIntent = StateReducer.restoreIntent(for: entry, monitors: monitors)
             restoreIntent.niriPlacement = hydration.niriPlacement
-            restoreIntent.detachedNiriColumnWidthState = hydration.detachedNiriColumnWidthState
+            restoreIntent.detachedNiriContainerSizingState = hydration.detachedNiriContainerSizingState
             world.setRestoreIntent(restoreIntent, for: token)
         }
 
@@ -824,7 +824,7 @@ final class WorkspaceManager {
                     restoreToFloating: restoreIntent.restoreToFloating,
                     rescueEligible: restoreIntent.rescueEligible,
                     niriPlacement: restoreIntent.niriPlacement,
-                    detachedNiriColumnWidthState: restoreIntent.detachedNiriColumnWidthState
+                    detachedNiriContainerSizingState: restoreIntent.detachedNiriContainerSizingState
                 )
             )
         }
@@ -2246,7 +2246,7 @@ final class WorkspaceManager {
             guard let entry = world.entry(for: token), entry.mode == .tiling else { return false }
             let restoreIntent = StateReducer.restoreIntent(for: entry, monitors: monitors)
             return restoreIntent.niriPlacement != placement
-                || restoreIntent.detachedNiriColumnWidthState != nil
+                || restoreIntent.detachedNiriContainerSizingState != nil
         }
         guard !changedPlacements.isEmpty else { return }
         recordReconcileEvent(
@@ -2767,11 +2767,11 @@ final class WorkspaceManager {
     }
 
     @discardableResult
-    func captureNiriColumnWidthState(
+    func captureDetachedNiriPlacement(
         for token: WindowToken,
         in workspaceId: WorkspaceDescriptor.ID
     ) -> Bool {
-        let captured = world.captureNiriColumnWidthState(
+        let captured = world.captureDetachedNiriPlacement(
             for: token,
             in: workspaceId,
             monitors: monitors
@@ -2908,13 +2908,13 @@ final class WorkspaceManager {
                 self.applyViewportInBatch(sourceState, for: sourceWorkspaceId)
                 self.applyViewportInBatch(targetState, for: targetWorkspaceId)
                 for token in moved.tokens {
-                    _ = self.world.captureNiriColumnWidthState(
-                        for: token,
-                        in: targetWorkspaceId,
-                        monitors: self.monitors
-                    )
                     self.setWorkspace(for: token, to: targetWorkspaceId)
                 }
+                _ = self.world.captureLiveNiriPlacements(
+                    containing: moved.tokens,
+                    in: targetWorkspaceId,
+                    monitors: self.monitors
+                )
             },
             resolvePlan: { plan, _, _ in plan }
         )

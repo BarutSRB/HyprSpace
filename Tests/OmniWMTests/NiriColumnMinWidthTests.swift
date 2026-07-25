@@ -35,29 +35,185 @@ final class NiriColumnMinWidthTests: XCTestCase {
             engine.balanceSizes(
                 in: workspaceId,
                 motion: .disabled,
-                workingAreaWidth: workingFrame.width,
-                gaps: gaps
+                workingFrame: workingFrame,
+                gaps: gaps,
+                orientation: .horizontal
             )
         )
         XCTAssertEqual(column.cachedWidth, 800, accuracy: 0.001)
     }
 
-    func testSetColumnWidthBelowMinSettlesAtMin() {
+    func testSetContainerPrimarySpanBelowMinSettlesAtMin() {
         let (engine, workspaceId, token, column) = makeSingleWindowEngine()
         engine.updateWindowConstraints(for: token, constraints: minConstraints(width: 800), in: workspaceId)
         var state = ViewportState()
 
-        engine.setColumnWidth(
+        engine.setContainerPrimarySpan(
             column,
             change: .setFixed(200),
             in: workspaceId,
             motion: .disabled,
             state: &state,
             workingFrame: workingFrame,
-            gaps: gaps
+            gaps: gaps,
+            orientation: .horizontal
         )
 
         XCTAssertEqual(column.cachedWidth, 800, accuracy: 0.001)
+    }
+
+    func testTabbedFixedPrimarySpanUsesOuterContainerPixels() throws {
+        let (engine, workspaceId, token, column) = makeSingleWindowEngine()
+        engine.singleWindowFit = SingleWindowFit(mode: .containerPrimarySpan)
+        engine.renderStyle.tabIndicatorWidth = 30
+        column.displayMode = .tabbed
+        var state = ViewportState()
+
+        engine.setContainerPrimarySpan(
+            column,
+            change: .setFixed(500),
+            in: workspaceId,
+            motion: .disabled,
+            state: &state,
+            workingFrame: workingFrame,
+            gaps: gaps,
+            orientation: .horizontal
+        )
+
+        let frame = try XCTUnwrap(
+            engine.calculateLayout(
+                state: state,
+                workspaceId: workspaceId,
+                monitorFrame: workingFrame,
+                gaps: (horizontal: gaps, vertical: gaps),
+                orientation: .horizontal
+            )[token]
+        )
+
+        XCTAssertEqual(column.width, .fixed(500))
+        XCTAssertEqual(column.cachedWidth, 500, accuracy: 0.001)
+        XCTAssertEqual(frame.width, 470, accuracy: 0.001)
+    }
+
+    func testTabbedFixedPrimarySpanPresetsCycleByOuterContainerPixels() {
+        let (engine, workspaceId, _, column) = makeSingleWindowEngine()
+        engine.singleWindowFit = SingleWindowFit(mode: .containerPrimarySpan)
+        engine.renderStyle.tabIndicatorWidth = 30
+        engine.presetContainerPrimarySpans = [.fixed(480), .fixed(520)]
+        column.displayMode = .tabbed
+        column.width = .fixed(500)
+        column.cachedWidth = 500
+        column.presetWidthIdx = nil
+        var state = ViewportState()
+
+        engine.toggleContainerPrimarySpan(
+            column,
+            forwards: true,
+            in: workspaceId,
+            motion: .disabled,
+            state: &state,
+            workingFrame: workingFrame,
+            gaps: gaps,
+            orientation: .horizontal
+        )
+
+        XCTAssertEqual(column.width, .fixed(520))
+        XCTAssertEqual(column.cachedWidth, 520, accuracy: 0.001)
+        XCTAssertEqual(column.presetWidthIdx, 1)
+    }
+
+    func testTabbedContentConstraintsIncludeRailInOuterWidth() throws {
+        let (engine, workspaceId, token, column) = makeSingleWindowEngine()
+        engine.singleWindowFit = SingleWindowFit(mode: .containerPrimarySpan)
+        engine.renderStyle.tabIndicatorWidth = 30
+        column.displayMode = .tabbed
+        engine.updateWindowConstraints(
+            for: token,
+            constraints: WindowSizeConstraints(
+                minSize: CGSize(width: 400, height: 1),
+                maxSize: CGSize(width: 600, height: 0),
+                isFixed: false
+            ),
+            in: workspaceId
+        )
+        var state = ViewportState()
+
+        engine.setContainerPrimarySpan(
+            column,
+            change: .setFixed(200),
+            in: workspaceId,
+            motion: .disabled,
+            state: &state,
+            workingFrame: workingFrame,
+            gaps: gaps,
+            orientation: .horizontal
+        )
+        var frame = try XCTUnwrap(
+            engine.calculateLayout(
+                state: state,
+                workspaceId: workspaceId,
+                monitorFrame: workingFrame,
+                gaps: (horizontal: gaps, vertical: gaps),
+                orientation: .horizontal
+            )[token]
+        )
+
+        XCTAssertEqual(column.cachedWidth, 430, accuracy: 0.001)
+        XCTAssertEqual(frame.width, 400, accuracy: 0.001)
+
+        engine.setContainerPrimarySpan(
+            column,
+            change: .setFixed(900),
+            in: workspaceId,
+            motion: .disabled,
+            state: &state,
+            workingFrame: workingFrame,
+            gaps: gaps,
+            orientation: .horizontal
+        )
+        frame = try XCTUnwrap(
+            engine.calculateLayout(
+                state: state,
+                workspaceId: workspaceId,
+                monitorFrame: workingFrame,
+                gaps: (horizontal: gaps, vertical: gaps),
+                orientation: .horizontal
+            )[token]
+        )
+
+        XCTAssertEqual(column.cachedWidth, 630, accuracy: 0.001)
+        XCTAssertEqual(frame.width, 600, accuracy: 0.001)
+    }
+
+    func testEnteringTabbedModeReclampsCachedOuterWidth() {
+        let (engine, workspaceId, token, column) = makeSingleWindowEngine()
+        engine.renderStyle.tabIndicatorWidth = 30
+        engine.updateWindowConstraints(for: token, constraints: minConstraints(width: 400), in: workspaceId)
+        column.width = .fixed(200)
+        column.cachedWidth = 400
+
+        XCTAssertTrue(
+            engine.setColumnDisplay(
+                .tabbed,
+                for: column,
+                in: workspaceId,
+                motion: .disabled,
+                orientation: .horizontal
+            )
+        )
+
+        XCTAssertEqual(column.cachedWidth, 430, accuracy: 0.001)
+    }
+
+    func testTabbedConstraintArrivalReclampsOuterWidth() {
+        let (engine, workspaceId, token, column) = makeSingleWindowEngine()
+        engine.renderStyle.tabIndicatorWidth = 30
+        column.displayMode = .tabbed
+        column.cachedWidth = 500
+
+        engine.updateWindowConstraints(for: token, constraints: minConstraints(width: 600), in: workspaceId)
+
+        XCTAssertEqual(column.cachedWidth, 630, accuracy: 0.001)
     }
 
     func testOversizedMinWidthIsKeptBeyondWorkArea() {
@@ -74,23 +230,25 @@ final class NiriColumnMinWidthTests: XCTestCase {
         engine.updateWindowConstraints(for: token, constraints: minConstraints(width: 800), in: workspaceId)
         var state = ViewportState()
 
-        engine.toggleFullWidth(
+        engine.toggleContainerFullPrimarySpan(
             column,
             in: workspaceId,
             motion: .disabled,
             state: &state,
             workingFrame: workingFrame,
-            gaps: gaps
+            gaps: gaps,
+            orientation: .horizontal
         )
         XCTAssertGreaterThanOrEqual(column.cachedWidth, 800)
 
-        engine.toggleFullWidth(
+        engine.toggleContainerFullPrimarySpan(
             column,
             in: workspaceId,
             motion: .disabled,
             state: &state,
             workingFrame: workingFrame,
-            gaps: gaps
+            gaps: gaps,
+            orientation: .horizontal
         )
         XCTAssertEqual(column.cachedWidth, 800, accuracy: 0.001)
     }

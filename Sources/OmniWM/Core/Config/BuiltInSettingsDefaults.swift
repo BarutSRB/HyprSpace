@@ -4,7 +4,7 @@
 import Foundation
 
 enum BuiltInSettingsDefaults {
-    static let niriColumnWidthPresets: [Double] = [
+    static let niriContainerPrimarySpanPresets: [Double] = [
         0.33333333333333331,
         0.5,
         0.66666666666666663

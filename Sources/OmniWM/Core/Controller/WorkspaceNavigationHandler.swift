@@ -167,6 +167,7 @@ final class WorkspaceNavigationHandler {
         state.selectedNodeId = movedNode.id
         let gap = controller.innerGap(for: monitor)
         let workingFrame = controller.insetWorkingFrame(for: monitor)
+        let orientation = controller.settings.effectiveOrientation(for: monitor)
         controller.workspaceManager.withEngineMutationScope {
             engine.activateWindow(movedNode.id, in: workspaceId)
             engine.ensureSelectionVisible(
@@ -175,7 +176,8 @@ final class WorkspaceNavigationHandler {
                 motion: controller.motionPolicy.snapshot(),
                 state: &state,
                 workingFrame: workingFrame,
-                gaps: gap
+                gaps: gap,
+                orientation: orientation
             )
         }
         return state
@@ -769,7 +771,7 @@ final class WorkspaceNavigationHandler {
                 }
 
                 if targetIsDwindle, engine.findNode(for: token, in: sourceWsId) != nil {
-                    controller.workspaceManager.captureNiriColumnWidthState(for: token, in: sourceWsId)
+                    controller.workspaceManager.captureDetachedNiriPlacement(for: token, in: sourceWsId)
                     engine.removeWindow(token: token, in: sourceWsId)
                 }
 
@@ -1062,6 +1064,7 @@ final class WorkspaceNavigationHandler {
         let targetWorkingFrame = controller.insetWorkingFrame(for: targetMonitor)
         let gaps = controller.innerGap(for: targetMonitor)
         let motion = controller.motionPolicy.snapshot()
+        let orientation = controller.settings.effectiveOrientation(for: targetMonitor)
         guard let result = controller.workspaceManager.withBatchedWorkspaceMove(
             sourceWorkspaceId: sourceWorkspaceId,
             targetWorkspaceId: targetWorkspaceId,
@@ -1071,7 +1074,8 @@ final class WorkspaceNavigationHandler {
                     from: sourceWorkspaceId,
                     to: targetWorkspaceId,
                     sourceState: &sourceState,
-                    targetState: &targetState
+                    targetState: &targetState,
+                    targetOrientation: orientation
                 ) else { return nil }
                 engine.activateWindow(windowNode.id, in: targetWorkspaceId)
                 targetState.selectedNodeId = windowNode.id
@@ -1081,7 +1085,8 @@ final class WorkspaceNavigationHandler {
                     motion: motion,
                     state: &targetState,
                     workingFrame: targetWorkingFrame,
-                    gaps: gaps
+                    gaps: gaps,
+                    orientation: orientation
                 )
                 return (moveResult, movedTokens)
             }

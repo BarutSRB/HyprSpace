@@ -44,7 +44,7 @@ struct MonitorDwindleSettings: MonitorSettingsType {
     private enum CodingKeys: String, CodingKey {
         case id, monitorName, monitorDisplayUUID, monitorDisplayId
         case smartSplit, defaultSplitRatio, splitWidthMultiplier
-        case singleWindowFit = "singleWindowAspectRatio"
+        case singleWindowFit
         case useGlobalGaps, innerGap
     }
 

@@ -9,41 +9,63 @@ extension ViewportState {
         _ newIndex: Int,
         columns: [NiriContainer],
         gap: CGFloat,
-        viewportWidth: CGFloat,
+        workingArea: CGRect,
+        orientation: Monitor.Orientation,
         motion: MotionSnapshot,
         animate: Bool,
         centerMode: CenterFocusedColumn,
         alwaysCenterSingleColumn: Bool = false,
         fromColumnIndex: Int? = nil,
         scale: CGFloat = 2.0,
-        workingArea: CGRect? = nil,
         viewFrame: CGRect? = nil
     ) {
         guard !columns.isEmpty else { return }
         let clampedIndex = newIndex.clamped(to: 0 ... (columns.count - 1))
+        let sizeKeyPath: KeyPath<NiriContainer, CGFloat>
+        let viewportSpan: CGFloat
+        switch orientation {
+        case .horizontal:
+            sizeKeyPath = \.cachedWidth
+            viewportSpan = workingArea.width
+        case .vertical:
+            sizeKeyPath = \.cachedHeight
+            viewportSpan = workingArea.height
+        }
 
-        let oldActiveColX = columnX(at: activeColumnIndex, columns: columns, gap: gap)
+        let oldActivePosition = containerPosition(
+            at: activeColumnIndex,
+            containers: columns,
+            gap: gap,
+            sizeKeyPath: sizeKeyPath
+        )
 
         let prevActiveColumn = activeColumnIndex
         activeColumnIndex = clampedIndex
 
-        let newActiveColX = columnX(at: clampedIndex, columns: columns, gap: gap)
-        let offsetDelta = oldActiveColX - newActiveColX
+        let newActivePosition = containerPosition(
+            at: clampedIndex,
+            containers: columns,
+            gap: gap,
+            sizeKeyPath: sizeKeyPath
+        )
+        let offsetDelta = oldActivePosition - newActivePosition
 
         rebaseOffset(by: offsetDelta)
 
         let targetOffset = computeVisibleOffset(
-            columnIndex: clampedIndex,
-            columns: columns,
+            containerIndex: clampedIndex,
+            containers: columns,
             gap: gap,
-            viewportWidth: viewportWidth,
-            currentOffset: viewOffset,
+            viewportSpan: viewportSpan,
+            sizeKeyPath: sizeKeyPath,
+            currentViewStart: newActivePosition + viewOffset,
             centerMode: centerMode,
             alwaysCenterSingleColumn: alwaysCenterSingleColumn,
-            fromColumnIndex: fromColumnIndex ?? prevActiveColumn,
+            fromContainerIndex: fromColumnIndex ?? prevActiveColumn,
             scale: scale,
             workingArea: workingArea,
-            viewFrame: viewFrame
+            viewFrame: viewFrame,
+            orientation: orientation
         )
 
         let pixel: CGFloat = 1.0 / max(scale, 1.0)
@@ -80,7 +102,7 @@ extension ViewportState {
         scale: CGFloat = 2.0,
         workingArea: CGRect? = nil,
         viewFrame: CGRect? = nil,
-        orientation: Monitor.Orientation = .horizontal
+        orientation: Monitor.Orientation
     ) {
         guard !containers.isEmpty, containerIndex >= 0, containerIndex < containers.count else { return }
 

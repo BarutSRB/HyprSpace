@@ -467,25 +467,32 @@ final class WindowActionHandler {
                    let colIdx = engine.columnIndex(of: column, in: workspaceId),
                    let monitor = controller.workspaceManager.monitor(for: workspaceId)
                 {
-                    controller.workspaceManager.withEngineMutationScope {
-                        engine.activateWindow(niriWindow.id, in: workspaceId)
-                    }
-
                     let cols = engine.columns(in: workspaceId)
                     let gap = controller.innerGap(for: monitor)
                     let settings = engine.effectiveSettings(in: workspaceId)
                     let workingFrame = controller.insetWorkingFrame(for: monitor)
+                    let orientation = controller.settings.effectiveOrientation(for: monitor)
+                    controller.workspaceManager.withEngineMutationScope {
+                        engine.activateWindow(niriWindow.id, in: workspaceId)
+                        engine.resolvePrimaryContainerSpans(
+                            in: workspaceId,
+                            workingFrame: workingFrame,
+                            gaps: gap,
+                            orientation: orientation
+                        )
+                    }
+
                     targetState.transitionToColumn(
                         colIdx,
                         columns: cols,
                         gap: gap,
-                        viewportWidth: workingFrame.width,
+                        workingArea: workingFrame,
+                        orientation: orientation,
                         motion: .disabled,
                         animate: false,
                         centerMode: settings.centerFocusedColumn,
                         alwaysCenterSingleColumn: settings.alwaysCenterSingleColumn,
                         scale: engine.displayScale(in: workspaceId),
-                        workingArea: workingFrame,
                         viewFrame: monitor.frame
                     )
                     targetState.selectionProgress = 0
@@ -581,7 +588,7 @@ final class WindowActionHandler {
             handle: WindowHandle(id: token),
             insertIndex: insertIndex,
             in: targetWorkspaceId,
-            widthPolicy: .inheritSource
+            sizingPolicy: .inheritSource
         ) else {
             return false
         }

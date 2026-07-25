@@ -130,7 +130,7 @@ struct RestoreIntent: Equatable {
     var restoreToFloating: Bool
     var rescueEligible: Bool
     var niriPlacement: PersistedNiriPlacement? = nil
-    var detachedNiriColumnWidthState: NiriColumnWidthState? = nil
+    var detachedNiriContainerSizingState: NiriContainerSizingState? = nil
 }
 
 enum ReplacementCorrelation {

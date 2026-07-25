@@ -57,6 +57,7 @@ final class TrackpadGestureIntentTests: XCTestCase {
             fingerCount: 3,
             cumulativeX: 50,
             cumulativeY: 10,
+            columnScrollAxis: .horizontal,
             columnContextAvailable: true
         )
         XCTAssertEqual(mode, .columnScroll)
@@ -68,6 +69,7 @@ final class TrackpadGestureIntentTests: XCTestCase {
             fingerCount: 3,
             cumulativeX: 10,
             cumulativeY: 50,
+            columnScrollAxis: .horizontal,
             columnContextAvailable: true
         )
         XCTAssertEqual(mode, .workspaceSwitch(axis: .vertical))
@@ -79,6 +81,7 @@ final class TrackpadGestureIntentTests: XCTestCase {
             fingerCount: 3,
             cumulativeX: 10,
             cumulativeY: 50,
+            columnScrollAxis: .horizontal,
             columnContextAvailable: true
         )
         XCTAssertEqual(mode, .workspaceSwitch(axis: .vertical))
@@ -90,6 +93,7 @@ final class TrackpadGestureIntentTests: XCTestCase {
             fingerCount: 3,
             cumulativeX: 10,
             cumulativeY: 50,
+            columnScrollAxis: .horizontal,
             columnContextAvailable: true
         )
         XCTAssertNil(mode)
@@ -101,6 +105,7 @@ final class TrackpadGestureIntentTests: XCTestCase {
             fingerCount: 4,
             cumulativeX: 50,
             cumulativeY: 10,
+            columnScrollAxis: .horizontal,
             columnContextAvailable: true
         )
         XCTAssertNil(mode)
@@ -112,6 +117,7 @@ final class TrackpadGestureIntentTests: XCTestCase {
             fingerCount: 3,
             cumulativeX: 10,
             cumulativeY: 50,
+            columnScrollAxis: .horizontal,
             columnContextAvailable: false
         )
         XCTAssertEqual(mode, .workspaceSwitch(axis: .vertical))
@@ -123,6 +129,7 @@ final class TrackpadGestureIntentTests: XCTestCase {
             fingerCount: 3,
             cumulativeX: 50,
             cumulativeY: 10,
+            columnScrollAxis: .horizontal,
             columnContextAvailable: false
         )
         XCTAssertNil(mode)
@@ -134,6 +141,7 @@ final class TrackpadGestureIntentTests: XCTestCase {
             fingerCount: 4,
             cumulativeX: 50,
             cumulativeY: 10,
+            columnScrollAxis: .horizontal,
             columnContextAvailable: true
         )
         XCTAssertEqual(mode, .workspaceSwitch(axis: .horizontal))
@@ -145,6 +153,7 @@ final class TrackpadGestureIntentTests: XCTestCase {
             fingerCount: 3,
             cumulativeX: 30,
             cumulativeY: 30,
+            columnScrollAxis: .horizontal,
             columnContextAvailable: true
         )
         XCTAssertEqual(mode, .workspaceSwitch(axis: .vertical))
@@ -156,9 +165,58 @@ final class TrackpadGestureIntentTests: XCTestCase {
             fingerCount: 3,
             cumulativeX: 50,
             cumulativeY: 10,
+            columnScrollAxis: .horizontal,
             columnContextAvailable: true
         )
         XCTAssertNil(mode)
+    }
+
+    func testResolveModePrefersColumnScrollForSharedCountVerticalSwipeOnVerticalAxis() {
+        let mode = TrackpadGestureIntent.resolveMode(
+            makeConfig(),
+            fingerCount: 3,
+            cumulativeX: 10,
+            cumulativeY: 50,
+            columnScrollAxis: .vertical,
+            columnContextAvailable: true
+        )
+        XCTAssertEqual(mode, .columnScroll)
+    }
+
+    func testResolveModeResolvesHorizontalWorkspaceSwitchForSharedCountOnVerticalAxis() {
+        let mode = TrackpadGestureIntent.resolveMode(
+            makeConfig(),
+            fingerCount: 3,
+            cumulativeX: 50,
+            cumulativeY: 10,
+            columnScrollAxis: .vertical,
+            columnContextAvailable: true
+        )
+        XCTAssertEqual(mode, .workspaceSwitch(axis: .horizontal))
+    }
+
+    func testResolveModeReturnsNilForColumnCountHorizontalSwipeWithDistinctCountsOnVerticalAxis() {
+        let mode = TrackpadGestureIntent.resolveMode(
+            makeConfig(workspaceFingers: 4),
+            fingerCount: 3,
+            cumulativeX: 50,
+            cumulativeY: 10,
+            columnScrollAxis: .vertical,
+            columnContextAvailable: true
+        )
+        XCTAssertNil(mode)
+    }
+
+    func testResolveModeHonorsConfiguredWorkspaceAxisWithDistinctCountsOnVerticalAxis() {
+        let mode = TrackpadGestureIntent.resolveMode(
+            makeConfig(workspaceFingers: 4, workspaceAxis: .horizontal),
+            fingerCount: 4,
+            cumulativeX: 50,
+            cumulativeY: 10,
+            columnScrollAxis: .vertical,
+            columnContextAvailable: true
+        )
+        XCTAssertEqual(mode, .workspaceSwitch(axis: .horizontal))
     }
 
     func testNaturalHorizontalSwipeLeftIsNext() {

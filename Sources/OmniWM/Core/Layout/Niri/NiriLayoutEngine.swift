@@ -113,15 +113,17 @@ final class NiriWorkspaceState {
 }
 
 final class NiriLayoutEngine {
-    enum NewColumnWidthPolicy {
+    enum NewContainerSizingPolicy {
         case workspaceDefault
         case inheritSource
     }
 
-    static let defaultPresetColumnWidthValues: [CGFloat] = [1.0 / 3.0, 0.5, 2.0 / 3.0]
-    static let defaultPresetColumnWidths: [PresetSize] = defaultPresetColumnWidthValues.map { .proportion($0) }
-    static let defaultPresetWindowHeightValues: [CGFloat] = [1.0 / 3.0, 0.5, 2.0 / 3.0]
-    static let defaultPresetWindowHeights: [PresetSize] = defaultPresetWindowHeightValues.map { .proportion($0) }
+    static let defaultPresetContainerPrimarySpanValues: [CGFloat] = [1.0 / 3.0, 0.5, 2.0 / 3.0]
+    static let defaultPresetContainerPrimarySpans: [PresetSize] = defaultPresetContainerPrimarySpanValues
+        .map { .proportion($0) }
+    static let defaultPresetWindowSecondarySpanValues: [CGFloat] = [1.0 / 3.0, 0.5, 2.0 / 3.0]
+    static let defaultPresetWindowSecondarySpans: [PresetSize] = defaultPresetWindowSecondarySpanValues
+        .map { .proportion($0) }
     private static let presetMatchTolerance: CGFloat = 0.001
 
     var monitors: [Monitor.ID: NiriMonitor] = [:]
@@ -133,7 +135,7 @@ final class NiriLayoutEngine {
 
     var axisSolveCache: [NiriAxisSolveKey: [NiriAxisSolver.Output]] = [:]
 
-    var maxVisibleColumns: Int
+    var visibleContainerCount: Int
     var infiniteLoop: Bool
 
     var centerFocusedColumn: CenterFocusedColumn = .never
@@ -185,12 +187,12 @@ final class NiriLayoutEngine {
         }
     }
 
-    var presetColumnWidths: [PresetSize] = NiriLayoutEngine.defaultPresetColumnWidths
-    var presetWindowHeights: [PresetSize] = NiriLayoutEngine.defaultPresetWindowHeights
-    var defaultColumnWidth: CGFloat? = 0.5
+    var presetContainerPrimarySpans: [PresetSize] = NiriLayoutEngine.defaultPresetContainerPrimarySpans
+    var presetWindowSecondarySpans: [PresetSize] = NiriLayoutEngine.defaultPresetWindowSecondarySpans
+    var defaultContainerPrimarySpan: CGFloat? = 0.5
 
-    init(maxVisibleColumns: Int = 2, infiniteLoop: Bool = false) {
-        self.maxVisibleColumns = max(1, min(5, maxVisibleColumns))
+    init(visibleContainerCount: Int = 2, infiniteLoop: Bool = false) {
+        self.visibleContainerCount = max(1, min(5, visibleContainerCount))
         self.infiniteLoop = infiniteLoop
     }
 
@@ -229,88 +231,108 @@ final class NiriLayoutEngine {
         }
     }
 
-    func resolvedColumnResetWidth(in workspaceId: WorkspaceDescriptor
+    func resolvedContainerResetPrimarySpan(in workspaceId: WorkspaceDescriptor
         .ID) -> (proportion: CGFloat, presetWidthIdx: Int?)
     {
-        if let defaultColumnWidth {
-            return (defaultColumnWidth, matchingPresetIndex(for: defaultColumnWidth))
+        if let defaultContainerPrimarySpan {
+            return (defaultContainerPrimarySpan, matchingPresetIndex(for: defaultContainerPrimarySpan))
         }
 
-        return (1.0 / CGFloat(effectiveMaxVisibleColumns(in: workspaceId)), nil)
+        return (1.0 / CGFloat(effectiveVisibleContainerCount(in: workspaceId)), nil)
     }
 
-    func initialColumnWidthState(for proportion: CGFloat) -> NiriColumnWidthState {
+    func initialContainerSizingState(for proportion: CGFloat) -> NiriContainerSizingState {
         precondition(proportion.isFinite && (0.05 ... 1.0).contains(proportion))
-        return NiriColumnWidthState(
-            width: .proportion(proportion),
-            presetWidthIndex: matchingPresetIndex(for: proportion),
-            isFullWidth: false,
-            savedWidth: nil,
-            hasManualSingleWindowWidthOverride: false
+        return initialContainerSizingState(
+            for: proportion,
+            presetWidthIndex: matchingPresetIndex(for: proportion)
         )
     }
 
-    func columnWidthState(
+    private func initialContainerSizingState(
+        for proportion: CGFloat,
+        presetWidthIndex: Int?
+    ) -> NiriContainerSizingState {
+        return NiriContainerSizingState(
+            width: .proportion(proportion),
+            presetWidthIndex: presetWidthIndex,
+            isFullWidth: false,
+            savedWidth: nil,
+            hasManualSingleWindowWidthOverride: false,
+            height: .proportion(proportion),
+            isFullHeight: false,
+            savedHeight: nil,
+            hasManualSingleWindowHeightOverride: false
+        )
+    }
+
+    func containerSizingState(
         for token: WindowToken,
         in workspaceId: WorkspaceDescriptor.ID
-    ) -> NiriColumnWidthState? {
+    ) -> NiriContainerSizingState? {
         guard let window = states[workspaceId]?.nodesByToken[token],
               let column = window.parent as? NiriContainer
         else {
             return nil
         }
-        return columnWidthState(for: column)
+        return containerSizingState(for: column)
     }
 
-    private func applyColumnWidthState(_ state: NiriColumnWidthState, to column: NiriContainer) {
+    private func applyContainerSizingState(_ state: NiriContainerSizingState, to column: NiriContainer) {
         column.width = state.width
         column.presetWidthIdx = state.presetWidthIndex
         column.isFullWidth = state.isFullWidth
         column.savedWidth = state.savedWidth
         column.hasManualSingleWindowWidthOverride = state.hasManualSingleWindowWidthOverride
+        column.height = state.height
+        column.isFullHeight = state.isFullHeight
+        column.savedHeight = state.savedHeight
+        column.hasManualSingleWindowHeightOverride = state.hasManualSingleWindowHeightOverride
         column.cachedWidth = 0
+        column.cachedHeight = 0
         column.widthAnimation = nil
         column.targetWidth = nil
     }
 
-    func initializeNewColumnWidth(
+    func initializeNewContainerSizing(
         _ column: NiriContainer,
         in workspaceId: WorkspaceDescriptor.ID,
-        initialState: NiriColumnWidthState? = nil
+        initialState: NiriContainerSizingState? = nil
     ) {
         if let initialState {
-            applyColumnWidthState(initialState, to: column)
+            applyContainerSizingState(initialState, to: column)
             return
         }
-        let resolvedWidth = resolvedColumnResetWidth(in: workspaceId)
-        applyColumnWidthState(
-            NiriColumnWidthState(
-                width: .proportion(resolvedWidth.proportion),
-                presetWidthIndex: resolvedWidth.presetWidthIdx,
-                isFullWidth: false,
-                savedWidth: nil,
-                hasManualSingleWindowWidthOverride: false
+        let resolvedWidth = resolvedContainerResetPrimarySpan(in: workspaceId)
+        applyContainerSizingState(
+            initialContainerSizingState(
+                for: resolvedWidth.proportion,
+                presetWidthIndex: resolvedWidth.presetWidthIdx
             ),
             to: column
         )
     }
 
-    func copyColumnWidthState(from sourceColumn: NiriContainer, to targetColumn: NiriContainer) {
-        applyColumnWidthState(columnWidthState(for: sourceColumn), to: targetColumn)
+    func copyContainerSizingState(from sourceColumn: NiriContainer, to targetColumn: NiriContainer) {
+        applyContainerSizingState(containerSizingState(for: sourceColumn), to: targetColumn)
     }
 
-    private func columnWidthState(for column: NiriContainer) -> NiriColumnWidthState {
-        NiriColumnWidthState(
+    private func containerSizingState(for column: NiriContainer) -> NiriContainerSizingState {
+        NiriContainerSizingState(
             width: column.width,
             presetWidthIndex: column.presetWidthIdx,
             isFullWidth: column.isFullWidth,
             savedWidth: column.savedWidth,
-            hasManualSingleWindowWidthOverride: column.hasManualSingleWindowWidthOverride
+            hasManualSingleWindowWidthOverride: column.hasManualSingleWindowWidthOverride,
+            height: column.height,
+            isFullHeight: column.isFullHeight,
+            savedHeight: column.savedHeight,
+            hasManualSingleWindowHeightOverride: column.hasManualSingleWindowHeightOverride
         )
     }
 
     private func matchingPresetIndex(for width: CGFloat) -> Int? {
-        presetColumnWidths.firstIndex { preset in
+        presetContainerPrimarySpans.firstIndex { preset in
             guard case let .proportion(presetWidth) = preset.kind else { return false }
             return abs(presetWidth - width) <= Self.presetMatchTolerance
         }
@@ -332,7 +354,7 @@ final class NiriLayoutEngine {
 
     func singleWindowLayoutContext(in workspaceId: WorkspaceDescriptor.ID) -> SingleWindowLayoutContext? {
         let fit = effectiveSingleWindowFit(in: workspaceId)
-        guard fit.mode != .columnWidth else {
+        guard fit.mode != .containerPrimarySpan else {
             return nil
         }
 
@@ -421,17 +443,17 @@ final class NiriLayoutEngine {
     }
 
     func updateConfiguration(
-        maxVisibleColumns: Int? = nil,
+        visibleContainerCount: Int? = nil,
         infiniteLoop: Bool? = nil,
         centerFocusedColumn: CenterFocusedColumn? = nil,
         alwaysCenterSingleColumn: Bool? = nil,
         singleWindowFit: SingleWindowFit? = nil,
-        presetColumnWidths: [PresetSize]? = nil,
-        defaultColumnWidth: CGFloat?? = nil
+        presetContainerPrimarySpans: [PresetSize]? = nil,
+        defaultContainerPrimarySpan: CGFloat?? = nil
     ) {
         assertSanctionedMutation()
-        if let max = maxVisibleColumns {
-            self.maxVisibleColumns = max.clamped(to: 1 ... 5)
+        if let max = visibleContainerCount {
+            self.visibleContainerCount = max.clamped(to: 1 ... 5)
         }
         if let loop = infiniteLoop {
             self.infiniteLoop = loop
@@ -446,12 +468,12 @@ final class NiriLayoutEngine {
             self.singleWindowFit = singleWindowFit
         }
         // Double optional distinguishes "no config change" from "set Auto/nil".
-        if let defaultColumnWidth {
-            self.defaultColumnWidth = defaultColumnWidth?.clamped(to: 0.05 ... 1.0)
+        if let defaultContainerPrimarySpan {
+            self.defaultContainerPrimarySpan = defaultContainerPrimarySpan?.clamped(to: 0.05 ... 1.0)
         }
 
-        if let presets = presetColumnWidths, !presets.isEmpty {
-            self.presetColumnWidths = presets
+        if let presets = presetContainerPrimarySpans, !presets.isEmpty {
+            self.presetContainerPrimarySpans = presets
             resetAllPresetWidthIndices()
         }
     }

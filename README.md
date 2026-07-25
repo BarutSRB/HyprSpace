@@ -404,6 +404,8 @@ Layout legend:
 | Toggle Fullscreen | `Option + Return` | `Shared` |
 | Toggle Native Fullscreen | `Unassigned` | `Shared` |
 | Balance Sizes | `Option + Shift + B` | `Shared` |
+| Cycle Size Forward | `Option + .` | `Shared` |
+| Cycle Size Backward | `Option + ,` | `Shared` |
 | Move to Root | `Unassigned` | `Dwindle` |
 | Toggle Split | `Unassigned` | `Dwindle` |
 | Swap Split | `Unassigned` | `Dwindle` |
@@ -425,9 +427,7 @@ Layout legend:
 | Move Container Left / Right | `Control + Option + Shift + Left / Right Arrow` | `Shared` |
 | Move Container Up / Down | `Unassigned` | `Dwindle` |
 | Toggle Column Tabbed | `Option + T` | `Niri` |
-| Cycle Column Width Forward | `Option + .` | `Shared` |
-| Cycle Column Width Backward | `Option + ,` | `Shared` |
-| Toggle Column Full Width | `Option + Shift + F` | `Niri` |
+| Toggle Container Full Primary Span | `Option + Shift + F` | `Niri` |
 
 The daily `Focus` and `Move` shortcuts adapt to the active layout. In Niri, `Move Left / Right` expels the focused window from a multi-window column or consumes a single-window column into its neighbor, while `Move Up / Down` reorders within the column.
 
@@ -557,18 +557,19 @@ Configure per-application behavior in Settings > App Rules:
 
 - **Always Float** - Force specific apps to always float (e.g., calculators, preferences windows)
 - **Assign to Workspace** - Open first matching app windows on a specific workspace; later windows follow the app's current workspace unless rules are explicitly applied
-- **Initial Column Width (Niri)** - Start matching resizable windows at 5–100% when they create or claim a new column; the column remains freely resizable afterward
+- **Initial Container Primary Span (Niri)** - Start matching resizable windows at 5–100% when they create or claim a new container; the container remains freely resizable afterward
 - **Minimum Size** - Prevent the layout engine from sizing windows below a threshold
 
-Initial column width is a one-time seed. Niri's Single Window Fit still takes visual precedence for a lone
-window, and minimum width can clamp the resolved pixel size without changing the stored initial proportion.
+Initial container primary span is a one-time seed. It controls width in horizontal orientation and height in
+vertical orientation. Niri's Single Window Fit still takes visual precedence for a lone window, and physical
+minimum-size constraints can clamp the resolved pixel size without changing the stored initial proportion.
 
 The equivalent TOML rule uses a proportion:
 
 ```toml
 [[appRules]]
 bundleId = "net.kovidgoyal.kitty"
-initialColumnWidth = 0.5
+initialContainerPrimarySpan = 0.5
 ```
 
 ## Building from Source

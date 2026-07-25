@@ -491,11 +491,11 @@ struct WindowState: Equatable {
 
 The focus session (`FocusSessionSnapshot`) and per-monitor visible-workspace state (`MonitorSession`) are value types defined in `Core/Reconcile/ReconcileSnapshot.swift` and held on `WorldStore`. There is no single `SessionState` type.
 
-### 4.3 Niri Layout Engine (Scrolling Columns)
+### 4.3 Niri Layout Engine (Orientation-Aware Scrolling Containers)
 
 **Directory:** `Sources/OmniWM/Core/Layout/Niri/` (~31 files)
 
-Niri arranges windows in vertical columns that scroll horizontally, inspired by the [Niri](https://github.com/YaLTeR/niri) Wayland compositor.
+Niri arranges containers along the monitor's primary axis, inspired by the [Niri](https://github.com/YaLTeR/niri) Wayland compositor. In horizontal orientation, vertical columns scroll left and right and their windows stack vertically. In vertical orientation, horizontal rows scroll up and down and their windows span left to right.
 
 ```
 NiriRoot (per workspace)
@@ -513,17 +513,17 @@ NiriRoot (per workspace)
 |------|---------|
 | `NiriLayoutEngine` | Owns per-workspace `NiriWorkspaceState` values with local roots and `nodesByToken` indexes, per-monitor `NiriMonitor` state, axis-solve cache, config. |
 | `NiriRoot` | Per-workspace container; cached columns / all-windows / id set. |
-| `NiriContainer` | A column: `displayMode` (`.normal`/`.tabbed`), `width: ProportionalSize`, `activeTileIdx`, width/move springs. |
-| `NiriWindow` | Leaf: `token`, `SizingMode` (`.normal`/`.maximized`/`.fullscreen`), `height: WeightedSize`, constraints, move animations. |
-| `ProportionalSize` | `.proportion(CGFloat)` or `.fixed(CGFloat)` — column width. |
-| `WeightedSize` | `.auto(weight:)` or `.fixed(CGFloat)` — window height within a column. |
+| `NiriContainer` | A primary-axis container: `displayMode` (`.normal`/`.tabbed`), horizontal `width` state, vertical `height` state, `activeTileIdx`, and move/width springs. |
+| `NiriWindow` | Leaf: `token`, `SizingMode` (`.normal`/`.maximized`/`.fullscreen`), horizontal-orientation `height`, vertical-orientation `windowWidth`, constraints, and move animations. |
+| `ProportionalSize` | `.proportion(CGFloat)` or `.fixed(CGFloat)` — a container's primary span. |
+| `WeightedSize` | `.auto(weight:)`, `.fixed(CGFloat)`, or `.preset(Int)` — a window's secondary span within its container. |
 | `ViewportState` | Per-workspace scroll/selection snapshot. **Stored in `WorldStore.viewports`**, passed into `calculateLayout`. |
 
-**Layout computation** lives in `NiriLayout.swift` (`calculateLayout(...) -> [WindowToken: CGRect]`). **Constraint solving** is `NiriAxisSolver` in `NiriConstraintSolver.swift` — a pure 1-D solver distributing span across weighted windows while honoring min/max/fixed constraints, memoized in the engine's axis-solve cache.
+**Layout computation** lives in `NiriLayout.swift` (`calculateLayout(...) -> [WindowToken: CGRect]`). Monitor orientation selects the primary scroll axis and secondary window-distribution axis before frame calculation. **Constraint solving** is `NiriAxisSolver` in `NiriConstraintSolver.swift` — a pure 1-D solver distributing span across weighted windows while honoring min/max/fixed constraints, memoized in the engine's axis-solve cache.
 
 **File organization.** The core engine is split across `NiriLayoutEngine.swift` plus twelve `NiriLayoutEngine+*.swift` extensions (`+Animation`, `+ColumnOps`, `+Monitors`, `+Sizing`, `+TabbedMode`, `+WindowOps`, `+Windows`, `+WorkspaceOps`, `+InteractiveMove`, `+InteractiveResize`, …), with navigation in `NiriNavigation.swift`, the node tree in `NiriNode.swift`, viewport math in `ViewportState.swift` (+4 extensions), and overlays for interactive move/resize, drag ghost, and swap targets. Tabbed Niri columns and grouped Dwindle tiles share the surface-layer `TabRailManager`.
 
-**Interactive move/resize.** Option+Shift+drag moves windows between columns; `DragGhostController` captures a ScreenCaptureKit thumbnail shown as a translucent ghost and `SwapTargetOverlay` highlights the drop target. Edge-dragging resizes column widths / window heights.
+**Interactive move/resize.** Option+Shift+drag moves windows between containers; `DragGhostController` captures a ScreenCaptureKit thumbnail shown as a translucent ghost and `SwapTargetOverlay` highlights the drop target. Edge-dragging resizes the container on the primary axis and the selected window on the secondary axis. Each interaction captures its orientation at begin and keeps that axis ownership through update and completion.
 
 ### 4.4 Dwindle Layout Engine (BSP)
 
@@ -606,7 +606,7 @@ Focus management is split across several objects (there is no single coordinator
 
 **Command routing** (`Core/Controller/CommandHandler.swift`). `handleHotkeyInvocation` gives `OverviewController` first refusal while Overview is open. The modal router uses physical keys for Escape, Enter, and non-repeating Command-W, recognizes the configured physical Overview toggle, and routes assigned structural commands against the selected Overview `WindowHandle`; recognized no-ops are consumed. Unsupported commands and triggerless external/IPC commands remain blocked. When Overview is inactive, `performCommand` enforces `isEnabled` and the **layout-compatibility guard**: a `.niri`-only command is ignored under Dwindle and vice versa (`.shared` commands work everywhere).
 
-**Mouse events** (`Core/Controller/MouseEventHandler.swift`). A `CGEventTap` drives focus-follows-mouse (debounced) and interactive move/resize, while raw multitouch frames (`MultitouchGestureSource`) drive trackpad swipes through one idle→armed→committed state machine with two routed modes: Niri viewport column scrolling (horizontal) and one-shot workspace switching (`TrackpadGestureIntent` resolves the mode from finger count and dominant axis; the switch fires through the same `switchWorkspaceRelative` seam as hotkeys, targeting the monitor under the cursor). Transient mouse events are coalesced *in the intake* before draining.
+**Mouse events** (`Core/Controller/MouseEventHandler.swift`). A `CGEventTap` drives focus-follows-mouse (debounced) and interactive move/resize, while raw multitouch frames (`MultitouchGestureSource`) drive trackpad swipes through one idle→armed→committed state machine with two routed modes: Niri viewport container scrolling on the active monitor's configured orientation axis and one-shot workspace switching (`TrackpadGestureIntent` resolves the mode from finger count and dominant axis; the switch fires through the same `switchWorkspaceRelative` seam as hotkeys, targeting the monitor under the cursor). A committed viewport gesture retains its resolved axis for the rest of the gesture. Transient mouse events are coalesced *in the intake* before draining.
 
 **SkyLight events** (`Core/SkyLight/CGSEventObserver.swift`). Registers for window-server notifications and posts them into the intake:
 
@@ -647,12 +647,12 @@ struct WindowDecision {
 }
 ```
 
-Per-app `initialColumnWidth` is an admission hint, not an ongoing `ManagedWindowRuleEffects` constraint.
+Per-app `initialContainerPrimarySpan` is an admission hint, not an ongoing `ManagedWindowRuleEffects` constraint.
 `WindowRuleEngine` takes it only from the single winning rule, and Niri consumes it once when a resizable
-window creates or claims a new column. Niri owns that initial column seed before its normal width fallback;
+window creates or claims a new container. Niri owns that initial primary-span seed before its normal fallback;
 Dwindle ignores it, restored placement takes precedence, and later resize or relayout operations do not
-reassert the rule value. Single Window Fit retains visual precedence for a lone window, while `minWidth`
-clamps the resolved pixel width without mutating the stored initial proportion.
+reassert the rule value. Single Window Fit retains visual precedence for a lone window, while physical
+minimum-size constraints can clamp the resolved span without mutating the stored initial proportion.
 
 ### 4.8 IPC System
 

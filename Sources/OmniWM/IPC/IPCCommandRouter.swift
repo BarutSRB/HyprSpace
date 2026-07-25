@@ -133,30 +133,30 @@ final class IPCCommandRouter {
             return controller.commandHandler.performCommand(.moveColumnToWorkspaceDown)
         case .toggleColumnTabbed:
             return controller.commandHandler.performCommand(.toggleColumnTabbed)
-        case .cycleColumnWidthForward:
-            return controller.commandHandler.performCommand(.cycleColumnWidthForward)
-        case .cycleColumnWidthBackward:
-            return controller.commandHandler.performCommand(.cycleColumnWidthBackward)
-        case .cycleWindowWidthForward:
-            return controller.commandHandler.performCommand(.cycleWindowWidthForward)
-        case .cycleWindowWidthBackward:
-            return controller.commandHandler.performCommand(.cycleWindowWidthBackward)
-        case .cycleWindowHeightForward:
-            return controller.commandHandler.performCommand(.cycleWindowHeightForward)
-        case .cycleWindowHeightBackward:
-            return controller.commandHandler.performCommand(.cycleWindowHeightBackward)
-        case .toggleColumnFullWidth:
-            return controller.commandHandler.performCommand(.toggleColumnFullWidth)
-        case .expandColumnToAvailableWidth:
-            return controller.commandHandler.performCommand(.expandColumnToAvailableWidth)
-        case .resetWindowHeight:
-            return controller.commandHandler.performCommand(.resetWindowHeight)
-        case let .setColumnWidth(change):
-            return controller.commandHandler.performCommand(.setColumnWidth(sizeChange(for: change)))
-        case let .setWindowWidth(change):
-            return controller.commandHandler.performCommand(.setWindowWidth(sizeChange(for: change)))
-        case let .setWindowHeight(change):
-            return controller.commandHandler.performCommand(.setWindowHeight(sizeChange(for: change)))
+        case .cycleSizeForward:
+            return controller.commandHandler.performCommand(.cycleSizeForward)
+        case .cycleSizeBackward:
+            return controller.commandHandler.performCommand(.cycleSizeBackward)
+        case .cycleWindowPrimarySpanForward:
+            return controller.commandHandler.performCommand(.cycleWindowPrimarySpanForward)
+        case .cycleWindowPrimarySpanBackward:
+            return controller.commandHandler.performCommand(.cycleWindowPrimarySpanBackward)
+        case .cycleWindowSecondarySpanForward:
+            return controller.commandHandler.performCommand(.cycleWindowSecondarySpanForward)
+        case .cycleWindowSecondarySpanBackward:
+            return controller.commandHandler.performCommand(.cycleWindowSecondarySpanBackward)
+        case .toggleContainerFullPrimarySpan:
+            return controller.commandHandler.performCommand(.toggleContainerFullPrimarySpan)
+        case .expandContainerToAvailablePrimarySpan:
+            return controller.commandHandler.performCommand(.expandContainerToAvailablePrimarySpan)
+        case .resetWindowSecondarySpan:
+            return controller.commandHandler.performCommand(.resetWindowSecondarySpan)
+        case let .setContainerPrimarySpan(change):
+            return controller.commandHandler.performCommand(.setContainerPrimarySpan(sizeChange(for: change)))
+        case let .setWindowPrimarySpan(change):
+            return controller.commandHandler.performCommand(.setWindowPrimarySpan(sizeChange(for: change)))
+        case let .setWindowSecondarySpan(change):
+            return controller.commandHandler.performCommand(.setWindowSecondarySpan(sizeChange(for: change)))
         case let .swapWorkspaceWithMonitor(ipcDirection):
             return swapWorkspaceWithMonitor(direction: direction(for: ipcDirection))
         case .balanceSizes:

@@ -20,21 +20,21 @@ final class MonitorSettingsIdentityTests: XCTestCase {
                 monitorName: first.name,
                 monitorDisplayUUID: displayUUIDA,
                 monitorDisplayId: 2,
-                maxVisibleColumns: 1
+                visibleContainerCount: 1
             ),
             MonitorNiriSettings(
                 monitorName: second.name,
                 monitorDisplayUUID: displayUUIDB,
                 monitorDisplayId: 3,
-                maxVisibleColumns: 4
+                visibleContainerCount: 4
             )
         ]
         let settings = makeSettingsStore()
 
         settings.applyExport(export)
 
-        XCTAssertEqual(settings.niriSettings(for: first)?.maxVisibleColumns, 1)
-        XCTAssertEqual(settings.niriSettings(for: second)?.maxVisibleColumns, 4)
+        XCTAssertEqual(settings.niriSettings(for: first)?.visibleContainerCount, 1)
+        XCTAssertEqual(settings.niriSettings(for: second)?.visibleContainerCount, 4)
         XCTAssertEqual(settings.monitorNiriSettings, export.monitorNiriSettings)
     }
 
@@ -46,7 +46,7 @@ final class MonitorSettingsIdentityTests: XCTestCase {
             MonitorNiriSettings(
                 monitorName: monitor.name,
                 monitorDisplayId: monitor.displayId,
-                maxVisibleColumns: 1
+                visibleContainerCount: 1
             )
         ]
         let settings = makeSettingsStore()
@@ -66,7 +66,7 @@ final class MonitorSettingsIdentityTests: XCTestCase {
             MonitorNiriSettings(
                 monitorName: secondary.name,
                 monitorDisplayId: primary.displayId,
-                maxVisibleColumns: 2
+                visibleContainerCount: 2
             )
         ]
         let root = makeTemporaryRoot()
@@ -340,7 +340,7 @@ final class MonitorSettingsIdentityTests: XCTestCase {
                 monitorName: "Display",
                 monitorDisplayUUID: displayUUIDA,
                 monitorDisplayId: 7,
-                maxVisibleColumns: 2
+                visibleContainerCount: 2
             )
         ]
         export.monitorDwindleSettings = [
@@ -418,7 +418,7 @@ final class MonitorSettingsIdentityTests: XCTestCase {
                 monitorName: "Wrong",
                 monitorDisplayUUID: displayUUIDB,
                 monitorDisplayId: 7,
-                maxVisibleColumns: 1
+                visibleContainerCount: 1
             ),
             for: monitor
         )
@@ -461,7 +461,7 @@ final class MonitorSettingsIdentityTests: XCTestCase {
             MonitorOrientationSettings(monitorName: "Display", monitorDisplayId: 7, orientation: .horizontal)
         ]
         export.monitorNiriSettings = [
-            MonitorNiriSettings(monitorName: "Display", monitorDisplayId: 7, maxVisibleColumns: 2)
+            MonitorNiriSettings(monitorName: "Display", monitorDisplayId: 7, visibleContainerCount: 2)
         ]
         export.monitorDwindleSettings = [
             MonitorDwindleSettings(monitorName: "Display", monitorDisplayId: 7, smartSplit: true)
@@ -492,7 +492,7 @@ final class MonitorSettingsIdentityTests: XCTestCase {
                 id: recordId,
                 monitorName: "Display",
                 monitorDisplayId: 7,
-                maxVisibleColumns: 2
+                visibleContainerCount: 2
             )
         ]
         var stable = legacy
@@ -502,7 +502,7 @@ final class MonitorSettingsIdentityTests: XCTestCase {
                 monitorName: "Display",
                 monitorDisplayUUID: displayUUIDA,
                 monitorDisplayId: 7,
-                maxVisibleColumns: 2
+                visibleContainerCount: 2
             )
         ]
 

@@ -38,7 +38,8 @@ class NiriInteractionTestCase: XCTestCase {
             motion: .disabled,
             state: &state,
             workingFrame: workingFrame,
-            gaps: 0
+            gaps: 0,
+            orientation: .horizontal
         )
     }
 
@@ -52,7 +53,8 @@ class NiriInteractionTestCase: XCTestCase {
             windowId: window.id,
             edges: .right,
             startLocation: CGPoint(x: frame.maxX, y: frame.midY),
-            in: workspaceId
+            in: workspaceId,
+            orientation: .horizontal
         )
     }
 
@@ -65,7 +67,8 @@ class NiriInteractionTestCase: XCTestCase {
             state: state,
             workspaceId: workspaceId,
             monitorFrame: workingFrame,
-            gaps: (horizontal: 0, vertical: 0)
+            gaps: (horizontal: 0, vertical: 0),
+            orientation: .horizontal
         )
     }
 
@@ -82,6 +85,7 @@ class NiriInteractionTestCase: XCTestCase {
             motion: .disabled,
             workingFrame: workingFrame,
             gaps: 0,
+            orientation: .horizontal,
             selectedNodeId: nil,
             removedNodeIds: []
         )
@@ -121,7 +125,8 @@ final class NiriInteractionOwnershipTests: NiriInteractionTestCase {
                 motion: .disabled,
                 state: &stateA,
                 workingFrame: workingFrame,
-                gaps: 0
+                gaps: 0,
+                orientation: .horizontal
             )
         )
         let hoverTarget = try XCTUnwrap(
@@ -164,7 +169,8 @@ final class NiriInteractionOwnershipTests: NiriInteractionTestCase {
                 windowId: source.id,
                 edges: .right,
                 startLocation: CGPoint(x: sourceFrame.maxX, y: sourceFrame.midY),
-                in: workspaceA
+                in: workspaceA,
+                orientation: .horizontal
             )
         )
         XCTAssertTrue(
@@ -204,7 +210,8 @@ final class NiriInteractionOwnershipTests: NiriInteractionTestCase {
                 windowId: window.id,
                 edges: .right,
                 startLocation: CGPoint(x: frame.maxX, y: frame.midY),
-                in: workspaceId
+                in: workspaceId,
+                orientation: .horizontal
             )
         )
         XCTAssertTrue(
@@ -238,7 +245,8 @@ final class NiriInteractionOwnershipTests: NiriInteractionTestCase {
                 motion: .disabled,
                 state: &state,
                 workingFrame: workingFrame,
-                gaps: 0
+                gaps: 0,
+                orientation: .horizontal
             )
         )
         let sourceFrame = try XCTUnwrap(layout(engine, in: sourceWorkspace)[source.token])
@@ -261,7 +269,8 @@ final class NiriInteractionOwnershipTests: NiriInteractionTestCase {
                 windowId: source.id,
                 edges: .right,
                 startLocation: CGPoint(x: sourceFrame.maxX, y: sourceFrame.midY),
-                in: sourceWorkspace
+                in: sourceWorkspace,
+                orientation: .horizontal
             )
         )
         XCTAssertTrue(sourceColumn.widthAnimation === sourceAnimation)
@@ -467,7 +476,8 @@ final class NiriInteractionLifecycleTests: NiriInteractionTestCase {
                 from: workspaceA,
                 to: workspaceB,
                 sourceState: &sourceState,
-                targetState: &targetState
+                targetState: &targetState,
+                targetOrientation: .horizontal
             )
         )
         XCTAssertNil(engine.interactiveMove)
@@ -490,7 +500,8 @@ final class NiriInteractionLifecycleTests: NiriInteractionTestCase {
                 from: workspaceA,
                 to: workspaceB,
                 sourceState: &sourceState,
-                targetState: &targetState
+                targetState: &targetState,
+                targetOrientation: .horizontal
             )
         )
         XCTAssertNil(engine.interactiveResize)
@@ -549,6 +560,409 @@ final class NiriInteractionLifecycleTests: NiriInteractionTestCase {
         XCTAssertEqual(moveHandle.token, newToken)
         XCTAssertEqual(engine.interactiveMove?.windowHandle.token, newToken)
         let targetFrame = try XCTUnwrap(layout(engine, in: workspace)[target.token])
-        XCTAssertNotNil(engine.interactiveMoveUpdate(currentLocation: targetFrame.center))
+        XCTAssertNotNil(
+            engine.interactiveMoveUpdate(currentLocation: targetFrame.center)
+        )
+    }
+}
+
+final class NiriInteractionOrientationTests: NiriInteractionTestCase {
+    func testHorizontalLeftResizeRebasesViewportByWidthDelta() throws {
+        let engine = NiriLayoutEngine()
+        let workspaceId = WorkspaceDescriptor.ID()
+        let window = addWindow(engine, pid: 1_031, to: workspaceId)
+        let frame = try XCTUnwrap(layout(engine, in: workspaceId)[window.token])
+        let column = try XCTUnwrap(engine.findColumn(containing: window, in: workspaceId))
+        var state = ViewportState()
+        state.jumpOffset(to: 75)
+
+        XCTAssertTrue(
+            engine.interactiveResizeBegin(
+                windowId: window.id,
+                edges: .left,
+                startLocation: CGPoint(x: frame.minX, y: frame.midY),
+                in: workspaceId,
+                orientation: .horizontal,
+                viewOffset: state.viewOffset
+            )
+        )
+        XCTAssertTrue(
+            engine.interactiveResizeUpdate(
+                currentLocation: CGPoint(x: frame.minX + 100, y: frame.midY),
+                monitorFrame: workingFrame,
+                gaps: LayoutGaps(horizontal: 0, vertical: 0),
+                viewportState: { mutate in mutate(&state) }
+            )
+        )
+
+        XCTAssertEqual(column.cachedWidth, frame.width - 100, accuracy: 0.001)
+        XCTAssertEqual(state.viewOffset, -25, accuracy: 0.001)
+    }
+
+    func testHorizontalBeforeInsertionPreviewStaysBeforeTarget() throws {
+        let engine = NiriLayoutEngine()
+        let workspaceId = WorkspaceDescriptor.ID()
+        let first = addWindow(engine, pid: 1_035, to: workspaceId)
+        let second = addWindow(engine, pid: 1_035, windowId: 2, to: workspaceId, after: first)
+        let column = try XCTUnwrap(engine.findColumn(containing: first, in: workspaceId))
+        var state = ViewportState()
+        XCTAssertTrue(
+            engine.consumeWindow(
+                second,
+                into: column,
+                enteringFrom: .down,
+                in: workspaceId,
+                motion: .disabled,
+                state: &state,
+                workingFrame: workingFrame,
+                gaps: 0,
+                orientation: .horizontal
+            )
+        )
+        let frames = layout(engine, in: workspaceId, state: state)
+        let targetFrame = try XCTUnwrap(frames[first.token])
+        let dropFrame = try XCTUnwrap(
+            engine.insertionDropzoneFrame(
+                targetWindowId: first.id,
+                position: .before,
+                in: workspaceId,
+                gaps: 0,
+                orientation: .horizontal
+            )
+        )
+
+        XCTAssertEqual(dropFrame.minY, targetFrame.minY, accuracy: 0.001)
+    }
+
+    func testPortraitInteractiveInsertKeepsBeginOrientationWhenMonitorChanges() throws {
+        let engine = NiriLayoutEngine()
+        let workspaceId = WorkspaceDescriptor.ID()
+        let monitor = Monitor(
+            id: .init(displayId: 41_031),
+            displayId: 41_031,
+            frame: workingFrame,
+            visibleFrame: workingFrame,
+            hasNotch: false,
+            name: "Interaction Orientation"
+        )
+        engine.syncWorkspaceAssignments(
+            [(workspaceId: workspaceId, monitor: monitor)],
+            orientations: [monitor.id: .vertical]
+        )
+        let source = addWindow(engine, pid: 1_030, to: workspaceId)
+        let target = addWindow(engine, pid: 1_030, windowId: 2, to: workspaceId, after: source)
+        var state = ViewportState()
+        let frames = engine.calculateLayout(
+            state: state,
+            workspaceId: workspaceId,
+            monitorFrame: workingFrame,
+            gaps: (horizontal: 0, vertical: 0),
+            orientation: .vertical
+        )
+        let sourceFrame = try XCTUnwrap(frames[source.token])
+        let targetFrame = try XCTUnwrap(frames[target.token])
+
+        XCTAssertTrue(
+            engine.interactiveMoveBegin(
+                windowId: source.id,
+                windowHandle: source.handle,
+                startLocation: sourceFrame.center,
+                isInsertMode: true,
+                in: workspaceId,
+                motion: .disabled,
+                state: &state,
+                workingFrame: workingFrame,
+                gaps: 0,
+                orientation: .vertical
+            )
+        )
+
+        let beforeLocation = CGPoint(
+            x: targetFrame.minX + targetFrame.width * 0.25,
+            y: targetFrame.midY
+        )
+        let hoverTarget = try XCTUnwrap(
+            engine.interactiveMoveUpdate(currentLocation: beforeLocation)
+        )
+        guard case let .window(nodeId, _, insertPosition) = hoverTarget else {
+            return XCTFail("Expected a window hover target")
+        }
+        XCTAssertEqual(nodeId, target.id)
+        XCTAssertEqual(insertPosition, .before)
+
+        let dropFrame = try XCTUnwrap(
+            engine.insertionDropzoneFrame(
+                targetWindowId: target.id,
+                position: insertPosition,
+                in: workspaceId,
+                gaps: 0,
+                orientation: .vertical
+            )
+        )
+        XCTAssertEqual(dropFrame.height, targetFrame.height, accuracy: 0.001)
+        XCTAssertLessThan(dropFrame.width, targetFrame.width)
+        XCTAssertEqual(dropFrame.minX, targetFrame.minX, accuracy: 0.001)
+
+        engine.updateMonitorOrientations([monitor.id: .horizontal])
+        XCTAssertEqual(engine.monitor(for: monitor.id)?.orientation, .horizontal)
+        XCTAssertEqual(engine.interactiveMove?.orientation, .vertical)
+        XCTAssertTrue(
+            engine.interactiveMoveEnd(
+                at: beforeLocation,
+                motion: .disabled,
+                state: &state,
+                workingFrame: workingFrame,
+                gaps: 0
+            )
+        )
+        let movedFrames = engine.calculateLayout(
+            state: state,
+            workspaceId: workspaceId,
+            monitorFrame: workingFrame,
+            gaps: (horizontal: 0, vertical: 0),
+            orientation: .vertical
+        )
+        XCTAssertLessThan(
+            try XCTUnwrap(movedFrames[source.token]).midX,
+            try XCTUnwrap(movedFrames[target.token]).midX
+        )
+    }
+
+    func testPortraitLeftResizeChangesRenderedWindowWidthWithoutRebasingViewport() throws {
+        let engine = NiriLayoutEngine()
+        let workspaceId = WorkspaceDescriptor.ID()
+        let window = addWindow(engine, pid: 1_032, to: workspaceId)
+        let frames = engine.calculateLayout(
+            state: ViewportState(),
+            workspaceId: workspaceId,
+            monitorFrame: workingFrame,
+            gaps: (horizontal: 0, vertical: 0),
+            orientation: .vertical
+        )
+        let frame = try XCTUnwrap(frames[window.token])
+        let column = try XCTUnwrap(engine.findColumn(containing: window, in: workspaceId))
+        var state = ViewportState()
+        state.jumpOffset(to: -140)
+
+        XCTAssertTrue(
+            engine.interactiveResizeBegin(
+                windowId: window.id,
+                edges: .left,
+                startLocation: CGPoint(x: frame.minX, y: frame.midY),
+                in: workspaceId,
+                orientation: .vertical,
+                viewOffset: state.viewOffset
+            )
+        )
+        XCTAssertTrue(
+            engine.interactiveResizeUpdate(
+                currentLocation: CGPoint(x: frame.minX + 100, y: frame.midY),
+                monitorFrame: workingFrame,
+                gaps: LayoutGaps(horizontal: 0, vertical: 0),
+                viewportState: { mutate in mutate(&state) }
+            )
+        )
+
+        XCTAssertEqual(window.windowWidth, .fixed(frame.width - 100))
+        XCTAssertEqual(column.cachedWidth, 0, accuracy: 0.001)
+        XCTAssertFalse(column.hasManualSingleWindowWidthOverride)
+        XCTAssertEqual(state.viewOffset, -140, accuracy: 0.001)
+        let resizedFrames = engine.calculateLayout(
+            state: state,
+            workspaceId: workspaceId,
+            monitorFrame: workingFrame,
+            gaps: (horizontal: 0, vertical: 0),
+            orientation: .vertical
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(resizedFrames[window.token]).width,
+            frame.width - 100,
+            accuracy: 0.001
+        )
+    }
+
+    func testPortraitExpandToAvailablePrimarySpanPreservesViewOrigin() throws {
+        let engine = NiriLayoutEngine()
+        let workspaceId = WorkspaceDescriptor.ID()
+        let first = addWindow(engine, pid: 1_033, to: workspaceId)
+        let second = addWindow(engine, pid: 1_033, windowId: 2, to: workspaceId, after: first)
+        let portraitFrame = CGRect(x: 0, y: 0, width: 900, height: 1600)
+        var state = ViewportState()
+        _ = engine.calculateLayout(
+            state: state,
+            workspaceId: workspaceId,
+            monitorFrame: portraitFrame,
+            gaps: (horizontal: 0, vertical: 0),
+            orientation: .vertical
+        )
+        let columns = engine.columns(in: workspaceId)
+        let targetColumn = try XCTUnwrap(columns.last)
+        XCTAssertEqual(targetColumn.cachedHeight, 800, accuracy: 0.001)
+        XCTAssertFalse(targetColumn.isFullHeight)
+        for column in columns {
+            column.cachedWidth = 300
+        }
+        state.activeColumnIndex = 1
+        state.selectedNodeId = second.id
+        state.jumpOffset(to: -100)
+        let viewOriginBefore = state.containerPosition(
+            at: state.activeColumnIndex,
+            containers: columns,
+            gap: 0,
+            sizeKeyPath: \.cachedHeight
+        ) + state.viewOffset
+
+        engine.expandContainerToAvailablePrimarySpan(
+            targetColumn,
+            in: workspaceId,
+            motion: .disabled,
+            state: &state,
+            workingFrame: portraitFrame,
+            gaps: 0,
+            orientation: .vertical
+        )
+
+        XCTAssertEqual(targetColumn.cachedHeight, 1600, accuracy: 0.001)
+        XCTAssertTrue(targetColumn.isFullHeight)
+        XCTAssertEqual(state.viewOffset, -100, accuracy: 0.001)
+        let viewOriginAfter = state.containerPosition(
+            at: state.activeColumnIndex,
+            containers: columns,
+            gap: 0,
+            sizeKeyPath: \.cachedHeight
+        ) + state.viewOffset
+        XCTAssertEqual(viewOriginAfter, viewOriginBefore, accuracy: 0.001)
+    }
+
+    func testPortraitFullSpanBeforeActiveContainerRebasesViewOrigin() throws {
+        let engine = NiriLayoutEngine()
+        let workspaceId = WorkspaceDescriptor.ID()
+        let first = addWindow(engine, pid: 1_036, to: workspaceId)
+        let second = addWindow(engine, pid: 1_036, windowId: 2, to: workspaceId, after: first)
+        let portraitFrame = CGRect(x: 0, y: 0, width: 900, height: 1600)
+        var state = ViewportState()
+        _ = engine.calculateLayout(
+            state: state,
+            workspaceId: workspaceId,
+            monitorFrame: portraitFrame,
+            gaps: (horizontal: 0, vertical: 0),
+            orientation: .vertical
+        )
+        let containers = engine.columns(in: workspaceId)
+        let firstContainer = try XCTUnwrap(containers.first)
+        state.activeColumnIndex = 1
+        state.selectedNodeId = second.id
+        state.jumpOffset(to: -100)
+        let viewOriginBefore = state.containerPosition(
+            at: state.activeColumnIndex,
+            containers: containers,
+            gap: 0,
+            sizeKeyPath: \.cachedHeight
+        ) + state.viewOffset
+
+        engine.toggleContainerFullPrimarySpan(
+            firstContainer,
+            in: workspaceId,
+            motion: .disabled,
+            state: &state,
+            workingFrame: portraitFrame,
+            gaps: 0,
+            orientation: .vertical
+        )
+
+        XCTAssertEqual(firstContainer.cachedHeight, 1600, accuracy: 0.001)
+        XCTAssertEqual(state.viewOffset, -900, accuracy: 0.001)
+        let viewOriginAfter = state.containerPosition(
+            at: state.activeColumnIndex,
+            containers: containers,
+            gap: 0,
+            sizeKeyPath: \.cachedHeight
+        ) + state.viewOffset
+        XCTAssertEqual(viewOriginAfter, viewOriginBefore, accuracy: 0.001)
+    }
+
+    func testPortraitFullSpanHonorsAlwaysCenterPolicy() throws {
+        let engine = NiriLayoutEngine()
+        engine.centerFocusedColumn = .always
+        let workspaceId = WorkspaceDescriptor.ID()
+        let first = addWindow(engine, pid: 1_037, to: workspaceId)
+        let second = addWindow(engine, pid: 1_037, windowId: 2, to: workspaceId, after: first)
+        let portraitFrame = CGRect(x: 0, y: 0, width: 900, height: 1600)
+        var state = ViewportState()
+        _ = engine.calculateLayout(
+            state: state,
+            workspaceId: workspaceId,
+            monitorFrame: portraitFrame,
+            gaps: (horizontal: 0, vertical: 0),
+            orientation: .vertical
+        )
+        let targetContainer = try XCTUnwrap(engine.column(of: second))
+        state.activeColumnIndex = 1
+        state.selectedNodeId = second.id
+        state.jumpOffset(to: -100)
+
+        engine.toggleContainerFullPrimarySpan(
+            targetContainer,
+            in: workspaceId,
+            motion: .disabled,
+            state: &state,
+            workingFrame: portraitFrame,
+            gaps: 0,
+            orientation: .vertical
+        )
+
+        XCTAssertEqual(targetContainer.cachedHeight, 1600, accuracy: 0.001)
+        XCTAssertEqual(state.viewOffset, 0, accuracy: 0.001)
+    }
+
+    func testPortraitColumnTransferReresolvesHeightForShorterTarget() throws {
+        let engine = NiriLayoutEngine()
+        let sourceWorkspaceId = WorkspaceDescriptor.ID()
+        let targetWorkspaceId = WorkspaceDescriptor.ID()
+        let movedWindow = addWindow(engine, pid: 1_034, to: sourceWorkspaceId)
+        _ = addWindow(engine, pid: 1_035, to: targetWorkspaceId)
+        let movedColumn = try XCTUnwrap(
+            engine.findColumn(containing: movedWindow, in: sourceWorkspaceId)
+        )
+        movedColumn.height = .proportion(1)
+        movedColumn.resolveAndCacheHeight(workingAreaHeight: 1_600, gaps: 0)
+        XCTAssertEqual(movedColumn.cachedHeight, 1_600, accuracy: 0.001)
+
+        var sourceState = ViewportState()
+        var targetState = ViewportState()
+        XCTAssertNotNil(
+            engine.moveColumnToWorkspace(
+                movedColumn,
+                from: sourceWorkspaceId,
+                to: targetWorkspaceId,
+                sourceState: &sourceState,
+                targetState: &targetState,
+                targetOrientation: .vertical
+            )
+        )
+        XCTAssertEqual(movedColumn.cachedHeight, 0, accuracy: 0.001)
+
+        let targetFrame = CGRect(x: 0, y: 0, width: 900, height: 900)
+        engine.ensureSelectionVisible(
+            node: movedWindow,
+            in: targetWorkspaceId,
+            motion: .disabled,
+            state: &targetState,
+            workingFrame: targetFrame,
+            gaps: 0,
+            orientation: .vertical
+        )
+
+        XCTAssertEqual(movedColumn.cachedHeight, targetFrame.height, accuracy: 0.001)
+        let frames = engine.calculateLayout(
+            state: targetState,
+            workspaceId: targetWorkspaceId,
+            monitorFrame: targetFrame,
+            gaps: (horizontal: 0, vertical: 0),
+            orientation: .vertical
+        )
+        let movedFrame = try XCTUnwrap(frames[movedWindow.token])
+        XCTAssertGreaterThanOrEqual(movedFrame.minY, targetFrame.minY - 0.001)
+        XCTAssertLessThanOrEqual(movedFrame.maxY, targetFrame.maxY + 0.001)
     }
 }
