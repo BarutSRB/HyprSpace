@@ -40,6 +40,70 @@ final class WindowRuleEngineTests: XCTestCase {
         engine.decision(for: facts, token: nil, appFullscreen: false)
     }
 
+    private func facts(
+        appName: String?,
+        bundleId: String?,
+        windowLevel: Int32
+    ) -> WindowRuleFacts {
+        let base = facts(appName: appName, bundleId: bundleId, subrole: "AXUnknown")
+        return WindowRuleFacts(
+            appName: base.appName,
+            ax: base.ax,
+            sizeConstraints: base.sizeConstraints,
+            windowServer: WindowServerInfo(
+                id: 1,
+                pid: 4321,
+                level: windowLevel,
+                frame: CGRect(x: 1420, y: 27, width: 310, height: 824)
+            )
+        )
+    }
+
+    func testMenuBarPopoverAboveNormalLevelsIsUnmanaged() {
+        // A menu-bar app's popover (BetterDisplay's opens at the screensaver level) must never be
+        // tracked: fronting or moving it makes the app dismiss it, and it strands a workspace-bar
+        // entry. Only the window level distinguishes it from a floatable panel.
+        let engine = WindowRuleEngine()
+        let popover = evaluate(
+            engine,
+            facts(appName: "BetterDisplay", bundleId: "pro.betterdisplay.BetterDisplay", windowLevel: 1000)
+        )
+
+        XCTAssertEqual(popover.disposition, .unmanaged)
+        XCTAssertEqual(popover.source, .builtInRule(WindowRuleEngine.elevatedWindowLevelRuleName))
+    }
+
+    func testUserRuleCannotForceAnElevatedSurfaceToBeManaged() {
+        let engine = WindowRuleEngine()
+        let rule = AppRule(bundleId: "pro.betterdisplay.BetterDisplay", layout: .tile)
+        engine.rebuild(rules: [rule])
+
+        let popover = evaluate(
+            engine,
+            facts(appName: "BetterDisplay", bundleId: "pro.betterdisplay.BetterDisplay", windowLevel: 1000)
+        )
+
+        XCTAssertEqual(popover.disposition, .unmanaged)
+        XCTAssertNotEqual(popover.source, .userRule(rule.id))
+    }
+
+    func testOrdinaryAndFloatingLevelWindowsStayManageable() {
+        // The gate must sit above the levels apps use for panels and dialogs, so those keep being
+        // classified normally rather than being dropped wholesale.
+        let engine = WindowRuleEngine()
+        for level: Int32 in [0, 3, 8, 19] {
+            let decision = evaluate(
+                engine,
+                facts(appName: "Preview", bundleId: "com.apple.Preview", windowLevel: level)
+            )
+            XCTAssertNotEqual(
+                decision.disposition,
+                .unmanaged,
+                "level \(level) is an ordinary app window level and must still be classified"
+            )
+        }
+    }
+
     func testAppNameWildcardMatchesNoBundleWindows() {
         let engine = WindowRuleEngine()
         let rule = AppRule(bundleId: "", appNameSubstring: "VMD", layout: .float)
