@@ -1500,13 +1500,23 @@ enum StructuralMutationOutcome: Equatable {
     }
 
     func toggleFullscreen() {
-        withNiriWorkspaceContext { engine, wsId, motion, state, _, _, _, _ in
+        withNiriWorkspaceContext { engine, wsId, motion, state, _, workingFrame, gaps, orientation in
             guard let currentId = state.selectedNodeId,
                   let currentNode = engine.findNode(by: currentId, in: wsId),
                   let windowNode = currentNode as? NiriWindow
             else { return }
 
             engine.toggleFullscreen(windowNode, motion: motion, state: &state)
+            if windowNode.sizingMode == .normal {
+                engine.recoverSettledCoverage(
+                    in: wsId,
+                    motion: motion,
+                    state: &state,
+                    workingFrame: workingFrame,
+                    gaps: gaps,
+                    orientation: orientation
+                )
+            }
 
             recordLayoutOperation(.fullscreenToggled(token: windowNode.token), in: wsId)
             requestLayoutCommandRelayout(in: wsId)
@@ -1734,8 +1744,7 @@ enum StructuralMutationOutcome: Equatable {
     }
 
     func balanceSizes() {
-        guard let controller else { return }
-        withNiriWorkspaceContext { engine, wsId, motion, _, _, workingFrame, gaps, orientation in
+        withNiriWorkspaceContext { engine, wsId, motion, state, _, workingFrame, gaps, orientation in
             guard engine.balanceSizes(
                 in: wsId,
                 motion: motion,
@@ -1743,11 +1752,17 @@ enum StructuralMutationOutcome: Equatable {
                 gaps: gaps,
                 orientation: orientation
             ) else { return }
+            engine.recoverSettledCoverage(
+                in: wsId,
+                motion: motion,
+                state: &state,
+                workingFrame: workingFrame,
+                gaps: gaps,
+                orientation: orientation
+            )
             recordLayoutOperation(.sizesBalanced, in: wsId)
             requestLayoutCommandRelayout(in: wsId)
-            if engine.hasAnyColumnAnimationsRunning(in: wsId) {
-                controller.layoutRefreshController.startScrollAnimation(for: wsId)
-            }
+            startScrollAnimationIfNeeded(for: wsId, state: state, engine: engine)
         }
     }
 
@@ -1757,7 +1772,7 @@ enum StructuralMutationOutcome: Equatable {
         for descriptor in controller.workspaceManager.workspaces {
             guard controller.settings.layoutType(for: descriptor.name) != .dwindle else { continue }
             withNiriWorkspaceContext(for: descriptor.id) {
-                engine, wsId, motion, _, _, workingFrame, gaps, orientation in
+                engine, wsId, motion, state, _, workingFrame, gaps, orientation in
                 guard engine.balanceSizes(
                     in: wsId,
                     motion: motion,
@@ -1765,11 +1780,17 @@ enum StructuralMutationOutcome: Equatable {
                     gaps: gaps,
                     orientation: orientation
                 ) else { return }
+                engine.recoverSettledCoverage(
+                    in: wsId,
+                    motion: motion,
+                    state: &state,
+                    workingFrame: workingFrame,
+                    gaps: gaps,
+                    orientation: orientation
+                )
                 changed.insert(wsId)
                 recordLayoutOperation(.sizesBalanced, in: wsId)
-                if engine.hasAnyColumnAnimationsRunning(in: wsId) {
-                    controller.layoutRefreshController.startScrollAnimation(for: wsId)
-                }
+                startScrollAnimationIfNeeded(for: wsId, state: state, engine: engine)
             }
         }
         if !changed.isEmpty {

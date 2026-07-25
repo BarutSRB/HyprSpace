@@ -1413,17 +1413,25 @@ final class AXManager {
     }
 
     func applyPositionsViaSkyLight(
-        _ positions: [(windowId: Int, origin: CGPoint)],
+        _ positions: [(windowId: Int, frame: CGRect)],
         allowInactive: Bool = false
     ) {
         let filtered = allowInactive
             ? positions
             : positions.filter { !inactiveWorkspaceWindowIds.contains($0.windowId) }
         guard !filtered.isEmpty else { return }
-        let batchPositions = filtered.map {
-            (windowId: UInt32($0.windowId), origin: ScreenCoordinateSpace.toWindowServer(point: $0.origin))
+        SkyLight.shared.batchMoveWindows(Self.windowServerPositions(filtered))
+    }
+
+    static func windowServerPositions(
+        _ positions: [(windowId: Int, frame: CGRect)]
+    ) -> [(windowId: UInt32, origin: CGPoint)] {
+        positions.map {
+            (
+                windowId: UInt32($0.windowId),
+                origin: ScreenCoordinateSpace.toWindowServer(rect: $0.frame).origin
+            )
         }
-        SkyLight.shared.batchMoveWindows(batchPositions)
     }
 
     private func shouldTrack(_ app: NSRunningApplication) -> Bool {

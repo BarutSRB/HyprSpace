@@ -247,12 +247,12 @@ extension NiriLayoutEngine {
                 hiddenPlacementMonitors: hiddenPlacementMonitors
             )
             if case .visible = visibilityState {
-                let clampedVisibilityRect = monitorPlaneClampedFrame(
+                let clampedVisibilityRect = NiriMonitorPlaneGeometry.clampedFrame(
                     visibilityRect,
                     screenClampRect: viewFrame,
                     orientation: orientation
                 )
-                if let liveOverflowEdge = overflowEdgeIntersectingNeighboringMonitor(
+                if let liveOverflowEdge = NiriMonitorPlaneGeometry.overflowEdgeIntersectingNeighboringMonitor(
                     clampedVisibilityRect,
                     viewportFrame: workingFrame,
                     orientation: orientation,
@@ -428,7 +428,7 @@ extension NiriLayoutEngine {
         ) else {
             return .hidden(defaultHideEdge)
         }
-        if let overflowEdge = overflowEdgeIntersectingNeighboringMonitor(
+        if let overflowEdge = NiriMonitorPlaneGeometry.overflowEdgeIntersectingNeighboringMonitor(
             renderedRect,
             viewportFrame: viewportFrame,
             orientation: orientation,
@@ -451,96 +451,6 @@ extension NiriLayoutEngine {
         case .vertical:
             containerRect.maxY > viewportFrame.minY && containerRect.minY < viewportFrame.maxY
         }
-    }
-
-    private func overflowEdgeIntersectingNeighboringMonitor(
-        _ renderedRect: CGRect,
-        viewportFrame: CGRect,
-        orientation: Monitor.Orientation,
-        hiddenPlacementMonitor: HiddenPlacementMonitorContext?,
-        hiddenPlacementMonitors: [HiddenPlacementMonitorContext]
-    ) -> AxisHideEdge? {
-        let minimumOverflow: CGRect?
-        let maximumOverflow: CGRect?
-        switch orientation {
-        case .horizontal:
-            let minimumMaxX = min(renderedRect.maxX, viewportFrame.minX)
-            minimumOverflow = minimumMaxX > renderedRect.minX
-                ? CGRect(
-                    x: renderedRect.minX,
-                    y: renderedRect.minY,
-                    width: minimumMaxX - renderedRect.minX,
-                    height: renderedRect.height
-                )
-                : nil
-            let maximumMinX = max(renderedRect.minX, viewportFrame.maxX)
-            maximumOverflow = renderedRect.maxX > maximumMinX
-                ? CGRect(
-                    x: maximumMinX,
-                    y: renderedRect.minY,
-                    width: renderedRect.maxX - maximumMinX,
-                    height: renderedRect.height
-                )
-                : nil
-        case .vertical:
-            let minimumMaxY = min(renderedRect.maxY, viewportFrame.minY)
-            minimumOverflow = minimumMaxY > renderedRect.minY
-                ? CGRect(
-                    x: renderedRect.minX,
-                    y: renderedRect.minY,
-                    width: renderedRect.width,
-                    height: minimumMaxY - renderedRect.minY
-                )
-                : nil
-            let maximumMinY = max(renderedRect.minY, viewportFrame.maxY)
-            maximumOverflow = renderedRect.maxY > maximumMinY
-                ? CGRect(
-                    x: renderedRect.minX,
-                    y: maximumMinY,
-                    width: renderedRect.width,
-                    height: renderedRect.maxY - maximumMinY
-                )
-                : nil
-        }
-
-        if let minimumOverflow {
-            for otherMonitor in hiddenPlacementMonitors where !ownsViewport(
-                otherMonitor,
-                hiddenPlacementMonitor: hiddenPlacementMonitor,
-                viewportFrame: viewportFrame
-            ) {
-                if minimumOverflow.intersects(otherMonitor.frame) {
-                    return .minimum
-                }
-            }
-        }
-
-        if let maximumOverflow {
-            for otherMonitor in hiddenPlacementMonitors where !ownsViewport(
-                otherMonitor,
-                hiddenPlacementMonitor: hiddenPlacementMonitor,
-                viewportFrame: viewportFrame
-            ) {
-                if maximumOverflow.intersects(otherMonitor.frame) {
-                    return .maximum
-                }
-            }
-        }
-
-        return nil
-    }
-
-    private func ownsViewport(
-        _ candidateMonitor: HiddenPlacementMonitorContext,
-        hiddenPlacementMonitor: HiddenPlacementMonitorContext?,
-        viewportFrame: CGRect
-    ) -> Bool {
-        if let hiddenPlacementMonitor {
-            return candidateMonitor.id == hiddenPlacementMonitor.id
-        }
-
-        return candidateMonitor.frame.intersects(viewportFrame)
-            || candidateMonitor.visibleFrame.intersects(viewportFrame)
     }
 
     private func hiddenEdge(
@@ -930,7 +840,7 @@ extension NiriLayoutEngine {
                 }
                 animatedFrame = offsetFrame
             }
-            animatedFrame = monitorPlaneClampedFrame(
+            animatedFrame = NiriMonitorPlaneGeometry.clampedFrame(
                 animatedFrame,
                 screenClampRect: screenClampRect,
                 orientation: orientation
@@ -946,29 +856,6 @@ extension NiriLayoutEngine {
                 }
             }
         }
-    }
-
-    private func monitorPlaneClampedFrame(
-        _ frame: CGRect,
-        screenClampRect: CGRect,
-        orientation: Monitor.Orientation
-    ) -> CGRect {
-        var clampedFrame = frame
-        switch orientation {
-        case .horizontal:
-            let minX = screenClampRect.minX - clampedFrame.width + 1
-            let maxX = screenClampRect.maxX - 1
-            if maxX >= minX {
-                clampedFrame.origin.x = min(max(clampedFrame.origin.x, minX), maxX)
-            }
-        case .vertical:
-            let minY = screenClampRect.minY - clampedFrame.height + 1
-            let maxY = screenClampRect.maxY - 1
-            if maxY >= minY {
-                clampedFrame.origin.y = min(max(clampedFrame.origin.y, minY), maxY)
-            }
-        }
-        return clampedFrame
     }
 
     private func resolveWindowSpans(

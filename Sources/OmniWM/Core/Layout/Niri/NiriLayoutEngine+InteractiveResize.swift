@@ -426,6 +426,7 @@ extension NiriLayoutEngine {
             return
         }
 
+        interactiveResize = nil
         if let windowNode = findNode(by: resize.windowId, in: resize.workspaceId) as? NiriWindow {
             ensureSelectionVisible(
                 node: windowNode,
@@ -436,9 +437,18 @@ extension NiriLayoutEngine {
                 gaps: gaps,
                 orientation: resize.orientation
             )
+            if resize.originalContainerSpan != nil {
+                recoverSettledCoverage(
+                    in: resize.workspaceId,
+                    motion: motion,
+                    state: &state,
+                    workingFrame: workingFrame,
+                    gaps: gaps,
+                    orientation: resize.orientation
+                )
+            }
         }
 
         NiriLayoutTrace.record(.resize, workspaceId: resize.workspaceId, "end win=\(resize.windowId)")
-        interactiveResize = nil
     }
 }

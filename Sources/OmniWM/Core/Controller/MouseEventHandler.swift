@@ -661,7 +661,9 @@ final class MouseEventHandler {
             in: workspaceId,
             source: .mouse
         )
-        if controller.hasStartedServices {
+        if controller.workspaceManager.animationDriver.hasMotion(in: workspaceId) {
+            controller.layoutRefreshController.startScrollAnimation(for: workspaceId)
+        } else if controller.hasStartedServices {
             controller.layoutRefreshController.requestImmediateRelayout(reason: .interactiveGesture)
         }
     }

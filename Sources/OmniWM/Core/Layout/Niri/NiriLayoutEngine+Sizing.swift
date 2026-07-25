@@ -188,7 +188,8 @@ extension NiriLayoutEngine {
         state: inout ViewportState,
         workingFrame: CGRect,
         gaps: CGFloat,
-        orientation: Monitor.Orientation
+        orientation: Monitor.Orientation,
+        recoversSettledCoverage: Bool = true
     ) {
         cancelInteractiveResize(for: column, in: workspaceId)
 
@@ -225,6 +226,16 @@ extension NiriLayoutEngine {
             gaps: gaps,
             orientation: orientation
         )
+        if recoversSettledCoverage {
+            recoverSettledCoverage(
+                in: workspaceId,
+                motion: motion,
+                state: &state,
+                workingFrame: workingFrame,
+                gaps: gaps,
+                orientation: orientation
+            )
+        }
     }
 
     private func ensureSelectionVisibleForPendingWidth(
@@ -304,6 +315,14 @@ extension NiriLayoutEngine {
                 orientation: .vertical
             )
         }
+        recoverSettledCoverage(
+            in: workspaceId,
+            motion: motion,
+            state: &state,
+            workingFrame: workingFrame,
+            gaps: gaps,
+            orientation: .vertical
+        )
     }
 
     private func toggleContainerHeight(
@@ -415,26 +434,34 @@ extension NiriLayoutEngine {
         if settings.centerFocusedColumn == .always
             || (settings.alwaysCenterSingleColumn && containers.count == 1)
         {
-            guard let window = column.activeWindow ?? column.windowNodes.first else { return }
-            ensureSelectionVisible(
-                node: window,
-                in: workspaceId,
-                motion: motion,
-                state: &state,
-                workingFrame: workingFrame,
-                gaps: gaps,
-                orientation: .vertical
+            if let window = column.activeWindow ?? column.windowNodes.first {
+                ensureSelectionVisible(
+                    node: window,
+                    in: workspaceId,
+                    motion: motion,
+                    state: &state,
+                    workingFrame: workingFrame,
+                    gaps: gaps,
+                    orientation: .vertical
+                )
+            }
+        } else {
+            let currentActivePosition = state.containerPosition(
+                at: activeIndex,
+                containers: containers,
+                gap: gaps,
+                sizeKeyPath: \.cachedHeight
             )
-            return
+            state.rebaseOffset(by: previousActivePosition - currentActivePosition)
         }
-
-        let currentActivePosition = state.containerPosition(
-            at: activeIndex,
-            containers: containers,
-            gap: gaps,
-            sizeKeyPath: \.cachedHeight
+        recoverSettledCoverage(
+            in: workspaceId,
+            motion: motion,
+            state: &state,
+            workingFrame: workingFrame,
+            gaps: gaps,
+            orientation: .vertical
         )
-        state.rebaseOffset(by: previousActivePosition - currentActivePosition)
     }
 
     private func cancelInteractiveResize(
@@ -800,6 +827,14 @@ extension NiriLayoutEngine {
             gaps: gaps,
             orientation: orientation
         )
+        recoverSettledCoverage(
+            in: workspaceId,
+            motion: motion,
+            state: &state,
+            workingFrame: workingFrame,
+            gaps: gaps,
+            orientation: orientation
+        )
     }
 
     func expandContainerToAvailablePrimarySpan(
@@ -918,7 +953,8 @@ extension NiriLayoutEngine {
             state: &state,
             workingFrame: workingFrame,
             gaps: gaps,
-            orientation: orientation
+            orientation: orientation,
+            recoversSettledCoverage: false
         )
 
         let targetOffset = leftmostColX - gaps - activeColX
@@ -926,6 +962,14 @@ extension NiriLayoutEngine {
             targetOffset,
             motion: motion,
             scale: displayScale(in: workspaceId)
+        )
+        recoverSettledCoverage(
+            in: workspaceId,
+            motion: motion,
+            state: &state,
+            workingFrame: workingFrame,
+            gaps: gaps,
+            orientation: orientation
         )
     }
 

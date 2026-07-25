@@ -2587,8 +2587,7 @@ import QuartzCore
 
     fileprivate struct WindowPositionPlan {
         let entry: WindowState
-        let origin: CGPoint
-        let frameSize: CGSize
+        let frame: CGRect
     }
 
     fileprivate enum HideOperationResolution {
@@ -2601,19 +2600,19 @@ import QuartzCore
         guard let controller, !plans.isEmpty else { return }
 
         controller.axManager.applyPositionsViaSkyLight(
-            plans.map { (windowId: $0.entry.windowId, origin: $0.origin) },
+            plans.map { (windowId: $0.entry.windowId, frame: $0.frame) },
             allowInactive: true
         )
 
         if animationTick {
             for plan in plans {
-                controller.axManager.recordSkyLightMove(windowId: plan.entry.windowId, origin: plan.origin)
+                controller.axManager.recordSkyLightMove(windowId: plan.entry.windowId, origin: plan.frame.origin)
                 controller.axManager.recordParkCommand(for: plan.entry.windowId)
                 FrameApplyTrace.recordEvent(
                     pid: plan.entry.pid,
                     windowId: plan.entry.windowId,
                     outcome: "outcome=slsmove/anim",
-                    target: CGRect(origin: plan.origin, size: plan.frameSize)
+                    target: plan.frame
                 )
             }
             return
@@ -2624,11 +2623,11 @@ import QuartzCore
             controller.axManager.recordParkCommand(for: plan.entry.windowId)
             let observedOrigin = AXWindowService.framePreferFast(plan.entry.axRef)?.origin
             if let observedOrigin,
-               abs(observedOrigin.x - plan.origin.x) > verifyEpsilon
-               || abs(observedOrigin.y - plan.origin.y) > verifyEpsilon
+               abs(observedOrigin.x - plan.frame.origin.x) > verifyEpsilon
+               || abs(observedOrigin.y - plan.frame.origin.y) > verifyEpsilon
             {
                 FallbackFiringRecorder.shared.note(.skylight, "moveAXFallback")
-                let fallbackFrame = CGRect(origin: plan.origin, size: plan.frameSize)
+                let fallbackFrame = plan.frame
                 FrameApplyTrace.shared.record(
                     .init(
                         timestamp: Date(),
@@ -2637,7 +2636,7 @@ import QuartzCore
                         outcome: "outcome=slsmove/fallback",
                         target: fallbackFrame,
                         hint: nil,
-                        observed: CGRect(origin: observedOrigin, size: plan.frameSize),
+                        observed: CGRect(origin: observedOrigin, size: plan.frame.size),
                         confirmed: nil
                     )
                 )
@@ -2652,9 +2651,9 @@ import QuartzCore
                         pid: plan.entry.pid,
                         windowId: plan.entry.windowId,
                         outcome: "outcome=slsmove/settle",
-                        target: CGRect(origin: plan.origin, size: plan.frameSize),
+                        target: plan.frame,
                         hint: nil,
-                        observed: observedOrigin.map { CGRect(origin: $0, size: plan.frameSize) },
+                        observed: observedOrigin.map { CGRect(origin: $0, size: plan.frame.size) },
                         confirmed: nil
                     )
                 )
@@ -2713,8 +2712,7 @@ import QuartzCore
         return .movable(
             WindowPositionPlan(
                 entry: entry,
-                origin: origin,
-                frameSize: frame.size
+                frame: CGRect(origin: origin, size: frame.size)
             ),
             hiddenState: hiddenState
         )
@@ -3617,8 +3615,7 @@ import QuartzCore
 
         return WindowPositionPlan(
             entry: entry,
-            origin: restoredOrigin,
-            frameSize: frame.size
+            frame: CGRect(origin: restoredOrigin, size: frame.size)
         )
     }
 
