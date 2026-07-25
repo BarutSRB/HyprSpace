@@ -2688,13 +2688,12 @@ final class AXEventHandler {
                 ? .pending(token: token, axRef: axRef, reason: .factsDeferred)
                 : .ignored(token: token, reason: .policyIgnored)
         }
-        if trackedMode == .tiling,
-           controller.shouldDeferTilingAdmission(
-               evaluation: evaluation,
-               axRef: axRef,
-               windowInfo: matchingWindowInfo
-           )
-        {
+        if controller.shouldDeferAdmission(
+            evaluation: evaluation,
+            axRef: axRef,
+            windowInfo: matchingWindowInfo,
+            trackedMode: trackedMode
+        ) {
             return .pending(token: token, axRef: axRef, reason: .degenerateGeometry)
         }
         subscribeToWindows([windowId])

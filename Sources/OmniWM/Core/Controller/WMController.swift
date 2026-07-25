@@ -1734,13 +1734,37 @@ final class WMController {
         return nil
     }
 
-    func shouldDeferTilingAdmission(
+    func shouldDeferAdmission(
+        evaluation: WindowDecisionEvaluation,
+        axRef: AXWindowRef,
+        windowInfo: WindowServerInfo?,
+        trackedMode: TrackedWindowMode
+    ) -> Bool {
+        // Only a tiled window has to accept a size we choose for it; a floating window is allowed
+        // to be fixed-size, so resizability gates tiling admission alone.
+        if trackedMode == .tiling {
+            let sizeSettable = evaluation.admissionGeometry?.isSizeSettable
+                ?? AXWindowService.isSizeSettable(axRef)
+            guard sizeSettable else { return true }
+        }
+        return hasDegenerateAdmissionFrame(
+            evaluation: evaluation,
+            axRef: axRef,
+            windowInfo: windowInfo
+        )
+    }
+
+    /// A window that is a point or thinner on either axis is not something the user can see, click,
+    /// or focus. Apps park invisible helper windows at that size - BetterDisplay keeps a 1x1 window
+    /// below the bottom of the screen for the lifetime of the process - so admitting one leaves a
+    /// workspace-bar entry that opens nothing and, once focus lands on it, bounces focus back to the
+    /// previous window. Frame-only, so it applies whatever mode the window would be admitted into.
+    func hasDegenerateAdmissionFrame(
         evaluation: WindowDecisionEvaluation,
         axRef: AXWindowRef,
         windowInfo: WindowServerInfo?
     ) -> Bool {
         if let admissionGeometry = evaluation.admissionGeometry {
-            guard admissionGeometry.isSizeSettable else { return true }
             guard let frame = evaluation.facts.windowServer?.frame
                 ?? windowInfo?.frame
                 ?? admissionGeometry.frame
@@ -1749,7 +1773,6 @@ final class WMController {
             }
             return !Self.isMeaningfulAdmissionFrame(frame)
         }
-        guard AXWindowService.isSizeSettable(axRef) else { return true }
         if let frame = evaluation.facts.windowServer?.frame ?? windowInfo?.frame,
            Self.isMeaningfulAdmissionFrame(frame)
         {
@@ -2231,15 +2254,14 @@ final class WMController {
                 axEventHandler.cancelTrackedTilingPromotionRetry(windowId: token.windowId)
             }
 
-            if effectiveTrackedMode == .tiling,
-               axEventHandler.deferTilingAdmissionIfNeeded(
-                   evaluation: evaluation,
-                   axRef: axRef,
-                   pid: token.pid,
-                   windowId: token.windowId,
-                   existingEntry: existingEntry
-               )
-            {
+            if axEventHandler.deferAdmissionIfNeeded(
+                evaluation: evaluation,
+                axRef: axRef,
+                pid: token.pid,
+                windowId: token.windowId,
+                trackedMode: effectiveTrackedMode,
+                existingEntry: existingEntry
+            ) {
                 continue
             }
 
@@ -2521,15 +2543,14 @@ final class WMController {
             axEventHandler.cancelTrackedTilingPromotionRetry(windowId: token.windowId)
         }
 
-        if trackedMode == .tiling,
-           axEventHandler.deferTilingAdmissionIfNeeded(
-               evaluation: evaluation,
-               axRef: entry.axRef,
-               pid: token.pid,
-               windowId: token.windowId,
-               existingEntry: entry
-           )
-        {
+        if axEventHandler.deferAdmissionIfNeeded(
+            evaluation: evaluation,
+            axRef: entry.axRef,
+            pid: token.pid,
+            windowId: token.windowId,
+            trackedMode: trackedMode,
+            existingEntry: entry
+        ) {
             return
         }
 

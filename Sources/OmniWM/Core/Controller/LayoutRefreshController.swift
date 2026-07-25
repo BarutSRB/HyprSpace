@@ -1530,15 +1530,14 @@ import QuartzCore
                 controller.axEventHandler.cancelTrackedTilingPromotionRetry(windowId: winId)
             }
 
-            if trackedMode == .tiling,
-               controller.axEventHandler.deferTilingAdmissionIfNeeded(
-                   evaluation: evaluation,
-                   axRef: ax,
-                   pid: pid,
-                   windowId: winId,
-                   existingEntry: existingEntry
-               )
-            {
+            if controller.axEventHandler.deferAdmissionIfNeeded(
+                evaluation: evaluation,
+                axRef: ax,
+                pid: pid,
+                windowId: winId,
+                trackedMode: trackedMode,
+                existingEntry: existingEntry
+            ) {
                 if let existingEntry {
                     seenKeys.insert(existingEntry.token)
                 }
