@@ -2257,8 +2257,7 @@ final class WMController {
             if axEventHandler.deferAdmissionIfNeeded(
                 evaluation: evaluation,
                 axRef: axRef,
-                pid: token.pid,
-                windowId: token.windowId,
+                token: token,
                 trackedMode: effectiveTrackedMode,
                 existingEntry: existingEntry
             ) {
@@ -2546,8 +2545,7 @@ final class WMController {
         if axEventHandler.deferAdmissionIfNeeded(
             evaluation: evaluation,
             axRef: entry.axRef,
-            pid: token.pid,
-            windowId: token.windowId,
+            token: token,
             trackedMode: trackedMode,
             existingEntry: entry
         ) {

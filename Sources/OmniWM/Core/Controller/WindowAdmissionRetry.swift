@@ -15,8 +15,7 @@ extension AXEventHandler {
     func deferAdmissionIfNeeded(
         evaluation: WMController.WindowDecisionEvaluation,
         axRef: AXWindowRef,
-        pid: pid_t,
-        windowId: Int,
+        token: WindowToken,
         trackedMode: TrackedWindowMode,
         existingEntry: WindowState?
     ) -> Bool {
@@ -31,7 +30,7 @@ extension AXEventHandler {
                   windowInfo: evaluation.facts.windowServer,
                   trackedMode: trackedMode
               ),
-              let windowId = UInt32(exactly: windowId)
+              let windowId = UInt32(exactly: token.windowId)
         else {
             return false
         }
@@ -44,7 +43,7 @@ extension AXEventHandler {
         } else {
             _ = scheduleCandidateAdmissionRetry(
                 windowId: windowId,
-                pid: pid,
+                pid: token.pid,
                 axRef: axRef,
                 reason: .degenerateGeometry
             )
