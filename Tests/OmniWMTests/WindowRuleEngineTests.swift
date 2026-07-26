@@ -144,6 +144,125 @@ final class WindowRuleEngineTests: XCTestCase {
         }
     }
 
+    private func chromePopupFacts(
+        subrole: String? = "AXUnknown",
+        hasButtons: Bool = false,
+        attributeFetchSucceeded: Bool = true,
+        tags: UInt64 = 0x1_400C_0402
+    ) -> WindowRuleFacts {
+        // Captured from Chrome's omnibox suggestion dropdown: a borderless widget window at the
+        // normal window level whose tags carry floating (0x2) without document (0x1).
+        WindowRuleFacts(
+            appName: "Google Chrome",
+            ax: AXWindowFacts(
+                role: kAXWindowRole as String,
+                subrole: subrole,
+                title: nil,
+                hasCloseButton: hasButtons,
+                hasFullscreenButton: hasButtons,
+                fullscreenButtonEnabled: hasButtons ? true : nil,
+                hasZoomButton: hasButtons,
+                hasMinimizeButton: hasButtons,
+                appPolicy: .regular,
+                bundleId: "com.google.Chrome",
+                attributeFetchSucceeded: attributeFetchSucceeded
+            ),
+            sizeConstraints: nil,
+            windowServer: WindowServerInfo(
+                id: 1207,
+                pid: 43657,
+                level: 0,
+                frame: CGRect(x: 99, y: 55, width: 3144, height: 418),
+                tags: tags
+            )
+        )
+    }
+
+    func testChromiumTransientPopupIsUnmanaged() {
+        // Chrome's omnibox dropdown and link-target status bubble are real AX windows at the
+        // normal level, so the elevated-level gate never fires, and the heuristic floated them -
+        // filling the workspace bar with untitled entries that open nothing when clicked.
+        let engine = WindowRuleEngine()
+        let popup = evaluate(engine, chromePopupFacts())
+
+        XCTAssertEqual(popup.disposition, .unmanaged)
+        XCTAssertEqual(popup.source, .builtInRule(WindowRuleEngine.transientPopupRuleName))
+    }
+
+    func testUserFloatRuleCannotResurrectABrowserPopup() {
+        let engine = WindowRuleEngine()
+        let rule = AppRule(bundleId: "com.google.Chrome", layout: .float)
+        engine.rebuild(rules: [rule])
+
+        let popup = evaluate(engine, chromePopupFacts())
+
+        XCTAssertEqual(popup.disposition, .unmanaged)
+        XCTAssertNotEqual(popup.source, .userRule(rule.id))
+    }
+
+    func testPictureInPictureWindowSurvivesThePopupGate() {
+        // Chrome's Picture-in-Picture window is the transient gate's nearest real neighbor: same
+        // app, also floating-by-nature - but it keeps the document tag, a standard subrole and a
+        // close button, and the user wants it tracked.
+        let engine = WindowRuleEngine()
+        let pip = WindowRuleFacts(
+            appName: "Google Chrome",
+            ax: AXWindowFacts(
+                role: kAXWindowRole as String,
+                subrole: kAXStandardWindowSubrole as String,
+                title: nil,
+                hasCloseButton: true,
+                hasFullscreenButton: false,
+                fullscreenButtonEnabled: nil,
+                hasZoomButton: true,
+                hasMinimizeButton: true,
+                appPolicy: .regular,
+                bundleId: "com.google.Chrome",
+                attributeFetchSucceeded: true
+            ),
+            sizeConstraints: nil,
+            windowServer: WindowServerInfo(
+                id: 1569,
+                pid: 43657,
+                level: 3,
+                frame: CGRect(x: 2657, y: 1476, width: 661, height: 372),
+                tags: 0x1_0008_2C01
+            )
+        )
+        let decision = evaluate(engine, pip)
+
+        XCTAssertEqual(decision.disposition, .floating)
+        XCTAssertNotEqual(decision.source, .builtInRule(WindowRuleEngine.transientPopupRuleName))
+    }
+
+    func testFloatingTaggedPanelWithWindowEvidenceStaysClassifiable() {
+        // A utility panel can share the popup's floating-without-document tags; a proper subrole
+        // or any window button is enough real-window evidence to keep it out of the gate.
+        let engine = WindowRuleEngine()
+
+        let dialogSubrole = evaluate(
+            engine,
+            chromePopupFacts(subrole: kAXDialogSubrole as String)
+        )
+        XCTAssertNotEqual(dialogSubrole.disposition, .unmanaged)
+
+        let buttonedPopup = evaluate(engine, chromePopupFacts(hasButtons: true))
+        XCTAssertNotEqual(buttonedPopup.disposition, .unmanaged)
+    }
+
+    func testDegradedFetchDoesNotTriggerThePopupGate() {
+        // A failed attribute fetch reports AXUnknown-with-no-buttons for every window, so the gate
+        // must stand down and leave those to the deferred/degraded-evidence path.
+        let engine = WindowRuleEngine()
+        let degraded = evaluate(
+            engine,
+            chromePopupFacts(attributeFetchSucceeded: false)
+        )
+
+        XCTAssertNotEqual(degraded.disposition, .unmanaged)
+        XCTAssertNotEqual(degraded.source, .builtInRule(WindowRuleEngine.transientPopupRuleName))
+    }
+
     func testAppNameWildcardMatchesNoBundleWindows() {
         let engine = WindowRuleEngine()
         let rule = AppRule(bundleId: "", appNameSubstring: "VMD", layout: .float)

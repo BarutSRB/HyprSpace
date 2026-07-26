@@ -225,6 +225,7 @@ final class WindowRuleEngine {
     static let systemTextInputPanelRuleName = "systemTextInputPanel"
     static let ownedWindowRuleName = "ownedWindow"
     static let elevatedWindowLevelRuleName = "elevatedWindowLevel"
+    static let transientPopupRuleName = "transientPopup"
     private static let cleanShotRecordingOverlayRuleName = "cleanShotRecordingOverlay"
 
     /// `kCGPopUpMenuWindowLevel`. At and above it macOS stacks menus, popovers, help tags, drag
@@ -433,6 +434,29 @@ final class WindowRuleEngine {
             )
         }
 
+        // Chromium browsers draw their transient surfaces - the omnibox suggestion dropdown, the
+        // link-target status bubble, hover cards - as borderless widget windows at the normal
+        // window level, so the elevated-level gate never sees them. The window server still marks
+        // them: they carry the floating tag without the document tag every ordinary window gets.
+        // Those tags alone also fit panels a user may want floated, so the gate additionally
+        // requires the AX side to show no real-window evidence - an AXUnknown subrole and not a
+        // single window button. Chrome's Picture-in-Picture window keeps its document tag,
+        // standard subrole and close button, so it stays classifiable. Runs ahead of the user
+        // rules for the same reason as the elevated-level gate: a rule that floats a browser's
+        // windows must not resurrect its popups.
+        if Self.isTransientPopupSurface(facts) {
+            return WindowDecision(
+                disposition: .unmanaged,
+                source: .builtInRule(Self.transientPopupRuleName),
+                layoutDecisionKind: .explicitLayout,
+                workspaceName: nil,
+                ruleEffects: .none,
+                admissionHints: .none,
+                heuristicReasons: [],
+                deferredReason: nil
+            )
+        }
+
         let userRule = bestMatch(in: compiledUserRules, facts: facts)
         let builtInRule = bestMatch(in: builtInRules, facts: facts)
 
@@ -576,6 +600,24 @@ final class WindowRuleEngine {
             heuristicReasons: heuristicReasons,
             deferredReason: nil
         )
+    }
+
+    /// A popup drawn as a real window at the normal window level, recognizable only by combining
+    /// window-server tags (floating without document, and not modal - a modal keeps its existing
+    /// handling) with an AX side that shows nothing a user-facing window would have. Requires a
+    /// successful attribute fetch: a degraded fetch reports no buttons for every window, and those
+    /// windows already go through the deferred/degraded-evidence path.
+    static func isTransientPopupSurface(_ facts: WindowRuleFacts) -> Bool {
+        guard let windowServer = facts.windowServer,
+              windowServer.hasFloatingTag,
+              !windowServer.hasDocumentTag,
+              !windowServer.hasModalTag
+        else {
+            return false
+        }
+        return facts.ax.attributeFetchSucceeded
+            && facts.ax.subrole == (kAXUnknownSubrole as String)
+            && !facts.ax.hasAnyWindowButton
     }
 
     /// CleanShot's recording overlay is a genuine window the user works with, even though it sits

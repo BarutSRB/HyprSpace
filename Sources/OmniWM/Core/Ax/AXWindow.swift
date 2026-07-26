@@ -232,6 +232,10 @@ struct AXWindowFacts: Equatable, Sendable {
     let appPolicy: NSApplication.ActivationPolicy?
     let bundleId: String?
     let attributeFetchSucceeded: Bool
+
+    var hasAnyWindowButton: Bool {
+        hasCloseButton || hasFullscreenButton || hasZoomButton || hasMinimizeButton
+    }
 }
 
 struct AXWindowDecisionEvidence: Equatable, Sendable {
@@ -802,10 +806,7 @@ enum AXWindowService {
             )
         }
 
-        let hasAnyButton = facts.hasCloseButton
-            || facts.hasFullscreenButton
-            || facts.hasZoomButton
-            || facts.hasMinimizeButton
+        let hasAnyButton = facts.hasAnyWindowButton
 
         if facts.appPolicy == .accessory && !facts.hasCloseButton {
             return AXWindowHeuristicDisposition(
