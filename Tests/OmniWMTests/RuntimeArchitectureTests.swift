@@ -2030,6 +2030,40 @@ final class RuntimeArchitectureTests: XCTestCase {
     }
 
     @MainActor
+    func testSurfaceReconcilerCleanupCancelsPendingReconcileAndOrdering() {
+        let controller = Self.controller()
+        controller.surfaceReconciler.noteRestackOccurred()
+
+        XCTAssertTrue(controller.surfaceReconciler.reconcileScheduled)
+        XCTAssertTrue(controller.surfaceReconciler.forceOrderingOnNextReconcile)
+
+        controller.surfaceReconciler.cleanup()
+
+        XCTAssertFalse(controller.surfaceReconciler.reconcileScheduled)
+        XCTAssertFalse(controller.surfaceReconciler.forceOrderingOnNextReconcile)
+        XCTAssertEqual(controller.surfaceReconciler.appliedScene, .empty)
+    }
+
+    @MainActor
+    func testStoppedServiceReconcileDoesNotRepopulateWorkspaceBars() {
+        let controller = Self.controller()
+        controller.settings.workspaceBarEnabled = true
+        controller.hasStartedServices = true
+        let world = WorldView(controller: controller)
+
+        XCTAssertFalse(SurfaceDerivation.derive(world: world).bars.isEmpty)
+        controller.surfaceReconciler.reconcileNow()
+        XCTAssertFalse(controller.surfaceReconciler.appliedScene.bars.isEmpty)
+
+        controller.hasStartedServices = false
+        controller.surfaceReconciler.cleanup()
+
+        XCTAssertTrue(SurfaceDerivation.derive(world: world).bars.isEmpty)
+        controller.surfaceReconciler.reconcileNow()
+        XCTAssertTrue(controller.surfaceReconciler.appliedScene.bars.isEmpty)
+    }
+
+    @MainActor
     func testAnimationBorderDerivationReusesNonManagedFrameWithoutBoundsQuery() throws {
         let controller = Self.controller()
         controller.hasStartedServices = true

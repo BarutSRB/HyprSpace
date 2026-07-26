@@ -41,7 +41,8 @@ enum SurfaceDerivation {
         return DesiredSurfaceScene(
             border: deriveBorder(world: world),
             tabRails: world.tabRailInfos(),
-            placeholders: world.nativeFullscreenPlaceholders()
+            placeholders: world.nativeFullscreenPlaceholders(),
+            bars: world.barSurfaces()
         )
     }
 
@@ -182,6 +183,8 @@ final class SurfaceReconciler {
     }
 
     func cleanup() {
+        reconcileScheduled = false
+        forceOrderingOnNextReconcile = false
         borderApplier.cleanup()
         appliedScene = .empty
     }
@@ -197,8 +200,7 @@ final class SurfaceReconciler {
         forceOrderingOnNextReconcile = false
         guard let controller else { return }
         let world = WorldView(controller: controller)
-        var desired = SurfaceDerivation.derive(world: world)
-        desired.bars = world.barSurfaces()
+        let desired = SurfaceDerivation.derive(world: world)
         let refreshCornerRadii = desired.border.map {
             !controller.axManager.hasPendingFrameWrite(for: $0.windowId)
         } ?? true
