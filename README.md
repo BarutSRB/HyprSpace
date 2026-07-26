@@ -599,6 +599,17 @@ A visual indicator showing your workspaces:
 - Click to switch workspaces or jump to that app
 - If dedupe option is on click the app icon to get a popup with list of all its windows to jump to
 - Configure position, height, and appearance in Settings
+- Exclude individual apps or choose alternate app icons across all monitors in Settings
+
+Workspace-bar icon overrides can also be configured in `settings.toml`. Quote bundle IDs so TOML treats each dotted identifier as one key:
+
+```toml
+[workspaceBar.iconOverrides]
+"com.example.App" = "icons/custom.icns"
+"com.cmuxterm.app" = "bundle-resource:AppIconDark"
+```
+
+`bundle-resource:` loads a named image packaged inside the selected app. The Settings picker discovers likely app-icon resources on demand; runtime-generated or downloaded Dock icons may not be available. Absolute paths are used as written, `~` expands to your home directory, and relative paths are resolved from the directory containing `settings.toml`. Overrides affect only the workspace bar. A valid override takes precedence over the app's standard icon; an unavailable or invalid image falls back to the standard icon, then the dashed placeholder when no app icon is available. OmniWM does not watch image files; use Replace to reload a file changed in place.
 
 #### Hidden Bar
 

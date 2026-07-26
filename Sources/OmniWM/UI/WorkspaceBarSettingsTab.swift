@@ -42,6 +42,11 @@ struct WorkspaceBarSettingsTab: View {
                 settings: settings,
                 controller: controller
             )
+
+            WorkspaceBarIconOverridesSection(
+                settings: settings,
+                controller: controller
+            )
         }
         .formStyle(.grouped)
         .onAppear {

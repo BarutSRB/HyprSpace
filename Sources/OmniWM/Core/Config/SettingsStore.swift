@@ -10,6 +10,12 @@ import OmniWMIPC
 final class SettingsStore {
     private nonisolated static let defaultExport = SettingsExport.defaults()
 
+    private struct NormalizedWorkspaceBarIconOverride {
+        let foldedBundleID: String
+        let bundleID: String
+        let value: String
+    }
+
     private let persistence: SettingsFilePersistence
     private let runtimeState: RuntimeStateStore
     private let autosaveEnabled: Bool
@@ -243,6 +249,12 @@ final class SettingsStore {
 
     private(set) var workspaceBarExcludedBundleIDs = SettingsStore.normalizedWorkspaceBarExcludedBundleIDs(
         SettingsStore.defaultExport.workspaceBarExcludedBundleIDs
+    ) {
+        didSet { scheduleSave() }
+    }
+
+    private(set) var workspaceBarIconOverrides = SettingsStore.normalizedWorkspaceBarIconOverrides(
+        SettingsStore.defaultExport.workspaceBarIconOverrides
     ) {
         didSet { scheduleSave() }
     }
@@ -673,6 +685,7 @@ final class SettingsStore {
             workspaceBarExcludedBundleIDs: SettingsStore.sortedWorkspaceBarExcludedBundleIDs(
                 workspaceBarExcludedBundleIDs
             ),
+            workspaceBarIconOverrides: workspaceBarIconOverrides,
             workspaceBarReserveLayoutSpace: workspaceBarReserveLayoutSpace,
             workspaceBarRevealModifier: workspaceBarRevealModifier.rawValue,
             workspaceBarRevealHoldMilliseconds: workspaceBarRevealHoldMilliseconds,
@@ -808,6 +821,9 @@ final class SettingsStore {
         workspaceBarHideEmptyWorkspaces = export.workspaceBarHideEmptyWorkspaces
         workspaceBarExcludedBundleIDs = SettingsStore.normalizedWorkspaceBarExcludedBundleIDs(
             export.workspaceBarExcludedBundleIDs
+        )
+        workspaceBarIconOverrides = SettingsStore.normalizedWorkspaceBarIconOverrides(
+            export.workspaceBarIconOverrides
         )
         workspaceBarReserveLayoutSpace = export.workspaceBarReserveLayoutSpace
         workspaceBarRevealModifier = WorkspaceBarRevealModifier(rawValue: export.workspaceBarRevealModifier) ?? .off
@@ -1059,6 +1075,45 @@ final class SettingsStore {
         return true
     }
 
+    func workspaceBarIconOverrideValue(for rawBundleID: String) -> String? {
+        let bundleID = rawBundleID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !bundleID.isEmpty else { return nil }
+        return workspaceBarIconOverrides.first { storedBundleID, _ in
+            storedBundleID.caseInsensitiveCompare(bundleID) == .orderedSame
+        }?.value
+    }
+
+    @discardableResult
+    func setWorkspaceBarIconOverride(_ rawValue: String, for rawBundleID: String) -> Bool {
+        let bundleID = rawBundleID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !bundleID.isEmpty, !value.isEmpty else { return false }
+
+        if let storedBundleID = workspaceBarIconOverrides.keys.first(where: {
+            $0.caseInsensitiveCompare(bundleID) == .orderedSame
+        }) {
+            guard workspaceBarIconOverrides[storedBundleID] != value else { return false }
+            workspaceBarIconOverrides[storedBundleID] = value
+            return true
+        }
+
+        workspaceBarIconOverrides[bundleID] = value
+        return true
+    }
+
+    @discardableResult
+    func removeWorkspaceBarIconOverride(for rawBundleID: String) -> Bool {
+        let bundleID = rawBundleID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !bundleID.isEmpty else { return false }
+        guard let storedBundleID = workspaceBarIconOverrides.keys.first(where: {
+            $0.caseInsensitiveCompare(bundleID) == .orderedSame
+        }) else {
+            return false
+        }
+        workspaceBarIconOverrides.removeValue(forKey: storedBundleID)
+        return true
+    }
+
     func appRule(for bundleId: String) -> AppRule? {
         appRules.first { $0.bundleId == bundleId }
     }
@@ -1257,6 +1312,36 @@ final class SettingsStore {
             let order = lhs.caseInsensitiveCompare(rhs)
             return order == .orderedSame ? lhs < rhs : order == .orderedAscending
         }
+    }
+
+    static func normalizedWorkspaceBarIconOverrides(_ overrides: [String: String]) -> [String: String] {
+        let candidates = overrides.compactMap { rawBundleID, rawValue -> NormalizedWorkspaceBarIconOverride? in
+            let bundleID = rawBundleID.trimmingCharacters(in: .whitespacesAndNewlines)
+            let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !bundleID.isEmpty, !value.isEmpty else { return nil }
+            return NormalizedWorkspaceBarIconOverride(
+                foldedBundleID: bundleID.lowercased(),
+                bundleID: bundleID,
+                value: value
+            )
+        }.sorted { lhs, rhs in
+            if lhs.foldedBundleID != rhs.foldedBundleID {
+                return lhs.foldedBundleID < rhs.foldedBundleID
+            }
+            if lhs.bundleID != rhs.bundleID {
+                return lhs.bundleID < rhs.bundleID
+            }
+            return lhs.value < rhs.value
+        }
+
+        var normalized: [String: String] = [:]
+        normalized.reserveCapacity(candidates.count)
+        var seenBundleIDs: Set<String> = []
+        seenBundleIDs.reserveCapacity(candidates.count)
+        for candidate in candidates where seenBundleIDs.insert(candidate.foldedBundleID).inserted {
+            normalized[candidate.bundleID] = candidate.value
+        }
+        return normalized
     }
 
     static func validatedHiddenBarRehideIntervalSeconds(_ value: Double) -> Double {

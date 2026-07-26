@@ -70,6 +70,7 @@ struct SettingsExport: Equatable {
     var workspaceBarDeduplicateAppIcons: Bool
     var workspaceBarHideEmptyWorkspaces: Bool
     var workspaceBarExcludedBundleIDs: [String]
+    var workspaceBarIconOverrides: [String: String]
     var workspaceBarReserveLayoutSpace: Bool
     var workspaceBarRevealModifier: String
     var workspaceBarRevealHoldMilliseconds: Double
@@ -188,6 +189,7 @@ extension SettingsExport {
             workspaceBarDeduplicateAppIcons: false,
             workspaceBarHideEmptyWorkspaces: false,
             workspaceBarExcludedBundleIDs: [],
+            workspaceBarIconOverrides: [:],
             workspaceBarReserveLayoutSpace: false,
             workspaceBarRevealModifier: WorkspaceBarRevealModifier.off.rawValue,
             workspaceBarRevealHoldMilliseconds: 200,

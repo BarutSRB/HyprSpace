@@ -153,6 +153,7 @@ struct CanonicalTOMLConfig: Codable, Equatable {
         var deduplicateAppIcons: Bool
         var hideEmptyWorkspaces: Bool
         var excludedBundleIDs: [String]
+        var iconOverrides: [String: String]
         var reserveLayoutSpace: Bool
         var revealModifier: String
         var revealHoldMilliseconds: Double
@@ -851,6 +852,12 @@ extension CanonicalTOMLConfig.WorkspaceBar {
             default: defaults.excludedBundleIDs,
             recovering: recovering
         )
+        iconOverrides = try container.decode(
+            [String: String].self,
+            forKey: .iconOverrides,
+            default: defaults.iconOverrides,
+            recovering: recovering
+        )
         reserveLayoutSpace = try container.decode(
             Bool.self,
             forKey: .reserveLayoutSpace,
@@ -1184,6 +1191,7 @@ extension CanonicalTOMLConfig {
             deduplicateAppIcons: export.workspaceBarDeduplicateAppIcons,
             hideEmptyWorkspaces: export.workspaceBarHideEmptyWorkspaces,
             excludedBundleIDs: export.workspaceBarExcludedBundleIDs,
+            iconOverrides: export.workspaceBarIconOverrides,
             reserveLayoutSpace: export.workspaceBarReserveLayoutSpace,
             revealModifier: export.workspaceBarRevealModifier,
             revealHoldMilliseconds: export.workspaceBarRevealHoldMilliseconds,
@@ -1296,6 +1304,7 @@ extension CanonicalTOMLConfig {
             workspaceBarDeduplicateAppIcons: workspaceBar.deduplicateAppIcons,
             workspaceBarHideEmptyWorkspaces: workspaceBar.hideEmptyWorkspaces,
             workspaceBarExcludedBundleIDs: workspaceBar.excludedBundleIDs,
+            workspaceBarIconOverrides: workspaceBar.iconOverrides,
             workspaceBarReserveLayoutSpace: workspaceBar.reserveLayoutSpace,
             workspaceBarRevealModifier: workspaceBar.revealModifier,
             workspaceBarRevealHoldMilliseconds: workspaceBar.revealHoldMilliseconds,

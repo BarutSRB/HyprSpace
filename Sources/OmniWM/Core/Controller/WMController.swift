@@ -94,6 +94,9 @@ final class WMController {
     let axManager = AXManager()
     let traceCaptureCoordinator: RuntimeTraceCaptureCoordinator
     let appInfoCache = AppInfoCache()
+    @ObservationIgnored
+    let workspaceBarIconResolver: WorkspaceBarIconResolver
+    private(set) var workspaceBarIconResolutionRevision: UInt64 = 0
     let eventIntake = EventIntake()
     let factResolver = FactResolver()
     let intentLedger = IntentLedger()
@@ -254,9 +257,12 @@ final class WMController {
         clipboardHistoryDirectory: URL = OmniWMStoragePaths.live.stateDirectory,
         diagnosticsDirectory: URL = OmniWMStoragePaths.live.diagnosticsDirectory,
         windowFocusOperations: WindowFocusOperations = .live,
-        ownedWindowRegistry: OwnedWindowRegistry = .shared
+        ownedWindowRegistry: OwnedWindowRegistry = .shared,
+        workspaceBarIconResolver: WorkspaceBarIconResolver? = nil
     ) {
         self.settings = settings
+        self.workspaceBarIconResolver = workspaceBarIconResolver
+            ?? WorkspaceBarIconResolver(settingsFileURL: settings.settingsFileURL)
         motionPolicy = MotionPolicy(animationsEnabled: settings.animationsEnabled)
         self.hiddenBarController = hiddenBarController ?? HiddenBarController(settings: settings)
         self.clipboardHistoryDirectory = clipboardHistoryDirectory
@@ -266,6 +272,11 @@ final class WMController {
         self.ownedWindowRegistry = ownedWindowRegistry
         workspaceManager = WorkspaceManager(settings: settings)
         focusPolicyEngine = FocusPolicyEngine()
+        if self.workspaceBarIconResolver.synchronize(
+            overrides: settings.workspaceBarIconOverrides
+        ) {
+            workspaceBarIconResolutionRevision = 1
+        }
         axManager.isWindowParked = { [workspaceManager] windowId in
             workspaceManager.entry(forWindowId: windowId)?.hiddenState != nil
         }
@@ -680,7 +691,10 @@ final class WMController {
         )
     }
 
-    func updateWorkspaceBarSettings() {
+    func updateWorkspaceBarSettings(forceIconReload: Bool = false) {
+        synchronizeWorkspaceBarIconOverrides(
+            forceReload: forceIconReload
+        )
         pruneHiddenWorkspaceBarMonitorIds()
         layoutRefreshController.requestRelayout(reason: .monitorSettingsChanged)
         surfaceReconciler.noteWorldChanged()
@@ -688,8 +702,50 @@ final class WMController {
         hiddenBarController.dismissPanel()
     }
 
+    func updateWorkspaceBarIconOverride(bundleId: String, forceReload: Bool) {
+        guard synchronizeWorkspaceBarIconOverrides(
+            forceReloadBundleId: forceReload ? bundleId : nil
+        ) else {
+            return
+        }
+        surfaceReconciler.noteWorldChanged()
+    }
+
+    func refreshUnavailableWorkspaceBarIconOverride(bundleId: String?) {
+        guard let bundleId,
+              let resolution = workspaceBarIconResolver.overrideResolution(for: bundleId),
+              resolution.image == nil,
+              case .bundleResource = resolution.source
+        else {
+            return
+        }
+
+        guard synchronizeWorkspaceBarIconOverrides(
+            forceReloadBundleId: bundleId
+        ) else {
+            return
+        }
+        surfaceReconciler.noteWorldChanged()
+    }
+
     func updateWorkspaceBarAppearance() {
         workspaceBarManager.updateAppearance()
+    }
+
+    @discardableResult
+    private func synchronizeWorkspaceBarIconOverrides(
+        forceReload: Bool = false,
+        forceReloadBundleId: String? = nil
+    ) -> Bool {
+        guard workspaceBarIconResolver.synchronize(
+            overrides: settings.workspaceBarIconOverrides,
+            forceReload: forceReload,
+            forceReloadBundleId: forceReloadBundleId
+        ) else {
+            return false
+        }
+        workspaceBarIconResolutionRevision += 1
+        return true
     }
 
     func updateMonitorOrientations() {
@@ -741,6 +797,7 @@ final class WMController {
             options: options,
             workspaceManager: workspaceManager,
             appInfoCache: appInfoCache,
+            iconResolver: workspaceBarIconResolver,
             focusedToken: workspaceManager.focusedToken,
             settings: settings
         )
@@ -755,6 +812,7 @@ final class WMController {
             options: options,
             workspaceManager: workspaceManager,
             appInfoCache: appInfoCache,
+            iconResolver: workspaceBarIconResolver,
             focusedToken: workspaceManager.focusedToken,
             settings: settings
         )

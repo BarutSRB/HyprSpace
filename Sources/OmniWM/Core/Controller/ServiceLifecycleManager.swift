@@ -104,8 +104,16 @@ final class ServiceLifecycleManager {
         controller.layoutRefreshController.setup()
         controller.axEventHandler.setup()
         controller.axManager.installWorkspaceObservers()
-        controller.axManager.onAppLaunched = { _ in
+        controller.axManager.onAppLaunched = { [weak controller] app in
+            controller?.refreshUnavailableWorkspaceBarIconOverride(
+                bundleId: app.bundleIdentifier
+            )
             EventIntake.post(.appLaunched)
+        }
+        for app in NSWorkspace.shared.runningApplications {
+            controller.refreshUnavailableWorkspaceBarIconOverride(
+                bundleId: app.bundleIdentifier
+            )
         }
         controller.axManager.onAppTerminated = { pid in
             EventIntake.post(.appTerminated(pid: pid))
