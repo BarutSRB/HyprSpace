@@ -64,7 +64,7 @@ final class DwindleInteractiveResizeTests: XCTestCase {
         let bottom = WindowToken(pid: 1, windowId: 1)
         let top = WindowToken(pid: 2, windowId: 2)
         _ = engine.addWindow(token: bottom, to: ws, activeWindowFrame: nil)
-        engine.setPreselection(.down, in: ws)
+        engine.setPreselection(.up, in: ws)
         _ = engine.addWindow(token: top, to: ws, activeWindowFrame: nil)
         _ = engine.calculateLayout(for: ws, screen: screen)
         XCTAssertEqual(engine.root(for: ws)?.splitOrientation, .vertical)
@@ -91,7 +91,7 @@ final class DwindleInteractiveResizeTests: XCTestCase {
         _ = engine.addWindow(token: leaf1, to: ws, activeWindowFrame: nil)
         _ = engine.addWindow(token: other, to: ws, activeWindowFrame: nil)
         engine.setSelectedNode(engine.findNode(for: leaf1, in: ws), in: ws)
-        engine.setPreselection(.down, in: ws)
+        engine.setPreselection(.up, in: ws)
         _ = engine.addWindow(token: leaf3, to: ws, activeWindowFrame: nil)
         _ = engine.calculateLayout(for: ws, screen: screen)
 

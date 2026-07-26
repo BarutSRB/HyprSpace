@@ -75,7 +75,7 @@ final class DwindleCommandRoutingTests: XCTestCase {
             controller: fixture.controller
         )
         fixture.controller.workspaceManager.withEngineMutationScope(in: fixture.sourceWorkspaceId) {
-            XCTAssertTrue(fixture.engine.setPreselection(.up, in: fixture.sourceWorkspaceId))
+            XCTAssertTrue(fixture.engine.setPreselection(.down, in: fixture.sourceWorkspaceId))
             _ = fixture.engine.addWindow(
                 token: localNeighbor,
                 to: fixture.sourceWorkspaceId,
