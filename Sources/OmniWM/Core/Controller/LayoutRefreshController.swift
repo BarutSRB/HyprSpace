@@ -421,9 +421,7 @@ import QuartzCore
         guard controller != nil else { return }
         guard let frame = fastFrame(for: entry.token, axRef: entry.axRef) else { return }
 
-        let reduceMotionScale: CGFloat = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0.25 : 1.0
-        let closeOffset = 12.0 * reduceMotionScale
-        let displacement = CGPoint(x: 0, y: -closeOffset)
+        let displacement = CGPoint(x: 0, y: -12)
 
         let now = CACurrentMediaTime()
         let refreshRate = layoutState.refreshRateByDisplay[monitor.displayId] ?? 60.0

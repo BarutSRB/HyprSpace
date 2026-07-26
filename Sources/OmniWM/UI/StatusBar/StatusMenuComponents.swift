@@ -223,7 +223,6 @@ struct StatusMenuControlHelpCard: View {
     let control: StatusMenuControl?
 
     @Environment(MotionPolicy.self) private var motionPolicy
-    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
 
     var body: some View {
         ZStack {
@@ -243,7 +242,7 @@ struct StatusMenuControlHelpCard: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     StatusMenuControlPreviewView(
                         preview: control.preview,
-                        animationsEnabled: animationsEnabled
+                        animationsEnabled: motionPolicy.animationsEnabled
                     )
                     .frame(width: 72, height: 72)
                     .accessibilityHidden(true)
@@ -273,11 +272,7 @@ struct StatusMenuControlHelpCard: View {
                         .stroke(Color(nsColor: .separatorColor).opacity(0.7), lineWidth: 0.5)
                 }
         }
-        .animation(animationsEnabled ? .easeOut(duration: 0.12) : nil, value: control?.id)
-    }
-
-    private var animationsEnabled: Bool {
-        motionPolicy.animationsEnabled && !accessibilityReduceMotion
+        .animation(motionPolicy.animationsEnabled ? .easeOut(duration: 0.12) : nil, value: control?.id)
     }
 }
 

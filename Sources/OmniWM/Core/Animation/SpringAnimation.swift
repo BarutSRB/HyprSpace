@@ -75,12 +75,7 @@ struct SpringConfig: Equatable {
     static let snappy = SpringConfig.niriHorizontalViewMovement
     static let balanced = SpringConfig.niriWindowMovement
     static let gentle = SpringConfig.niriWindowMovement
-    static let reducedMotion = SpringConfig.niriHorizontalViewMovement
     static let `default` = SpringConfig.snappy
-
-    func resolvedForReduceMotion(_ reduceMotion: Bool) -> SpringConfig {
-        self
-    }
 
     func with(epsilon: Double, velocityEpsilon: Double) -> SpringConfig {
         return SpringConfig(
@@ -117,14 +112,13 @@ final class SpringAnimation {
         self.displayRefreshRate = displayRefreshRate
         self.initialVelocity = initialVelocity
 
-        let resolvedConfig = config.resolvedForReduceMotion(false)
-        self.config = resolvedConfig
+        self.config = config
         displacement = to - from
         duration = Self.duration(
             from: from,
             target: to,
             initialVelocity: initialVelocity,
-            config: resolvedConfig
+            config: config
         )
     }
 

@@ -168,7 +168,6 @@ private struct WorkspaceBarContentView: View {
     let onToggleSystemStats: () -> Void
     let onSystemStatsAnchorChange: (CGPoint?) -> Void
 
-    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @Environment(\.accessibilityReduceTransparency) private var accessibilityReduceTransparency
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
@@ -184,10 +183,6 @@ private struct WorkspaceBarContentView: View {
     private let workspaceSpacing: CGFloat = 8
     private let windowSpacing: CGFloat = 2
     private let cornerRadius: CGFloat = 6
-
-    private var effectiveAnimationsEnabled: Bool {
-        animationsEnabled && !accessibilityReduceMotion
-    }
 
     private var backgroundColor: Color {
         colorScheme == .dark
@@ -216,7 +211,7 @@ private struct WorkspaceBarContentView: View {
                     itemHeight: itemHeight,
                     windowSpacing: windowSpacing,
                     cornerRadius: cornerRadius,
-                    animationsEnabled: effectiveAnimationsEnabled,
+                    animationsEnabled: animationsEnabled,
                     showLabels: snapshot.showLabels,
                     accentColor: accentColor,
                     textColor: textColor,
@@ -230,7 +225,7 @@ private struct WorkspaceBarContentView: View {
                     item: scratchpad,
                     iconSize: iconSize,
                     itemHeight: itemHeight,
-                    animationsEnabled: effectiveAnimationsEnabled,
+                    animationsEnabled: animationsEnabled,
                     accentColor: accentColor,
                     textColor: textColor,
                     onActivateScratchpad: onActivateScratchpad

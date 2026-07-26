@@ -733,12 +733,12 @@ Native fullscreen is co-driven by two observed facts: (1) SkyLight fullscreen-sp
 
 **Directory:** `Sources/OmniWM/Core/Animation/`
 
-- **`SpringAnimation` / `SpringConfig`** — a closed-form damped-spring solver sampled by absolute `CACurrentMediaTime`. `offsetBy(_:)` rebases both endpoints so the world can re-anchor a viewport mid-flight. The named presets (`niriHorizontalViewMovement`, `niriWindowMovement`, `niriWindowResize`, and the `snappy`/`balanced`/`gentle`/`reducedMotion`/`default` aliases) are all the same critically-damped curve (`dampingRatio 1.0`, `stiffness 800`); `resolvedForReduceMotion` is currently a no-op.
+- **`SpringAnimation` / `SpringConfig`** — a closed-form damped-spring solver sampled by absolute `CACurrentMediaTime`. `offsetBy(_:)` rebases both endpoints so the world can re-anchor a viewport mid-flight. The named presets (`niriHorizontalViewMovement`, `niriWindowMovement`, `niriWindowResize`, and the `snappy`/`balanced`/`gentle`/`default` aliases) all use the same critically-damped curve (`dampingRatio 1.0`, `stiffness 800`).
 - **`CubicAnimation`** — cubic-bezier easing used by the Dwindle path.
 - **`AnimationDriver`** — owns the per-workspace **viewport scroll motion only** (gesture or spring). It is seeded from inside the commit path (`reconcileViewportCommit` re-seeds the spring from a committed `ViewportState` transition) and sampled per frame by `NiriLayoutHandler`. Per-window/column animations live in the Niri engine, not here.
 - **`SwipeTracker`** — accumulates trackpad deltas over a 150ms window and projects an inertial throw target that a spring snaps to.
 - **`AnimationClock`** — a monotonic accumulating clock over `CACurrentMediaTime`, held by the engines and `WMController`.
-- **`MotionPolicy`** — a `@MainActor @Observable` single boolean (`animationsEnabled`) seeded from settings; it gates non-gesture scroll animations. It does **not** read the OS reduce-motion setting (that is consulted separately in UI views).
+- **`MotionPolicy`** — a `@MainActor @Observable` single boolean (`animationsEnabled`) seeded from settings; it gates OmniWM-authored animations.
 
 The per-frame **display link** is owned by `LayoutRefreshController` (not by `Animation/`); see [3.9](#39-the-ungated-animation-tier).
 
@@ -958,7 +958,7 @@ CLIRenderer displays the result
 | `NativeFullscreenRecord` | Per-window record (`originalToken`, `currentToken`, `workspaceId`, `exitRequestedByCommand`, `transition`) from which `isAppFullscreenActive` is derived. |
 | `AnimationDriver` | Owns per-workspace viewport scroll motion (gesture/spring). |
 | `SpringConfig` | Spring parameters; presets are all the same critically-damped curve. |
-| `MotionPolicy` | Single-boolean animations-enabled gate (does not read OS reduce-motion). |
+| `MotionPolicy` | Settings-backed gate for OmniWM-authored animations. |
 | `HotkeyCommand` | Enum of every command that can be triggered by hotkey or IPC; carries `LayoutCompatibility`. |
 | `WindowDecision` | Rule-evaluation result: `disposition`, `source`, `workspaceName`, `ruleEffects`. |
 

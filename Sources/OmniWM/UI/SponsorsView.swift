@@ -245,12 +245,11 @@ struct ReservedSlotCard: View {
 }
 
 struct SupporterScroll: View {
-    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @Bindable var motionPolicy: MotionPolicy
 
     var body: some View {
         AutoScrollList(
-            animationsEnabled: motionPolicy.animationsEnabled && !accessibilityReduceMotion,
+            animationsEnabled: motionPolicy.animationsEnabled,
             speed: 18,
             spacing: 16
         ) {

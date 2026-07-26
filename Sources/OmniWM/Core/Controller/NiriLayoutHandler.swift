@@ -971,22 +971,17 @@ enum StructuralMutationOutcome: Equatable {
            snapshot.isActiveWorkspace,
            !animatedNewTokens.isEmpty
         {
-            let reduceMotionScale: CGFloat = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0.25 : 1.0
-            let appearOffset = 16.0 * reduceMotionScale
-
             for token in animatedNewTokens {
                 guard let window = pass.engine.findNode(for: token, in: pass.wsId),
                       !window.isHiddenInTabbedMode else { continue }
 
-                if abs(appearOffset) > 0.1 {
-                    window.animateMoveFrom(
-                        displacement: CGPoint(x: 0, y: -appearOffset),
-                        clock: pass.engine.animationClock,
-                        config: pass.engine.windowMovementAnimationConfig,
-                        displayRefreshRate: state.displayRefreshRate,
-                        animated: motion.animationsEnabled
-                    )
-                }
+                window.animateMoveFrom(
+                    displacement: CGPoint(x: 0, y: -16),
+                    clock: pass.engine.animationClock,
+                    config: pass.engine.windowMovementAnimationConfig,
+                    displayRefreshRate: state.displayRefreshRate,
+                    animated: motion.animationsEnabled
+                )
             }
         }
 

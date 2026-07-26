@@ -89,7 +89,7 @@ final class ViewportGestureTests: XCTestCase {
         XCTAssertEqual(220 + state.viewOffset, 170)
     }
 
-    func testReduceMotionJumpsToClampedLandingWithoutDeceleration() {
+    func testDisabledAnimationsJumpToClampedLandingWithoutDeceleration() {
         var state = makeState()
         state.endGesture(
             currentOffset: 30,
