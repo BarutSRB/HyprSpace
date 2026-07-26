@@ -860,6 +860,7 @@ import QuartzCore
                 preserveWorkspaceInactive: transaction.preserveWorkspaceInactive
             )
         }
+        controller.axManager.clearParkPending(for: transaction.windowId, pid: transaction.pid)
         controller.surfaceReconciler.noteWorldChanged()
         if transaction.refreshOverviewOnSuccess {
             controller.windowActionHandler.refreshOverviewProjection(

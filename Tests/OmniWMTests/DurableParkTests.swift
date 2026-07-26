@@ -9,16 +9,19 @@ import XCTest
 
 @MainActor
 final class DurableParkTests: XCTestCase {
-    func testAnimationTickParkStaysPendingUntilConfirmed() throws {
+    func testMatchingSkyLightFrameStaysPendingUntilVerifiedAXPark() throws {
         let controller = Self.controller()
         let monitor = Self.monitor()
+        FrameApplyTrace.shared.beginCapture()
+        defer { FrameApplyTrace.shared.endCapture() }
         controller.workspaceManager.applyMonitorConfigurationChange([monitor])
         let workspaceId = try XCTUnwrap(controller.workspaceManager.workspaceId(for: "1", createIfMissing: true))
         _ = controller.workspaceManager.focusWorkspace(named: "1")
         controller.niriLayoutHandler.enableNiriLayout()
 
+        let axRef = AXWindowRef(element: AXUIElementCreateApplication(951_001), windowId: 951_101)
         let token = controller.workspaceManager.addWindow(
-            AXWindowRef(element: AXUIElementCreateApplication(951_001), windowId: 951_101),
+            axRef,
             pid: 951_001, windowId: 951_101, to: workspaceId
         )
         _ = controller.niriEngine?.addWindow(token: token, to: workspaceId, afterSelection: nil)
@@ -35,37 +38,43 @@ final class DurableParkTests: XCTestCase {
             )
         )
         XCTAssertTrue(controller.axManager.pendingParkWindowIds.contains(token.windowId))
+        XCTAssertNil(controller.axManager.pendingParkFrameRequest(for: token.windowId))
+        XCTAssertTrue(FrameApplyTrace.shared.dump().contains("outcome=sls-parked/animation"))
+        XCTAssertFalse(FrameApplyTrace.shared.dump().contains("outcome=ax-park-"))
         let parkOrigin = try XCTUnwrap(controller.axManager.skyLightLivePosition(for: token.windowId))
 
-        XCTAssertTrue(
-            controller.layoutRefreshController.executeLayoutPlan(
-                Self.hidePlan(workspaceId: workspaceId, monitor: monitor, token: token)
-            )
-        )
-        XCTAssertTrue(controller.axManager.pendingParkWindowIds.contains(token.windowId))
-        XCTAssertNil(controller.axManager.skyLightLivePosition(for: token.windowId))
-
-        XCTAssertTrue(
-            controller.layoutRefreshController.executeLayoutPlan(
-                Self.hidePlan(workspaceId: workspaceId, monitor: monitor, token: token)
-            )
-        )
-        XCTAssertTrue(controller.axManager.pendingParkWindowIds.contains(token.windowId))
-        XCTAssertNotNil(controller.axManager.skyLightLivePosition(for: token.windowId))
-
+        FrameApplyTrace.shared.beginCapture()
         physicalFrame = CGRect(origin: parkOrigin, size: onscreenFrame.size)
         XCTAssertTrue(
             controller.layoutRefreshController.executeLayoutPlan(
-                Self.hidePlan(workspaceId: workspaceId, monitor: monitor, token: token)
+                Self.hidePlan(
+                    workspaceId: workspaceId,
+                    monitor: monitor,
+                    token: token,
+                    isAnimationTick: false
+                )
             )
         )
         XCTAssertTrue(controller.axManager.pendingParkWindowIds.contains(token.windowId))
+        XCTAssertNil(controller.axManager.verifiedParkFrame(for: token.windowId))
+        XCTAssertTrue(FrameApplyTrace.shared.dump().contains("outcome=sls-parked/settled"))
+        XCTAssertTrue(FrameApplyTrace.shared.dump().contains("outcome=ax-park-failed/contextUnavailable"))
+
+        let parkFrame = CGRect(origin: parkOrigin, size: onscreenFrame.size)
+        let request = try XCTUnwrap(
+            controller.axManager.prepareParkFrameApplications([
+                .init(pid: token.pid, window: axRef, frame: parkFrame)
+            ]).first
+        )
+        XCTAssertTrue(request.verify)
         XCTAssertTrue(
-            controller.layoutRefreshController.executeLayoutPlan(
-                Self.hidePlan(workspaceId: workspaceId, monitor: monitor, token: token)
-            )
+            controller.axManager.processParkFrameApplyResults([
+                WindowAdmissionTestSupport.successfulFrameResult(request: request)
+            ]).isEmpty
         )
         XCTAssertFalse(controller.axManager.pendingParkWindowIds.contains(token.windowId))
+        XCTAssertEqual(controller.axManager.verifiedParkFrame(for: token.windowId), parkFrame)
+        XCTAssertTrue(FrameApplyTrace.shared.dump().contains("outcome=ax-park-confirmed"))
         XCTAssertNotNil(controller.workspaceManager.hiddenState(for: token))
         XCTAssertEqual(controller.workspaceManager.invariantViolationCountsDump(), "clean")
     }
@@ -78,15 +87,17 @@ final class DurableParkTests: XCTestCase {
         _ = controller.workspaceManager.focusWorkspace(named: "1")
         controller.niriLayoutHandler.enableNiriLayout()
 
+        let axRef = AXWindowRef(element: AXUIElementCreateApplication(952_001), windowId: 952_101)
         let token = controller.workspaceManager.addWindow(
-            AXWindowRef(element: AXUIElementCreateApplication(952_001), windowId: 952_101),
+            axRef,
             pid: 952_001, windowId: 952_101, to: workspaceId
         )
         _ = controller.niriEngine?.addWindow(token: token, to: workspaceId, afterSelection: nil)
-        controller.axManager.confirmFrameWrite(
-            for: token.windowId,
-            frame: CGRect(x: 100, y: 16, width: 800, height: 600)
-        )
+        let visibleFrame = CGRect(x: 100, y: 16, width: 800, height: 600)
+        controller.layoutRefreshController.fastFrameProvider = { queriedToken, _ in
+            queriedToken == token ? visibleFrame : nil
+        }
+        controller.axManager.confirmFrameWrite(for: token.windowId, frame: visibleFrame)
 
         XCTAssertTrue(
             controller.layoutRefreshController.executeLayoutPlan(
@@ -95,18 +106,113 @@ final class DurableParkTests: XCTestCase {
         )
         XCTAssertTrue(controller.axManager.pendingParkWindowIds.contains(token.windowId))
 
+        let parkFrame = CGRect(
+            x: monitor.frame.maxX - 1,
+            y: visibleFrame.minY,
+            width: visibleFrame.width,
+            height: visibleFrame.height
+        )
+        let pendingRequest = try XCTUnwrap(
+            controller.axManager.prepareParkFrameApplications([
+                .init(pid: token.pid, window: axRef, frame: parkFrame)
+            ]).first
+        )
+        controller.axManager.markParkPending(
+            .init(pid: token.pid, window: axRef, frame: parkFrame)
+        )
+        XCTAssertNil(controller.axManager.pendingParkFrameRequest(for: token.windowId))
+
         var showDiff = WorkspaceLayoutDiff()
         showDiff.visibilityChanges.append(.show(token))
+        FrameApplyTrace.shared.beginCapture()
+        defer { FrameApplyTrace.shared.endCapture() }
         XCTAssertTrue(
             controller.layoutRefreshController.executeLayoutPlan(
                 Self.plan(workspaceId: workspaceId, monitor: monitor, diff: showDiff)
             )
         )
+        XCTAssertTrue(FrameApplyTrace.shared.dump().contains("outcome=ax-park-cancelled/revealed"))
+        XCTAssertTrue(FrameApplyTrace.shared.dump().contains("outcome=skip/contextUnavailable"))
         XCTAssertFalse(controller.axManager.pendingParkWindowIds.contains(token.windowId))
+        XCTAssertNil(controller.axManager.pendingParkFrameRequest(for: token.windowId))
+        XCTAssertNil(controller.axManager.verifiedParkFrame(for: token.windowId))
+        controller.axManager.confirmFrameWrite(for: token.windowId, frame: visibleFrame)
+
+        XCTAssertTrue(
+            controller.axManager.processParkFrameApplyResults([
+                WindowAdmissionTestSupport.successfulFrameResult(request: pendingRequest)
+            ]).isEmpty
+        )
+        XCTAssertNil(controller.axManager.verifiedParkFrame(for: token.windowId))
+        XCTAssertEqual(controller.axManager.lastAppliedFrame(for: token.windowId), visibleFrame)
         XCTAssertEqual(controller.workspaceManager.invariantViolationCountsDump(), "clean")
     }
 
-    func testAcceptedWriteOnParkedWindowRemarksPending() throws {
+    func testPendingRevealSuccessClearsParkRemarkedByOrdinaryWriteCallback() throws {
+        let controller = Self.controller()
+        let monitor = Self.monitor()
+        controller.workspaceManager.applyMonitorConfigurationChange([monitor])
+        let workspaceId = try XCTUnwrap(controller.workspaceManager.workspaceId(for: "1", createIfMissing: true))
+        _ = controller.workspaceManager.focusWorkspace(named: "1")
+
+        let pid: pid_t = 964_001
+        let windowId = 964_101
+        let axRef = AXWindowRef(element: AXUIElementCreateApplication(pid), windowId: windowId)
+        let token = controller.workspaceManager.addWindow(
+            axRef,
+            pid: pid,
+            windowId: windowId,
+            to: workspaceId,
+            mode: .floating
+        )
+        let hiddenState = HiddenState(
+            proportionalPosition: .zero,
+            referenceMonitorId: monitor.id,
+            reason: .scratchpad
+        )
+        let visibleFrame = CGRect(x: 100, y: 16, width: 800, height: 600)
+        controller.workspaceManager.setScratchpadToken(token)
+        controller.workspaceManager.setHiddenState(hiddenState, for: token)
+        let entry = try XCTUnwrap(controller.workspaceManager.entry(for: token))
+        let transactionId = try XCTUnwrap(
+            controller.layoutRefreshController.beginPendingRevealTransaction(
+                for: entry,
+                hiddenState: hiddenState,
+                targetFrame: visibleFrame,
+                monitor: monitor
+            )
+        )
+        let result = AXFrameApplyResult(
+            pid: pid,
+            windowId: windowId,
+            expectedWindow: axRef,
+            targetFrame: visibleFrame,
+            currentFrameHint: nil,
+            writeResult: AXFrameWriteResult(
+                targetFrame: visibleFrame,
+                observedFrame: visibleFrame,
+                writeOrder: .sizeThenPosition,
+                sizeError: .success,
+                positionError: .success,
+                failureReason: nil
+            )
+        )
+        controller.axManager.onFrameApplySucceeded = { result in
+            controller.layoutRefreshController.completePendingRevealTransaction(
+                with: result,
+                transactionId: transactionId
+            )
+        }
+
+        controller.axManager.handleAcceptedFrameApplySuccess(result)
+
+        XCTAssertNil(controller.workspaceManager.hiddenState(for: token))
+        XCTAssertFalse(controller.axManager.pendingParkWindowIds.contains(windowId))
+        XCTAssertNil(controller.axManager.pendingParkFrameRequest(for: windowId))
+        XCTAssertNil(controller.axManager.verifiedParkFrame(for: windowId))
+    }
+
+    func testAcceptedOrdinaryWriteInvalidatesVerifiedPark() throws {
         let controller = Self.controller()
         let monitor = Self.monitor()
         controller.workspaceManager.applyMonitorConfigurationChange([monitor])
@@ -126,7 +232,19 @@ final class DurableParkTests: XCTestCase {
             ),
             for: token
         )
+        let parkFrame = CGRect(x: monitor.frame.maxX - 1, y: 16, width: 800, height: 600)
+        let parkRequest = try XCTUnwrap(
+            controller.axManager.prepareParkFrameApplications([
+                .init(pid: token.pid, window: axRef, frame: parkFrame)
+            ]).first
+        )
+        XCTAssertTrue(
+            controller.axManager.processParkFrameApplyResults([
+                WindowAdmissionTestSupport.successfulFrameResult(request: parkRequest)
+            ]).isEmpty
+        )
         XCTAssertFalse(controller.axManager.pendingParkWindowIds.contains(token.windowId))
+        XCTAssertEqual(controller.axManager.verifiedParkFrame(for: token.windowId), parkFrame)
 
         let stragglerFrame = CGRect(x: -857, y: 16, width: 1256, height: 1378)
         let acceptedResult = AXFrameApplyResult(
@@ -146,6 +264,7 @@ final class DurableParkTests: XCTestCase {
         )
         controller.axManager.handleAcceptedFrameApplySuccess(acceptedResult)
         XCTAssertTrue(controller.axManager.pendingParkWindowIds.contains(token.windowId))
+        XCTAssertNil(controller.axManager.verifiedParkFrame(for: token.windowId))
 
         controller.workspaceManager.setHiddenState(nil, for: token)
         controller.axManager.clearParkPending(for: token.windowId, pid: token.pid, reason: "test")
@@ -153,76 +272,430 @@ final class DurableParkTests: XCTestCase {
         XCTAssertFalse(controller.axManager.pendingParkWindowIds.contains(token.windowId))
     }
 
-    func testStaleStragglerLandingAfterParkDoesNotDelaySettle() throws {
+    func testFailedParkRetriesOnceAndRemainsPendingForLaterSettlement() throws {
+        let controller = Self.controller()
+        let manager = controller.axManager
+        let pid: pid_t = 955_001
+        let windowId = 955_101
+        let axRef = AXWindowRef(element: AXUIElementCreateApplication(pid), windowId: windowId)
+        let parkFrame = CGRect(x: 2559, y: 16, width: 800, height: 600)
+        let target = AXFrameApplicationTarget(
+            pid: pid,
+            window: axRef,
+            frame: parkFrame
+        )
+        manager.markWindowInactive(windowId)
+        manager.suppressFrameWrites([(pid: pid, windowId: windowId)])
+
+        let firstRequest = try XCTUnwrap(manager.prepareParkFrameApplications([target]).first)
+        XCTAssertFalse(manager.hasPendingFrameWrite(for: windowId))
+        let retries = manager.processParkFrameApplyResults([
+            WindowAdmissionTestSupport.frameResult(
+                request: firstRequest,
+                observed: CGRect(x: 2558, y: 16, width: 800, height: 600),
+                failure: .verificationMismatch
+            )
+        ])
+        let retryRequest = try XCTUnwrap(retries.first)
+        XCTAssertEqual(retries.count, 1)
+        XCTAssertNotEqual(retryRequest.requestId, firstRequest.requestId)
+        XCTAssertEqual(manager.pendingParkFrameRequest(for: windowId), retryRequest)
+
+        XCTAssertTrue(
+            manager.processParkFrameApplyResults([
+                WindowAdmissionTestSupport.frameResult(
+                    request: retryRequest,
+                    observed: parkFrame,
+                    failure: .readbackFailed
+                )
+            ]).isEmpty
+        )
+        XCTAssertNil(manager.pendingParkFrameRequest(for: windowId))
+        XCTAssertNil(manager.verifiedParkFrame(for: windowId))
+        XCTAssertTrue(manager.pendingParkWindowIds.contains(windowId))
+
+        let laterRequest = try XCTUnwrap(manager.prepareParkFrameApplications([target]).first)
+        XCTAssertNotEqual(laterRequest.requestId, retryRequest.requestId)
+    }
+
+    func testAnimationSupersessionStillRequiresVisibleAXSettlementOnReveal() throws {
+        let manager = AXManager()
+        defer { manager.cleanup() }
+        let pid: pid_t = 965_001
+        let windowId = 965_101
+        let token = WindowToken(pid: pid, windowId: windowId)
+        let target = AXFrameApplicationTarget(
+            pid: pid,
+            window: AXWindowRef(
+                element: AXUIElementCreateApplication(pid),
+                windowId: windowId
+            ),
+            frame: CGRect(x: 2559, y: 16, width: 800, height: 600)
+        )
+        let staleRequest = try XCTUnwrap(manager.prepareParkFrameApplications([target]).first)
+
+        manager.markParkPending(target)
+
+        XCTAssertNil(manager.pendingParkFrameRequest(for: windowId))
+        XCTAssertTrue(manager.pendingParkWindowIds.contains(windowId))
+        XCTAssertEqual(
+            manager.cancelParkFrameJobs([(pid: pid, windowId: windowId)], reason: "revealed"),
+            [token]
+        )
+        XCTAssertFalse(manager.pendingParkWindowIds.contains(windowId))
+        XCTAssertTrue(
+            manager.processParkFrameApplyResults([
+                WindowAdmissionTestSupport.successfulFrameResult(request: staleRequest)
+            ]).isEmpty
+        )
+        XCTAssertNil(manager.verifiedParkFrame(for: windowId))
+    }
+
+    func testVerifiedParkDeduplicatesOnlyExactIdentityAndTargetWithoutTouchingFrameLedger() throws {
+        let controller = Self.controller()
+        let manager = controller.axManager
+        let pid: pid_t = 957_001
+        let windowId = 957_101
+        let axRef = AXWindowRef(element: AXUIElementCreateApplication(pid), windowId: windowId)
+        let visibleFrame = CGRect(x: 100, y: 16, width: 800, height: 600)
+        let parkFrame = CGRect(x: 2559, y: 16, width: 800, height: 600)
+        let target = AXFrameApplicationTarget(pid: pid, window: axRef, frame: parkFrame)
+
+        manager.markWindowInactive(windowId)
+        manager.suppressFrameWrites([(pid: pid, windowId: windowId)])
+        manager.confirmFrameWrite(for: windowId, frame: visibleFrame)
+
+        let request = try XCTUnwrap(manager.prepareParkFrameApplications([target]).first)
+        XCTAssertTrue(request.verify)
+        XCTAssertEqual(request.currentFrameHint, visibleFrame)
+        XCTAssertTrue(
+            manager.processParkFrameApplyResults([
+                WindowAdmissionTestSupport.successfulFrameResult(request: request)
+            ]).isEmpty
+        )
+        XCTAssertEqual(manager.verifiedParkFrame(for: windowId), parkFrame)
+        XCTAssertEqual(manager.lastAppliedFrame(for: windowId), visibleFrame)
+        XCTAssertFalse(manager.hasPendingFrameWrite(for: windowId))
+        XCTAssertTrue(manager.prepareParkFrameApplications([target]).isEmpty)
+
+        let replacementRef = AXWindowRef(
+            element: AXUIElementCreateApplication(pid + 1),
+            windowId: windowId
+        )
+        let identityRequest = try XCTUnwrap(
+            manager.prepareParkFrameApplications([
+                .init(pid: pid, window: replacementRef, frame: parkFrame)
+            ]).first
+        )
+        XCTAssertNotEqual(identityRequest.requestId, request.requestId)
+
+        let changedFrame = parkFrame.offsetBy(dx: -1, dy: 0)
+        let targetRequest = try XCTUnwrap(
+            manager.prepareParkFrameApplications([
+                .init(pid: pid, window: replacementRef, frame: changedFrame)
+            ]).first
+        )
+        XCTAssertNotEqual(targetRequest.requestId, identityRequest.requestId)
+        XCTAssertEqual(manager.pendingParkFrameRequest(for: windowId), targetRequest)
+    }
+
+    func testWorkspaceInactiveAndScratchpadFloatingHidesRemainPendingWithoutAXConfirmation() throws {
         let controller = Self.controller()
         let monitor = Self.monitor()
         controller.workspaceManager.applyMonitorConfigurationChange([monitor])
         let workspaceId = try XCTUnwrap(controller.workspaceManager.workspaceId(for: "1", createIfMissing: true))
         _ = controller.workspaceManager.focusWorkspace(named: "1")
-        controller.niriLayoutHandler.enableNiriLayout()
+        let cases: [(LayoutRefreshController.HideReason, HiddenReason)] = [
+            (.workspaceInactive, .workspaceInactive),
+            (.scratchpad, .scratchpad)
+        ]
 
-        let axRef = AXWindowRef(element: AXUIElementCreateApplication(955_001), windowId: 955_101)
-        let token = controller.workspaceManager.addWindow(
-            axRef,
-            pid: 955_001, windowId: 955_101, to: workspaceId
-        )
-        _ = controller.niriEngine?.addWindow(token: token, to: workspaceId, afterSelection: nil)
-
-        let onscreenFrame = CGRect(x: 100, y: 16, width: 800, height: 600)
-        var physicalFrame = onscreenFrame
-        controller.layoutRefreshController.fastFrameProvider = { queriedToken, _ in
-            queriedToken == token ? physicalFrame : nil
-        }
-
-        XCTAssertTrue(
-            controller.layoutRefreshController.executeLayoutPlan(
-                Self.hidePlan(workspaceId: workspaceId, monitor: monitor, token: token)
+        for (index, testCase) in cases.enumerated() {
+            let pid = pid_t(958_001 + index)
+            let windowId = 958_101 + index
+            let axRef = AXWindowRef(element: AXUIElementCreateApplication(pid), windowId: windowId)
+            let token = controller.workspaceManager.addWindow(
+                axRef,
+                pid: pid,
+                windowId: windowId,
+                to: workspaceId,
+                mode: .floating
             )
-        )
-        XCTAssertTrue(controller.axManager.pendingParkWindowIds.contains(token.windowId))
-        let parkOrigin = try XCTUnwrap(controller.axManager.skyLightLivePosition(for: token.windowId))
-        physicalFrame = CGRect(origin: parkOrigin, size: onscreenFrame.size)
+            let frame = CGRect(x: 100 + CGFloat(index * 20), y: 16, width: 800, height: 600)
+            controller.layoutRefreshController.fastFrameProvider = { queriedToken, _ in
+                queriedToken == token ? frame : nil
+            }
+            let entry = try XCTUnwrap(controller.workspaceManager.entry(for: token))
 
-        let stragglerFrame = CGRect(x: -202, y: 16, width: 800, height: 600)
-        controller.axManager.handleFrameApplyResults([
-            AXFrameApplyResult(
-                pid: token.pid,
-                windowId: token.windowId,
-                expectedWindow: axRef,
-                targetFrame: stragglerFrame,
-                currentFrameHint: nil,
-                writeResult: AXFrameWriteResult(
-                    targetFrame: stragglerFrame,
-                    observedFrame: stragglerFrame,
-                    writeOrder: .sizeThenPosition,
-                    sizeError: .success,
-                    positionError: .success,
-                    failureReason: nil
+            controller.layoutRefreshController.hideWindow(
+                entry,
+                monitor: monitor,
+                side: .right,
+                reason: testCase.0
+            )
+
+            XCTAssertEqual(controller.workspaceManager.hiddenState(for: token)?.reason, testCase.1)
+            XCTAssertTrue(controller.axManager.pendingParkWindowIds.contains(windowId))
+            XCTAssertNil(controller.axManager.verifiedParkFrame(for: windowId))
+        }
+    }
+
+    func testNiriAndDwindleTerminalLayoutTransientHidesCoverTiledAndFloatingWindows() throws {
+        let cases: [(usesDwindle: Bool, mode: TrackedWindowMode)] = [
+            (false, .tiling),
+            (false, .floating),
+            (true, .tiling),
+            (true, .floating)
+        ]
+
+        for (index, testCase) in cases.enumerated() {
+            let controller = Self.controller()
+            let monitor = Self.monitor()
+            controller.workspaceManager.applyMonitorConfigurationChange([monitor])
+            let workspaceId = try XCTUnwrap(
+                controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+            )
+            _ = controller.workspaceManager.focusWorkspace(named: "1")
+            if testCase.usesDwindle {
+                controller.dwindleLayoutHandler.enableDwindleLayout()
+            } else {
+                controller.niriLayoutHandler.enableNiriLayout()
+            }
+
+            let pid = pid_t(960_001 + index)
+            let windowId = 960_101 + index
+            let token = controller.workspaceManager.addWindow(
+                AXWindowRef(element: AXUIElementCreateApplication(pid), windowId: windowId),
+                pid: pid,
+                windowId: windowId,
+                to: workspaceId,
+                mode: testCase.mode
+            )
+            if testCase.mode == .tiling {
+                controller.workspaceManager.withEngineMutationScope {
+                    if testCase.usesDwindle {
+                        _ = controller.dwindleEngine?.addWindow(
+                            token: token,
+                            to: workspaceId,
+                            activeWindowFrame: nil
+                        )
+                    } else {
+                        _ = controller.niriEngine?.addWindow(
+                            token: token,
+                            to: workspaceId,
+                            afterSelection: nil
+                        )
+                    }
+                }
+            }
+            let frame = CGRect(x: 100, y: 16, width: 800, height: 600)
+            controller.layoutRefreshController.fastFrameProvider = { queriedToken, _ in
+                queriedToken == token ? frame : nil
+            }
+
+            FrameApplyTrace.shared.beginCapture()
+            let executed = controller.layoutRefreshController.executeLayoutPlan(
+                Self.hidePlan(
+                    workspaceId: workspaceId,
+                    monitor: monitor,
+                    token: token,
+                    isAnimationTick: false
                 )
             )
-        ])
+            let trace = FrameApplyTrace.shared.dump()
+            FrameApplyTrace.shared.endCapture()
 
-        XCTAssertTrue(
-            controller.layoutRefreshController.executeLayoutPlan(
-                Self.hidePlan(workspaceId: workspaceId, monitor: monitor, token: token)
+            let label = "\(testCase.usesDwindle ? "Dwindle" : "Niri")/\(testCase.mode)"
+            XCTAssertTrue(executed, label)
+            XCTAssertEqual(
+                controller.workspaceManager.hiddenState(for: token)?.reason,
+                .layoutTransient(.right),
+                label
+            )
+            XCTAssertTrue(controller.axManager.pendingParkWindowIds.contains(windowId), label)
+            XCTAssertTrue(trace.contains("outcome=sls-parked/settled"), label)
+            XCTAssertTrue(trace.contains("outcome=ax-park-failed/contextUnavailable"), label)
+        }
+    }
+
+    func testRekeyCancelsOldParkCompletionAndReissuesForNewIdentity() throws {
+        let controller = Self.controller()
+        let manager = controller.axManager
+        let pid: pid_t = 959_001
+        let oldWindowId = 959_101
+        let newWindowId = 959_102
+        let oldRef = AXWindowRef(
+            element: AXUIElementCreateApplication(pid),
+            windowId: oldWindowId
+        )
+        let newRef = AXWindowRef(
+            element: AXUIElementCreateApplication(pid + 1),
+            windowId: newWindowId
+        )
+        let parkFrame = CGRect(x: 2559, y: 16, width: 800, height: 600)
+        let staleRequest = try XCTUnwrap(
+            manager.prepareParkFrameApplications([
+                .init(pid: pid, window: oldRef, frame: parkFrame)
+            ]).first
+        )
+
+        manager.commitFrameApplicationStateForRebind(
+            from: AXManagedWindowIdentity(
+                token: WindowToken(pid: pid, windowId: oldWindowId),
+                axRef: oldRef
+            ),
+            to: AXManagedWindowIdentity(
+                token: WindowToken(pid: pid, windowId: newWindowId),
+                axRef: newRef
             )
         )
-        XCTAssertTrue(controller.axManager.pendingParkWindowIds.contains(token.windowId))
 
+        XCTAssertFalse(manager.pendingParkWindowIds.contains(oldWindowId))
+        XCTAssertNil(manager.pendingParkFrameRequest(for: oldWindowId))
+        XCTAssertNil(manager.verifiedParkFrame(for: oldWindowId))
+        XCTAssertTrue(manager.pendingParkWindowIds.contains(newWindowId))
+        XCTAssertNil(manager.verifiedParkFrame(for: newWindowId))
         XCTAssertTrue(
-            controller.layoutRefreshController.executeLayoutPlan(
-                Self.hidePlan(workspaceId: workspaceId, monitor: monitor, token: token)
+            manager.processParkFrameApplyResults([
+                WindowAdmissionTestSupport.successfulFrameResult(request: staleRequest)
+            ]).isEmpty
+        )
+        XCTAssertNil(manager.verifiedParkFrame(for: oldWindowId))
+        XCTAssertNil(manager.verifiedParkFrame(for: newWindowId))
+
+        let reissuedRequest = try XCTUnwrap(
+            manager.prepareParkFrameApplications([
+                .init(pid: pid, window: newRef, frame: parkFrame)
+            ]).first
+        )
+        XCTAssertEqual(reissuedRequest.windowId, newWindowId)
+        XCTAssertEqual(reissuedRequest.frame, parkFrame)
+        XCTAssertTrue(sameAXWindowIdentity(reissuedRequest.expectedWindow, newRef))
+    }
+
+    func testHiddenRekeyReissuesRetainedTargetAfterRetryExhaustion() throws {
+        let manager = AXManager()
+        let pid: pid_t = 962_001
+        let oldWindowId = 962_101
+        let newWindowId = 962_102
+        let oldRef = AXWindowRef(
+            element: AXUIElementCreateApplication(pid),
+            windowId: oldWindowId
+        )
+        let newRef = AXWindowRef(
+            element: AXUIElementCreateApplication(pid + 1),
+            windowId: newWindowId
+        )
+        let parkFrame = CGRect(x: 2559, y: 16, width: 800, height: 600)
+        let firstRequest = try XCTUnwrap(
+            manager.prepareParkFrameApplications([
+                .init(pid: pid, window: oldRef, frame: parkFrame)
+            ]).first
+        )
+        let retryRequest = try XCTUnwrap(
+            manager.processParkFrameApplyResults([
+                WindowAdmissionTestSupport.frameResult(
+                    request: firstRequest,
+                    observed: parkFrame.offsetBy(dx: -1, dy: 0),
+                    failure: .verificationMismatch
+                )
+            ]).first
+        )
+        XCTAssertTrue(
+            manager.processParkFrameApplyResults([
+                WindowAdmissionTestSupport.frameResult(
+                    request: retryRequest,
+                    observed: parkFrame,
+                    failure: .readbackFailed
+                )
+            ]).isEmpty
+        )
+        XCTAssertTrue(manager.pendingParkWindowIds.contains(oldWindowId))
+        XCTAssertNil(manager.pendingParkFrameRequest(for: oldWindowId))
+
+        FrameApplyTrace.shared.beginCapture()
+        defer {
+            FrameApplyTrace.shared.endCapture()
+            manager.cleanup()
+        }
+        manager.commitFrameApplicationStateForRebind(
+            from: AXManagedWindowIdentity(
+                token: WindowToken(pid: pid, windowId: oldWindowId),
+                axRef: oldRef
+            ),
+            to: AXManagedWindowIdentity(
+                token: WindowToken(pid: pid, windowId: newWindowId),
+                axRef: newRef
             )
         )
-        XCTAssertFalse(controller.axManager.pendingParkWindowIds.contains(token.windowId))
 
+        XCTAssertFalse(manager.pendingParkWindowIds.contains(oldWindowId))
+        XCTAssertTrue(manager.pendingParkWindowIds.contains(newWindowId))
+        XCTAssertNil(manager.pendingParkFrameRequest(for: newWindowId))
         XCTAssertTrue(
-            controller.layoutRefreshController.executeLayoutPlan(
-                Self.hidePlan(workspaceId: workspaceId, monitor: monitor, token: token, isAnimationTick: false)
+            FrameApplyTrace.shared.dump().contains(
+                "win=\(newWindowId) pid=\(pid) outcome=ax-park-failed/contextUnavailable"
             )
         )
-        XCTAssertFalse(controller.axManager.pendingParkWindowIds.contains(token.windowId))
-        XCTAssertEqual(controller.workspaceManager.invariantViolationCountsDump(), "clean")
+        let laterRequest = try XCTUnwrap(
+            manager.prepareParkFrameApplications([
+                .init(pid: pid, window: newRef, frame: parkFrame)
+            ]).first
+        )
+        XCTAssertEqual(laterRequest.frame, parkFrame)
+        XCTAssertTrue(sameAXWindowIdentity(laterRequest.expectedWindow, newRef))
+    }
+
+    func testAnimationOnlyParkRetainsTargetAcrossHiddenRekey() throws {
+        let manager = AXManager()
+        let pid: pid_t = 963_001
+        let oldWindowId = 963_101
+        let newWindowId = 963_102
+        let oldRef = AXWindowRef(
+            element: AXUIElementCreateApplication(pid),
+            windowId: oldWindowId
+        )
+        let newRef = AXWindowRef(
+            element: AXUIElementCreateApplication(pid + 1),
+            windowId: newWindowId
+        )
+        let parkFrame = CGRect(x: 2559, y: 16, width: 800, height: 600)
+        manager.markParkPending(
+            .init(pid: pid, window: oldRef, frame: parkFrame)
+        )
+        XCTAssertTrue(manager.pendingParkWindowIds.contains(oldWindowId))
+        XCTAssertNil(manager.pendingParkFrameRequest(for: oldWindowId))
+
+        FrameApplyTrace.shared.beginCapture()
+        defer {
+            FrameApplyTrace.shared.endCapture()
+            manager.cleanup()
+        }
+        manager.commitFrameApplicationStateForRebind(
+            from: AXManagedWindowIdentity(
+                token: WindowToken(pid: pid, windowId: oldWindowId),
+                axRef: oldRef
+            ),
+            to: AXManagedWindowIdentity(
+                token: WindowToken(pid: pid, windowId: newWindowId),
+                axRef: newRef
+            )
+        )
+
+        XCTAssertFalse(manager.pendingParkWindowIds.contains(oldWindowId))
+        XCTAssertTrue(manager.pendingParkWindowIds.contains(newWindowId))
+        XCTAssertTrue(
+            FrameApplyTrace.shared.dump().contains(
+                "win=\(newWindowId) pid=\(pid) outcome=ax-park-failed/contextUnavailable"
+            )
+        )
+        let laterRequest = try XCTUnwrap(
+            manager.prepareParkFrameApplications([
+                .init(pid: pid, window: newRef, frame: parkFrame)
+            ]).first
+        )
+        XCTAssertEqual(laterRequest.frame, parkFrame)
+        XCTAssertTrue(sameAXWindowIdentity(laterRequest.expectedWindow, newRef))
     }
 
     func testFrameChangedSkipsWindowServerQueryWhileScrollAnimating() throws {
@@ -255,15 +728,85 @@ final class DurableParkTests: XCTestCase {
         XCTAssertEqual(controller.workspaceManager.invariantViolationCountsDump(), "clean")
     }
 
-    func testRemovingWindowClearsParkPendingBookkeeping() {
+    func testRemovingWindowsClearsPendingAndVerifiedParkState() throws {
         let controller = Self.controller()
         let axManager = controller.axManager
+        let pid: pid_t = 953_001
+        let verifiedWindowId = 42
+        let pendingWindowId = 43
+        let verifiedTarget = AXFrameApplicationTarget(
+            pid: pid,
+            window: AXWindowRef(
+                element: AXUIElementCreateApplication(pid),
+                windowId: verifiedWindowId
+            ),
+            frame: CGRect(x: 2559, y: 16, width: 800, height: 600)
+        )
+        let pendingTarget = AXFrameApplicationTarget(
+            pid: pid,
+            window: AXWindowRef(
+                element: AXUIElementCreateApplication(pid),
+                windowId: pendingWindowId
+            ),
+            frame: CGRect(x: 2559, y: 32, width: 800, height: 600)
+        )
+        let verifiedRequest = try XCTUnwrap(
+            axManager.prepareParkFrameApplications([verifiedTarget]).first
+        )
+        _ = axManager.processParkFrameApplyResults([
+            WindowAdmissionTestSupport.successfulFrameResult(request: verifiedRequest)
+        ])
+        XCTAssertEqual(
+            axManager.verifiedParkFrame(for: verifiedWindowId),
+            verifiedTarget.frame
+        )
+        XCTAssertNotNil(axManager.prepareParkFrameApplications([pendingTarget]).first)
 
-        axManager.markParkPending(for: 42, pid: 953_001)
-        XCTAssertTrue(axManager.pendingParkWindowIds.contains(42))
+        axManager.removeWindowLedgerState(pid: pid, windowId: verifiedWindowId)
+        axManager.removeWindowLedgerState(pid: pid, windowId: pendingWindowId)
 
-        axManager.removeWindowLedgerState(pid: 953_001, windowId: 42)
-        XCTAssertFalse(axManager.pendingParkWindowIds.contains(42))
+        XCTAssertFalse(axManager.pendingParkWindowIds.contains(verifiedWindowId))
+        XCTAssertFalse(axManager.pendingParkWindowIds.contains(pendingWindowId))
+        XCTAssertNil(axManager.pendingParkFrameRequest(for: verifiedWindowId))
+        XCTAssertNil(axManager.pendingParkFrameRequest(for: pendingWindowId))
+        XCTAssertNil(axManager.verifiedParkFrame(for: verifiedWindowId))
+        XCTAssertNil(axManager.verifiedParkFrame(for: pendingWindowId))
+    }
+
+    func testCleanupClearsAllParkStateBeforeShutdown() throws {
+        let manager = AXManager()
+        let pid: pid_t = 961_001
+        let verifiedTarget = AXFrameApplicationTarget(
+            pid: pid,
+            window: AXWindowRef(
+                element: AXUIElementCreateApplication(pid),
+                windowId: 961_101
+            ),
+            frame: CGRect(x: 2559, y: 16, width: 800, height: 600)
+        )
+        let pendingTarget = AXFrameApplicationTarget(
+            pid: pid,
+            window: AXWindowRef(
+                element: AXUIElementCreateApplication(pid),
+                windowId: 961_102
+            ),
+            frame: CGRect(x: 2559, y: 32, width: 800, height: 600)
+        )
+        let verifiedRequest = try XCTUnwrap(
+            manager.prepareParkFrameApplications([verifiedTarget]).first
+        )
+        _ = manager.processParkFrameApplyResults([
+            WindowAdmissionTestSupport.successfulFrameResult(request: verifiedRequest)
+        ])
+        XCTAssertNotNil(manager.prepareParkFrameApplications([pendingTarget]).first)
+
+        manager.cleanup()
+
+        XCTAssertTrue(manager.pendingParkWindowIds.isEmpty)
+        XCTAssertNil(manager.pendingParkFrameRequest(for: verifiedTarget.windowId))
+        XCTAssertNil(manager.pendingParkFrameRequest(for: pendingTarget.windowId))
+        XCTAssertNil(manager.verifiedParkFrame(for: verifiedTarget.windowId))
+        XCTAssertNil(manager.verifiedParkFrame(for: pendingTarget.windowId))
     }
 
     private static func hidePlan(

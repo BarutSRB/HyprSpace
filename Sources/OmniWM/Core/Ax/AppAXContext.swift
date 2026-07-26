@@ -255,6 +255,7 @@ final class AppAXContext {
 
     private var activeFrameBatchJobs: [UUID: RunLoopJob] = [:]
     private let frameWriteGenerations = LockedWindowGenerationMap()
+    private let parkFrameWriteGenerations = LockedWindowGenerationMap()
     private let windowBindingEpoch = LockedGenerationEpoch()
     let suppressedFrameWindowIds = LockedWindowIdSet()
     private let axObserver: ThreadGuardedValue<AXObserver?>
@@ -1088,6 +1089,10 @@ final class AppAXContext {
         _ = frameWriteGenerations.nextGeneration(for: windowId)
     }
 
+    func cancelParkFrameJob(for windowId: Int) {
+        _ = parkFrameWriteGenerations.nextGeneration(for: windowId)
+    }
+
     func invalidateWindowIdentity() {
         _ = windowBindingEpoch.advance()
     }
@@ -1716,17 +1721,20 @@ final class AppAXContext {
 
     func prepareWindowRebind(from oldWindowId: Int, to newWindowId: Int) {
         frameWriteGenerations.invalidateAndMoveValue(from: oldWindowId, to: newWindowId)
+        parkFrameWriteGenerations.invalidateAndMoveValue(from: oldWindowId, to: newWindowId)
         suppressedFrameWindowIds.moveIfPresent(from: oldWindowId, to: newWindowId)
         _ = windowBindingEpoch.advance()
     }
 
     func prepareWindowRemoval(for windowId: Int) {
         frameWriteGenerations.invalidateAndRemove(windowId)
+        parkFrameWriteGenerations.invalidateAndRemove(windowId)
         suppressedFrameWindowIds.remove(windowId)
     }
 
     func retainFrameState(only windowIds: Set<Int>) {
         frameWriteGenerations.retainOnly(windowIds)
+        parkFrameWriteGenerations.retainOnly(windowIds)
         suppressedFrameWindowIds.retainOnly(windowIds)
     }
 
@@ -1825,6 +1833,35 @@ final class AppAXContext {
         _ frames: [AXFrameApplicationRequest],
         completion: @escaping @MainActor ([AXFrameApplyResult]) -> Void
     ) {
+        setFrameBatch(
+            frames,
+            generations: frameWriteGenerations,
+            suppression: suppressedFrameWindowIds,
+            forceVerification: false,
+            completion: completion
+        )
+    }
+
+    func setParkFramesBatch(
+        _ frames: [AXFrameApplicationRequest],
+        completion: @escaping @MainActor ([AXFrameApplyResult]) -> Void
+    ) {
+        setFrameBatch(
+            frames,
+            generations: parkFrameWriteGenerations,
+            suppression: nil,
+            forceVerification: true,
+            completion: completion
+        )
+    }
+
+    private func setFrameBatch(
+        _ frames: [AXFrameApplicationRequest],
+        generations: LockedWindowGenerationMap,
+        suppression: LockedWindowIdSet?,
+        forceVerification: Bool,
+        completion: @escaping @MainActor ([AXFrameApplyResult]) -> Void
+    ) {
         guard let thread else {
             completion(
                 frames.map {
@@ -1854,12 +1891,10 @@ final class AppAXContext {
                 expectedWindow: $0.expectedWindow,
                 frame: $0.frame,
                 currentFrameHint: $0.currentFrameHint,
-                generation: frameWriteGenerations.nextGeneration(for: $0.windowId),
-                verify: $0.verify
+                generation: generations.nextGeneration(for: $0.windowId),
+                verify: forceVerification || $0.verify
             )
         }
-        let suppression = suppressedFrameWindowIds
-        let generations = frameWriteGenerations
         let batchId = UUID()
         let currentPid = pid
 
@@ -1926,7 +1961,7 @@ final class AppAXContext {
                     )
                     continue
                 }
-                if suppression.contains(request.windowId) {
+                if suppression?.contains(request.windowId) == true {
                     results.append(
                         AXFrameApplyResult(
                             requestId: request.requestId,

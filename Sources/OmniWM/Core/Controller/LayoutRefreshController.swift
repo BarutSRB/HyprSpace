@@ -1863,6 +1863,13 @@ import QuartzCore
                     )
                 } else {
                     cancelPendingScratchpadReveal(for: entry.token)
+                    if controller.axManager.pendingParkWindowIds.contains(entry.windowId),
+                       let visibleFrame = observation?.visibleFrame
+                    {
+                        applyPositionPlans([
+                            WindowPositionPlan(entry: entry, frame: visibleFrame)
+                        ])
+                    }
                     controller.workspaceManager.setHiddenState(nil, for: entry.token)
                     controller.axManager.unsuppressFrameWrites([(entry.pid, entry.windowId)])
                 }
@@ -2583,80 +2590,15 @@ import QuartzCore
         }
     }
 
-    fileprivate struct WindowPositionPlan {
+    struct WindowPositionPlan {
         let entry: WindowState
         let frame: CGRect
     }
 
     fileprivate enum HideOperationResolution {
         case movable(WindowPositionPlan, hiddenState: HiddenState)
-        case alreadyHidden(hiddenState: HiddenState)
+        case alreadyHidden(WindowPositionPlan, hiddenState: HiddenState)
         case unavailable
-    }
-
-    fileprivate func applyPositionPlans(_ plans: [WindowPositionPlan], animationTick: Bool = false) {
-        guard let controller, !plans.isEmpty else { return }
-
-        controller.axManager.applyPositionsViaSkyLight(
-            plans.map { (windowId: $0.entry.windowId, frame: $0.frame) },
-            allowInactive: true
-        )
-
-        if animationTick {
-            for plan in plans {
-                controller.axManager.recordSkyLightMove(windowId: plan.entry.windowId, origin: plan.frame.origin)
-                controller.axManager.recordParkCommand(for: plan.entry.windowId)
-                FrameApplyTrace.recordEvent(
-                    pid: plan.entry.pid,
-                    windowId: plan.entry.windowId,
-                    outcome: "outcome=slsmove/anim",
-                    target: plan.frame
-                )
-            }
-            return
-        }
-
-        let verifyEpsilon: CGFloat = 1.0
-        for plan in plans {
-            controller.axManager.recordParkCommand(for: plan.entry.windowId)
-            let observedOrigin = AXWindowService.framePreferFast(plan.entry.axRef)?.origin
-            if let observedOrigin,
-               abs(observedOrigin.x - plan.frame.origin.x) > verifyEpsilon
-               || abs(observedOrigin.y - plan.frame.origin.y) > verifyEpsilon
-            {
-                FallbackFiringRecorder.shared.note(.skylight, "moveAXFallback")
-                let fallbackFrame = plan.frame
-                FrameApplyTrace.shared.record(
-                    .init(
-                        timestamp: Date(),
-                        pid: plan.entry.pid,
-                        windowId: plan.entry.windowId,
-                        outcome: "outcome=slsmove/fallback",
-                        target: fallbackFrame,
-                        hint: nil,
-                        observed: CGRect(origin: observedOrigin, size: plan.frame.size),
-                        confirmed: nil
-                    )
-                )
-                let axRef = plan.entry.axRef
-                AppAXContext.contexts[plan.entry.pid]?.axThread?.runInLoopAsync { _ in
-                    _ = AXWindowService.setFrame(axRef, frame: fallbackFrame)
-                }
-            } else {
-                FrameApplyTrace.shared.record(
-                    .init(
-                        timestamp: Date(),
-                        pid: plan.entry.pid,
-                        windowId: plan.entry.windowId,
-                        outcome: "outcome=slsmove/settle",
-                        target: plan.frame,
-                        hint: nil,
-                        observed: observedOrigin.map { CGRect(origin: $0, size: plan.frame.size) },
-                        confirmed: nil
-                    )
-                )
-            }
-        }
     }
 
     fileprivate func resolveHideOperation(
@@ -2704,7 +2646,13 @@ import QuartzCore
         if abs(frame.origin.x - origin.x) < moveEpsilon,
            abs(frame.origin.y - origin.y) < moveEpsilon
         {
-            return .alreadyHidden(hiddenState: hiddenState)
+            return .alreadyHidden(
+                WindowPositionPlan(
+                    entry: entry,
+                    frame: CGRect(origin: origin, size: frame.size)
+                ),
+                hiddenState: hiddenState
+            )
         }
 
         return .movable(
@@ -2810,11 +2758,12 @@ import QuartzCore
             controller.workspaceManager.setHiddenState(hiddenState, for: entry.token)
             controller.axManager.cancelPendingFrameJobs([frameEntry])
             controller.axManager.suppressFrameWrites([frameEntry])
-            applyPositionPlans([plan])
-        case let .alreadyHidden(hiddenState):
+            applyParkPositionPlans([plan], movablePlans: [plan], animationTick: false)
+        case let .alreadyHidden(plan, hiddenState):
             controller.workspaceManager.setHiddenState(hiddenState, for: entry.token)
             controller.axManager.cancelPendingFrameJobs([frameEntry])
             controller.axManager.suppressFrameWrites([frameEntry])
+            applyParkPositionPlans([plan], movablePlans: [], animationTick: false)
         case .unavailable:
             controller.axManager.cancelPendingFrameJobs([frameEntry])
             controller.axManager.suppressFrameWrites([frameEntry])
@@ -2830,8 +2779,10 @@ import QuartzCore
         guard !hiddenEntries.isEmpty, let controller else { return }
         var hiddenJobs: [(pid: pid_t, windowId: Int)] = []
         hiddenJobs.reserveCapacity(hiddenEntries.count)
-        var hidePlans: [WindowPositionPlan] = []
-        hidePlans.reserveCapacity(hiddenEntries.count)
+        var parkPlans: [WindowPositionPlan] = []
+        parkPlans.reserveCapacity(hiddenEntries.count)
+        var movableParkPlans: [WindowPositionPlan] = []
+        movableParkPlans.reserveCapacity(hiddenEntries.count)
         let hiddenPlacementMonitors = controller.workspaceManager.monitors.map(
             HiddenPlacementMonitorContext.init
         )
@@ -2849,31 +2800,14 @@ import QuartzCore
             case let .movable(movePlan, hiddenState):
                 controller.workspaceManager.setHiddenState(hiddenState, for: entry.token)
                 hiddenJobs.append((entry.pid, entry.windowId))
-                hidePlans.append(movePlan)
-                if isAnimationTick {
-                    controller.axManager.markParkPending(for: entry.windowId, pid: entry.pid)
-                }
-            case let .alreadyHidden(hiddenState):
+                parkPlans.append(movePlan)
+                movableParkPlans.append(movePlan)
+            case let .alreadyHidden(plan, hiddenState):
                 controller.workspaceManager.setHiddenState(hiddenState, for: entry.token)
                 hiddenJobs.append((entry.pid, entry.windowId))
-                if !isAnimationTick
-                    || (controller.axManager.skyLightLivePosition(for: entry.windowId) == nil
-                        && !controller.axManager.hasPendingFrameWrite(for: entry.windowId)
-                        && controller.axManager.parkQuietSinceCommand(for: entry.windowId))
-                {
-                    controller.axManager.clearParkPending(
-                        for: entry.windowId,
-                        pid: entry.pid,
-                        reason: "confirmed"
-                    )
-                }
+                parkPlans.append(plan)
             case .unavailable:
                 hiddenJobs.append((entry.pid, entry.windowId))
-                controller.axManager.clearParkPending(
-                    for: entry.windowId,
-                    pid: entry.pid,
-                    reason: "unavailable"
-                )
             }
         }
 
@@ -2881,8 +2815,12 @@ import QuartzCore
             controller.axManager.cancelPendingFrameJobs(hiddenJobs)
             controller.axManager.suppressFrameWrites(hiddenJobs)
         }
-        if !hidePlans.isEmpty {
-            applyPositionPlans(hidePlans, animationTick: isAnimationTick)
+        if !parkPlans.isEmpty {
+            applyParkPositionPlans(
+                parkPlans,
+                movablePlans: movableParkPlans,
+                animationTick: isAnimationTick
+            )
         }
     }
 
@@ -2942,7 +2880,14 @@ import QuartzCore
     ) -> Bool {
         guard let controller else { return false }
         guard let hiddenState = controller.workspaceManager.hiddenState(for: entry.token) else {
-            controller.axManager.unsuppressFrameWrites([(entry.pid, entry.windowId)])
+            if controller.axManager.pendingParkWindowIds.contains(entry.windowId),
+               let frame = fastFrame(for: entry.token, axRef: entry.axRef)
+               ?? controller.axManager.lastAppliedFrame(for: entry.windowId)
+            {
+                applyPositionPlans([WindowPositionPlan(entry: entry, frame: frame)])
+            } else {
+                controller.axManager.unsuppressFrameWrites([(entry.pid, entry.windowId)])
+            }
             return true
         }
         guard hiddenState.workspaceInactive else { return false }
@@ -3261,6 +3206,7 @@ import QuartzCore
         controller.withRuntimeFrameJobCancellationSuppressed {
             controller.workspaceManager.setHiddenState(nil, for: pendingTransaction.token)
         }
+        controller.axManager.clearParkPending(for: pendingTransaction.windowId, pid: pendingTransaction.pid)
         if pendingTransaction.hiddenState.isScratchpad {
             controller.requestWorkspaceBarRefresh()
         }
@@ -3589,6 +3535,8 @@ import QuartzCore
         guard let controller else { return nil }
         guard let frame = fastFrame(for: entry.token, axRef: entry.axRef)
             ?? controller.axManager.lastAppliedFrame(for: entry.windowId)
+            ?? entry.observedState.frame
+            ?? entry.floatingState?.lastFrame
         else {
             return nil
         }
@@ -3604,12 +3552,6 @@ import QuartzCore
 
         let topLeft = topLeftPoint(from: hiddenState.proportionalPosition, in: restoreFrame)
         let restoredOrigin = clampedOrigin(forTopLeft: topLeft, windowSize: frame.size, in: restoreFrame)
-        let moveEpsilon: CGFloat = 0.01
-        if abs(frame.origin.x - restoredOrigin.x) < moveEpsilon,
-           abs(frame.origin.y - restoredOrigin.y) < moveEpsilon
-        {
-            return nil
-        }
 
         return WindowPositionPlan(
             entry: entry,
@@ -3730,6 +3672,13 @@ final class LayoutDiffExecutor {
             restoreEntries.append((entry, restoreChange.hiddenState))
         }
 
+        for (entry, hiddenState) in shownEntries
+            where !hiddenTokens.contains(entry.token) && !isDeferredReveal(entry.token)
+        {
+            guard let hiddenState, restoreTokens.insert(entry.token).inserted else { continue }
+            restoreEntries.append((entry, hiddenState))
+        }
+
         for (entry, hiddenState) in restoreEntries {
             guard refreshController.shouldUsePendingRevealTransaction(
                 for: entry,
@@ -3753,7 +3702,7 @@ final class LayoutDiffExecutor {
             }
         }
 
-        for (entry, hiddenState) in shownEntries {
+        for (entry, hiddenState) in shownEntries where !restoreTokens.contains(entry.token) {
             guard let hiddenState else { continue }
             guard refreshController.shouldUsePendingRevealTransaction(
                 for: entry,
@@ -3796,7 +3745,7 @@ final class LayoutDiffExecutor {
                         hiddenState: hiddenState
                     )
                 }
-            refreshController.applyPositionPlans(restorePlans, animationTick: plan.isAnimationTick)
+            refreshController.applyPositionPlans(restorePlans)
 
             for (entry, _) in restoreEntries
                 where pendingRevealTransactionIdsByToken[entry.token] == nil

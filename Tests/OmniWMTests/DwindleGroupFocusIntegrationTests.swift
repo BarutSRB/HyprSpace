@@ -109,9 +109,17 @@ final class DwindleGroupFocusIntegrationTests: XCTestCase {
         postLayout.runIfCurrent(using: fixture.controller.workspaceManager)
         XCTAssertEqual(frontedTokens, [neighbor])
 
+        let revealResult = frameResult(token: fixture.inactiveToken, frame: pendingReveal.frame)
+        fixture.controller.axManager.handleAcceptedFrameApplySuccess(revealResult)
+        XCTAssertTrue(
+            fixture.controller.axManager.pendingParkWindowIds.contains(fixture.inactiveToken.windowId)
+        )
         fixture.controller.dwindleLayoutHandler.completePendingGroupRevealTransaction(
-            with: frameResult(token: fixture.inactiveToken, frame: pendingReveal.frame),
+            with: revealResult,
             transactionId: pendingReveal.transactionId
+        )
+        XCTAssertFalse(
+            fixture.controller.axManager.pendingParkWindowIds.contains(fixture.inactiveToken.windowId)
         )
         XCTAssertEqual(frontedTokens, [neighbor, fixture.inactiveToken])
     }

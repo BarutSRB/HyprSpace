@@ -1515,37 +1515,6 @@ final class AXFullRescanBoundaryTests: XCTestCase {
         XCTAssertTrue(suppression.contains(newWindowId))
     }
 
-    func testManagerDoesNotRecordRejectedRawSuccessAsFrameActivity() {
-        let manager = AXManager()
-        let pid: pid_t = 72_008
-        let windowId = 72_009
-        let target = CGRect(x: 10, y: 20, width: 800, height: 600)
-        let window = AXWindowRef(element: AXUIElementCreateApplication(pid), windowId: windowId)
-        manager.recordParkCommand(for: windowId)
-
-        manager.handleFrameApplyResults([
-            AXFrameApplyResult(
-                requestId: 999,
-                pid: pid,
-                windowId: windowId,
-                expectedWindow: window,
-                targetFrame: target,
-                currentFrameHint: nil,
-                writeResult: AXFrameWriteResult(
-                    targetFrame: target,
-                    observedFrame: target,
-                    writeOrder: .sizeThenPosition,
-                    sizeError: .success,
-                    positionError: .success,
-                    failureReason: nil
-                )
-            )
-        ])
-
-        XCTAssertTrue(manager.parkQuietSinceCommand(for: windowId))
-        manager.cleanup()
-    }
-
     func testManagedWindowBindingRetryBackoffIsBounded() async {
         XCTAssertEqual(AXManager.managedWindowBindingRetryDelay(afterFailure: 1), .milliseconds(100))
         XCTAssertEqual(AXManager.managedWindowBindingRetryDelay(afterFailure: 2), .milliseconds(250))
