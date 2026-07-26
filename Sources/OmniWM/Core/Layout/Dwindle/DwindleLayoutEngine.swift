@@ -318,8 +318,6 @@ final class DwindleLayoutEngine {
         let (orientation, newFirst): (DwindleOrientation, Bool)
         if let dir = preselectedDirection {
             orientation = dir.dwindleOrientation
-            // First child of a vertical split is the bottom half (frames are AppKit
-            // y-up), so an upward placement targets the second child.
             newFirst = dir == .left || dir == .down
         } else {
             (orientation, newFirst) = planSplit(
