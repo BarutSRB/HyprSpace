@@ -95,6 +95,15 @@ final class SettingsStore {
         didSet { scheduleSave() }
     }
 
+    func applyMonitorSetup(
+        routingSettings: [MonitorRoutingSettings],
+        mouseWarpEnabled: Bool
+    ) {
+        monitorRoutingSettings = routingSettings
+        monitorRoutingMode = .custom
+        self.mouseWarpEnabled = mouseWarpEnabled
+    }
+
     var gapSize = SettingsStore.defaultExport.gapSize {
         didSet { scheduleSave() }
     }
@@ -590,6 +599,10 @@ final class SettingsStore {
         set { runtimeState.hasSeenIssueWalkthrough = newValue }
     }
 
+    var monitorSetupStatus = RuntimeStateStore.defaultMonitorSetupStatus {
+        didSet { runtimeState.monitorSetupStatus = monitorSetupStatus }
+    }
+
     init(
         persistence: SettingsFilePersistence = SettingsFilePersistence(),
         runtimeState: RuntimeStateStore = RuntimeStateStore(),
@@ -599,6 +612,7 @@ final class SettingsStore {
         self.runtimeState = runtimeState
         self.autosaveEnabled = autosaveEnabled
         commandPaletteLastMode = runtimeState.commandPaletteLastMode
+        monitorSetupStatus = runtimeState.monitorSetupStatus
         isApplyingRuntimeState = true
         quakeTerminalCustomFrameStorage = QuakeTerminalGeometryPolicy.normalizedCustomFrame(
             runtimeState.quakeTerminalCustomFrame

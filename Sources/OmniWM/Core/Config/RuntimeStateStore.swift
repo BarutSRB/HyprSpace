@@ -43,6 +43,12 @@ struct IssueDraft: Codable, Equatable {
     var polishedBody: String = ""
 }
 
+enum MonitorSetupStatus: String, Codable, Equatable, Sendable {
+    case notPresented
+    case dismissed
+    case completed
+}
+
 struct RuntimeState: Codable, Equatable {
     var windowRestoreCatalog: PersistedWindowRestoreCatalog?
     var updaterLastCheckedAt: Date?
@@ -52,6 +58,7 @@ struct RuntimeState: Codable, Equatable {
     var quakeTerminalCustomFrame: RuntimeQuakeTerminalFrame?
     var issueDraft: IssueDraft?
     var hasSeenIssueWalkthrough: Bool?
+    var monitorSetupStatus: MonitorSetupStatus?
 }
 
 @MainActor
@@ -60,6 +67,7 @@ final class RuntimeStateStore {
     nonisolated static let fileName = "runtime-state.json"
     nonisolated static let defaultCommandPaletteLastMode = CommandPaletteMode.windows
     nonisolated static let defaultQuakeTerminalUseCustomFrame = false
+    nonisolated static let defaultMonitorSetupStatus = MonitorSetupStatus.notPresented
     nonisolated static var fileURL: URL {
         defaultDirectoryURL.appendingPathComponent(fileName, isDirectory: false)
     }
@@ -194,6 +202,15 @@ final class RuntimeStateStore {
         set {
             guard hasSeenIssueWalkthrough != newValue else { return }
             state.hasSeenIssueWalkthrough = newValue
+            scheduleSave()
+        }
+    }
+
+    var monitorSetupStatus: MonitorSetupStatus {
+        get { state.monitorSetupStatus ?? Self.defaultMonitorSetupStatus }
+        set {
+            guard monitorSetupStatus != newValue else { return }
+            state.monitorSetupStatus = newValue
             scheduleSave()
         }
     }

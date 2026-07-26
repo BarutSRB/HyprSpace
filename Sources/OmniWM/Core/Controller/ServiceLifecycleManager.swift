@@ -98,6 +98,9 @@ final class ServiceLifecycleManager {
 
     private func startServices() {
         guard let controller, !controller.hasStartedServices else { return }
+        if refreshMonitorConfigurationForServiceStart(currentMonitors: Monitor.current()) {
+            controller.syncMonitorsToNiriEngine()
+        }
         controller.hasStartedServices = true
         controller.reconcileEnabledAndHotkeysState()
         controller.eventIntake.open(sink: controller.eventInterpreter)
@@ -223,13 +226,21 @@ final class ServiceLifecycleManager {
         applyMonitorConfigurationChanged(currentMonitors: Monitor.current())
     }
 
+    @discardableResult
+    func refreshMonitorConfigurationForServiceStart(currentMonitors: [Monitor]) -> Bool {
+        guard let controller else { return false }
+        guard isUsableMonitorConfiguration(currentMonitors) else { return false }
+        guard controller.workspaceManager.monitors != currentMonitors else { return false }
+        controller.workspaceManager.applyMonitorConfigurationChange(currentMonitors)
+        return true
+    }
+
     func applyMonitorConfigurationChanged(
         currentMonitors: [Monitor],
         performPostUpdateActions: Bool = true
     ) {
         guard let controller else { return }
-        guard !currentMonitors.isEmpty else { return }
-        guard currentMonitors.allSatisfy({ $0.frame.width > 1 && $0.frame.height > 1 }) else { return }
+        guard isUsableMonitorConfiguration(currentMonitors) else { return }
 
         controller.workspaceManager.applyMonitorConfigurationChange(currentMonitors)
         controller.resetMouseWarpTransientState()
@@ -244,6 +255,11 @@ final class ServiceLifecycleManager {
 
         controller.layoutRefreshController.requestFullRescan(reason: .monitorConfigurationChanged)
         controller.reapplyQuakeTerminalGeometryForMonitorChange()
+    }
+
+    private func isUsableMonitorConfiguration(_ monitors: [Monitor]) -> Bool {
+        !monitors.isEmpty
+            && monitors.allSatisfy { $0.frame.width > 1 && $0.frame.height > 1 }
     }
 
     func handleAppTerminated(pid: pid_t) {

@@ -408,6 +408,16 @@ For setup, installation options, commands, queries, rules, subscriptions, and se
 
 ## User Guide
 
+### Multi-Monitor Setup
+
+OmniWM uses two display maps for different jobs:
+
+1. Open **System Settings > Displays > Arrange**. Put the physically largest or widest display at the bottom. Place the next smaller display above and to its right so its bottom-left corner touches the lower display's top-right corner. Continue the same staircase for every additional display. This macOS map is a technical arrangement used for actual window placement; it does not need to look like your desk.
+2. Open **OmniWM Settings > Monitors** and arrange the OmniWM routing map to match where the displays really sit on your desk. Keep every display connected by a left, right, up, or down edge; diagonal-only displays cannot exchange directional focus, window moves, or mouse warp.
+3. Leave **Mouse Warp** turned on for the recommended experience. It lets the pointer cross between displays according to the real-desk OmniWM map even though macOS uses the staircase.
+
+The setup assistant opens automatically when OmniWM first sees multiple displays. To review or redo it later, choose **Run Monitor Setup…** in **Settings > Monitors**. The assistant's **Show Numbers on Screens** action helps match each physical display to its tile.
+
 ### Layout Modes
 
 OmniWM offers two layout engines that you can switch between per workspace:

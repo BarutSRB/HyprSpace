@@ -5,6 +5,19 @@ import AppKit
 import Observation
 import OmniWMIPC
 
+struct MonitorSetupPresentationPolicy {
+    static func shouldAutomaticallyPresent(
+        status: MonitorSetupStatus,
+        monitors: [Monitor],
+        launchOverlayFinished: Bool
+    ) -> Bool {
+        status == .notPresented
+            && monitors.count >= 2
+            && monitors.allSatisfy { $0.frame.width > 1 && $0.frame.height > 1 }
+            && launchOverlayFinished
+    }
+}
+
 @MainActor @Observable
 public final class AppBootstrapState {
     var settings: SettingsStore?
@@ -54,6 +67,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var updateCoordinator: (any AppUpdateCoordinating)?
     private var runtimeStateStore: RuntimeStateStore?
     private var launchOverlayController: LaunchOverlayController?
+    private var monitorSetupScreenObserver: NSObjectProtocol?
+    private var monitorSetupEvaluationTask: Task<Void, Never>?
+    private var launchOverlayFinished = false
 
     public func applicationDidFinishLaunching(_: Notification) {
         NSApplication.shared.setActivationPolicy(.accessory)
@@ -70,6 +86,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             controller.workspaceManager.flushPersistedWindowRestoreCatalogNow()
         }
         AppDelegate.sharedBootstrap?.settings?.flushNow()
+        stopMonitorSetupPresentationObservation()
         stopIPCServer()
         runtimeStateStore?.flushNow()
     }
@@ -144,9 +161,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         updateCoordinator.startAutomaticChecks()
 
+        startMonitorSetupPresentationObservation()
         let overlay = LaunchOverlayController()
         launchOverlayController = overlay
-        overlay.play { [weak self] in self?.launchOverlayController = nil }
+        overlay.play { [weak self] in
+            guard let self else { return }
+            launchOverlayController = nil
+            launchOverlayFinished = true
+            scheduleMonitorSetupEvaluation()
+        }
     }
 
     func startIPCServer(controller: WMController) throws {
@@ -169,6 +192,65 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private func stopIPCServer() {
         ipcServer?.stop()
         ipcServer = nil
+    }
+
+    private func startMonitorSetupPresentationObservation() {
+        guard monitorSetupScreenObserver == nil else { return }
+        monitorSetupScreenObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.scheduleMonitorSetupEvaluation()
+            }
+        }
+    }
+
+    private func scheduleMonitorSetupEvaluation() {
+        guard launchOverlayFinished else { return }
+        monitorSetupEvaluationTask?.cancel()
+        monitorSetupEvaluationTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            self?.evaluateMonitorSetupPresentation()
+        }
+    }
+
+    private func evaluateMonitorSetupPresentation() {
+        guard let bootstrap = AppDelegate.sharedBootstrap,
+              let settings = bootstrap.settings,
+              let controller = bootstrap.controller
+        else { return }
+        let shouldPresent = MonitorSetupPresentationPolicy.shouldAutomaticallyPresent(
+            status: settings.monitorSetupStatus,
+            monitors: Monitor.current(),
+            launchOverlayFinished: launchOverlayFinished
+        )
+        guard shouldPresent else {
+            if settings.monitorSetupStatus != .notPresented {
+                stopMonitorSetupPresentationObservation()
+            }
+            return
+        }
+
+        settings.monitorSetupStatus = .dismissed
+        stopMonitorSetupPresentationObservation()
+        SettingsWindowController.shared.show(
+            settings: settings,
+            controller: controller,
+            updateCoordinator: bootstrap.updateCoordinator,
+            presentMonitorSetup: true
+        )
+    }
+
+    private func stopMonitorSetupPresentationObservation() {
+        monitorSetupEvaluationTask?.cancel()
+        monitorSetupEvaluationTask = nil
+        if let monitorSetupScreenObserver {
+            NotificationCenter.default.removeObserver(monitorSetupScreenObserver)
+            self.monitorSetupScreenObserver = nil
+        }
     }
 
     private func presentInfoAlert(title: String, message: String) {

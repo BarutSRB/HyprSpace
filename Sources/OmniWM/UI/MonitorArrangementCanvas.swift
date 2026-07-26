@@ -45,9 +45,15 @@ struct MonitorArrangementTile: View {
     let fallbackName: String
     let isMain: Bool
     var isSelected: Bool = false
+    var identifierNumber: Int? = nil
 
     private var name: String {
         displayLabel?.name ?? fallbackName
+    }
+
+    private var accessibilityName: String {
+        guard let identifierNumber else { return name }
+        return "Display \(identifierNumber), \(name)"
     }
 
     var body: some View {
@@ -83,8 +89,18 @@ struct MonitorArrangementTile: View {
                     .padding(.horizontal, 4)
             }
         }
+        .overlay(alignment: .topLeading) {
+            if let identifierNumber {
+                Text(identifierNumber.formatted())
+                    .font(.caption2.bold())
+                    .foregroundStyle(.primary)
+                    .frame(minWidth: 18, minHeight: 18)
+                    .background(.regularMaterial, in: Circle())
+                    .padding(5)
+            }
+        }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(isMain ? "\(name), main display" : name)
+        .accessibilityLabel(isMain ? "\(accessibilityName), main display" : accessibilityName)
     }
 }
 
@@ -96,6 +112,7 @@ struct RoutingArrangementCanvas: View {
         let displayLabel: MonitorDisplayLabel?
         let fallbackName: String
         let isMain: Bool
+        var identifierNumber: Int? = nil
     }
 
     let tiles: [Tile]
@@ -147,7 +164,8 @@ struct RoutingArrangementCanvas: View {
                         displayLabel: tile.displayLabel,
                         fallbackName: tile.fallbackName,
                         isMain: tile.isMain,
-                        isSelected: tile.id == selected
+                        isSelected: tile.id == selected,
+                        identifierNumber: tile.identifierNumber
                     )
                     .frame(width: frame.width, height: frame.height)
                     .offset(

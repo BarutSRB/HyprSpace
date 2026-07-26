@@ -100,6 +100,62 @@ final class MonitorSettingsIdentityTests: XCTestCase {
         XCTAssertNil(settings.niriSettings(for: secondary))
     }
 
+    @MainActor
+    func testServiceStartRefreshesStaleBootMonitorSnapshotBeforeServicesBecomeActive() {
+        let stale = makeMonitor(displayId: 2, name: "Stale", displayUUID: displayUUIDA)
+        let current = makeMonitor(displayId: 3, name: "Current", displayUUID: displayUUIDB)
+        let controller = WMController(settings: makeSettingsStore())
+        controller.workspaceManager.applyMonitorConfigurationChange([stale])
+
+        XCTAssertEqual(controller.workspaceManager.monitors, [stale])
+        XCTAssertFalse(controller.hasStartedServices)
+
+        controller.serviceLifecycleManager.refreshMonitorConfigurationForServiceStart(
+            currentMonitors: [current]
+        )
+
+        XCTAssertEqual(controller.workspaceManager.monitors, [current])
+        XCTAssertFalse(controller.hasStartedServices)
+    }
+
+    @MainActor
+    func testServiceStartKeepsStaleSnapshotWhenCurrentConfigurationIsTransient() {
+        let stale = makeMonitor(displayId: 2, name: "Stale", displayUUID: displayUUIDA)
+        let transient = Monitor(
+            id: .init(displayId: 3),
+            displayId: 3,
+            frame: CGRect(x: 0, y: 0, width: 1, height: 900),
+            visibleFrame: CGRect(x: 0, y: 0, width: 1, height: 900),
+            hasNotch: false,
+            name: "Transient",
+            displayUUID: displayUUIDB
+        )
+        let controller = WMController(settings: makeSettingsStore())
+        controller.workspaceManager.applyMonitorConfigurationChange([stale])
+
+        controller.serviceLifecycleManager.refreshMonitorConfigurationForServiceStart(
+            currentMonitors: [transient]
+        )
+
+        XCTAssertEqual(controller.workspaceManager.monitors, [stale])
+        XCTAssertFalse(controller.hasStartedServices)
+    }
+
+    @MainActor
+    func testServiceStartDoesNotCommitAnUnchangedMonitorSnapshot() {
+        let current = makeMonitor(displayId: 2, name: "Current", displayUUID: displayUUIDA)
+        let controller = WMController(settings: makeSettingsStore())
+        controller.workspaceManager.applyMonitorConfigurationChange([current])
+        let worldSeq = controller.workspaceManager.worldSeq
+
+        controller.serviceLifecycleManager.refreshMonitorConfigurationForServiceStart(
+            currentMonitors: [current]
+        )
+
+        XCTAssertEqual(controller.workspaceManager.worldSeq, worldSeq)
+        XCTAssertFalse(controller.hasStartedServices)
+    }
+
     func testDuplicateStableClaimsFailClosedAndExplicitEditCollapsesThem() {
         let monitor = makeMonitor(displayId: 2, name: "Display", displayUUID: displayUUIDA)
         var overrides = [

@@ -16,10 +16,13 @@ final class SettingsWindowController {
         settings: SettingsStore,
         controller: WMController,
         updateCoordinator: (any AppUpdateCoordinating)? = nil,
-        section: SettingsSection? = nil
+        section: SettingsSection? = nil,
+        presentMonitorSetup: Bool = false
     ) {
         windowCornerPreferences.refresh()
-        if let section {
+        if presentMonitorSetup {
+            navigation.requestMonitorSetupPresentation()
+        } else if let section {
             navigation.section = section
         }
 

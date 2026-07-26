@@ -7,9 +7,11 @@ import SwiftUI
 struct MonitorSettingsTab: View {
     @Bindable var settings: SettingsStore
     @Bindable var controller: WMController
+    let navigation: SettingsNavigationModel
 
     @State private var selectedMonitor: Monitor.ID?
     @State private var connectedMonitors: [Monitor] = Monitor.current()
+    @State private var isMonitorSetupPresented = false
 
     private var sortedMonitors: [Monitor] {
         MonitorSettingsTabModel.sortedMonitors(connectedMonitors)
@@ -81,8 +83,42 @@ struct MonitorSettingsTab: View {
 
     var body: some View {
         SettingsPage(
-            subtitle: "Route cross-monitor focus, move, and mouse warp independently of the macOS display arrangement."
+            subtitle: "macOS controls where windows are placed. OmniWM can use a separate map that matches how "
+                + "your displays are actually arranged on your desk."
         ) {
+            Section("Guided Setup") {
+                HStack(alignment: .center, spacing: 12) {
+                    Label {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(settings.monitorSetupStatus == .completed
+                                ? "Multi-monitor setup is complete"
+                                : "Set up multiple displays")
+                                .fontWeight(.medium)
+                            Text(
+                                settings.monitorSetupStatus == .completed
+                                    ? "Run the guide again after moving, replacing, or adding a display."
+                                    : "Follow three visual steps for the macOS staircase, your real desk, and Mouse Warp."
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: settings.monitorSetupStatus == .completed
+                            ? "checkmark.circle.fill"
+                            : "sparkles")
+                            .foregroundStyle(
+                                settings.monitorSetupStatus == .completed ? Color.green : Color.accentColor
+                            )
+                    }
+
+                    Spacer()
+
+                    Button("Run Monitor Setup…") {
+                        isMonitorSetupPresented = true
+                    }
+                }
+            }
+
             Section("macOS Arrangement") {
                 if sortedMonitors.isEmpty {
                     Text("No monitors detected.")
@@ -95,8 +131,8 @@ struct MonitorSettingsTab: View {
                         onSelect: { selectedMonitor = $0 }
                     )
                     SettingsCaption(
-                        "How macOS arranges your displays (used for actual window placement). "
-                            + "Click a display to edit its orientation below."
+                        "This is the technical macOS map used for actual window placement. "
+                            + "For multiple displays, the setup guide shows how to arrange them as a corner-to-corner staircase."
                     )
                 }
             }
@@ -146,11 +182,14 @@ struct MonitorSettingsTab: View {
                     Button("Reset Custom Arrangement to macOS Layout") { seedFromMacOS() }
 
                     SettingsCaption(
-                        "Drag monitors into your physical layout. OmniWM uses this for cross-monitor focus, "
-                            + "move, and mouse warp — not for window placement."
+                        "Make this look like your real desk. Displays in the same row or column can exchange focus, "
+                            + "windows, and the pointer. This does not change where macOS places windows."
                     )
                 } else {
-                    SettingsCaption("Routing follows the macOS arrangement shown above.")
+                    SettingsCaption(
+                        "Routing currently follows the technical macOS map. Run the setup guide to create a separate "
+                            + "map that matches your desk."
+                    )
                 }
             }
 
@@ -158,7 +197,12 @@ struct MonitorSettingsTab: View {
                 Toggle("Focus Across Monitor at Edge", isOn: $settings.focusCrossesMonitorAtEdge)
                 Toggle("Move Window Across Monitor at Edge", isOn: $settings.moveCrossesMonitorAtEdge)
                 Toggle("Follow Window to Monitor", isOn: $settings.focusFollowsWindowToMonitor)
-                Toggle("Mouse Warp", isOn: $settings.mouseWarpEnabled)
+                Toggle(isOn: $settings.mouseWarpEnabled) {
+                    HStack(spacing: 8) {
+                        Text("Mouse Warp")
+                        MonitorBadge(text: "Recommended")
+                    }
+                }
                 Toggle("Constrain Cursor to Arrangement", isOn: $settings.cursorContainmentEnabled)
                     .disabled(!settings.mouseWarpEnabled || settings.monitorRoutingMode != .custom)
 
@@ -169,9 +213,11 @@ struct MonitorSettingsTab: View {
                             .monospacedDigit()
                     }
                 }
+                .disabled(!settings.mouseWarpEnabled)
 
                 SettingsCaption(
-                    "These use the OmniWM Routing Arrangement, not necessarily the macOS arrangement."
+                    "Mouse Warp moves the pointer across matching display edges using the OmniWM routing arrangement. "
+                        + "It is recommended when the macOS displays touch only at their corners."
                 )
             }
 
@@ -191,12 +237,33 @@ struct MonitorSettingsTab: View {
                 }
             }
         }
-        .onAppear(perform: refreshConnectedMonitors)
+        .onAppear {
+            refreshConnectedMonitors()
+            presentRequestedMonitorSetupIfNeeded()
+        }
+        .onChange(of: navigation.hasPendingMonitorSetupPresentation) { _, pending in
+            guard pending else { return }
+            presentRequestedMonitorSetupIfNeeded()
+        }
         .onReceive(NotificationCenter.default
             .publisher(for: NSApplication.didChangeScreenParametersNotification))
         { _ in
             refreshConnectedMonitors()
         }
+        .sheet(isPresented: $isMonitorSetupPresented) {
+            MonitorSetupGuide(
+                settings: settings,
+                controller: controller,
+                monitors: sortedMonitors,
+                onFinish: { isMonitorSetupPresented = false },
+                onSkip: { isMonitorSetupPresented = false }
+            )
+        }
+    }
+
+    private func presentRequestedMonitorSetupIfNeeded() {
+        guard navigation.consumeMonitorSetupPresentationRequest() else { return }
+        isMonitorSetupPresented = true
     }
 
     private func refreshConnectedMonitors() {
@@ -238,27 +305,19 @@ struct MonitorSettingsTab: View {
     private func placeRouting(_ monitorID: Monitor.ID, column: Int, row: Int) {
         let monitors = sortedMonitors
         let layout = routingEditorLayout.settings
-        var cells: [Monitor.ID: (column: Int, row: Int)] = [:]
+        var cells: [Monitor.ID: MonitorSetupDraft.Cell] = [:]
         for (monitor, entry) in zip(monitors, layout) {
-            cells[monitor.id] = (entry.gridColumn, entry.gridRow)
+            cells[monitor.id] = .init(column: entry.gridColumn, row: entry.gridRow)
         }
-        guard let moving = cells[monitorID] else { return }
-        if let occupant = cells.first(where: {
-            $0.key != monitorID && $0.value.column == column && $0.value.row == row
-        })?.key {
-            cells[occupant] = moving
-        }
-        cells[monitorID] = (column, row)
-
-        let minColumn = cells.values.map { $0.column }.min() ?? 0
-        let minRow = cells.values.map { $0.row }.min() ?? 0
-        let normalizedCells = cells.mapValues { cell in
-            (column: cell.column - minColumn, row: cell.row - minRow)
-        }
+        MonitorRoutingGridEditor.place(
+            monitorID,
+            at: .init(column: column, row: row),
+            cells: &cells
+        )
         settings.monitorRoutingSettings = MonitorSettingsTabModel.routingSettingsAfterEdit(
             existing: settings.monitorRoutingSettings,
             monitors: monitors,
-            cells: normalizedCells
+            cells: cells.mapValues { (column: $0.column, row: $0.row) }
         )
     }
 
