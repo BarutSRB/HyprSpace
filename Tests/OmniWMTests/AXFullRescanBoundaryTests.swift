@@ -1468,6 +1468,322 @@ final class AXFullRescanBoundaryTests: XCTestCase {
         XCTAssertTrue(controller.workspaceManager.hiddenState(for: pinnedToken)?.isScratchpad == true)
     }
 
+    func testFullRescanPreservesFocusedTrackedSheetWithMatchingWindowServerIdentity() throws {
+        for (index, mode) in [TrackedWindowMode.tiling, .floating].enumerated() {
+            let controller = WindowAdmissionTestSupport.controller()
+            let workspaceId = try XCTUnwrap(
+                controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+            )
+            let pid = pid_t(72_100 + index)
+            let windowId = 72_110 + index
+            let parentWindowId = UInt32(72_120 + index)
+            let token = trackSheet(
+                controller: controller,
+                workspaceId: workspaceId,
+                pid: pid,
+                windowId: windowId,
+                parentWindowId: parentWindowId,
+                mode: mode
+            )
+            XCTAssertTrue(
+                controller.workspaceManager.confirmManagedFocus(
+                    token,
+                    in: workspaceId,
+                    activateWorkspaceOnMonitor: false
+                )
+            )
+            controller.workspaceManager.setSystemModalFocus(token)
+            var queriedWindowIds: [UInt32] = []
+            let matchingWindowInfo = WindowServerInfo(
+                id: UInt32(windowId),
+                pid: pid,
+                level: 0,
+                frame: CGRect(x: 200, y: 160, width: 600, height: 350),
+                parentId: parentWindowId
+            )
+            controller.axEventHandler.windowInfoProvider = { queriedWindowId in
+                queriedWindowIds.append(queriedWindowId)
+                return matchingWindowInfo
+            }
+            let capturedWindowServerInfo = index == 0 ? [windowId: matchingWindowInfo] : [:]
+
+            for _ in 0 ..< 2 {
+                var seenKeys: Set<WindowToken> = []
+                controller.layoutRefreshController.preserveFocusedSheetDuringFullRescan(
+                    windowServerInfoByWindowId: capturedWindowServerInfo,
+                    seenKeys: &seenKeys
+                )
+
+                XCTAssertEqual(seenKeys, [token])
+                XCTAssertTrue(
+                    controller.workspaceManager.confirmedMissingEntries(
+                        keys: seenKeys,
+                        requiredConsecutiveMisses: 2
+                    ).isEmpty
+                )
+            }
+
+            XCTAssertEqual(controller.workspaceManager.entry(for: token)?.mode, mode)
+            XCTAssertEqual(controller.workspaceManager.systemModalFocusToken, token)
+            XCTAssertEqual(
+                queriedWindowIds,
+                index == 0 ? [] : [UInt32(windowId), UInt32(windowId)]
+            )
+
+            controller.axEventHandler.windowInfoProvider = { _ in nil }
+            controller.axEventHandler.handleCGSEvent(
+                .destroyed(windowId: UInt32(windowId), spaceId: 0)
+            )
+
+            XCTAssertNil(controller.workspaceManager.entry(for: token))
+            XCTAssertNil(controller.workspaceManager.systemModalFocusToken)
+        }
+    }
+
+    func testFullRescanFocusedSheetPreservationRejectsAmbiguousOrStaleEvidence() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let pid: pid_t = 72_130
+        let windowId = 72_131
+        let parentWindowId: UInt32 = 72_132
+        let token = trackSheet(
+            controller: controller,
+            workspaceId: workspaceId,
+            pid: pid,
+            windowId: windowId,
+            parentWindowId: parentWindowId,
+            mode: .floating
+        )
+        XCTAssertTrue(
+            controller.workspaceManager.confirmManagedFocus(
+                token,
+                in: workspaceId,
+                activateWorkspaceOnMonitor: false
+            )
+        )
+        var queriedWindowIds: [UInt32] = []
+        var resolvedWindowInfo: WindowServerInfo? = WindowServerInfo(
+            id: UInt32(windowId),
+            pid: pid,
+            level: 0,
+            frame: CGRect(x: 200, y: 160, width: 600, height: 350),
+            parentId: parentWindowId
+        )
+        controller.axEventHandler.windowInfoProvider = { queriedWindowId in
+            queriedWindowIds.append(queriedWindowId)
+            return resolvedWindowInfo
+        }
+
+        var seenKeys: Set<WindowToken> = [token]
+        controller.workspaceManager.setSystemModalFocus(token)
+        controller.layoutRefreshController.preserveFocusedSheetDuringFullRescan(
+            windowServerInfoByWindowId: [:],
+            seenKeys: &seenKeys
+        )
+        XCTAssertTrue(queriedWindowIds.isEmpty)
+
+        seenKeys.removeAll()
+        let otherToken = controller.workspaceManager.addWindow(
+            AXWindowRef(
+                element: AXUIElementCreateApplication(pid + 1),
+                windowId: windowId + 1
+            ),
+            pid: pid + 1,
+            windowId: windowId + 1,
+            to: workspaceId
+        )
+        XCTAssertTrue(
+            controller.workspaceManager.confirmManagedFocus(
+                otherToken,
+                in: workspaceId,
+                activateWorkspaceOnMonitor: false
+            )
+        )
+        controller.layoutRefreshController.preserveFocusedSheetDuringFullRescan(
+            windowServerInfoByWindowId: [:],
+            seenKeys: &seenKeys
+        )
+        XCTAssertTrue(seenKeys.isEmpty)
+        XCTAssertTrue(queriedWindowIds.isEmpty)
+
+        XCTAssertTrue(
+            controller.workspaceManager.confirmManagedFocus(
+                token,
+                in: workspaceId,
+                activateWorkspaceOnMonitor: false
+            )
+        )
+        controller.workspaceManager.setSystemModalFocus(nil)
+        controller.layoutRefreshController.preserveFocusedSheetDuringFullRescan(
+            windowServerInfoByWindowId: [:],
+            seenKeys: &seenKeys
+        )
+        XCTAssertTrue(seenKeys.isEmpty)
+        XCTAssertTrue(queriedWindowIds.isEmpty)
+
+        controller.workspaceManager.setSystemModalFocus(token)
+        var metadata = try XCTUnwrap(
+            controller.workspaceManager.entry(for: token)?.managedReplacementMetadata
+        )
+        metadata.role = kAXWindowRole as String
+        _ = controller.workspaceManager.setManagedReplacementMetadata(metadata, for: token)
+        controller.layoutRefreshController.preserveFocusedSheetDuringFullRescan(
+            windowServerInfoByWindowId: [:],
+            seenKeys: &seenKeys
+        )
+        XCTAssertTrue(seenKeys.isEmpty)
+        XCTAssertTrue(queriedWindowIds.isEmpty)
+
+        metadata.role = kAXSheetRole as String
+        metadata.parentWindowId = nil
+        _ = controller.workspaceManager.setManagedReplacementMetadata(metadata, for: token)
+        controller.layoutRefreshController.preserveFocusedSheetDuringFullRescan(
+            windowServerInfoByWindowId: [:],
+            seenKeys: &seenKeys
+        )
+        XCTAssertTrue(seenKeys.isEmpty)
+        XCTAssertTrue(queriedWindowIds.isEmpty)
+
+        metadata.parentWindowId = parentWindowId
+        _ = controller.workspaceManager.setManagedReplacementMetadata(metadata, for: token)
+        let mismatchedCapturedWindowInfo = WindowServerInfo(
+            id: UInt32(windowId),
+            pid: pid,
+            level: 0,
+            frame: .zero,
+            parentId: parentWindowId + 1
+        )
+        controller.layoutRefreshController.preserveFocusedSheetDuringFullRescan(
+            windowServerInfoByWindowId: [windowId: mismatchedCapturedWindowInfo],
+            seenKeys: &seenKeys
+        )
+        XCTAssertTrue(seenKeys.isEmpty)
+        XCTAssertTrue(queriedWindowIds.isEmpty)
+
+        let mismatchedWindowInfos: [WindowServerInfo?] = [
+            nil,
+            WindowServerInfo(
+                id: UInt32(windowId + 1),
+                pid: pid,
+                level: 0,
+                frame: .zero,
+                parentId: parentWindowId
+            ),
+            WindowServerInfo(
+                id: UInt32(windowId),
+                pid: pid + 1,
+                level: 0,
+                frame: .zero,
+                parentId: parentWindowId
+            ),
+            WindowServerInfo(
+                id: UInt32(windowId),
+                pid: pid,
+                level: 0,
+                frame: .zero,
+                parentId: parentWindowId + 1
+            )
+        ]
+        for mismatchedWindowInfo in mismatchedWindowInfos {
+            resolvedWindowInfo = mismatchedWindowInfo
+            seenKeys.removeAll()
+            controller.layoutRefreshController.preserveFocusedSheetDuringFullRescan(
+                windowServerInfoByWindowId: [:],
+                seenKeys: &seenKeys
+            )
+            XCTAssertTrue(seenKeys.isEmpty)
+        }
+        XCTAssertEqual(queriedWindowIds, Array(repeating: UInt32(windowId), count: 4))
+    }
+
+    func testFullRescanFocusedSheetUsesTwoMissCleanupWithoutWindowServerEvidence() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let pid: pid_t = 72_140
+        let windowId = 72_141
+        let token = trackSheet(
+            controller: controller,
+            workspaceId: workspaceId,
+            pid: pid,
+            windowId: windowId,
+            parentWindowId: 72_142,
+            mode: .floating
+        )
+        XCTAssertTrue(
+            controller.workspaceManager.confirmManagedFocus(
+                token,
+                in: workspaceId,
+                activateWorkspaceOnMonitor: false
+            )
+        )
+        controller.workspaceManager.setSystemModalFocus(token)
+        controller.axEventHandler.windowInfoProvider = { _ in nil }
+
+        var seenKeys: Set<WindowToken> = []
+        controller.layoutRefreshController.preserveFocusedSheetDuringFullRescan(
+            windowServerInfoByWindowId: [:],
+            seenKeys: &seenKeys
+        )
+        XCTAssertTrue(
+            controller.workspaceManager.confirmedMissingEntries(
+                keys: seenKeys,
+                requiredConsecutiveMisses: 2
+            ).isEmpty
+        )
+
+        controller.layoutRefreshController.preserveFocusedSheetDuringFullRescan(
+            windowServerInfoByWindowId: [:],
+            seenKeys: &seenKeys
+        )
+        let missingEntry = try XCTUnwrap(
+            controller.workspaceManager.confirmedMissingEntries(
+                keys: seenKeys,
+                requiredConsecutiveMisses: 2
+            ).first
+        )
+        XCTAssertEqual(missingEntry.token, token)
+
+        controller.axEventHandler.retireManagedWindowFromAuthoritativeRescan(missingEntry)
+
+        XCTAssertNil(controller.workspaceManager.entry(for: token))
+        XCTAssertNil(controller.workspaceManager.systemModalFocusToken)
+    }
+
+    private func trackSheet(
+        controller: WMController,
+        workspaceId: WorkspaceDescriptor.ID,
+        pid: pid_t,
+        windowId: Int,
+        parentWindowId: UInt32,
+        mode: TrackedWindowMode
+    ) -> WindowToken {
+        controller.workspaceManager.addWindow(
+            AXWindowRef(
+                element: AXUIElementCreateApplication(pid),
+                windowId: windowId
+            ),
+            pid: pid,
+            windowId: windowId,
+            to: workspaceId,
+            mode: mode,
+            managedReplacementMetadata: ManagedReplacementMetadata(
+                bundleId: "com.apple.systempreferences",
+                workspaceId: workspaceId,
+                mode: mode,
+                role: kAXSheetRole as String,
+                subrole: nil,
+                title: "Displays",
+                windowLevel: 0,
+                parentWindowId: parentWindowId,
+                frame: CGRect(x: 200, y: 160, width: 600, height: 350)
+            )
+        )
+    }
+
     func testBoundedAsyncMapCapsConcurrencyAndPreservesInputOrder() async throws {
         let probe = AXBoundaryConcurrencyProbe()
         let inputs = Array(0 ..< 12)

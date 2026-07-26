@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Copyright (C) 2026 BarutSRB — https://github.com/BarutSRB/OmniWM
 
+import ApplicationServices
 import Foundation
 
 @MainActor
@@ -47,6 +48,31 @@ extension LayoutRefreshController {
             return fallbackWorkspaceId
         }
         return candidate.workspaceId
+    }
+
+    func preserveFocusedSheetDuringFullRescan(
+        windowServerInfoByWindowId: [Int: WindowServerInfo],
+        seenKeys: inout Set<WindowToken>
+    ) {
+        guard let controller,
+              let token = controller.workspaceManager.systemModalFocusToken,
+              controller.workspaceManager.focusedToken == token,
+              !seenKeys.contains(token),
+              let entry = controller.workspaceManager.entry(for: token),
+              let metadata = entry.managedReplacementMetadata,
+              metadata.role == (kAXSheetRole as String),
+              let parentWindowId = metadata.parentWindowId,
+              parentWindowId != 0,
+              let windowId = UInt32(exactly: token.windowId),
+              let windowInfo = windowServerInfoByWindowId[token.windowId]
+              ?? controller.axEventHandler.resolveWindowInfo(windowId),
+              windowInfo.id == windowId,
+              windowInfo.pid == token.pid,
+              windowInfo.parentId == parentWindowId
+        else {
+            return
+        }
+        seenKeys.insert(token)
     }
 
     func makeNiriRemovalSeeds(

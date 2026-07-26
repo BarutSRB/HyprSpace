@@ -1779,6 +1779,11 @@ import QuartzCore
             )
         }
 
+        preserveFocusedSheetDuringFullRescan(
+            windowServerInfoByWindowId: enumerationSnapshot.windowServerInfoByWindowId,
+            seenKeys: &seenKeys
+        )
+
         let missingEntries = controller.workspaceManager.confirmedMissingEntries(
             keys: seenKeys,
             requiredConsecutiveMisses: 2
