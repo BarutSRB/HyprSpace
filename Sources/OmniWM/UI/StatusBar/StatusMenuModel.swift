@@ -5,12 +5,168 @@ import AppKit
 import Observation
 import SwiftUI
 
+enum StatusMenuControlPreview: Equatable {
+    case focusedWindow
+    case workspaceBar
+    case keepAwake
+    case focusMouse
+    case focusEdge
+    case mouseToFocused
+    case followMonitor
+    case moveEdge
+    case mouseWarp
+    case hiddenMenuIcons
+}
+
+enum StatusMenuControl: String, CaseIterable, Identifiable {
+    case bordersEnabled
+    case workspaceBarEnabled
+    case preventSleepEnabled
+    case focusFollowsMouse
+    case focusCrossesMonitorAtEdge
+    case moveMouseToFocusedWindow
+    case focusFollowsWindowToMonitor
+    case moveCrossesMonitorAtEdge
+    case mouseWarpEnabled
+    case hiddenBarEnabled
+
+    var id: String {
+        rawValue
+    }
+
+    var icon: String {
+        switch self {
+        case .bordersEnabled:
+            "square.dashed"
+        case .workspaceBarEnabled:
+            "menubar.rectangle"
+        case .preventSleepEnabled:
+            "moon.zzz"
+        case .focusFollowsMouse:
+            "cursorarrow.motionlines"
+        case .focusCrossesMonitorAtEdge:
+            "display.2"
+        case .moveMouseToFocusedWindow:
+            "arrow.up.left.and.down.right.magnifyingglass"
+        case .focusFollowsWindowToMonitor:
+            "arrow.right.square"
+        case .moveCrossesMonitorAtEdge:
+            "macwindow.on.rectangle"
+        case .mouseWarpEnabled:
+            "arrow.left.arrow.right"
+        case .hiddenBarEnabled:
+            "eye.slash"
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .bordersEnabled:
+            "Borders"
+        case .workspaceBarEnabled:
+            "Workspace Bar"
+        case .preventSleepEnabled:
+            "Keep Awake"
+        case .focusFollowsMouse:
+            "Focus Mouse"
+        case .focusCrossesMonitorAtEdge:
+            "Focus Edge"
+        case .moveMouseToFocusedWindow:
+            "Mouse to Focused"
+        case .focusFollowsWindowToMonitor:
+            "Follow Monitor"
+        case .moveCrossesMonitorAtEdge:
+            "Move Edge"
+        case .mouseWarpEnabled:
+            "Mouse Warp"
+        case .hiddenBarEnabled:
+            "Hide Menu Icons"
+        }
+    }
+
+    var accessibilityName: String {
+        switch self {
+        case .bordersEnabled:
+            "Window Borders"
+        case .workspaceBarEnabled:
+            "Workspace Bar"
+        case .preventSleepEnabled:
+            "Keep Awake"
+        case .focusFollowsMouse:
+            "Focus Follows Mouse"
+        case .focusCrossesMonitorAtEdge:
+            "Focus Across Monitor at Edge"
+        case .moveMouseToFocusedWindow:
+            "Mouse to Focused"
+        case .focusFollowsWindowToMonitor:
+            "Follow Window to Monitor"
+        case .moveCrossesMonitorAtEdge:
+            "Move Window Across Monitor at Edge"
+        case .mouseWarpEnabled:
+            "Mouse Warp"
+        case .hiddenBarEnabled:
+            "Hide Menu Bar Icons"
+        }
+    }
+
+    var explanation: String {
+        switch self {
+        case .bordersEnabled:
+            "Shows a colored outline around the currently focused managed window. Customize its appearance in Settings."
+        case .workspaceBarEnabled:
+            "Shows workspaces and their windows in a clickable bar on each display. Per-display overrides can change an individual bar."
+        case .preventSleepEnabled:
+            "Prevents idle display sleep while your user session is active. Manual sleep and closing the laptop lid still work."
+        case .focusFollowsMouse:
+            "Focuses a managed window when the pointer enters it—no click needed. Hold Focus Lock to cross windows without changing focus."
+        case .focusCrossesMonitorAtEdge:
+            "At the last window in any direction, Focus continues left, right, up, or down onto the adjacent display in OmniWM’s Routing Arrangement."
+        case .moveMouseToFocusedWindow:
+            "Moves the pointer into a window after OmniWM navigation changes focus. It stays put if already inside or the pointer caused the focus."
+        case .focusFollowsWindowToMonitor:
+            "After moving a window or column to another workspace, switches there and keeps it focused. When off, you stay in the source workspace."
+        case .moveCrossesMonitorAtEdge:
+            "At a workspace edge, Move Window sends the focused window left, right, up, or down to the adjacent routed display and follows it."
+        case .mouseWarpEnabled:
+            "Moves the pointer across matching display edges using OmniWM’s Routing Arrangement. Available only with multiple displays."
+        case .hiddenBarEnabled:
+            "Hides the menu-bar items selected in Settings. Right-click or Option-click OmniWM’s icon to reveal the hidden-icons bar."
+        }
+    }
+
+    var preview: StatusMenuControlPreview {
+        switch self {
+        case .bordersEnabled:
+            .focusedWindow
+        case .workspaceBarEnabled:
+            .workspaceBar
+        case .preventSleepEnabled:
+            .keepAwake
+        case .focusFollowsMouse:
+            .focusMouse
+        case .focusCrossesMonitorAtEdge:
+            .focusEdge
+        case .moveMouseToFocusedWindow:
+            .mouseToFocused
+        case .focusFollowsWindowToMonitor:
+            .followMonitor
+        case .moveCrossesMonitorAtEdge:
+            .moveEdge
+        case .mouseWarpEnabled:
+            .mouseWarp
+        case .hiddenBarEnabled:
+            .hiddenMenuIcons
+        }
+    }
+}
+
 struct ToggleTileSpec: Identifiable {
-    let id: String
-    let icon: String
-    let label: String
-    let accessibilityName: String
+    let control: StatusMenuControl
     let isOn: Binding<Bool>
+
+    var id: String {
+        control.id
+    }
 }
 
 @MainActor
@@ -26,6 +182,7 @@ final class StatusMenuModel {
     var confirmationAlertPresenter: (String, String, String, String) -> Bool
     var settingsFileActionPerformer: (SettingsFileAction, SettingsStore) throws -> SettingsFileStatus
     private(set) var cliStatus: AppCLIExposureStatus?
+    private(set) var menuPresentationGeneration = 0
 
     init(settings: SettingsStore, controller: WMController) {
         self.settings = settings
@@ -78,8 +235,13 @@ final class StatusMenuModel {
     }
 
     func menuWillOpen() {
+        menuPresentationGeneration += 1
         controller?.refreshDiagnosticsIssues()
         cliStatus = cliManager?.exposureStatus()
+    }
+
+    func menuDidClose() {
+        menuPresentationGeneration += 1
     }
 
     var toggleTiles: [ToggleTileSpec] {
@@ -87,10 +249,7 @@ final class StatusMenuModel {
         weak let controller = controller
         var tiles: [ToggleTileSpec] = [
             ToggleTileSpec(
-                id: "bordersEnabled",
-                icon: "square.dashed",
-                label: "Borders",
-                accessibilityName: "Window Borders",
+                control: .bordersEnabled,
                 isOn: Binding(
                     get: { settings.bordersEnabled },
                     set: {
@@ -100,10 +259,7 @@ final class StatusMenuModel {
                 )
             ),
             ToggleTileSpec(
-                id: "workspaceBarEnabled",
-                icon: "menubar.rectangle",
-                label: "Workspace Bar",
-                accessibilityName: "Workspace Bar",
+                control: .workspaceBarEnabled,
                 isOn: Binding(
                     get: { settings.workspaceBarEnabled },
                     set: {
@@ -113,10 +269,7 @@ final class StatusMenuModel {
                 )
             ),
             ToggleTileSpec(
-                id: "preventSleepEnabled",
-                icon: "moon.zzz",
-                label: "Keep Awake",
-                accessibilityName: "Keep Awake",
+                control: .preventSleepEnabled,
                 isOn: Binding(
                     get: { settings.preventSleepEnabled },
                     set: {
@@ -126,10 +279,7 @@ final class StatusMenuModel {
                 )
             ),
             ToggleTileSpec(
-                id: "focusFollowsMouse",
-                icon: "cursorarrow.motionlines",
-                label: "Focus Mouse",
-                accessibilityName: "Focus Follows Mouse",
+                control: .focusFollowsMouse,
                 isOn: Binding(
                     get: { settings.focusFollowsMouse },
                     set: {
@@ -139,20 +289,14 @@ final class StatusMenuModel {
                 )
             ),
             ToggleTileSpec(
-                id: "focusCrossesMonitorAtEdge",
-                icon: "display.2",
-                label: "Focus Edge",
-                accessibilityName: "Focus Across Monitor at Edge",
+                control: .focusCrossesMonitorAtEdge,
                 isOn: Binding(
                     get: { settings.focusCrossesMonitorAtEdge },
                     set: { settings.focusCrossesMonitorAtEdge = $0 }
                 )
             ),
             ToggleTileSpec(
-                id: "moveMouseToFocusedWindow",
-                icon: "arrow.up.left.and.down.right.magnifyingglass",
-                label: "Mouse to Focused",
-                accessibilityName: "Mouse to Focused",
+                control: .moveMouseToFocusedWindow,
                 isOn: Binding(
                     get: { settings.moveMouseToFocusedWindow },
                     set: {
@@ -162,30 +306,21 @@ final class StatusMenuModel {
                 )
             ),
             ToggleTileSpec(
-                id: "focusFollowsWindowToMonitor",
-                icon: "arrow.right.square",
-                label: "Follow Monitor",
-                accessibilityName: "Follow Window to Monitor",
+                control: .focusFollowsWindowToMonitor,
                 isOn: Binding(
                     get: { settings.focusFollowsWindowToMonitor },
                     set: { settings.focusFollowsWindowToMonitor = $0 }
                 )
             ),
             ToggleTileSpec(
-                id: "moveCrossesMonitorAtEdge",
-                icon: "macwindow.on.rectangle",
-                label: "Move Edge",
-                accessibilityName: "Move Window Across Monitor at Edge",
+                control: .moveCrossesMonitorAtEdge,
                 isOn: Binding(
                     get: { settings.moveCrossesMonitorAtEdge },
                     set: { settings.moveCrossesMonitorAtEdge = $0 }
                 )
             ),
             ToggleTileSpec(
-                id: "mouseWarpEnabled",
-                icon: "arrow.left.arrow.right",
-                label: "Mouse Warp",
-                accessibilityName: "Mouse Warp",
+                control: .mouseWarpEnabled,
                 isOn: Binding(
                     get: { settings.mouseWarpEnabled },
                     set: { settings.mouseWarpEnabled = $0 }
@@ -195,10 +330,7 @@ final class StatusMenuModel {
         if controller?.isHiddenBarHidingAvailable == true {
             tiles.append(
                 ToggleTileSpec(
-                    id: "hiddenBarEnabled",
-                    icon: "eye.slash",
-                    label: "Hide Menu Icons",
-                    accessibilityName: "Hide Menu Bar Icons",
+                    control: .hiddenBarEnabled,
                     isOn: Binding(
                         get: { settings.hiddenBarEnabled },
                         set: { controller?.setHiddenBarEnabled($0) }

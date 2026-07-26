@@ -160,6 +160,7 @@ final class StatusBarController: NSObject {
         menuModel.menuWillOpen()
         StatusMenuHost.prepareForDisplay(menus, appearance: NSApplication.shared.appearance)
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: anchor.bounds.height + 5), in: anchor)
+        menuModel.menuDidClose()
     }
 
     func handleTraceCaptureStateChange() {

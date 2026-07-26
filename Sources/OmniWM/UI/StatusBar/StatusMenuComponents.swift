@@ -153,24 +153,25 @@ struct MenuActionRow: View {
 }
 
 struct MenuToggleTile: View {
-    let icon: String
-    let label: String
-    let accessibilityName: String
+    let control: StatusMenuControl
     @Binding var isOn: Bool
+    var onHoverChanged: (StatusMenuControl, Bool) -> Void = { _, _ in }
+    var onFocusChanged: (StatusMenuControl, Bool) -> Void = { _, _ in }
 
     @Environment(MotionPolicy.self) private var motionPolicy
     @State private var isHovered = false
+    @FocusState private var isFocused: Bool
 
     var body: some View {
         Button {
             isOn.toggle()
         } label: {
             VStack(spacing: 3) {
-                Image(systemName: icon)
+                Image(systemName: control.icon)
                     .font(.system(size: 16, weight: .medium))
                     .foregroundStyle(iconColor)
                     .frame(height: 20)
-                Text(label)
+                Text(control.label)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(labelColor)
                     .multilineTextAlignment(.center)
@@ -186,11 +187,18 @@ struct MenuToggleTile: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(fillColor)
         }
-        .onHover { isHovered = $0 }
+        .focused($isFocused)
+        .onHover { hovered in
+            isHovered = hovered
+            onHoverChanged(control, hovered)
+        }
+        .onChange(of: isFocused) { _, focused in
+            onFocusChanged(control, focused)
+        }
         .animation(motionPolicy.animationsEnabled ? .easeOut(duration: 0.12) : nil, value: isHovered)
         .animation(motionPolicy.animationsEnabled ? .easeOut(duration: 0.12) : nil, value: isOn)
-        .help(accessibilityName)
-        .accessibilityLabel(accessibilityName)
+        .accessibilityLabel(control.accessibilityName)
+        .accessibilityHint(control.explanation)
         .accessibilityValue(isOn ? "on" : "off")
         .accessibilityAddTraits(.isToggle)
     }
@@ -208,6 +216,68 @@ struct MenuToggleTile: View {
 
     private var labelColor: Color {
         isOn ? .white : Color(nsColor: .labelColor)
+    }
+}
+
+struct StatusMenuControlHelpCard: View {
+    let control: StatusMenuControl?
+
+    @Environment(MotionPolicy.self) private var motionPolicy
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
+
+    var body: some View {
+        ZStack {
+            if let control {
+                HStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(control.label)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Color(nsColor: .labelColor))
+                        Text(control.explanation)
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+                            .fixedSize(horizontal: false, vertical: true)
+                            .layoutPriority(1)
+                        Spacer(minLength: 0)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    StatusMenuControlPreviewView(
+                        preview: control.preview,
+                        animationsEnabled: animationsEnabled
+                    )
+                    .frame(width: 72, height: 72)
+                    .accessibilityHidden(true)
+                }
+                .id(control.id)
+                .transition(.opacity)
+            } else {
+                HStack(spacing: 8) {
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 14))
+                        .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
+                    Text("Hover or focus a control to learn what it does.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+                    Spacer(minLength: 0)
+                }
+                .transition(.opacity)
+            }
+        }
+        .padding(10)
+        .frame(height: 100)
+        .background {
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .stroke(Color(nsColor: .separatorColor).opacity(0.7), lineWidth: 0.5)
+                }
+        }
+        .animation(animationsEnabled ? .easeOut(duration: 0.12) : nil, value: control?.id)
+    }
+
+    private var animationsEnabled: Bool {
+        motionPolicy.animationsEnabled && !accessibilityReduceMotion
     }
 }
 
