@@ -1792,13 +1792,18 @@ final class WMController {
         return nil
     }
 
-    func shouldDeferTilingAdmission(
+    func shouldDeferAdmission(
         evaluation: WindowDecisionEvaluation,
         axRef: AXWindowRef,
+        mode: TrackedWindowMode,
         windowInfo: WindowServerInfo?
     ) -> Bool {
         if let admissionGeometry = evaluation.admissionGeometry {
-            guard admissionGeometry.isSizeSettable else { return true }
+            if mode == .tiling,
+               !admissionGeometry.isSizeSettable
+            {
+                return true
+            }
             guard let frame = evaluation.facts.windowServer?.frame
                 ?? windowInfo?.frame
                 ?? admissionGeometry.frame
@@ -1807,7 +1812,11 @@ final class WMController {
             }
             return !Self.isMeaningfulAdmissionFrame(frame)
         }
-        guard AXWindowService.isSizeSettable(axRef) else { return true }
+        if mode == .tiling,
+           !AXWindowService.isSizeSettable(axRef)
+        {
+            return true
+        }
         if let frame = evaluation.facts.windowServer?.frame ?? windowInfo?.frame,
            Self.isMeaningfulAdmissionFrame(frame)
         {
@@ -2289,15 +2298,13 @@ final class WMController {
                 axEventHandler.cancelTrackedTilingPromotionRetry(windowId: token.windowId)
             }
 
-            if effectiveTrackedMode == .tiling,
-               axEventHandler.deferTilingAdmissionIfNeeded(
-                   evaluation: evaluation,
-                   axRef: axRef,
-                   pid: token.pid,
-                   windowId: token.windowId,
-                   existingEntry: existingEntry
-               )
-            {
+            if axEventHandler.deferAdmissionIfNeeded(
+                evaluation: evaluation,
+                axRef: axRef,
+                token: token,
+                mode: effectiveTrackedMode,
+                existingEntry: existingEntry
+            ) {
                 continue
             }
 
@@ -2579,15 +2586,13 @@ final class WMController {
             axEventHandler.cancelTrackedTilingPromotionRetry(windowId: token.windowId)
         }
 
-        if trackedMode == .tiling,
-           axEventHandler.deferTilingAdmissionIfNeeded(
-               evaluation: evaluation,
-               axRef: entry.axRef,
-               pid: token.pid,
-               windowId: token.windowId,
-               existingEntry: entry
-           )
-        {
+        if axEventHandler.deferAdmissionIfNeeded(
+            evaluation: evaluation,
+            axRef: entry.axRef,
+            token: token,
+            mode: trackedMode,
+            existingEntry: entry
+        ) {
             return
         }
 

@@ -9,7 +9,14 @@ import XCTest
 
 @MainActor
 enum WindowAdmissionTestSupport {
-    static func controller(prefix: String = "OmniWMWindowAdmissionTests") -> WMController {
+    static func controller(
+        prefix: String = "OmniWMWindowAdmissionTests",
+        windowFocusOperations: WindowFocusOperations = WindowFocusOperations(
+            activateApp: { _ in },
+            focusSpecificWindow: { _, _, _ in },
+            raiseWindow: { _ in }
+        )
+    ) -> WMController {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("\(prefix)-\(UUID().uuidString)", isDirectory: true)
         let settings = SettingsStore(
@@ -26,11 +33,7 @@ enum WindowAdmissionTestSupport {
         )
         return WMController(
             settings: settings,
-            windowFocusOperations: WindowFocusOperations(
-                activateApp: { _ in },
-                focusSpecificWindow: { _, _, _ in },
-                raiseWindow: { _ in }
-            )
+            windowFocusOperations: windowFocusOperations
         )
     }
 

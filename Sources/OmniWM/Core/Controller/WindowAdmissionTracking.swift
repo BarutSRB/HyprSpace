@@ -76,15 +76,6 @@ extension AXEventHandler {
             )
         )
 
-        if trackedEntry.mode == .floating {
-            controller.focusPolicyEngine.beginLease(
-                owner: .ruleCreatedFloatingWindow,
-                reason: "floating_window_create",
-                suppressesFocusFollowsMouse: true,
-                duration: 0.35
-            )
-        }
-
         var floatingTargetFrame: CGRect?
         if trackedEntry.mode == .floating {
             let observedFrame = AXWindowService.framePreferFast(candidate.axRef)
@@ -125,7 +116,7 @@ extension AXEventHandler {
             scheduleAXContextWarmup(for: liveTrackedEntry.pid)
         }
         if liveTrackedEntry.mode == .floating {
-            controller.windowActionHandler.raiseFloatingWindow(trackedToken)
+            controller.windowActionHandler.focusCreatedFloatingWindow(trackedToken)
         }
         if candidate.requiresPostCreateLifecycleVerification {
             schedulePostCreateLifecycleVerification(for: trackedToken)

@@ -191,7 +191,7 @@ final class WindowActionHandler {
     }
 
     @discardableResult
-    func raiseFloatingWindow(_ token: WindowToken) -> Bool {
+    func focusCreatedFloatingWindow(_ token: WindowToken) -> Bool {
         guard let controller,
               !controller.isLockScreenActive
         else {
@@ -210,6 +210,12 @@ final class WindowActionHandler {
             return false
         }
 
+        controller.focusPolicyEngine.beginLease(
+            owner: .ruleCreatedFloatingWindow,
+            reason: "floating_window_create",
+            suppressesFocusFollowsMouse: true,
+            duration: 0.35
+        )
         orderWindow(UInt32(entry.windowId))
         controller.focusWindow(token)
         return true

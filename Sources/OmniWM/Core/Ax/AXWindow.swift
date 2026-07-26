@@ -274,6 +274,22 @@ struct AXWindowConstraintInputs {
     let currentSize: CGSize?
 }
 
+enum AXFullscreenButtonEvidence {
+    case absent
+    case present(AXUIElement)
+    case failed
+
+    var element: AXUIElement? {
+        guard case let .present(element) = self else { return nil }
+        return element
+    }
+
+    var succeeded: Bool {
+        guard case .failed = self else { return true }
+        return false
+    }
+}
+
 struct AXWindowHeuristicDisposition: Equatable, Sendable {
     let disposition: WindowDecisionDisposition
     let reasons: [AXWindowHeuristicReason]
@@ -650,31 +666,12 @@ enum AXWindowService {
             return valuesArray[index.rawValue]
         }
 
-        let fullscreenButtonElement = attributeValue(.fullScreenButton)
-        var attributeFetchSucceeded = true
-        let hasFullscreenButton = resolvedAttribute(fullscreenButtonElement)
+        let fullscreenButtonValue = attributeValue(.fullScreenButton)
+        let fullscreenButtonEvidence = fullscreenButtonEvidence(fullscreenButtonValue)
+        var attributeFetchSucceeded = fullscreenButtonEvidence.succeeded
 
         var fullscreenButtonEnabled: Bool?
-        if hasFullscreenButton, let fullscreenButtonElement {
-            guard CFGetTypeID(fullscreenButtonElement as CFTypeRef) == AXUIElementGetTypeID() else {
-                attributeFetchSucceeded = false
-                return makeWindowFacts(
-                    AXWindowFactAttributeValues(
-                        role: attributeValue(.role) as? String,
-                        subrole: attributeValue(.subrole) as? String,
-                        title: includeTitle ? (attributeValue(.title) as? String) : nil,
-                        closeButton: attributeValue(.closeButton),
-                        fullscreenButton: nil,
-                        fullscreenButtonEnabled: nil,
-                        zoomButton: attributeValue(.zoomButton),
-                        minimizeButton: attributeValue(.minimizeButton)
-                    ),
-                    appPolicy: appPolicy,
-                    bundleId: bundleId,
-                    attributeFetchSucceeded: attributeFetchSucceeded
-                )
-            }
-            let buttonElement = unsafeDowncast(fullscreenButtonElement as AnyObject, to: AXUIElement.self)
+        if let buttonElement = fullscreenButtonEvidence.element {
             var enabledValue: CFTypeRef?
             let enabledResult = AXUIElementCopyAttributeValue(
                 buttonElement,
@@ -698,7 +695,7 @@ enum AXWindowService {
                 subrole: attributeValue(.subrole) as? String,
                 title: includeTitle ? (attributeValue(.title) as? String) : nil,
                 closeButton: attributeValue(.closeButton),
-                fullscreenButton: fullscreenButtonElement,
+                fullscreenButton: fullscreenButtonValue,
                 fullscreenButtonEnabled: fullscreenButtonEnabled,
                 zoomButton: attributeValue(.zoomButton),
                 minimizeButton: attributeValue(.minimizeButton)
@@ -732,7 +729,37 @@ enum AXWindowService {
 
     static func resolvedAttribute(_ value: Any?) -> Bool {
         guard let value else { return false }
-        return !(value is NSError)
+        return CFGetTypeID(value as CFTypeRef) == AXUIElementGetTypeID()
+    }
+
+    static func fullscreenButtonEvidence(_ value: Any?) -> AXFullscreenButtonEvidence {
+        guard let value else { return .absent }
+        let cfValue = value as CFTypeRef
+        let typeId = CFGetTypeID(cfValue)
+        if typeId == CFNullGetTypeID() {
+            return .absent
+        }
+        if typeId == AXUIElementGetTypeID() {
+            return .present(unsafeDowncast(cfValue, to: AXUIElement.self))
+        }
+        guard typeId == AXValueGetTypeID() else {
+            return .failed
+        }
+        let axValue = unsafeDowncast(cfValue, to: AXValue.self)
+        guard AXValueGetType(axValue) == .axError else {
+            return .failed
+        }
+        var error = AXError.success
+        guard AXValueGetValue(axValue, .axError, &error) else {
+            return .failed
+        }
+        switch error {
+        case .noValue,
+             .attributeUnsupported:
+            return .absent
+        default:
+            return .failed
+        }
     }
 
     static func sizeValue(_ value: Any?) -> CGSize? {

@@ -1438,6 +1438,7 @@ import QuartzCore
         }
         var seenKeys: Set<WindowToken> = []
         var decisionBasedRemovals: [WindowToken] = []
+        var floatingFocusCandidate: FullRescanFloatingFocusCandidate?
         let focusedWorkspaceId = controller.activeWorkspace()?.id
         let screenFrames = NSScreen.screens.map(\.frame)
 
@@ -1528,15 +1529,13 @@ import QuartzCore
                 controller.axEventHandler.cancelTrackedTilingPromotionRetry(windowId: winId)
             }
 
-            if trackedMode == .tiling,
-               controller.axEventHandler.deferTilingAdmissionIfNeeded(
-                   evaluation: evaluation,
-                   axRef: ax,
-                   pid: pid,
-                   windowId: winId,
-                   existingEntry: existingEntry
-               )
-            {
+            if controller.axEventHandler.deferAdmissionIfNeeded(
+                evaluation: evaluation,
+                axRef: ax,
+                token: token,
+                mode: trackedMode,
+                existingEntry: existingEntry
+            ) {
                 if let existingEntry {
                     seenKeys.insert(existingEntry.token)
                 }
@@ -1685,6 +1684,18 @@ import QuartzCore
             if refreshedEntry != nil {
                 _ = controller.workspaceManager.updateAdmissionHints(admissionHints, for: admittedToken)
             }
+            if let candidate = FullRescanFloatingFocusCandidate(
+                token: admittedToken,
+                workspaceId: wsForWindow,
+                isNewAdmission: existingEntry == nil,
+                mode: admittedMode,
+                createPlacementContext: createPlacementContext
+            ) {
+                floatingFocusCandidate = Self.newestFullRescanFloatingFocusCandidate(
+                    floatingFocusCandidate,
+                    considering: candidate
+                )
+            }
             if existingEntry == nil {
                 controller.axEventHandler.discardCreatePlacementContext(for: winId)
             }
@@ -1718,6 +1729,13 @@ import QuartzCore
             }
             seenKeys.insert(admittedToken)
         }
+
+        let focusValidationWorkspaceId = controller.hasStartedServices
+            ? focusFullRescanFloatingCandidate(
+                floatingFocusCandidate,
+                fallbackWorkspaceId: focusedWorkspaceId
+            )
+            : focusedWorkspaceId
 
         controller.axEventHandler.updateIdentityAliases(
             enumerationSnapshot.identityAliasesByWindowId
@@ -1810,9 +1828,9 @@ import QuartzCore
         if !controller.workspaceManager.isAppFullscreenActive,
            !controller.workspaceManager.hasPendingNativeFullscreenTransition,
            !controller.shouldSuppressManagedFocusRecovery,
-           let focusedWorkspaceId
+           let focusValidationWorkspaceId
         {
-            effects.focusValidationWorkspaceIds = [focusedWorkspaceId]
+            effects.focusValidationWorkspaceIds = [focusValidationWorkspaceId]
         }
         effects.markInitialRefreshComplete = true
         effects.drainDeferredCreatedWindows = true

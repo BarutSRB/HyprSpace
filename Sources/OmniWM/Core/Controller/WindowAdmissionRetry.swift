@@ -12,21 +12,24 @@ extension AXEventHandler {
         pid == getpid()
     }
 
-    func deferTilingAdmissionIfNeeded(
+    func deferAdmissionIfNeeded(
         evaluation: WMController.WindowDecisionEvaluation,
         axRef: AXWindowRef,
-        pid: pid_t,
-        windowId: Int,
+        token: WindowToken,
+        mode: TrackedWindowMode,
         existingEntry: WindowState?
     ) -> Bool {
-        guard existingEntry?.mode != .tiling else { return false }
+        let requiresValidation = existingEntry == nil
+            || existingEntry?.mode == .floating && mode == .tiling
+        guard requiresValidation else { return false }
         guard let controller,
-              controller.shouldDeferTilingAdmission(
+              controller.shouldDeferAdmission(
                   evaluation: evaluation,
                   axRef: axRef,
+                  mode: mode,
                   windowInfo: evaluation.facts.windowServer
               ),
-              let windowId = UInt32(exactly: windowId)
+              let windowId = UInt32(exactly: token.windowId)
         else {
             return false
         }
@@ -39,7 +42,7 @@ extension AXEventHandler {
         } else {
             _ = scheduleCandidateAdmissionRetry(
                 windowId: windowId,
-                pid: pid,
+                pid: token.pid,
                 axRef: axRef,
                 reason: .degenerateGeometry
             )

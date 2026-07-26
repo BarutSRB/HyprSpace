@@ -5,6 +5,50 @@ import Foundation
 
 @MainActor
 extension LayoutRefreshController {
+    struct FullRescanFloatingFocusCandidate: Equatable {
+        let token: WindowToken
+        let workspaceId: WorkspaceDescriptor.ID
+        let createdAt: Date
+
+        init?(
+            token: WindowToken,
+            workspaceId: WorkspaceDescriptor.ID,
+            isNewAdmission: Bool,
+            mode: TrackedWindowMode,
+            createPlacementContext: WindowCreatePlacementContext?
+        ) {
+            guard isNewAdmission,
+                  mode == .floating,
+                  let createPlacementContext
+            else {
+                return nil
+            }
+            self.token = token
+            self.workspaceId = workspaceId
+            createdAt = createPlacementContext.createdAt
+        }
+    }
+
+    static func newestFullRescanFloatingFocusCandidate(
+        _ current: FullRescanFloatingFocusCandidate?,
+        considering candidate: FullRescanFloatingFocusCandidate
+    ) -> FullRescanFloatingFocusCandidate {
+        guard let current else { return candidate }
+        return candidate.createdAt > current.createdAt ? candidate : current
+    }
+
+    func focusFullRescanFloatingCandidate(
+        _ candidate: FullRescanFloatingFocusCandidate?,
+        fallbackWorkspaceId: WorkspaceDescriptor.ID?
+    ) -> WorkspaceDescriptor.ID? {
+        guard let candidate,
+              controller?.windowActionHandler.focusCreatedFloatingWindow(candidate.token) == true
+        else {
+            return fallbackWorkspaceId
+        }
+        return candidate.workspaceId
+    }
+
     func makeNiriRemovalSeeds(
         from payloads: [WindowRemovalPayload]
     ) -> [WorkspaceDescriptor.ID: NiriWindowRemovalSeed] {

@@ -8,6 +8,11 @@ import XCTest
 
 private let axBoundaryObserverCallback: AXObserverCallback = { _, _, _, _ in }
 
+private func axBoundaryErrorValue(_ error: AXError) -> AXValue? {
+    var error = error
+    return AXValueCreate(.axError, &error)
+}
+
 private final class AXBoundaryCounter: @unchecked Sendable {
     private let lock = NSLock()
     private var storage = 0
@@ -1160,6 +1165,93 @@ final class AXFullRescanBoundaryTests: XCTestCase {
         XCTAssertEqual(evaluation.facts.sizeConstraints, constraints)
         XCTAssertEqual(evaluation.facts.windowServer, windowInfo)
         XCTAssertNil(controller.workspaceManager.cachedConstraints(for: token))
+    }
+
+    func testFullscreenButtonEvidenceTreatsMissingSentinelsAsAbsent() throws {
+        let noValue = try XCTUnwrap(axBoundaryErrorValue(.noValue))
+        let unsupported = try XCTUnwrap(axBoundaryErrorValue(.attributeUnsupported))
+        let values: [Any?] = [nil, kCFNull, NSNull(), noValue, unsupported]
+
+        for value in values {
+            guard case .absent = AXWindowService.fullscreenButtonEvidence(value) else {
+                XCTFail("Expected absent fullscreen-button evidence")
+                continue
+            }
+            XCTAssertFalse(AXWindowService.resolvedAttribute(value))
+        }
+    }
+
+    func testFullscreenButtonEvidencePreservesFailures() throws {
+        var point = CGPoint(x: 10, y: 20)
+        let pointValue = try XCTUnwrap(AXValueCreate(.cgPoint, &point))
+        let values: [Any] = [
+            try XCTUnwrap(axBoundaryErrorValue(.cannotComplete)),
+            try XCTUnwrap(axBoundaryErrorValue(.invalidUIElement)),
+            try XCTUnwrap(axBoundaryErrorValue(.failure)),
+            pointValue,
+            "unexpected"
+        ]
+
+        for value in values {
+            let evidence = AXWindowService.fullscreenButtonEvidence(value)
+            guard case .failed = evidence else {
+                XCTFail("Expected failed fullscreen-button evidence")
+                continue
+            }
+            XCTAssertFalse(evidence.succeeded)
+            XCTAssertFalse(AXWindowService.resolvedAttribute(value))
+        }
+    }
+
+    func testFullscreenButtonEvidenceAcceptsOnlyAXUIElement() {
+        let element = AXUIElementCreateApplication(72_035)
+        let evidence = AXWindowService.fullscreenButtonEvidence(element)
+
+        guard case let .present(resolvedElement) = evidence else {
+            return XCTFail("Expected present fullscreen-button evidence")
+        }
+        XCTAssertTrue(CFEqual(element, resolvedElement))
+        XCTAssertTrue(evidence.succeeded)
+        XCTAssertTrue(AXWindowService.resolvedAttribute(element))
+    }
+
+    func testMissingFullscreenButtonErrorWrapperClassifiesActivityMonitorShapeAsFloating() throws {
+        let missingButton = try XCTUnwrap(axBoundaryErrorValue(.noValue))
+        let presentButton = AXUIElementCreateApplication(72_036)
+        let evidence = AXWindowService.fullscreenButtonEvidence(missingButton)
+        let facts = AXWindowService.makeWindowFacts(
+            AXWindowFactAttributeValues(
+                role: kAXWindowRole as String,
+                subrole: kAXStandardWindowSubrole as String,
+                title: "Activity Monitor",
+                closeButton: presentButton,
+                fullscreenButton: missingButton,
+                fullscreenButtonEnabled: nil,
+                zoomButton: presentButton,
+                minimizeButton: presentButton
+            ),
+            appPolicy: .regular,
+            bundleId: "com.apple.ActivityMonitor",
+            attributeFetchSucceeded: evidence.succeeded
+        )
+        let engine = WindowRuleEngine()
+        let decision = engine.decision(
+            for: WindowRuleFacts(
+                appName: "Activity Monitor",
+                ax: facts,
+                sizeConstraints: .fixed(size: CGSize(width: 800, height: 600)),
+                windowServer: nil
+            ),
+            token: nil,
+            appFullscreen: false
+        )
+
+        XCTAssertFalse(facts.hasFullscreenButton)
+        XCTAssertTrue(facts.attributeFetchSucceeded)
+        XCTAssertEqual(decision.disposition, .floating)
+        XCTAssertEqual(decision.source, .heuristic)
+        XCTAssertEqual(decision.heuristicReasons, [.missingFullscreenButton])
+        XCTAssertNil(decision.deferredReason)
     }
 
     func testCapturedConstraintParserUsesObservedSizeForFixedWindow() {
