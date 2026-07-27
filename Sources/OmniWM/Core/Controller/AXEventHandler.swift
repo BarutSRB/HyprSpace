@@ -197,9 +197,14 @@ final class AXEventHandler {
         case ignored(token: WindowToken?, reason: WindowAdmissionRejectionReason)
     }
 
+    private enum WindowDestroyEvidence {
+        case transientLifecycle, windowClosed
+    }
+
     private struct PreparedDestroy {
         let token: WindowToken
         let replacementMetadata: ManagedReplacementMetadata
+        var evidence: WindowDestroyEvidence
 
         var bundleId: String? {
             replacementMetadata.bundleId
@@ -277,7 +282,7 @@ final class AXEventHandler {
 
     private struct PendingManagedDestroy {
         let sequence: UInt64
-        let candidate: PreparedDestroy
+        var candidate: PreparedDestroy
     }
 
     private enum PendingManagedReplacementEvent {
@@ -304,8 +309,16 @@ final class AXEventHandler {
         }
 
         mutating func append(destroy: PendingManagedDestroy) {
-            guard !destroys.contains(where: { $0.candidate.token == destroy.candidate.token }) else { return }
-            destroys.append(destroy)
+            guard let index = destroys.firstIndex(where: { $0.candidate.token == destroy.candidate.token }) else {
+                destroys.append(destroy)
+                return
+            }
+            guard destroys[index].candidate.evidence == .transientLifecycle,
+                  destroy.candidate.evidence == .windowClosed
+            else {
+                return
+            }
+            destroys[index].candidate.evidence = .windowClosed
         }
 
         var orderedEvents: [PendingManagedReplacementEvent] {
@@ -447,7 +460,7 @@ final class AXEventHandler {
             WindowAdmissionTrace.record(
                 .init(action: .cgsDestroyed, windowId: Int(windowId), reason: "closed")
             )
-            handleConfirmedWindowDestroyed(windowId: windowId)
+            handleCGSWindowDestroyed(windowId: windowId, evidence: .windowClosed)
             controller.spaceTracker.noteWindowDestroyed(windowId: Int(windowId))
 
         case let .frameChanged(windowId):
@@ -1072,15 +1085,7 @@ final class AXEventHandler {
         if resolveWindowInfo(windowId) != nil { return }
         if let controller, let entry = controller.workspaceManager.entry(forWindowId: Int(windowId)),
            controller.workspaceManager.hiddenState(for: entry.token) != nil { return }
-        handleConfirmedWindowDestroyed(windowId: windowId)
-    }
-
-    private func handleConfirmedWindowDestroyed(windowId: UInt32) {
-        AXWindowService.invalidateCachedTitle(windowId: windowId)
-        cancelCreatedWindowRetry(windowId: windowId)
-        discardCreatePlacementContext(windowId: windowId)
-        removeDeferredCreatedWindow(windowId)
-        handleWindowDestroyed(windowId: windowId, pidHint: nil)
+        handleCGSWindowDestroyed(windowId: windowId, evidence: .transientLifecycle)
     }
 
     func subscribeToManagedWindows() {
@@ -1248,32 +1253,13 @@ final class AXEventHandler {
             windowId: windowId,
             pidHint: pid,
             expectedWindow: axRef,
-            callbackGeneration: callbackGeneration
+            callbackGeneration: callbackGeneration,
+            evidence: .transientLifecycle
         )
     }
 
     func handleRemoved(token: WindowToken) {
-        guard let controller else { return }
-        guard let entry = controller.workspaceManager.entry(for: token) else {
-            discardRemovedWindowRuntimeState(token)
-            scheduleWindowRuleReevaluationIfNeeded(targets: [.pid(token.pid)])
-            return
-        }
-
-        if handleNativeFullscreenDestroy(token) {
-            discardRemovedWindowRuntimeState(token)
-            return
-        }
-
-        let recovery = prepareManagedWindowRemoval(entry)
-        retireManagedWindow(
-            entry,
-            reason: .destroyed(
-                shouldRecoverFocus: recovery.shouldRecoverFocus,
-                allowsPreferredRecoveryToken: recovery.closeRecoveryArmed
-            )
-        )
-        scheduleWindowRuleReevaluationIfNeeded(targets: [.pid(token.pid)])
+        handleRemoved(token: token, evidence: .transientLifecycle)
     }
 
     private func discardRemovedWindowRuntimeState(_ token: WindowToken) {
@@ -2444,7 +2430,11 @@ final class AXEventHandler {
         )
     }
 
-    private func handleNativeFullscreenDestroy(_ token: WindowToken) -> Bool {
+    private func handleNativeFullscreenDestroy(
+        _ token: WindowToken,
+        evidence: WindowDestroyEvidence
+    ) -> Bool {
+        guard evidence == .transientLifecycle else { return false }
         guard let controller,
               let entry = controller.workspaceManager.entry(for: token)
         else {
@@ -2864,7 +2854,8 @@ final class AXEventHandler {
 
     private func prepareDestroyCandidate(
         windowId: UInt32,
-        pidHint: pid_t?
+        pidHint: pid_t?,
+        evidence: WindowDestroyEvidence
     ) -> PreparedDestroy? {
         guard let controller else { return nil }
 
@@ -2913,7 +2904,8 @@ final class AXEventHandler {
 
         return PreparedDestroy(
             token: token,
-            replacementMetadata: replacementMetadata
+            replacementMetadata: replacementMetadata,
+            evidence: evidence
         )
     }
 
@@ -2921,7 +2913,8 @@ final class AXEventHandler {
         windowId: UInt32,
         pidHint: pid_t?,
         expectedWindow: AXWindowRef? = nil,
-        callbackGeneration: UInt64? = nil
+        callbackGeneration: UInt64? = nil,
+        evidence: WindowDestroyEvidence
     ) {
         let observedToken = resolveWindowToken(windowId)
         let resolvedToken = resolveTrackedToken(windowId, resolvedWindowToken: observedToken)
@@ -2941,7 +2934,11 @@ final class AXEventHandler {
             )
         )
 
-        guard let candidate = prepareDestroyCandidate(windowId: windowId, pidHint: pidHint) else {
+        guard let candidate = prepareDestroyCandidate(
+            windowId: windowId,
+            pidHint: pidHint,
+            evidence: evidence
+        ) else {
             discardUnmanagedDestroyedWindowState(windowId: windowId, resolvedToken: resolvedToken)
             WindowAdmissionTrace.record(
                 .init(
@@ -2983,7 +2980,9 @@ final class AXEventHandler {
         }
 
         let shouldDelayDestroy = shouldDelayManagedReplacementDestroy(candidate)
-        if shouldDelayDestroy, handleNativeFullscreenDestroy(candidate.token) {
+        if shouldDelayDestroy,
+           handleNativeFullscreenDestroy(candidate.token, evidence: candidate.evidence)
+        {
             return
         }
         if shouldDelayDestroy {
@@ -3026,7 +3025,7 @@ final class AXEventHandler {
     }
 
     private func processPreparedDestroy(_ candidate: PreparedDestroy) {
-        handleRemoved(token: candidate.token)
+        handleRemoved(token: candidate.token, evidence: candidate.evidence)
         clearManagedReplacementFocusTransaction(
             containing: candidate.token,
             workspaceId: candidate.workspaceId,
@@ -3061,9 +3060,13 @@ final class AXEventHandler {
         managedReplacementCorrelationPolicy(for: candidate.replacementMetadata) != nil
     }
 
+    func enqueueManagedReplacementCreate(_ candidate: PreparedCreate) {
+        enqueueManagedReplacementCreate(candidate, focusedActivation: nil)
+    }
+
     private func enqueueManagedReplacementCreate(
         _ candidate: PreparedCreate,
-        focusedActivation: PendingFocusedManagedActivation? = nil
+        focusedActivation: PendingFocusedManagedActivation?
     ) {
         guard let policy = managedReplacementCorrelationPolicy(for: candidate.replacementMetadata) else { return }
         WindowAdmissionTrace.record(
@@ -3941,5 +3944,42 @@ final class AXEventHandler {
     private func removeDeferredCreatedWindow(_ windowId: UInt32) {
         guard deferredCreatedWindowIds.remove(windowId) != nil else { return }
         deferredCreatedWindowOrder.removeAll { $0 == windowId }
+    }
+}
+
+extension AXEventHandler {
+    private func handleCGSWindowDestroyed(
+        windowId: UInt32,
+        evidence: WindowDestroyEvidence
+    ) {
+        AXWindowService.invalidateCachedTitle(windowId: windowId)
+        cancelCreatedWindowRetry(windowId: windowId)
+        discardCreatePlacementContext(windowId: windowId)
+        removeDeferredCreatedWindow(windowId)
+        handleWindowDestroyed(windowId: windowId, pidHint: nil, evidence: evidence)
+    }
+
+    private func handleRemoved(token: WindowToken, evidence: WindowDestroyEvidence) {
+        guard let controller else { return }
+        guard let entry = controller.workspaceManager.entry(for: token) else {
+            discardRemovedWindowRuntimeState(token)
+            scheduleWindowRuleReevaluationIfNeeded(targets: [.pid(token.pid)])
+            return
+        }
+
+        if handleNativeFullscreenDestroy(token, evidence: evidence) {
+            discardRemovedWindowRuntimeState(token)
+            return
+        }
+
+        let recovery = prepareManagedWindowRemoval(entry)
+        retireManagedWindow(
+            entry,
+            reason: .destroyed(
+                shouldRecoverFocus: recovery.shouldRecoverFocus,
+                allowsPreferredRecoveryToken: recovery.closeRecoveryArmed
+            )
+        )
+        scheduleWindowRuleReevaluationIfNeeded(targets: [.pid(token.pid)])
     }
 }
