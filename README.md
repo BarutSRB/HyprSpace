@@ -356,6 +356,34 @@ brew tap BarutSRB/tap
 brew install omniwm
 ```
 
+### Nix
+
+OmniWM supports both community-maintained Nix packages below. They install official OmniWM release
+artifacts, while their Nix expressions are maintained by DoomHammer and DavSanchez respectively.
+
+| Package | Best for | Packaging difference |
+| --- | --- | --- |
+| [DoomHammer NUR package](https://nur.nix-community.org/repos/doomhammer/) | Fast release tracking | Its current `unzip` extraction does not preserve the release's valid Developer ID signature, and it installs the app bundle without exposing `omniwmctl` on `PATH`. |
+| [DavSanchez package](https://github.com/DavSanchez/nix-dotfiles/blob/master/pkgs/omniwm.nix) and [Home Manager module](https://github.com/DavSanchez/nix-dotfiles/blob/master/modules/home/omniwm.nix) | Signature-preserving, declarative integration | It may trail the latest release, but its `bsdtar` extraction preserves code signing and it provides `omniwmctl`, Home Manager settings, and launchd integration. |
+
+Install the fast-tracking DoomHammer package directly:
+
+```bash
+nix profile install github:DoomHammer/nur-packages#omniwm
+```
+
+Existing NUR configurations can use `nur.repos.doomhammer.omniwm`.
+
+Install the signature-preserving DavSanchez package directly:
+
+```bash
+nix profile install github:DavSanchez/nix-dotfiles#omniwm
+```
+
+For a declarative setup, use DavSanchez's exported
+[`homeModules.omniwm`](https://github.com/DavSanchez/nix-dotfiles/blob/master/modules/home/omniwm.nix)
+and `overlays.additions`. After either installation, complete the macOS setup in steps 3-6 below.
+
 ### GitHub Releases
 
 1. Download the latest `OmniWM.zip` from [Releases](https://github.com/BarutSRB/OmniWM/releases)
