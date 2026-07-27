@@ -166,6 +166,7 @@ struct FocusSessionSnapshot: Equatable {
     var lastTiledFocusedByWorkspace: [WorkspaceDescriptor.ID: WindowToken] = [:]
     var lastFloatingFocusedByWorkspace: [WorkspaceDescriptor.ID: WindowToken] = [:]
     var lastTiledFocusedToken: WindowToken? = nil
+    var tiledFocusHistory: [WindowToken] = []
     var focusLease: FocusPolicyLease? = nil
     var isNonManagedFocusActive: Bool = false
     var nonManagedFocusToken: WindowToken? = nil
@@ -176,6 +177,18 @@ struct FocusSessionSnapshot: Equatable {
 }
 
 extension FocusSessionSnapshot {
+    @discardableResult
+    mutating func recordTiledFocus(_ token: WindowToken) -> Bool {
+        let previous = tiledFocusHistory
+        tiledFocusHistory.removeAll { $0 == token }
+        tiledFocusHistory.insert(token, at: 0)
+        if tiledFocusHistory.count > 32 {
+            tiledFocusHistory.removeLast(tiledFocusHistory.count - 32)
+        }
+        lastTiledFocusedToken = token
+        return tiledFocusHistory != previous
+    }
+
     @discardableResult
     mutating func rememberFocus(
         _ token: WindowToken,
@@ -203,6 +216,10 @@ extension FocusSessionSnapshot {
 
         if lastTiledFocusedToken == token {
             lastTiledFocusedToken = nil
+            changed = true
+        }
+        if tiledFocusHistory.contains(token) {
+            tiledFocusHistory.removeAll { $0 == token }
             changed = true
         }
 
@@ -238,6 +255,10 @@ extension FocusSessionSnapshot {
             lastTiledFocusedToken = newToken
             changed = true
         }
+        if tiledFocusHistory.contains(oldToken) {
+            tiledFocusHistory = tiledFocusHistory.map { $0 == oldToken ? newToken : $0 }
+            changed = true
+        }
 
         for (workspaceId, token) in lastTiledFocusedByWorkspace where token == oldToken {
             lastTiledFocusedByWorkspace[workspaceId] = newToken
@@ -271,6 +292,10 @@ extension FocusSessionSnapshot {
             }
             if lastTiledFocusedToken == token {
                 lastTiledFocusedToken = nil
+                changed = true
+            }
+            if tiledFocusHistory.contains(token) {
+                tiledFocusHistory.removeAll { $0 == token }
                 changed = true
             }
         }

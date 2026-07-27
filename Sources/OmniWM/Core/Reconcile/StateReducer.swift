@@ -477,8 +477,8 @@ enum StateReducer {
         }
         focusSession.focusedToken = token
         focusSession.pendingManagedFocus = .empty
-        if mode == .tiling {
-            focusSession.lastTiledFocusedToken = token
+        if mode != .floating {
+            _ = focusSession.recordTiledFocus(token)
         }
         if focusSession.interactionMonitorId != monitorId {
             if let currentMonitorId = focusSession.interactionMonitorId,

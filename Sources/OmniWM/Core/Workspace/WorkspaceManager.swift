@@ -861,6 +861,12 @@ final class WorkspaceManager {
         world.focus.lastTiledFocusedToken
     }
 
+    func mostRecentlyFocusedTiledToken(excluding token: WindowToken) -> WindowToken? {
+        world.focus.tiledFocusHistory.first { candidate in
+            candidate != token && (windowMode(for: candidate) ?? .tiling) == .tiling && entry(for: candidate) != nil
+        }
+    }
+
     var focusedHandle: WindowHandle? {
         focusedToken.flatMap { world.handle(for: $0) }
     }
