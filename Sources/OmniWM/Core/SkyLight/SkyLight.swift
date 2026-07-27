@@ -906,12 +906,6 @@ final class SkyLight {
         return (resolutionOk, opacityOk)
     }
 
-    var backgroundBlurAvailable: Bool {
-        setWindowBackgroundBlurRadius != nil
-    }
-
-    /// Blurs whatever is behind `wid`; only visible through the window's translucent pixels.
-    /// A radius of 0 removes the blur.
     @discardableResult
     func setWindowBackgroundBlurRadius(_ wid: UInt32, radius: Int) -> Bool {
         let cid = getMainConnectionID()

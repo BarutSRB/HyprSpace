@@ -539,6 +539,12 @@ final class SettingsStore {
         didSet { scheduleSave() }
     }
 
+    var quakeTerminalBackgroundEffect = QuakeTerminalBackgroundEffect(
+        rawValue: SettingsStore.defaultExport.quakeTerminalBackgroundEffect
+    ) ?? .standardBlur {
+        didSet { scheduleSave() }
+    }
+
     var quakeTerminalBackgroundBlurRadius = SettingsStore.defaultExport.quakeTerminalBackgroundBlurRadius
         ?? QuakeTerminalAppearancePolicy.disabledBackgroundBlurRadius
     {
@@ -766,6 +772,7 @@ final class SettingsStore {
             quakeTerminalAnimationDuration: quakeTerminalAnimationDuration,
             quakeTerminalAutoHide: quakeTerminalAutoHide,
             quakeTerminalOpacity: quakeTerminalOpacity,
+            quakeTerminalBackgroundEffect: quakeTerminalBackgroundEffect.rawValue,
             quakeTerminalBackgroundBlurRadius: quakeTerminalBackgroundBlurRadius,
             quakeTerminalMonitorMode: quakeTerminalMonitorMode.rawValue,
             appearanceMode: appearanceMode.rawValue
@@ -916,6 +923,9 @@ final class SettingsStore {
         quakeTerminalAnimationDuration = export.quakeTerminalAnimationDuration
         quakeTerminalAutoHide = export.quakeTerminalAutoHide
         quakeTerminalOpacity = export.quakeTerminalOpacity ?? baseline.quakeTerminalOpacity ?? 1.0
+        quakeTerminalBackgroundEffect = QuakeTerminalBackgroundEffect(
+            rawValue: export.quakeTerminalBackgroundEffect
+        ) ?? .standardBlur
         quakeTerminalBackgroundBlurRadius = QuakeTerminalAppearancePolicy.normalizedBackgroundBlurRadius(
             export.quakeTerminalBackgroundBlurRadius
                 ?? baseline.quakeTerminalBackgroundBlurRadius

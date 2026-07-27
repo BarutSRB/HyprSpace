@@ -60,6 +60,15 @@ struct QuakeTerminalSettingsTab: View {
                 }
 
                 Section("Appearance") {
+                    Picker("Background Effect", selection: $settings.quakeTerminalBackgroundEffect) {
+                        ForEach(QuakeTerminalBackgroundEffect.allCases, id: \.self) { effect in
+                            Text(effect.displayName).tag(effect)
+                        }
+                    }
+                    .onChange(of: settings.quakeTerminalBackgroundEffect) { _, _ in
+                        controller.reloadQuakeTerminalBackgroundEffect()
+                    }
+
                     SettingsSliderRow(
                         label: "Quake Background Opacity",
                         value: $settings.quakeTerminalOpacity,
@@ -85,8 +94,13 @@ struct QuakeTerminalSettingsTab: View {
                     .onChange(of: settings.quakeTerminalBackgroundBlurRadius) { _, _ in
                         controller.reloadQuakeTerminalBackgroundBlur()
                     }
+                    .disabled(settings.quakeTerminalBackgroundEffect != .standardBlur)
 
-                    if QuakeTerminalAppearancePolicy.backgroundBlurIsHiddenByOpaqueBackground(
+                    if settings.quakeTerminalBackgroundEffect != .standardBlur {
+                        SettingsCaption(
+                            "The saved Standard Blur radius is preserved and becomes active again when Standard Blur is selected."
+                        )
+                    } else if QuakeTerminalAppearancePolicy.backgroundBlurIsHiddenByOpaqueBackground(
                         radius: settings.quakeTerminalBackgroundBlurRadius,
                         opacity: settings.quakeTerminalOpacity
                     ) {

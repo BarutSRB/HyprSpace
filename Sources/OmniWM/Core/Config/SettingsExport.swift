@@ -129,6 +129,7 @@ struct SettingsExport: Equatable {
     var quakeTerminalAnimationDuration: Double
     var quakeTerminalAutoHide: Bool
     var quakeTerminalOpacity: Double?
+    var quakeTerminalBackgroundEffect: String
     var quakeTerminalBackgroundBlurRadius: Int?
     var quakeTerminalMonitorMode: String?
 
@@ -243,6 +244,7 @@ extension SettingsExport {
             quakeTerminalAnimationDuration: 0.2,
             quakeTerminalAutoHide: false,
             quakeTerminalOpacity: 1.0,
+            quakeTerminalBackgroundEffect: QuakeTerminalBackgroundEffect.standardBlur.rawValue,
             quakeTerminalBackgroundBlurRadius: QuakeTerminalAppearancePolicy.disabledBackgroundBlurRadius,
             quakeTerminalMonitorMode: QuakeTerminalMonitorMode.focusedWindow.rawValue,
             appearanceMode: AppearanceMode.dark.rawValue

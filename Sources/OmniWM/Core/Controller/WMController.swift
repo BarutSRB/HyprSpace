@@ -645,6 +645,10 @@ final class WMController {
         quakeTerminalController.reloadOpacityConfig()
     }
 
+    func reloadQuakeTerminalBackgroundEffect() {
+        quakeTerminalController.reloadOpacityConfig()
+    }
+
     func reloadQuakeTerminalBackgroundBlur() {
         quakeTerminalController.reloadBackgroundBlur()
     }

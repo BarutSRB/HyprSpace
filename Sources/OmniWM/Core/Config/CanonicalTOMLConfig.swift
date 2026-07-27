@@ -230,6 +230,7 @@ struct CanonicalTOMLConfig: Codable, Equatable {
         var animationDuration: Double
         var autoHide: Bool
         var opacity: Double?
+        var backgroundEffect: String
         var backgroundBlurRadius: Int?
         var monitorMode: String?
     }
@@ -1096,6 +1097,12 @@ extension CanonicalTOMLConfig.QuakeTerminal {
             recovering: recovering
         )
         opacity = try container.decodeIfPresent(Double.self, forKey: .opacity)
+        backgroundEffect = try container.decode(
+            String.self,
+            forKey: .backgroundEffect,
+            default: defaults.backgroundEffect,
+            recovering: recovering
+        )
         backgroundBlurRadius = try container.decodeIfPresent(Int.self, forKey: .backgroundBlurRadius)
         monitorMode = try container.decodeIfPresent(String.self, forKey: .monitorMode)
     }
@@ -1240,6 +1247,7 @@ extension CanonicalTOMLConfig {
             animationDuration: export.quakeTerminalAnimationDuration,
             autoHide: export.quakeTerminalAutoHide,
             opacity: export.quakeTerminalOpacity,
+            backgroundEffect: export.quakeTerminalBackgroundEffect,
             backgroundBlurRadius: export.quakeTerminalBackgroundBlurRadius,
             monitorMode: export.quakeTerminalMonitorMode
         )
@@ -1360,6 +1368,7 @@ extension CanonicalTOMLConfig {
             quakeTerminalAnimationDuration: quakeTerminal.animationDuration,
             quakeTerminalAutoHide: quakeTerminal.autoHide,
             quakeTerminalOpacity: quakeTerminal.opacity,
+            quakeTerminalBackgroundEffect: quakeTerminal.backgroundEffect,
             quakeTerminalBackgroundBlurRadius: quakeTerminal.backgroundBlurRadius,
             quakeTerminalMonitorMode: quakeTerminal.monitorMode,
             appearanceMode: appearance.mode

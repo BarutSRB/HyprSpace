@@ -6,6 +6,19 @@ import Foundation
 import XCTest
 
 final class QuakeTerminalAppearanceSettingsTests: XCTestCase {
+    func testBackgroundEffectDefaultsToStandardBlur() {
+        XCTAssertEqual(
+            SettingsExport.defaults().quakeTerminalBackgroundEffect,
+            QuakeTerminalBackgroundEffect.standardBlur.rawValue
+        )
+    }
+
+    func testBackgroundEffectGhosttyValues() {
+        XCTAssertEqual(QuakeTerminalBackgroundEffect.standardBlur.ghosttyBackgroundBlurValue, "false")
+        XCTAssertEqual(QuakeTerminalBackgroundEffect.glassRegular.ghosttyBackgroundBlurValue, "macos-glass-regular")
+        XCTAssertEqual(QuakeTerminalBackgroundEffect.glassClear.ghosttyBackgroundBlurValue, "macos-glass-clear")
+    }
+
     func testBackgroundBlurDefaultsToOff() {
         let defaults = SettingsExport.defaults()
 
@@ -20,6 +33,17 @@ final class QuakeTerminalAppearanceSettingsTests: XCTestCase {
         XCTAssertEqual(QuakeTerminalAppearancePolicy.normalizedBackgroundBlurRadius(0), 0)
         XCTAssertEqual(QuakeTerminalAppearancePolicy.normalizedBackgroundBlurRadius(20), 20)
         XCTAssertEqual(QuakeTerminalAppearancePolicy.normalizedBackgroundBlurRadius(1000), 100)
+    }
+
+    func testGhosttyGlassDisablesNumericBackgroundBlur() {
+        XCTAssertEqual(
+            QuakeTerminalAppearancePolicy.effectiveBackgroundBlurRadius(40, glassEffectActive: true),
+            0
+        )
+        XCTAssertEqual(
+            QuakeTerminalAppearancePolicy.effectiveBackgroundBlurRadius(40, glassEffectActive: false),
+            40
+        )
     }
 
     func testBackgroundBlurIsOnlyVisibleThroughATranslucentTerminal() {
@@ -41,6 +65,37 @@ final class QuakeTerminalAppearanceSettingsTests: XCTestCase {
         XCTAssertTrue(toml.contains("[quakeTerminal]"))
         XCTAssertTrue(toml.contains("backgroundBlurRadius = 35"))
         XCTAssertEqual(decoded.quakeTerminalBackgroundBlurRadius, 35)
+    }
+
+    func testRoundTripsEveryBackgroundEffectInQuakeTerminalTable() throws {
+        for effect in QuakeTerminalBackgroundEffect.allCases {
+            var export = SettingsExport.defaults()
+            export.quakeTerminalBackgroundEffect = effect.rawValue
+
+            let data = try SettingsTOMLCodec.encode(export)
+            let toml = String(decoding: data, as: UTF8.self)
+            let decoded = try SettingsTOMLCodec.decode(data)
+
+            XCTAssertTrue(toml.contains("backgroundEffect = \"\(effect.rawValue)\""))
+            XCTAssertEqual(decoded.quakeTerminalBackgroundEffect, effect.rawValue)
+        }
+    }
+
+    @MainActor
+    func testConfigWithoutBackgroundEffectRecoversToStandardBlur() throws {
+        let defaults = SettingsExport.defaults()
+        let toml = String(decoding: try SettingsTOMLCodec.encode(defaults), as: UTF8.self)
+        let stripped = removingValue(in: toml, table: "quakeTerminal", key: "backgroundEffect")
+
+        let decoded = try SettingsTOMLCodec.decode(Data(stripped.utf8))
+        XCTAssertEqual(
+            decoded.quakeTerminalBackgroundEffect,
+            QuakeTerminalBackgroundEffect.standardBlur.rawValue
+        )
+
+        let settings = makeSettingsStore()
+        settings.applyExport(decoded)
+        XCTAssertEqual(settings.quakeTerminalBackgroundEffect, .standardBlur)
     }
 
     @MainActor
@@ -91,6 +146,21 @@ final class QuakeTerminalAppearanceSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testApplyExportRejectsUnknownBackgroundEffect() {
+        let settings = makeSettingsStore()
+        var export = SettingsExport.defaults()
+
+        export.quakeTerminalBackgroundEffect = "futureGlass"
+        settings.applyExport(export)
+
+        XCTAssertEqual(settings.quakeTerminalBackgroundEffect, .standardBlur)
+        XCTAssertEqual(
+            settings.toExport().quakeTerminalBackgroundEffect,
+            QuakeTerminalBackgroundEffect.standardBlur.rawValue
+        )
+    }
+
+    @MainActor
     func testAssigningOutOfRangeBackgroundBlurRadiusNormalizesInPlace() {
         let settings = makeSettingsStore()
 
@@ -123,9 +193,11 @@ final class QuakeTerminalAppearanceSettingsTests: XCTestCase {
         )
 
         settings.quakeTerminalBackgroundBlurRadius = 40
+        settings.quakeTerminalBackgroundEffect = .glassClear
 
         let persisted = try SettingsTOMLCodec.decode(Data(contentsOf: persistence.fileURL))
         XCTAssertEqual(persisted.quakeTerminalBackgroundBlurRadius, 40)
+        XCTAssertEqual(persisted.quakeTerminalBackgroundEffect, QuakeTerminalBackgroundEffect.glassClear.rawValue)
     }
 
     private func replacingValue(

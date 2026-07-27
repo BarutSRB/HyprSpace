@@ -25,6 +25,8 @@ final class QuakeTerminalController: NSObject, NSWindowDelegate, QuakeTerminalTa
 
     private var containerView: NSView?
     private var tabBar: QuakeTerminalTabBar?
+    private var glassEffectView: QuakeTerminalGlassView?
+    private var ghosttyAppearance: QuakeGhosttyAppearance?
 
     private var activeTab: QuakeTerminalTab? {
         guard activeTabIndex >= 0, activeTabIndex < tabs.count else { return nil }
@@ -100,6 +102,7 @@ final class QuakeTerminalController: NSObject, NSWindowDelegate, QuakeTerminalTa
             return
         }
         ghosttyConfig = config
+        updateGhosttyAppearance(QuakeGhosttyAppearance(config: config))
 
         var runtimeConfig = ghostty_runtime_config_s()
         runtimeConfig.userdata = Unmanaged.passUnretained(self).toOpaque()
@@ -111,7 +114,29 @@ final class QuakeTerminalController: NSObject, NSWindowDelegate, QuakeTerminalTa
                 controller.tick()
             }
         }
-        runtimeConfig.action_cb = { _, _, _ in false }
+        runtimeConfig.action_cb = { app, target, action in
+            guard let app, let userdata = ghostty_app_userdata(app) else { return false }
+            switch action.tag {
+            case GHOSTTY_ACTION_CONFIG_CHANGE:
+                guard target.tag == GHOSTTY_TARGET_APP,
+                      let config = action.action.config_change.config else { return false }
+                let appearance = QuakeGhosttyAppearance(config: config)
+                return MainActor.assumeIsolated {
+                    let controller = Unmanaged<QuakeTerminalController>.fromOpaque(userdata).takeUnretainedValue()
+                    controller.receiveGhosttyAppearance(appearance)
+                    return true
+                }
+            case GHOSTTY_ACTION_RELOAD_CONFIG:
+                guard target.tag == GHOSTTY_TARGET_APP else { return false }
+                return MainActor.assumeIsolated {
+                    let controller = Unmanaged<QuakeTerminalController>.fromOpaque(userdata).takeUnretainedValue()
+                    controller.reloadGhosttyConfig(soft: action.action.reload_config.soft)
+                    return true
+                }
+            default:
+                return false
+            }
+        }
         runtimeConfig.read_clipboard_cb = { userdata, location, state in
             guard let userdata, let state else { return false }
             return MainActor.assumeIsolated { () -> Bool in
@@ -166,6 +191,7 @@ final class QuakeTerminalController: NSObject, NSWindowDelegate, QuakeTerminalTa
             Log.terminal.error("Failed to create ghostty app")
             ghostty_config_free(config)
             ghosttyConfig = nil
+            updateGhosttyAppearance(nil)
             return
         }
 
@@ -197,6 +223,8 @@ final class QuakeTerminalController: NSObject, NSWindowDelegate, QuakeTerminalTa
         window?.close()
         window = nil
         appliedBackgroundBlurRadius = nil
+        glassEffectView = nil
+        ghosttyAppearance = nil
         containerView = nil
         tabBar = nil
         restoreTarget = nil
@@ -207,31 +235,132 @@ final class QuakeTerminalController: NSObject, NSWindowDelegate, QuakeTerminalTa
     }
 
     private func makeGhosttyConfig() -> ghostty_config_t? {
-        ghosttyConfigBuilder.build(opacity: settings.quakeTerminalOpacity)
+        ghosttyConfigBuilder.build(
+            opacity: settings.quakeTerminalOpacity,
+            backgroundEffect: settings.quakeTerminalBackgroundEffect
+        )
     }
 
     func reloadOpacityConfig() {
         guard let ghosttyApp else { return }
         guard let newConfig = makeGhosttyConfig() else { return }
 
+        if settings.quakeTerminalBackgroundEffect != .standardBlur {
+            applyBackgroundBlurRadius(QuakeTerminalAppearancePolicy.disabledBackgroundBlurRadius)
+        }
         ghostty_app_update_config(ghosttyApp, newConfig)
-        ghostty_config_free(newConfig)
+        if let ghosttyConfig {
+            ghostty_config_free(ghosttyConfig)
+        }
+        ghosttyConfig = newConfig
         applyCurrentGhosttyColorScheme()
     }
 
+    private func reloadGhosttyConfig(soft: Bool) {
+        guard let ghosttyApp else { return }
+        guard soft, let ghosttyConfig else {
+            reloadOpacityConfig()
+            return
+        }
+        ghostty_app_update_config(ghosttyApp, ghosttyConfig)
+    }
+
     func reloadBackgroundBlur() {
+        reconcileBackgroundEffect()
+    }
+
+    private func receiveGhosttyAppearance(_ appearance: QuakeGhosttyAppearance) {
+        guard ghosttyApp != nil else { return }
+        updateGhosttyAppearance(appearance, deferred: true)
+    }
+
+    private func updateGhosttyAppearance(_ appearance: QuakeGhosttyAppearance?, deferred: Bool = false) {
+        guard ghosttyAppearance != appearance else { return }
+        ghosttyAppearance = appearance
+        if deferred {
+            DispatchQueue.main.async { [weak self] in
+                self?.reconcileBackgroundEffect()
+            }
+        } else {
+            reconcileBackgroundEffect()
+        }
+    }
+
+    private func reconcileBackgroundEffect() {
+        if let appearance = ghosttyAppearance,
+           let glassStyle = appearance.glassStyle,
+           let containerView
+        {
+            let effectView = makeGlassEffectView(in: containerView)
+            let style: NSGlassEffectView.Style = switch glassStyle {
+            case .regular:
+                .regular
+            case .clear:
+                .clear
+            }
+            let color = ghosttyBackgroundColor(for: appearance)
+            effectView.configure(
+                style: style,
+                backgroundColor: color,
+                backgroundOpacity: appearance.opacity,
+                isKeyWindow: window?.isKeyWindow == true
+            )
+        } else {
+            glassEffectView?.removeFromSuperview()
+            glassEffectView = nil
+        }
+
         applyBackgroundBlur()
     }
 
-    /// The blur lives on the window-server window, so libghostty never sees it: it is applied
-    /// to our own panel and shows through wherever the terminal background is translucent.
+    private func ghosttyBackgroundColor(for appearance: QuakeGhosttyAppearance) -> NSColor {
+        guard let backgroundColor = appearance.backgroundColor else {
+            return .windowBackgroundColor
+        }
+        return NSColor(
+            srgbRed: CGFloat(backgroundColor.red) / 255,
+            green: CGFloat(backgroundColor.green) / 255,
+            blue: CGFloat(backgroundColor.blue) / 255,
+            alpha: 1
+        )
+    }
+
+    private func updateGlassKeyStatus(_ isKeyWindow: Bool) {
+        guard let ghosttyAppearance else { return }
+        glassEffectView?.updateKeyStatus(
+            isKeyWindow,
+            backgroundColor: ghosttyBackgroundColor(for: ghosttyAppearance)
+        )
+    }
+
+    private func makeGlassEffectView(in containerView: NSView) -> QuakeTerminalGlassView {
+        if let glassEffectView {
+            return glassEffectView
+        }
+
+        let effectView = QuakeTerminalGlassView(frame: containerView.bounds)
+        effectView.autoresizingMask = [.width, .height]
+        if let bottomSubview = containerView.subviews.first {
+            containerView.addSubview(effectView, positioned: .below, relativeTo: bottomSubview)
+        } else {
+            containerView.addSubview(effectView)
+        }
+        glassEffectView = effectView
+        return effectView
+    }
+
     private func applyBackgroundBlur() {
-        guard let window else { return }
+        let radius = QuakeTerminalAppearancePolicy.effectiveBackgroundBlurRadius(
+            settings.quakeTerminalBackgroundBlurRadius,
+            glassEffectActive: ghosttyAppearance?.glassStyle != nil
+        )
+        applyBackgroundBlurRadius(radius)
+    }
+
+    private func applyBackgroundBlurRadius(_ radius: Int) {
+        guard let window, window.isVisible else { return }
         let windowNumber = window.windowNumber
         guard windowNumber > 0 else { return }
-
-        let radius = QuakeTerminalAppearancePolicy
-            .normalizedBackgroundBlurRadius(settings.quakeTerminalBackgroundBlurRadius)
         guard appliedBackgroundBlurRadius != radius else { return }
         guard SkyLight.shared.setWindowBackgroundBlurRadius(UInt32(windowNumber), radius: radius) else { return }
         appliedBackgroundBlurRadius = radius
@@ -331,7 +460,7 @@ final class QuakeTerminalController: NSObject, NSWindowDelegate, QuakeTerminalTa
         container.addSubview(bar)
         self.tabBar = bar
 
-        applyBackgroundBlur()
+        reconcileBackgroundEffect()
     }
 
     private var surfaceID: String {
@@ -541,9 +670,6 @@ final class QuakeTerminalController: NSObject, NSWindowDelegate, QuakeTerminalTa
             createInitialSurface()
         }
 
-        // No-op once applied; covers a window whose device was not backed yet at creation.
-        applyBackgroundBlur()
-
         animateWindowIn(window: window)
     }
 
@@ -589,7 +715,7 @@ final class QuakeTerminalController: NSObject, NSWindowDelegate, QuakeTerminalTa
         if let customFrame = customFrameForShow(on: screen) {
             window.setFrame(customFrame, display: false)
             window.level = .popUpMenu
-            window.makeKeyAndOrderFront(nil)
+            orderFront(window)
 
             if !motionPolicy.animationsEnabled {
                 finishWindowIn(window)
@@ -622,7 +748,7 @@ final class QuakeTerminalController: NSObject, NSWindowDelegate, QuakeTerminalTa
         )
 
         window.level = .popUpMenu
-        window.makeKeyAndOrderFront(nil)
+        orderFront(window)
 
         if !motionPolicy.animationsEnabled {
             position.setFinal(
@@ -759,7 +885,7 @@ final class QuakeTerminalController: NSObject, NSWindowDelegate, QuakeTerminalTa
 
     private func makeWindowKey(_ window: NSWindow, retries: UInt8 = 0) {
         guard visible else { return }
-        window.makeKeyAndOrderFront(nil)
+        orderFront(window)
 
         if let surfaceView {
             window.makeFirstResponder(surfaceView)
@@ -770,6 +896,11 @@ final class QuakeTerminalController: NSObject, NSWindowDelegate, QuakeTerminalTa
         DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(25)) { [weak self] in
             self?.makeWindowKey(window, retries: retries - 1)
         }
+    }
+
+    private func orderFront(_ window: NSWindow) {
+        window.makeKeyAndOrderFront(nil)
+        reconcileBackgroundEffect()
     }
 
     private func readClipboard(
@@ -1113,7 +1244,10 @@ final class QuakeTerminalController: NSObject, NSWindowDelegate, QuakeTerminalTa
     }
 
     nonisolated func windowDidResignKey(_ notification: Notification) {
+        guard let notificationWindow = notification.object as? NSWindow else { return }
         Task { @MainActor in
+            guard notificationWindow === window else { return }
+            updateGlassKeyStatus(notificationWindow.isKeyWindow)
             guard visible else { return }
             guard window?.attachedSheet == nil else { return }
 
@@ -1124,6 +1258,14 @@ final class QuakeTerminalController: NSObject, NSWindowDelegate, QuakeTerminalTa
             if settings.quakeTerminalAutoHide {
                 animateOut(hideBehavior: .preserveCurrentFocus)
             }
+        }
+    }
+
+    nonisolated func windowDidBecomeKey(_ notification: Notification) {
+        guard let notificationWindow = notification.object as? NSWindow else { return }
+        Task { @MainActor in
+            guard notificationWindow === window else { return }
+            updateGlassKeyStatus(notificationWindow.isKeyWindow)
         }
     }
 
