@@ -53,6 +53,80 @@ final class WorkspaceMoveIPCIntegrationTests: XCTestCase {
         XCTAssertEqual(response.code, .workspaceStateConflict)
     }
 
+    func testHotkeyMovesActiveConfiguredWorkspaceWithRuntimeOverrideWithoutSwap() throws {
+        let fixture = try makeFixture()
+        defer { fixture.controller.layoutRefreshController.resetState() }
+        let controller = fixture.controller
+        let manager = controller.workspaceManager
+        _ = manager.setInteractionMonitor(fixture.left.id)
+
+        XCTAssertEqual(controller.activeWorkspace()?.id, fixture.sourceWorkspaceId)
+        XCTAssertNil(manager.descriptor(for: fixture.sourceWorkspaceId)?.runtimeMonitorOverride)
+
+        XCTAssertEqual(
+            controller.commandHandler.handleHotkeyInvocation(
+                HotkeyInvocation(
+                    command: .moveWorkspaceToMonitor(.right),
+                    trigger: PhysicalHotkeyTrigger(keyCode: 46, modifiers: 0, isRepeat: false)
+                )
+            ),
+            .executed
+        )
+
+        XCTAssertEqual(
+            manager.monitorForWorkspace(fixture.sourceWorkspaceId)?.id,
+            fixture.center.id
+        )
+        XCTAssertEqual(
+            manager.descriptor(for: fixture.sourceWorkspaceId)?.runtimeMonitorOverride,
+            OutputId(from: fixture.center)
+        )
+        XCTAssertEqual(
+            manager.monitorForWorkspace(fixture.centerWorkspaceId)?.id,
+            fixture.center.id
+        )
+        XCTAssertEqual(
+            manager.activeWorkspace(on: fixture.center.id)?.id,
+            fixture.sourceWorkspaceId
+        )
+        XCTAssertEqual(
+            controller.settings.workspaceConfigurations
+                .first { $0.name == "1" }?
+                .monitorAssignment,
+            .specificDisplay(OutputId(from: fixture.left))
+        )
+    }
+
+    func testHotkeyMoveAtMonitorEdgeDoesNotWrapOrMutate() throws {
+        let fixture = try makeFixture()
+        defer { fixture.controller.layoutRefreshController.resetState() }
+        let controller = fixture.controller
+        let manager = controller.workspaceManager
+        _ = manager.setInteractionMonitor(fixture.left.id)
+        let worldSeq = manager.worldSeq
+        let visibleWorkspaces = manager.activeVisibleWorkspaceMap()
+
+        XCTAssertEqual(
+            controller.commandHandler.handleHotkeyInvocation(
+                HotkeyInvocation(
+                    command: .moveWorkspaceToMonitor(.left),
+                    trigger: PhysicalHotkeyTrigger(keyCode: 46, modifiers: 0, isRepeat: false)
+                )
+            ),
+            .executed
+        )
+
+        XCTAssertEqual(manager.worldSeq, worldSeq)
+        XCTAssertEqual(manager.activeVisibleWorkspaceMap(), visibleWorkspaces)
+        XCTAssertEqual(
+            manager.monitorForWorkspace(fixture.sourceWorkspaceId)?.id,
+            fixture.left.id
+        )
+        XCTAssertNil(manager.descriptor(for: fixture.sourceWorkspaceId)?.runtimeMonitorOverride)
+        XCTAssertNil(controller.layoutRefreshController.layoutState.activeRefresh)
+        XCTAssertNil(controller.layoutRefreshController.layoutState.pendingRefresh)
+    }
+
     func testRouterResolvesDirectionFromNamedWorkspaceAndHonorsForce() throws {
         let fixture = try makeFixture()
         defer { fixture.controller.layoutRefreshController.resetState() }

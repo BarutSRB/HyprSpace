@@ -433,7 +433,7 @@ There is one deliberate exception to "all mutation goes through commit": **per-f
 | `axEventHandler` | CGS/AX events → admissions, focus confirm/retry, native-fullscreen detection |
 | `commandHandler` | Routes physical `HotkeyInvocation`s through Overview first, then routes inactive-Overview commands with layout-compatibility guards |
 | `mouseEventHandler` / `mouseWarpHandler` | CGEvent tap, focus-follows-mouse, gestures; cursor warp |
-| `workspaceNavigationHandler` | Workspace switching, explicit-handle window workspace/monitor transfers, and Niri whole-column workspace transfers |
+| `workspaceNavigationHandler` | Workspace switching, directional whole-workspace monitor moves, explicit-handle window workspace/monitor transfers, and Niri whole-column workspace transfers |
 | `windowActionHandler` | Close, fullscreen, float toggle |
 | `serviceLifecycleManager` | Observer setup, permission polling, service start/stop |
 | `layoutRefreshController` | Refresh scheduling, the display-link loop, frame application (owns `niriLayoutHandler`/`dwindleLayoutHandler`) |
@@ -600,7 +600,7 @@ Focus management is split across several objects (there is no single coordinator
 
 **Hotkeys** (`Sources/OmniWM/Core/Input/`)
 
-`ActionCatalog` is the source of truth for bindable actions. `buildSpecs()` materializes **149** `ActionSpec`s (95 standalone actions + 6 loop templates × 9), each with a title, search keywords, category, layout compatibility, and default binding. `HotkeyBinding`/`HotkeyBindingRegistry` persist and canonicalize per-action bindings (an action can have several shortcuts).
+`ActionCatalog` is the source of truth for bindable actions. `buildSpecs()` materializes **153** `ActionSpec`s (99 standalone actions + 6 loop templates × 9), each with a title, search keywords, category, layout compatibility, and default binding. `HotkeyBinding`/`HotkeyBindingRegistry` persist and canonicalize per-action bindings (an action can have several shortcuts).
 
 `HotkeyCenter` (`Hotkeys.swift`) installs one Carbon `InstallEventHandler` and registers each binding via `RegisterEventHotKey`, plus a virtual-hyper synthesis path. On a press it emits a `HotkeyInvocation` through `onCommand`; the invocation carries the semantic `HotkeyCommand` and optional `PhysicalHotkeyTrigger` metadata (`keyCode`, modifiers, and repeat state). `WMController` wires it to `eventIntake.enqueue(.hotkeyInvocation(invocation))`, so physical commands enter the same ordered intake pipeline as everything else (falling back to `CommandHandler.handleHotkeyInvocation` only if intake is closed).
 

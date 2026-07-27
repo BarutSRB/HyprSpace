@@ -178,6 +178,14 @@ final class CommandHandler {
             controller.niriLayoutHandler.setWindowPrimarySpan(change)
         case let .setWindowSecondarySpan(change):
             controller.niriLayoutHandler.setWindowSecondarySpan(change)
+        case let .moveWorkspaceToMonitor(direction):
+            if let workspaceId = controller.activeWorkspace()?.id {
+                _ = controller.workspaceNavigationHandler.moveWorkspaceToMonitor(
+                    workspaceId,
+                    direction: direction,
+                    force: true
+                )
+            }
         case let .swapWorkspaceWithMonitor(direction):
             controller.workspaceNavigationHandler.swapCurrentWorkspaceWithMonitor(direction: direction)
         case .balanceSizes:

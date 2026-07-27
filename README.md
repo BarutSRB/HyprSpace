@@ -513,6 +513,9 @@ Layout legend:
 | Focus Next Monitor | `Control + Command + Tab` | `Shared` |
 | Focus Previous Monitor | `Unassigned` | `Shared` |
 | Focus Last Monitor | `` Control + Command + ` `` | `Shared` |
+| Move Workspace to Left / Right / Up / Down Monitor | `Unassigned` | `Shared` |
+
+The workspace-to-monitor actions target the active workspace and intentionally use the same temporary runtime override as `omniwmctl workspace move-to-monitor --force`. They do not rewrite the workspace's Home Monitor or swap workspaces, and unsafe fullscreen, hidden-app, scratchpad, or focus states still block the move.
 
 #### Layout
 

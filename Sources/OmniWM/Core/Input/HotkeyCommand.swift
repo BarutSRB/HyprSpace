@@ -84,6 +84,7 @@ enum HotkeyCommand: Codable, Equatable, Hashable {
     case setWindowPrimarySpan(NiriSizeChange)
     case setWindowSecondarySpan(NiriSizeChange)
 
+    case moveWorkspaceToMonitor(Direction)
     case swapWorkspaceWithMonitor(Direction)
 
     case balanceSizes

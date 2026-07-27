@@ -418,6 +418,7 @@ enum ActionCatalog {
             )
         ])
 
+        let workspaceMonitorMoveKeywords = ["display", "home monitor", "force", "runtime override"]
         specs.append(contentsOf: [
             action(
                 id: "focusMonitorNext",
@@ -436,6 +437,34 @@ enum ActionCatalog {
                 command: .focusMonitorLast,
                 category: .monitor,
                 binding: KeyBinding(keyCode: UInt32(kVK_ANSI_Grave), modifiers: UInt32(controlKey | cmdKey))
+            ),
+            action(
+                id: "moveWorkspaceToMonitor.left",
+                command: .moveWorkspaceToMonitor(.left),
+                category: .monitor,
+                binding: .unassigned,
+                keywords: workspaceMonitorMoveKeywords
+            ),
+            action(
+                id: "moveWorkspaceToMonitor.right",
+                command: .moveWorkspaceToMonitor(.right),
+                category: .monitor,
+                binding: .unassigned,
+                keywords: workspaceMonitorMoveKeywords
+            ),
+            action(
+                id: "moveWorkspaceToMonitor.up",
+                command: .moveWorkspaceToMonitor(.up),
+                category: .monitor,
+                binding: .unassigned,
+                keywords: workspaceMonitorMoveKeywords
+            ),
+            action(
+                id: "moveWorkspaceToMonitor.down",
+                command: .moveWorkspaceToMonitor(.down),
+                category: .monitor,
+                binding: .unassigned,
+                keywords: workspaceMonitorMoveKeywords
             )
         ])
 
@@ -992,6 +1021,7 @@ enum ActionCatalog {
              .focusMonitorNext,
              .focusMonitorLast,
              .toggleNativeFullscreen,
+             .moveWorkspaceToMonitor,
              .swapWorkspaceWithMonitor,
              .workspaceBackAndForth,
              .focusWorkspaceAnywhere,
@@ -1071,6 +1101,7 @@ enum ActionCatalog {
         case let .setContainerPrimarySpan(change): "Set Container Primary Span \(sizeChangeDisplayName(change))"
         case let .setWindowPrimarySpan(change): "Set Window Primary Span \(sizeChangeDisplayName(change))"
         case let .setWindowSecondarySpan(change): "Set Window Secondary Span \(sizeChangeDisplayName(change))"
+        case let .moveWorkspaceToMonitor(dir): "Move Workspace to \(dir.displayName) Monitor"
         case let .swapWorkspaceWithMonitor(dir): "Swap Workspace with \(dir.displayName) Monitor"
         case .balanceSizes: "Balance Sizes"
         case .moveToRoot: "Move to Root"
@@ -1215,6 +1246,8 @@ enum ActionCatalog {
             .setWindowPrimarySpan
         case .setWindowSecondarySpan:
             .setWindowSecondarySpan
+        case .moveWorkspaceToMonitor:
+            nil
         case .swapWorkspaceWithMonitor:
             .swapWorkspaceWithMonitor
         case .balanceSizes:

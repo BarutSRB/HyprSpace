@@ -100,6 +100,15 @@ final class OverviewStructuralCommandTests: XCTestCase {
             ),
             .ignoredOverview
         )
+        XCTAssertEqual(
+            fixture.controller.commandHandler.handleHotkeyInvocation(
+                HotkeyInvocation(
+                    command: .moveWorkspaceToMonitor(.right),
+                    trigger: PhysicalHotkeyTrigger(keyCode: 46, modifiers: 0, isRepeat: false)
+                )
+            ),
+            .ignoredOverview
+        )
     }
 
     func testCoalescedStructuralActionsRefreshUnionOfAffectedWorkspacesOnce() async throws {
