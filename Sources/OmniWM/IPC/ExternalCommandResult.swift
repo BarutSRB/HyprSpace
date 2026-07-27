@@ -9,6 +9,8 @@ enum ExternalCommandResult: Equatable, Sendable, Error {
     case ignoredOverview
     case ignoredLayoutMismatch
     case staleWindowId
+    case workspaceAssignmentConflict
+    case workspaceStateConflict
     case notFound
     case invalidArguments
 }

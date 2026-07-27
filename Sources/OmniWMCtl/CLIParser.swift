@@ -468,19 +468,40 @@ enum CLIParser {
 
         for descriptor in IPCAutomationManifest.workspaceActionDescriptors(matching: arguments) {
             let actionWords = descriptor.actionWords
-            let remainingCount = arguments.count - actionWords.count
-            guard remainingCount == descriptor.arguments.count else {
-                continue
-            }
+            let remaining = Array(arguments.dropFirst(actionWords.count))
 
             switch descriptor.name {
             case .focusName:
-                let targetValue = arguments.last ?? ""
+                guard remaining.count == descriptor.arguments.count,
+                      let targetValue = remaining.first
+                else {
+                    continue
+                }
                 return IPCRequest(
                     id: id,
-                    workspace: IPCWorkspaceRequest(
-                        name: .focusName,
+                    workspace: .focusName(
                         target: WorkspaceTarget(resolvingInput: targetValue)
+                    )
+                )
+            case .moveToMonitor:
+                let flags = remaining.filter { $0.hasPrefix("--") }
+                guard flags.allSatisfy(descriptor.optionalFlags.contains),
+                      flags.count == Set(flags).count
+                else {
+                    continue
+                }
+
+                let positionals = remaining.filter { !$0.hasPrefix("--") }
+                guard positionals.count == descriptor.arguments.count else {
+                    continue
+                }
+
+                return IPCRequest(
+                    id: id,
+                    workspace: .moveToMonitor(
+                        target: WorkspaceTarget(resolvingInput: positionals[0]),
+                        direction: try parseDirection(positionals[1]),
+                        force: flags.contains("--force")
                     )
                 )
             }

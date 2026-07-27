@@ -5,34 +5,10 @@ import AppKit
 import Foundation
 import OmniWMIPC
 
-struct WorkspaceDescriptor: Identifiable, Hashable {
-    typealias ID = UUID
-    let id: ID
-    var name: String
-    var assignedMonitorPoint: CGPoint?
-
-    init(name: String, assignedMonitorPoint: CGPoint? = nil) {
-        id = UUID()
-        self.name = name
-        self.assignedMonitorPoint = assignedMonitorPoint
-    }
-}
-
 @MainActor
 final class WorkspaceManager {
-    enum NativeFullscreenTransition: Equatable {
-        case enterRequested
-        case suspended
-        case exitRequested
-    }
-
-    struct NativeFullscreenRecord: Equatable {
-        let originalToken: WindowToken
-        var currentToken: WindowToken
-        var workspaceId: WorkspaceDescriptor.ID
-        var exitRequestedByCommand: Bool
-        var transition: NativeFullscreenTransition
-    }
+    typealias NativeFullscreenTransition = WorkspaceNativeFullscreenTransition
+    typealias NativeFullscreenRecord = WorkspaceNativeFullscreenRecord
 
     private struct MonitorResolutionContext {
         let monitors: [Monitor]
@@ -48,7 +24,7 @@ final class WorkspaceManager {
 
     private var _monitorsById: [Monitor.ID: Monitor] = [:]
     private var _monitorsByName: [String: [Monitor]] = [:]
-    private let settings: SettingsStore
+    let settings: SettingsStore
 
     private var workspacesById: [WorkspaceDescriptor.ID: WorkspaceDescriptor] = [:]
     private var workspaceIdByName: [String: WorkspaceDescriptor.ID] = [:]
@@ -61,6 +37,8 @@ final class WorkspaceManager {
     let animationDriver = AnimationDriver()
     private var nativeFullscreenRecordsByOriginalToken: [WindowToken: NativeFullscreenRecord] = [:]
     private var nativeFullscreenOriginalTokenByCurrentToken: [WindowToken: WindowToken] = [:]
+    var pendingRuntimeMonitorOverrideClearWorkspaceIds: Set<WorkspaceDescriptor.ID> = []
+    var isDrainingPendingRuntimeMonitorOverrideClears = false
     private lazy var persistedRestoreCatalogStore = PersistedRestoreCatalogStore(
         bootCatalog: settings.loadPersistedWindowRestoreCatalog(),
         buildSnapshot: { [unowned self] in self.persistedWindowRestoreCatalogBuildSnapshot() },
@@ -83,6 +61,7 @@ final class WorkspaceManager {
     var onSessionStateChanged: (() -> Void)?
     var onRuntimeInvalidation: ((WorkspaceDescriptor.ID?, InvalidationDomain) -> Void)?
     var onWindowRemoved: ((WindowState) -> Void)?
+    var onDeferredWorkspaceMonitorMove: ((WorkspaceMonitorMoveOutcome) -> Void)?
 
     init(settings: SettingsStore) {
         self.settings = settings
@@ -329,6 +308,10 @@ final class WorkspaceManager {
         let normalizedMonitors = newMonitors.isEmpty ? [Monitor.fallback()] : newMonitors
         let snapshot = reconcileSnapshot()
         let topologyResolutionContext = monitorResolutionContext(for: normalizedMonitors)
+        let runtimeOverrideReconnectPreferences = runtimeOverrideReconnectAssignments(
+            previousMonitors: monitors,
+            newMonitors: normalizedMonitors
+        )
         let topologyPlan = restorePlanner.planMonitorConfigurationChange(
             .init(
                 snapshot: snapshot,
@@ -336,6 +319,7 @@ final class WorkspaceManager {
                 newMonitors: normalizedMonitors,
                 visibleWorkspaceMap: activeVisibleWorkspaceMap(),
                 disconnectedVisibleWorkspaceCache: disconnectedVisibleWorkspaceCache,
+                runtimeOverrideReconnectPreferences: runtimeOverrideReconnectPreferences,
                 interactionMonitorId: world.focus.interactionMonitorId,
                 previousInteractionMonitorId: world.focus.previousInteractionMonitorId,
                 workspaceExists: { [weak self] workspaceId in
@@ -572,6 +556,11 @@ final class WorkspaceManager {
         world.updateFocus {
             $0.interactionMonitorId = transition.interactionMonitorId
             $0.previousInteractionMonitorId = transition.previousInteractionMonitorId
+            if let pendingWorkspaceId = $0.pendingManagedFocus.workspaceId,
+               let pendingMonitorId = effectiveMonitor(for: pendingWorkspaceId, context: context)?.id
+            {
+                $0.pendingManagedFocus.monitorId = pendingMonitorId
+            }
         }
         reconcileInteractionMonitorState(notify: false)
         refreshWindowMonitorReferencesForAllEntries()
@@ -809,8 +798,13 @@ final class WorkspaceManager {
                 continue
             }
 
-            let preferredMonitor = monitor(for: entry.workspaceId, context: context).map(DisplayFingerprint.init)
-                ?? restoreIntent.preferredMonitor
+            let preferredMonitor: DisplayFingerprint?
+            if configuredMonitorDescription(for: workspaceName, context: context) != nil {
+                preferredMonitor = homeMonitor(for: entry.workspaceId, context: context).map(DisplayFingerprint.init)
+            } else {
+                preferredMonitor = monitor(for: entry.workspaceId, context: context).map(DisplayFingerprint.init)
+                    ?? restoreIntent.preferredMonitor
+            }
 
             snapshotEntries.append(
                 PersistedWindowRestoreCatalogBuildEntry(
@@ -955,6 +949,7 @@ final class WorkspaceManager {
         if changed {
             notifySessionStateChanged()
         }
+        drainPendingRuntimeMonitorOverrideClears()
         return changed
     }
 
@@ -1052,6 +1047,7 @@ final class WorkspaceManager {
             notifySessionStateChanged()
         }
 
+        drainPendingRuntimeMonitorOverrideClears()
         return changed
     }
 
@@ -1095,6 +1091,7 @@ final class WorkspaceManager {
             notifySessionStateChanged()
         }
 
+        drainPendingRuntimeMonitorOverrideClears()
         return changed
     }
 
@@ -1137,6 +1134,12 @@ final class WorkspaceManager {
             return nil
         }
         return nativeFullscreenRecordsByOriginalToken[originalToken]
+    }
+
+    func hasNativeFullscreenRecord(in workspaceId: WorkspaceDescriptor.ID) -> Bool {
+        nativeFullscreenRecordsByOriginalToken.values.contains {
+            $0.workspaceId == workspaceId
+        }
     }
 
     @discardableResult
@@ -1275,8 +1278,12 @@ final class WorkspaceManager {
         if let record {
             _ = removeNativeFullscreenRecord(originalToken: record.originalToken)
         }
-        let restored = restoreFromNativeState(for: resolvedToken)
+        let restored = restoreFromNativeState(
+            for: resolvedToken,
+            drainPendingRuntimeMonitorOverrides: false
+        )
         _ = exitNonManagedFocus()
+        drainPendingRuntimeMonitorOverrideClears()
         return restored
     }
 
@@ -1674,6 +1681,7 @@ final class WorkspaceManager {
         if notify {
             notifySessionStateChanged()
         }
+        drainPendingRuntimeMonitorOverrideClears()
         return true
     }
 
@@ -1736,20 +1744,20 @@ final class WorkspaceManager {
         invalidateWorkspaceProjectionCaches()
     }
 
-    private func invalidateSettingsProjectionCaches() {
+    func invalidateSettingsProjectionCaches() {
         _cachedConfiguredWorkspaceNames = nil
         _cachedConfiguredWorkspaceNameSet = nil
         _cachedMonitorDescriptionByWorkspaceName = nil
     }
 
-    private func invalidateWorkspaceProjectionCaches() {
+    func invalidateWorkspaceProjectionCaches() {
         _cachedWorkspaceIdsByMonitor = nil
         _cachedVisibleWorkspaceIds = nil
         _cachedVisibleWorkspaceMap = nil
         _cachedMonitorIdByVisibleWorkspace = nil
     }
 
-    private func sortedMonitors() -> [Monitor] {
+    func sortedMonitors() -> [Monitor] {
         if let cached = _cachedSortedMonitors {
             return cached
         }
@@ -1829,7 +1837,7 @@ final class WorkspaceManager {
         let context = monitorResolutionContext()
         var workspaceIdsByMonitor: [Monitor.ID: [WorkspaceDescriptor.ID]] = [:]
         for workspace in sortedWorkspaces() {
-            guard let monitorId = resolvedWorkspaceMonitorId(for: workspace.id, context: context) else { continue }
+            guard let monitorId = effectiveMonitor(for: workspace.id, context: context)?.id else { continue }
             workspaceIdsByMonitor[monitorId, default: []].append(workspace.id)
         }
 
@@ -1974,16 +1982,12 @@ final class WorkspaceManager {
         ensureVisibleWorkspaces()
         guard let targetMonitor = monitorForWorkspace(workspaceId) else { return nil }
         guard setActiveWorkspace(workspaceId, on: targetMonitor.id) else { return nil }
-        guard let workspace = descriptor(for: workspaceId) else { return nil }
-        return (workspace, targetMonitor)
-    }
-
-    func applySettings() {
-        invalidateSettingsProjectionCaches()
-        invalidateWorkspaceProjectionCaches()
-        synchronizeConfiguredWorkspaces()
-        ensureVisibleWorkspaces()
-        reconcileConfiguredVisibleWorkspaces()
+        guard let workspace = descriptor(for: workspaceId),
+              let resolvedMonitor = monitorForWorkspace(workspaceId)
+        else {
+            return nil
+        }
+        return (workspace, resolvedMonitor)
     }
 
     func applyMonitorConfigurationChange(_ newMonitors: [Monitor]) {
@@ -2023,25 +2027,12 @@ final class WorkspaceManager {
         }
     }
 
-    func monitorForWorkspace(_ workspaceId: WorkspaceDescriptor.ID) -> Monitor? {
-        guard let monitorId = workspaceMonitorId(for: workspaceId) else { return nil }
-        return monitor(byId: monitorId)
-    }
-
-    func monitor(for workspaceId: WorkspaceDescriptor.ID) -> Monitor? {
-        monitorForWorkspace(workspaceId)
-    }
-
     private func monitor(
         for workspaceId: WorkspaceDescriptor.ID,
         context: MonitorResolutionContext
     ) -> Monitor? {
         guard let monitorId = workspaceMonitorId(for: workspaceId, context: context) else { return nil }
         return monitor(byId: monitorId)
-    }
-
-    func monitorId(for workspaceId: WorkspaceDescriptor.ID) -> Monitor.ID? {
-        monitorForWorkspace(workspaceId)?.id
     }
 
     private func monitorId(
@@ -2507,6 +2498,7 @@ final class WorkspaceManager {
         if focusChanged || scratchpadChanged {
             notifySessionStateChanged()
         }
+        drainPendingRuntimeMonitorOverrideClears()
         onWindowRemoved?(entry)
         return entry
     }
@@ -2531,6 +2523,11 @@ final class WorkspaceManager {
                 source: .workspaceManager
             )
         )
+        if world.scratchpadToken == token,
+           previousWorkspace.map(pendingRuntimeMonitorOverrideClearWorkspaceIds.contains) == true
+        {
+            drainPendingRuntimeMonitorOverrideClears()
+        }
     }
 
     func workspace(for token: WindowToken) -> WorkspaceDescriptor.ID? {
@@ -2553,6 +2550,7 @@ final class WorkspaceManager {
                 source: .workspaceManager
             )
         )
+        drainPendingRuntimeMonitorOverrideClears()
     }
 
     func hiddenState(for token: WindowToken) -> HiddenState? {
@@ -2582,7 +2580,10 @@ final class WorkspaceManager {
     }
 
     @discardableResult
-    func restoreFromNativeState(for token: WindowToken) -> Bool {
+    func restoreFromNativeState(
+        for token: WindowToken,
+        drainPendingRuntimeMonitorOverrides: Bool = true
+    ) -> Bool {
         guard let entry = world.entry(for: token),
               entry.layoutReason != .standard,
               let workspaceId = workspace(for: token)
@@ -2598,6 +2599,9 @@ final class WorkspaceManager {
                 source: .workspaceManager
             )
         )
+        if drainPendingRuntimeMonitorOverrides, nativeFullscreenRecord(for: token) == nil {
+            drainPendingRuntimeMonitorOverrideClears()
+        }
         return true
     }
 
@@ -2674,26 +2678,167 @@ final class WorkspaceManager {
     }
 
     @discardableResult
-    func moveWorkspaceToMonitor(_ workspaceId: WorkspaceDescriptor.ID, to targetMonitorId: Monitor.ID) -> Bool {
-        guard let targetMonitor = monitor(byId: targetMonitorId) else { return false }
-        guard let sourceMonitor = monitorForWorkspace(workspaceId) else { return false }
-
-        if sourceMonitor.id == targetMonitor.id { return false }
-
-        guard isValidAssignment(workspaceId: workspaceId, monitorId: targetMonitor.id) else { return false }
-
-        guard setActiveWorkspaceInternal(
-            workspaceId,
-            on: targetMonitor.id,
-            anchorPoint: targetMonitor.workspaceAnchorPoint,
-            updateInteractionMonitor: true
-        ) else {
-            return false
+    func moveWorkspaceToMonitor(
+        _ workspaceId: WorkspaceDescriptor.ID,
+        to targetMonitorId: Monitor.ID,
+        force: Bool = false
+    ) -> WorkspaceMonitorMoveOutcome {
+        let unchangedOutcome: (WorkspaceMonitorMoveOutcome.Status) -> WorkspaceMonitorMoveOutcome = { status in
+            WorkspaceMonitorMoveOutcome(
+                status: status,
+                affectedWorkspaces: [],
+                floatingRelocations: []
+            )
         }
 
-        replaceVisibleWorkspaceIfNeeded(on: sourceMonitor.id)
+        guard var workspace = descriptor(for: workspaceId),
+              let targetMonitor = monitor(byId: targetMonitorId)
+        else {
+            return unchangedOutcome(.notFound)
+        }
 
-        return true
+        let context = monitorResolutionContext()
+        guard let sourceMonitorId = resolvedWorkspaceMonitorId(for: workspaceId, context: context) else {
+            return unchangedOutcome(.notFound)
+        }
+        guard sourceMonitorId != targetMonitor.id else {
+            return unchangedOutcome(.executed)
+        }
+
+        let isConfigured = context.configuredWorkspaceNames.contains(workspace.name)
+        let homeMonitorId = homeMonitorId(for: workspaceId, context: context)
+        if isConfigured, homeMonitorId != targetMonitor.id, !force {
+            return unchangedOutcome(.conflict)
+        }
+
+        let visibleBefore = activeVisibleWorkspaceMap()
+        let movedWorkspaceWasVisible = visibleBefore[sourceMonitorId] == workspaceId
+        let managedFocusedEntry = world.focus.isNonManagedFocusActive
+            ? nil
+            : world.focus.focusedToken.flatMap { world.entry(for: $0) }
+        let managedFocusedWorkspaceId = managedFocusedEntry?.workspaceId
+        let transfersManagedFocus = managedFocusedWorkspaceId == workspaceId
+        guard !isWorkspaceMonitorMoveUnsafe(
+            workspaceId,
+            sourceMonitorId: sourceMonitorId,
+            visibleWorkspaces: visibleBefore
+        ) else {
+            return unchangedOutcome(.stateConflict)
+        }
+
+        let destinationWorkspaceId = visibleBefore[targetMonitor.id]
+        let destinationIsProtected = targetMonitor.id == world.focus.interactionMonitorId
+            || destinationWorkspaceId.map {
+                $0 == managedFocusedWorkspaceId
+                    || $0 == world.focus.pendingManagedFocus.workspaceId
+            } ?? false
+        let makesMovedWorkspaceVisible = transfersManagedFocus || !destinationIsProtected
+        let sourceReplacementWorkspaceId = movedWorkspaceWasVisible
+            ? sourceReplacementWorkspaceId(
+                for: workspaceId,
+                on: sourceMonitorId,
+                context: context
+            )
+            : nil
+
+        var nextMonitorSessions = world.monitorSessions
+        for monitorId in Array(nextMonitorSessions.keys) where monitorId != targetMonitor.id {
+            guard var session = nextMonitorSessions[monitorId],
+                  session.previousVisibleWorkspaceId == workspaceId
+            else {
+                continue
+            }
+            session.previousVisibleWorkspaceId = nil
+            if session.visibleWorkspaceId == nil {
+                nextMonitorSessions.removeValue(forKey: monitorId)
+            } else {
+                nextMonitorSessions[monitorId] = session
+            }
+        }
+        if movedWorkspaceWasVisible {
+            var sourceSession = nextMonitorSessions[sourceMonitorId] ?? MonitorSession()
+            sourceSession.visibleWorkspaceId = sourceReplacementWorkspaceId
+            sourceSession.previousVisibleWorkspaceId = nil
+            if sourceSession.visibleWorkspaceId == nil {
+                nextMonitorSessions.removeValue(forKey: sourceMonitorId)
+            } else {
+                nextMonitorSessions[sourceMonitorId] = sourceSession
+            }
+        }
+        if makesMovedWorkspaceVisible {
+            var targetSession = nextMonitorSessions[targetMonitor.id] ?? MonitorSession()
+            targetSession.visibleWorkspaceId = workspaceId
+            targetSession.previousVisibleWorkspaceId = destinationWorkspaceId
+            nextMonitorSessions[targetMonitor.id] = targetSession
+        }
+
+        let floatingStates = translatedFloatingStates(in: workspaceId, to: targetMonitor)
+        let floatingRelocations = floatingStates.compactMap { token, state -> WorkspaceFloatingRelocation? in
+            guard world.entry(for: token)?.hiddenState == nil else { return nil }
+            return WorkspaceFloatingRelocation(
+                workspaceId: workspaceId,
+                token: token,
+                frame: state.lastFrame
+            )
+        }.sorted {
+            if $0.token.pid != $1.token.pid {
+                return $0.token.pid < $1.token.pid
+            }
+            return $0.token.windowId < $1.token.windowId
+        }
+
+        workspace.assignedMonitorPoint = targetMonitor.workspaceAnchorPoint
+        workspace.runtimeMonitorOverride = homeMonitorId == targetMonitor.id
+            ? nil
+            : OutputId(from: targetMonitor)
+
+        animationDriver.removeMotions(for: [workspaceId])
+        world.commit(
+            .userCommand(
+                workspaceId: workspaceId,
+                label: "workspace_monitor_move",
+                source: .command
+            ),
+            monitors: monitors,
+            snapshot: { self.reconcileSnapshot() },
+            preMutate: {
+                self.workspacesById[workspaceId] = workspace
+                self.pendingRuntimeMonitorOverrideClearWorkspaceIds.remove(workspaceId)
+                self._cachedSortedWorkspaces = nil
+                self.world.applyWorkspaceMonitorMove(
+                    workspaceId: workspaceId,
+                    targetMonitorId: targetMonitor.id,
+                    monitorSessions: nextMonitorSessions,
+                    floatingStates: floatingStates,
+                    transferInteraction: transfersManagedFocus,
+                    monitors: self.monitors
+                )
+                self.world.niriEngine?.moveWorkspace(
+                    workspaceId,
+                    to: targetMonitor.id,
+                    monitor: targetMonitor
+                )
+                self.invalidateWorkspaceProjectionCaches()
+            },
+            resolvePlan: { plan, _, _ in plan }
+        )
+
+        var affectedWorkspaces: Set<WorkspaceDescriptor.ID> = [workspaceId]
+        if let sourceReplacementWorkspaceId {
+            affectedWorkspaces.insert(sourceReplacementWorkspaceId)
+        }
+        noteInvalidation(
+            workspaceIds: affectedWorkspaces,
+            domains: [.workspace, .layout, .focus]
+        )
+        schedulePersistedWindowRestoreCatalogSave()
+        notifySessionStateChanged()
+
+        return WorkspaceMonitorMoveOutcome(
+            status: .executed,
+            affectedWorkspaces: affectedWorkspaces,
+            floatingRelocations: makesMovedWorkspaceVisible ? floatingRelocations : []
+        )
     }
 
     @discardableResult
@@ -2995,170 +3140,7 @@ final class WorkspaceManager {
         removeWorkspaces(toRemove)
     }
 
-    func adjacentMonitor(from monitorId: Monitor.ID, direction: Direction, wrapAround: Bool = false) -> Monitor? {
-        guard let current = monitor(byId: monitorId) else { return nil }
-
-        if settings.monitorRoutingMode == .custom {
-            switch MonitorRouting.gridAdjacent(
-                from: current,
-                direction: direction,
-                layout: settings.monitorRoutingSettings,
-                monitors: monitors,
-                wrapAround: wrapAround
-            ) {
-            case let .monitor(target):
-                return target
-            case .edge:
-                return nil
-            case .fallBackToMacOS:
-                break
-            }
-        }
-
-        return macOSAdjacentMonitor(from: current, direction: direction, wrapAround: wrapAround)
-    }
-
-    private func macOSAdjacentMonitor(from current: Monitor, direction: Direction, wrapAround: Bool) -> Monitor? {
-        let others = monitors.filter { $0.id != current.id }
-        guard !others.isEmpty else { return nil }
-
-        let directional = others.filter { candidate in
-            let delta = monitorDelta(from: current, to: candidate)
-            switch direction {
-            case .left: return delta.dx < 0 && abs(delta.dx) >= abs(delta.dy)
-            case .right: return delta.dx > 0 && abs(delta.dx) >= abs(delta.dy)
-            case .up: return delta.dy > 0 && abs(delta.dy) >= abs(delta.dx)
-            case .down: return delta.dy < 0 && abs(delta.dy) >= abs(delta.dx)
-            }
-        }
-
-        if let bestDirectional = bestMonitor(in: directional, from: current, direction: direction) {
-            return bestDirectional
-        }
-
-        guard wrapAround else { return nil }
-        return wrappedMonitor(in: others, from: current, direction: direction)
-    }
-
-    func previousMonitor(from monitorId: Monitor.ID) -> Monitor? {
-        guard monitors.count > 1 else { return nil }
-
-        let sorted = sortedMonitors()
-        guard let currentIdx = sorted.firstIndex(where: { $0.id == monitorId }) else { return nil }
-
-        let prevIdx = currentIdx > 0 ? currentIdx - 1 : sorted.count - 1
-        return sorted[prevIdx]
-    }
-
-    func nextMonitor(from monitorId: Monitor.ID) -> Monitor? {
-        guard monitors.count > 1 else { return nil }
-
-        let sorted = sortedMonitors()
-        guard let currentIdx = sorted.firstIndex(where: { $0.id == monitorId }) else { return nil }
-
-        let nextIdx = (currentIdx + 1) % sorted.count
-        return sorted[nextIdx]
-    }
-
-    private func monitorDelta(from source: Monitor, to target: Monitor) -> (dx: CGFloat, dy: CGFloat) {
-        let dx = target.frame.center.x - source.frame.center.x
-        let dy = target.frame.center.y - source.frame.center.y
-        return (dx, dy)
-    }
-
-    private func bestMonitor(in candidates: [Monitor], from current: Monitor, direction: Direction) -> Monitor? {
-        candidates.min(by: {
-            isBetterMonitorCandidate($0, than: $1, from: current, direction: direction, mode: .directional)
-        })
-    }
-
-    private func wrappedMonitor(in candidates: [Monitor], from current: Monitor, direction: Direction) -> Monitor? {
-        candidates.min(by: {
-            isBetterMonitorCandidate($0, than: $1, from: current, direction: direction, mode: .wrapped)
-        })
-    }
-
-    private enum MonitorSelectionMode {
-        case directional
-        case wrapped
-    }
-
-    private struct MonitorSelectionRank {
-        let primary: CGFloat
-        let secondary: CGFloat
-        let distance: CGFloat?
-    }
-
-    private func isBetterMonitorCandidate(
-        _ lhs: Monitor,
-        than rhs: Monitor,
-        from current: Monitor,
-        direction: Direction,
-        mode: MonitorSelectionMode
-    ) -> Bool {
-        let lhsRank = monitorSelectionRank(for: lhs, from: current, direction: direction, mode: mode)
-        let rhsRank = monitorSelectionRank(for: rhs, from: current, direction: direction, mode: mode)
-
-        if lhsRank.primary != rhsRank.primary {
-            return lhsRank.primary < rhsRank.primary
-        }
-        if lhsRank.secondary != rhsRank.secondary {
-            return lhsRank.secondary < rhsRank.secondary
-        }
-        if let lhsDistance = lhsRank.distance,
-           let rhsDistance = rhsRank.distance,
-           lhsDistance != rhsDistance
-        {
-            return lhsDistance < rhsDistance
-        }
-        return monitorSortKey(lhs) < monitorSortKey(rhs)
-    }
-
-    private func monitorSelectionRank(
-        for candidate: Monitor,
-        from current: Monitor,
-        direction: Direction,
-        mode: MonitorSelectionMode
-    ) -> MonitorSelectionRank {
-        let delta = monitorDelta(from: current, to: candidate)
-
-        switch mode {
-        case .directional:
-            switch direction {
-            case .left,
-                 .right:
-                return MonitorSelectionRank(
-                    primary: abs(delta.dx),
-                    secondary: abs(delta.dy),
-                    distance: candidate.frame.center.distanceSquared(to: current.frame.center)
-                )
-            case .up,
-                 .down:
-                return MonitorSelectionRank(
-                    primary: abs(delta.dy),
-                    secondary: abs(delta.dx),
-                    distance: candidate.frame.center.distanceSquared(to: current.frame.center)
-                )
-            }
-        case .wrapped:
-            switch direction {
-            case .right:
-                return MonitorSelectionRank(primary: candidate.frame.center.x, secondary: abs(delta.dy), distance: nil)
-            case .left:
-                return MonitorSelectionRank(primary: -candidate.frame.center.x, secondary: abs(delta.dy), distance: nil)
-            case .up:
-                return MonitorSelectionRank(primary: candidate.frame.center.y, secondary: abs(delta.dx), distance: nil)
-            case .down:
-                return MonitorSelectionRank(primary: -candidate.frame.center.y, secondary: abs(delta.dx), distance: nil)
-            }
-        }
-    }
-
-    private func monitorSortKey(_ monitor: Monitor) -> (CGFloat, CGFloat, UInt32) {
-        (monitor.frame.minX, -monitor.frame.maxY, monitor.displayId)
-    }
-
-    private func sortedWorkspaces() -> [WorkspaceDescriptor] {
+    func sortedWorkspaces() -> [WorkspaceDescriptor] {
         if let cached = _cachedSortedWorkspaces {
             return cached
         }
@@ -3167,7 +3149,108 @@ final class WorkspaceManager {
         return sorted
     }
 
-    private func synchronizeConfiguredWorkspaces() {
+    func clearRuntimeMonitorOverrides(
+        _ workspaceIds: Set<WorkspaceDescriptor.ID>
+    ) -> Set<WorkspaceDescriptor.ID> {
+        let context = monitorResolutionContext()
+        var cleared: Set<WorkspaceDescriptor.ID> = []
+        for workspaceId in workspaceIds {
+            guard var workspace = workspacesById[workspaceId],
+                  workspace.runtimeMonitorOverride != nil
+            else {
+                continue
+            }
+            workspace.runtimeMonitorOverride = nil
+            if let homeMonitor = homeMonitor(for: workspaceId, context: context) {
+                workspace.assignedMonitorPoint = homeMonitor.workspaceAnchorPoint
+            }
+            workspacesById[workspaceId] = workspace
+            cleared.insert(workspaceId)
+        }
+        if !cleared.isEmpty {
+            _cachedSortedWorkspaces = nil
+        }
+        return cleared
+    }
+
+    func commitRuntimeMonitorOverrideClears(
+        _ workspaceIds: Set<WorkspaceDescriptor.ID>,
+        affectedWorkspaceIds: Set<WorkspaceDescriptor.ID>
+    ) -> [WorkspaceFloatingRelocation] {
+        let context = monitorResolutionContext()
+        let moves: [(
+            workspaceId: WorkspaceDescriptor.ID,
+            targetMonitor: Monitor,
+            floatingStates: [WindowToken: FloatingState]
+        )] = workspaceIds.sorted { $0.uuidString < $1.uuidString }.compactMap { workspaceId in
+            guard let targetMonitor = effectiveMonitor(for: workspaceId, context: context) else {
+                return nil
+            }
+            return (
+                workspaceId,
+                targetMonitor,
+                translatedFloatingStates(in: workspaceId, to: targetMonitor)
+            )
+        }
+        let visibleWorkspaces = Set(activeVisibleWorkspaceMap().values)
+        let floatingRelocations = moves.flatMap { move -> [WorkspaceFloatingRelocation] in
+            guard visibleWorkspaces.contains(move.workspaceId) else { return [] }
+            return move.floatingStates.compactMap { token, state in
+                guard world.entry(for: token)?.hiddenState == nil else { return nil }
+                return WorkspaceFloatingRelocation(
+                    workspaceId: move.workspaceId,
+                    token: token,
+                    frame: state.lastFrame
+                )
+            }
+        }.sorted {
+            if $0.token.pid != $1.token.pid {
+                return $0.token.pid < $1.token.pid
+            }
+            return $0.token.windowId < $1.token.windowId
+        }
+
+        animationDriver.removeMotions(for: moves.lazy.map(\.workspaceId))
+        world.commit(
+            .userCommand(
+                workspaceId: nil,
+                label: "workspace_monitor_overrides_cleared",
+                source: .workspaceManager
+            ),
+            monitors: monitors,
+            snapshot: { self.reconcileSnapshot() },
+            preMutate: {
+                for move in moves {
+                    let transfersManagedFocus = self.world.focus.focusedToken
+                        .flatMap { self.world.entry(for: $0)?.workspaceId } == move.workspaceId
+                        && !self.world.focus.isNonManagedFocusActive
+                    self.world.applyWorkspaceMonitorMove(
+                        workspaceId: move.workspaceId,
+                        targetMonitorId: move.targetMonitor.id,
+                        monitorSessions: self.world.monitorSessions,
+                        floatingStates: move.floatingStates,
+                        transferInteraction: transfersManagedFocus,
+                        monitors: self.monitors
+                    )
+                    self.world.niriEngine?.moveWorkspace(
+                        move.workspaceId,
+                        to: move.targetMonitor.id,
+                        monitor: move.targetMonitor
+                    )
+                }
+            },
+            resolvePlan: { plan, _, _ in plan }
+        )
+        noteInvalidation(
+            workspaceIds: affectedWorkspaceIds,
+            domains: [.workspace, .layout, .focus]
+        )
+        schedulePersistedWindowRestoreCatalogSave()
+        notifySessionStateChanged()
+        return floatingRelocations
+    }
+
+    func synchronizeConfiguredWorkspaces() {
         let configuredNames = configuredWorkspaceNames()
         let configuredSet = Set(configuredNames)
 
@@ -3204,6 +3287,7 @@ final class WorkspaceManager {
         for id in ids {
             workspacesById.removeValue(forKey: id)
         }
+        pendingRuntimeMonitorOverrideClearWorkspaceIds.subtract(toRemove)
         withEngineMutationScope(label: "workspace_removed_engine_cleanup", source: .workspaceManager) {
             for id in toRemove {
                 niriEngine?.removeWorkspaceState(id)
@@ -3234,6 +3318,58 @@ final class WorkspaceManager {
         reconcileConfiguredVisibleWorkspaces()
     }
 
+    func restoreClearedRuntimeOverrideVisibility(
+        visibleMonitorByWorkspace: [WorkspaceDescriptor.ID: Monitor.ID]
+    ) -> Bool {
+        guard !visibleMonitorByWorkspace.isEmpty else { return false }
+        let context = monitorResolutionContext()
+        var sessions = world.monitorSessions
+        let managedFocusedWorkspaceId = world.focus.isNonManagedFocusActive
+            ? nil
+            : world.focus.focusedToken.flatMap { world.entry(for: $0)?.workspaceId }
+
+        for workspaceId in visibleMonitorByWorkspace.keys.sorted(by: { $0.uuidString < $1.uuidString }) {
+            guard let sourceMonitorId = visibleMonitorByWorkspace[workspaceId],
+                  sessions[sourceMonitorId]?.visibleWorkspaceId == workspaceId,
+                  let targetMonitorId = effectiveMonitor(for: workspaceId, context: context)?.id,
+                  targetMonitorId != sourceMonitorId
+            else {
+                continue
+            }
+
+            let sourceReplacementWorkspaceId = sourceReplacementWorkspaceId(
+                for: workspaceId,
+                on: sourceMonitorId,
+                context: context
+            )
+            var sourceSession = sessions[sourceMonitorId] ?? MonitorSession()
+            sourceSession.visibleWorkspaceId = sourceReplacementWorkspaceId
+            sourceSession.previousVisibleWorkspaceId = nil
+            if sourceSession.visibleWorkspaceId == nil {
+                sessions.removeValue(forKey: sourceMonitorId)
+            } else {
+                sessions[sourceMonitorId] = sourceSession
+            }
+
+            let destinationWorkspaceId = sessions[targetMonitorId]?.visibleWorkspaceId
+            let destinationIsProtected = targetMonitorId == world.focus.interactionMonitorId
+                || destinationWorkspaceId.map {
+                    $0 == managedFocusedWorkspaceId
+                        || $0 == world.focus.pendingManagedFocus.workspaceId
+                } ?? false
+            if managedFocusedWorkspaceId == workspaceId || !destinationIsProtected {
+                var targetSession = sessions[targetMonitorId] ?? MonitorSession()
+                targetSession.previousVisibleWorkspaceId = targetSession.visibleWorkspaceId
+                targetSession.visibleWorkspaceId = workspaceId
+                sessions[targetMonitorId] = targetSession
+            }
+        }
+
+        guard sessions != world.monitorSessions else { return false }
+        commitMonitorSessions(sessions)
+        return true
+    }
+
     private func pruneRestoredDisconnectedVisibleWorkspaces() {
         let context = monitorResolutionContext()
         disconnectedVisibleWorkspaceCache = disconnectedVisibleWorkspaceCache.filter { _, workspaceId in
@@ -3243,7 +3379,7 @@ final class WorkspaceManager {
         }
     }
 
-    private func reconcileConfiguredVisibleWorkspaces(notify: Bool = true) {
+    func reconcileConfiguredVisibleWorkspaces(notify: Bool = true) {
         var changed = false
         let context = monitorResolutionContext()
 
@@ -3283,7 +3419,7 @@ final class WorkspaceManager {
         }
     }
 
-    private func ensureVisibleWorkspaces() {
+    func ensureVisibleWorkspaces() {
         let currentMonitorIds = Set(monitors.map(\.id))
         let expectedVisibleMonitorIds = expectedVisibleMonitorIds()
         let previousMonitorSessions = world.monitorSessions
@@ -3382,7 +3518,32 @@ final class WorkspaceManager {
         }
     }
 
-    private func resolvedWorkspaceMonitorId(for workspaceId: WorkspaceDescriptor.ID) -> Monitor.ID? {
+    private func sourceReplacementWorkspaceId(
+        for movedWorkspaceId: WorkspaceDescriptor.ID,
+        on sourceMonitorId: Monitor.ID,
+        context: MonitorResolutionContext
+    ) -> WorkspaceDescriptor.ID? {
+        let isEligible: (WorkspaceDescriptor.ID) -> Bool = { workspaceId in
+            guard workspaceId != movedWorkspaceId,
+                  self.effectiveMonitor(for: workspaceId, context: context)?.id == sourceMonitorId
+            else {
+                return false
+            }
+            guard let visibleMonitorId = self.monitorIdShowingWorkspace(workspaceId) else {
+                return true
+            }
+            return visibleMonitorId == sourceMonitorId
+        }
+
+        if let previousWorkspaceId = previousVisibleWorkspaceId(on: sourceMonitorId),
+           isEligible(previousWorkspaceId)
+        {
+            return previousWorkspaceId
+        }
+        return sortedWorkspaces().first { isEligible($0.id) }?.id
+    }
+
+    func resolvedWorkspaceMonitorId(for workspaceId: WorkspaceDescriptor.ID) -> Monitor.ID? {
         resolvedWorkspaceMonitorId(for: workspaceId, context: monitorResolutionContext())
     }
 
@@ -3390,10 +3551,6 @@ final class WorkspaceManager {
         for workspaceId: WorkspaceDescriptor.ID,
         context: MonitorResolutionContext
     ) -> Monitor.ID? {
-        guard let workspace = descriptor(for: workspaceId) else { return nil }
-        if context.configuredWorkspaceNames.contains(workspace.name) {
-            return effectiveMonitor(for: workspaceId, context: context)?.id
-        }
         return monitorIdShowingWorkspace(workspaceId)
             ?? effectiveMonitor(for: workspaceId, context: context)?.id
     }
@@ -3448,6 +3605,12 @@ final class WorkspaceManager {
         for workspaceId: WorkspaceDescriptor.ID,
         context: MonitorResolutionContext
     ) -> Monitor? {
+        if let runtimeOverride = descriptor(for: workspaceId)?.runtimeMonitorOverride,
+           let monitor = runtimeOverride.resolveMonitor(in: context.sortedMonitors)
+        {
+            return monitor
+        }
+
         if let home = homeMonitor(for: workspaceId, context: context) {
             return home
         }
@@ -3543,6 +3706,9 @@ final class WorkspaceManager {
             }
         }
 
+        if workspaceVisibilityChanged {
+            drainPendingRuntimeMonitorOverrideClears()
+        }
         return true
     }
 
@@ -3596,7 +3762,7 @@ final class WorkspaceManager {
         return _cachedMonitorIdByVisibleWorkspace?[workspaceId]
     }
 
-    private func activeVisibleWorkspaceMap() -> [Monitor.ID: WorkspaceDescriptor.ID] {
+    func activeVisibleWorkspaceMap() -> [Monitor.ID: WorkspaceDescriptor.ID] {
         visibleWorkspaceMap()
     }
 
@@ -3668,6 +3834,7 @@ final class WorkspaceManager {
         if notify {
             notifySessionStateChanged()
         }
+        drainPendingRuntimeMonitorOverrideClears()
         return true
     }
 
@@ -3704,7 +3871,9 @@ final class WorkspaceManager {
     private func notifySessionStateChanged() {
         onSessionStateChanged?()
     }
+}
 
+extension WorkspaceManager {
     private func noteInvalidation(for event: WMEvent) {
         switch event {
         case let .windowAdmitted(_, workspaceId, _, _, _, _, _, _, _),
@@ -3793,6 +3962,16 @@ final class WorkspaceManager {
     ) {
         world.noteInvalidation(workspaceId: workspaceId, domains: domains)
         onRuntimeInvalidation?(workspaceId, domains)
+    }
+
+    private func noteInvalidation(
+        workspaceIds: Set<WorkspaceDescriptor.ID>,
+        domains: InvalidationDomain
+    ) {
+        world.noteInvalidation(workspaceIds: workspaceIds, domains: domains)
+        for workspaceId in workspaceIds {
+            onRuntimeInvalidation?(workspaceId, domains)
+        }
     }
 }
 

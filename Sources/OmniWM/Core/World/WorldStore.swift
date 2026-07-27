@@ -167,6 +167,18 @@ final class WorldStore {
         }
     }
 
+    func noteInvalidation(
+        workspaceIds: Set<WorkspaceDescriptor.ID>,
+        domains: InvalidationDomain
+    ) {
+        guard !workspaceIds.isEmpty else { return }
+        seq &+= 1
+        epochMarks.record(seq, domains: domains)
+        for workspaceId in workspaceIds {
+            workspaceMarks[workspaceId, default: InvalidationMarks()].record(seq, domains: domains)
+        }
+    }
+
     func invalidationMarks(for workspaceId: WorkspaceDescriptor.ID) -> InvalidationMarks {
         broadcastMarks.merged(with: workspaceMarks[workspaceId] ?? InvalidationMarks())
     }
@@ -458,6 +470,52 @@ extension WorldStore {
 }
 
 extension WorldStore {
+    func applyWorkspaceMonitorMove(
+        workspaceId: WorkspaceDescriptor.ID,
+        targetMonitorId: Monitor.ID,
+        monitorSessions: [Monitor.ID: MonitorSession],
+        floatingStates: [WindowToken: FloatingState],
+        transferInteraction: Bool,
+        monitors: [Monitor]
+    ) {
+        assertInCommit("applyWorkspaceMonitorMove")
+        self.monitorSessions = monitorSessions
+
+        for entry in model.windows(in: workspaceId) {
+            if let floatingState = floatingStates[entry.token] {
+                model.setFloatingState(floatingState, for: entry.token)
+            }
+
+            var observedState = entry.observedState
+            observedState.monitorId = targetMonitorId
+            model.setObservedState(observedState, for: entry.token)
+
+            var desiredState = entry.desiredState
+            desiredState.monitorId = targetMonitorId
+            if let floatingState = floatingStates[entry.token] {
+                desiredState.floatingFrame = floatingState.lastFrame
+            }
+            model.setDesiredState(desiredState, for: entry.token)
+
+            if let updatedEntry = model.entry(for: entry.token) {
+                model.setRestoreIntent(
+                    StateReducer.restoreIntent(for: updatedEntry, monitors: monitors),
+                    for: entry.token
+                )
+            }
+        }
+
+        updateFocus {
+            if $0.pendingManagedFocus.workspaceId == workspaceId {
+                $0.pendingManagedFocus.monitorId = targetMonitorId
+            }
+            if transferInteraction {
+                $0.previousInteractionMonitorId = $0.interactionMonitorId
+                $0.interactionMonitorId = targetMonitorId
+            }
+        }
+    }
+
     func setLifecyclePhase(_ phase: WindowLifecyclePhase, for token: WindowToken) {
         assertInCommit("setLifecyclePhase")
         model.setLifecyclePhase(phase, for: token)

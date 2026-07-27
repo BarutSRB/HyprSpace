@@ -131,6 +131,7 @@ extension NiriLayoutEngine {
         to monitorId: Monitor.ID,
         monitor: Monitor
     ) {
+        assertSanctionedMutation()
         let targetMonitor = ensureMonitor(for: monitorId, monitor: monitor)
         removeWorkspaceRootCopies(workspaceId, keepingMonitorId: targetMonitor.id)
         attachWorkspaceRootIfNeeded(workspaceId, to: targetMonitor)
@@ -192,6 +193,10 @@ extension NiriLayoutEngine {
         let root = ensureRoot(for: workspaceId)
         if let existing = targetMonitor.workspaceRoots[workspaceId], existing === root {
             return
+        }
+        for column in root.columns {
+            column.invalidateCachedPrimarySpan(orientation: .horizontal)
+            column.invalidateCachedPrimarySpan(orientation: .vertical)
         }
         targetMonitor.workspaceRoots[workspaceId] = root
     }

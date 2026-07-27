@@ -149,22 +149,29 @@ public struct IPCWorkspaceActionDescriptor: Codable, Equatable, Sendable {
     public let name: IPCWorkspaceActionName
     public let summary: String
     public let arguments: [String]
+    public let optionalFlags: [String]
 
     public init(
         actionWords: [String],
         name: IPCWorkspaceActionName,
         summary: String,
-        arguments: [String] = []
+        arguments: [String] = [],
+        optionalFlags: [String] = []
     ) {
         self.actionWords = actionWords
-        path = Self.makePath(actionWords: actionWords, arguments: arguments)
+        path = Self.makePath(actionWords: actionWords, arguments: arguments, optionalFlags: optionalFlags)
         self.name = name
         self.summary = summary
         self.arguments = arguments
+        self.optionalFlags = optionalFlags
     }
 
-    private static func makePath(actionWords: [String], arguments: [String]) -> String {
-        let parts = ["workspace"] + actionWords + arguments.map { "<\($0)>" }
+    private static func makePath(
+        actionWords: [String],
+        arguments: [String],
+        optionalFlags: [String]
+    ) -> String {
+        let parts = ["workspace"] + actionWords + arguments.map { "<\($0)>" } + optionalFlags.map { "[\($0)]" }
         return parts.joined(separator: " ")
     }
 }
@@ -869,6 +876,13 @@ public enum IPCAutomationManifest {
             name: .focusName,
             summary: "Focus a workspace by raw workspace ID or unambiguous configured display name.",
             arguments: ["name"]
+        ),
+        .init(
+            actionWords: ["move-to-monitor"],
+            name: .moveToMonitor,
+            summary: "Move a workspace to an adjacent monitor; --force temporarily overrides its configured assignment.",
+            arguments: ["workspace", "left|right|up|down"],
+            optionalFlags: ["--force"]
         )
     ]
 

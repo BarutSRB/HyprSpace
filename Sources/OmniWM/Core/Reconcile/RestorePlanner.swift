@@ -24,6 +24,7 @@ struct RestorePlanner {
         let newMonitors: [Monitor]
         let visibleWorkspaceMap: [Monitor.ID: WorkspaceDescriptor.ID]
         let disconnectedVisibleWorkspaceCache: [MonitorRestoreKey: WorkspaceDescriptor.ID]
+        let runtimeOverrideReconnectPreferences: [Monitor.ID: WorkspaceDescriptor.ID]
         let interactionMonitorId: Monitor.ID?
         let previousInteractionMonitorId: Monitor.ID?
         let workspaceExists: (WorkspaceDescriptor.ID) -> Bool
@@ -240,6 +241,62 @@ struct RestorePlanner {
             plan.visibleAssignments[monitor.id] = workspaceId
         }
 
+        let fallbackAssignments = plan.visibleAssignments
+        let sortedNewMonitors = Monitor.sortedByPosition(input.newMonitors)
+        let validMonitorIds = Set(sortedNewMonitors.map(\.id))
+        let confirmedFocusWorkspaceId = input.snapshot.focusSession.isNonManagedFocusActive
+            ? nil
+            : input.snapshot.focusedToken.flatMap { token in
+                input.snapshot.windows.first(where: { $0.token == token })?.workspaceId
+            }
+        let pendingFocusWorkspaceId = input.snapshot.focusSession.pendingManagedFocus.workspaceId
+        var prioritizedAssignments: [Monitor.ID: WorkspaceDescriptor.ID] = [:]
+        var prioritizedWorkspaceIds: Set<WorkspaceDescriptor.ID> = []
+
+        func reserve(_ workspaceId: WorkspaceDescriptor.ID?, on monitorId: Monitor.ID?) {
+            guard let workspaceId,
+                  let monitorId,
+                  input.workspaceExists(workspaceId),
+                  validMonitorIds.contains(monitorId),
+                  prioritizedWorkspaceIds.insert(workspaceId).inserted
+            else {
+                return
+            }
+            guard prioritizedAssignments[monitorId] == nil else { return }
+            prioritizedAssignments[monitorId] = workspaceId
+        }
+
+        reserve(
+            confirmedFocusWorkspaceId,
+            on: confirmedFocusWorkspaceId.flatMap {
+                input.effectiveMonitorId($0, input.newMonitors)
+            }
+        )
+        reserve(
+            pendingFocusWorkspaceId,
+            on: pendingFocusWorkspaceId.flatMap {
+                input.effectiveMonitorId($0, input.newMonitors)
+            }
+        )
+        for monitor in sortedNewMonitors {
+            reserve(
+                input.runtimeOverrideReconnectPreferences[monitor.id],
+                on: monitor.id
+            )
+        }
+        for monitor in sortedNewMonitors {
+            guard prioritizedAssignments[monitor.id] == nil,
+                  let workspaceId = fallbackAssignments[monitor.id],
+                  input.workspaceExists(workspaceId),
+                  input.effectiveMonitorId(workspaceId, input.newMonitors) == monitor.id,
+                  prioritizedWorkspaceIds.insert(workspaceId).inserted
+            else {
+                continue
+            }
+            prioritizedAssignments[monitor.id] = workspaceId
+        }
+        plan.visibleAssignments = prioritizedAssignments
+
         disconnectedCache = disconnectedCache.filter { _, workspaceId in
             guard input.workspaceExists(workspaceId) else {
                 return false
@@ -251,11 +308,12 @@ struct RestorePlanner {
         }
         plan.disconnectedVisibleWorkspaceCache = disconnectedCache
 
-        let reconciled = reconcileInteractionMonitors(
+        let reconciled = reconcileTopologyInteractionMonitors(
             interactionMonitorId: input.interactionMonitorId,
             previousInteractionMonitorId: input.previousInteractionMonitorId,
-            focusedToken: input.snapshot.focusedToken,
-            windows: input.snapshot.windows,
+            confirmedFocusWorkspaceId: confirmedFocusWorkspaceId,
+            pendingFocusWorkspaceId: pendingFocusWorkspaceId,
+            isNonManagedFocusActive: input.snapshot.focusSession.isNonManagedFocusActive,
             monitors: input.newMonitors,
             visibleAssignments: plan.visibleAssignments
         )
@@ -267,6 +325,54 @@ struct RestorePlanner {
         ]
 
         return plan
+    }
+
+    private func reconcileTopologyInteractionMonitors(
+        interactionMonitorId: Monitor.ID?,
+        previousInteractionMonitorId: Monitor.ID?,
+        confirmedFocusWorkspaceId: WorkspaceDescriptor.ID?,
+        pendingFocusWorkspaceId: WorkspaceDescriptor.ID?,
+        isNonManagedFocusActive: Bool,
+        monitors: [Monitor],
+        visibleAssignments: [Monitor.ID: WorkspaceDescriptor.ID]
+    ) -> (interactionMonitorId: Monitor.ID?, previousInteractionMonitorId: Monitor.ID?) {
+        let sortedMonitors = Monitor.sortedByPosition(monitors)
+        let validMonitorIds = Set(sortedMonitors.map(\.id))
+        let confirmedFocusMonitorId = confirmedFocusWorkspaceId.flatMap { workspaceId in
+            sortedMonitors.first(where: { visibleAssignments[$0.id] == workspaceId })?.id
+        }
+        let pendingFocusMonitorId = pendingFocusWorkspaceId.flatMap { workspaceId in
+            sortedMonitors.first(where: { visibleAssignments[$0.id] == workspaceId })?.id
+        }
+        let connectedInteractionMonitorId = interactionMonitorId.flatMap {
+            validMonitorIds.contains($0) ? $0 : nil
+        }
+        let firstAssignedMonitorId = sortedMonitors.first(where: {
+            visibleAssignments[$0.id] != nil
+        })?.id
+        let resolvedInteractionMonitorId = isNonManagedFocusActive
+            ? connectedInteractionMonitorId
+            ?? pendingFocusMonitorId
+            ?? firstAssignedMonitorId
+            ?? sortedMonitors.first?.id
+            : confirmedFocusMonitorId
+            ?? pendingFocusMonitorId
+            ?? connectedInteractionMonitorId
+            ?? firstAssignedMonitorId
+            ?? sortedMonitors.first?.id
+
+        let resolvedPreviousInteractionMonitorId: Monitor.ID?
+        if let connectedInteractionMonitorId,
+           connectedInteractionMonitorId != resolvedInteractionMonitorId
+        {
+            resolvedPreviousInteractionMonitorId = connectedInteractionMonitorId
+        } else {
+            resolvedPreviousInteractionMonitorId = previousInteractionMonitorId.flatMap {
+                validMonitorIds.contains($0) && $0 != resolvedInteractionMonitorId ? $0 : nil
+            }
+        }
+
+        return (resolvedInteractionMonitorId, resolvedPreviousInteractionMonitorId)
     }
 
     func planPersistedHydration(_ input: PersistedHydrationInput) -> PersistedHydrationPlan? {

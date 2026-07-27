@@ -219,8 +219,22 @@ final class IPCCommandRouter {
         if let guardResult = validateControllerState() {
             return guardResult
         }
+
+        switch request {
+        case let .focusName(target):
+            return focusWorkspace(target)
+        case let .moveToMonitor(target, ipcDirection, force):
+            return moveWorkspaceToMonitor(
+                target,
+                direction: direction(for: ipcDirection),
+                force: force
+            )
+        }
+    }
+
+    private func focusWorkspace(_ target: WorkspaceTarget) -> ExternalCommandResult {
         let rawWorkspaceID: String
-        switch resolveWorkspaceTarget(request.target) {
+        switch resolveWorkspaceTarget(target) {
         case let .success(resolved):
             rawWorkspaceID = resolved
         case let .failure(result):
@@ -228,6 +242,44 @@ final class IPCCommandRouter {
         }
 
         return controller.windowActionHandler.focusWorkspaceFromBar(named: rawWorkspaceID) ? .executed : .notFound
+    }
+
+    private func moveWorkspaceToMonitor(
+        _ target: WorkspaceTarget,
+        direction: Direction,
+        force: Bool
+    ) -> ExternalCommandResult {
+        let rawWorkspaceID: String
+        switch resolveWorkspaceTarget(target) {
+        case let .success(resolved):
+            rawWorkspaceID = resolved
+        case let .failure(result):
+            return result
+        }
+
+        guard let workspaceId = controller.workspaceManager.workspaceId(
+            for: rawWorkspaceID,
+            createIfMissing: false
+        ),
+            let outcome = controller.workspaceNavigationHandler.moveWorkspaceToMonitor(
+                workspaceId,
+                direction: direction,
+                force: force
+            )
+        else {
+            return .notFound
+        }
+
+        switch outcome.status {
+        case .executed:
+            return .executed
+        case .conflict:
+            return .workspaceAssignmentConflict
+        case .stateConflict:
+            return .workspaceStateConflict
+        case .notFound:
+            return .notFound
+        }
     }
 
     func handle(_ request: IPCWindowRequest) -> ExternalCommandResult {

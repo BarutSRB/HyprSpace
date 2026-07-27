@@ -102,7 +102,30 @@ enum CLICompletionGenerator {
               fi
               ;;
             workspace)
-              suggestions="\(shellWords(workspaceActionNames))"
+              local action="${words[3]}"
+              local workspace_positionals=0
+              local index token skip_format_value=0
+              if (( CURRENT == 3 )); then
+                suggestions="\(shellWords(workspaceActionNames))"
+              elif [[ "$action" == "\(workspaceMoveActionName)" ]]; then
+                for (( index = 4; index < CURRENT; index++ )); do
+                  token="${words[index]}"
+                  if (( skip_format_value )); then
+                    skip_format_value=0
+                  elif [[ "$token" == "--format" ]]; then
+                    skip_format_value=1
+                  elif [[ "$token" != --* ]]; then
+                    (( workspace_positionals += 1 ))
+                  fi
+                done
+                if (( workspace_positionals == 1 )); then
+                  suggestions="\(shellWords(workspaceMoveDirections))"
+                fi
+                if (( workspace_positionals <= 2 )) &&
+                   [[ " ${words[*]} " != *" --force "* ]]; then
+                  suggestions="$suggestions \(shellWords(workspaceMoveOptionalFlags))"
+                fi
+              fi
               ;;
             window)
               suggestions="\(shellWords(windowActionNames))"
@@ -123,7 +146,8 @@ enum CLICompletionGenerator {
         """
         _omniwmctl()
         {
-          local cur prev command first second query_name suggestions
+          local cur prev command first second query_name suggestions workspace_action
+          local workspace_positionals index token skip_format_value
           COMPREPLY=()
           cur="${COMP_WORDS[COMP_CWORD]}"
           prev="${COMP_WORDS[COMP_CWORD-1]}"
@@ -222,7 +246,31 @@ enum CLICompletionGenerator {
               fi
               ;;
             workspace)
-              __omniwmctl_compgen "\(shellWords(workspaceActionNames))"
+              workspace_action="${COMP_WORDS[2]}"
+              if [[ ${COMP_CWORD} -eq 2 ]]; then
+                __omniwmctl_compgen "\(shellWords(workspaceActionNames))"
+              elif [[ "$workspace_action" == "\(workspaceMoveActionName)" ]]; then
+                workspace_positionals=0
+                skip_format_value=0
+                for (( index = 3; index < COMP_CWORD; index++ )); do
+                  token="${COMP_WORDS[index]}"
+                  if [[ ${skip_format_value} -eq 1 ]]; then
+                    skip_format_value=0
+                  elif [[ "$token" == "--format" ]]; then
+                    skip_format_value=1
+                  elif [[ "$token" != --* ]]; then
+                    (( workspace_positionals += 1 ))
+                  fi
+                done
+                if [[ ${workspace_positionals} -eq 1 ]]; then
+                  suggestions="\(shellWords(workspaceMoveDirections))"
+                fi
+                if [[ ${workspace_positionals} -le 2 ]] &&
+                   [[ " ${COMP_WORDS[*]} " != *" --force "* ]]; then
+                  suggestions="$suggestions \(shellWords(workspaceMoveOptionalFlags))"
+                fi
+                __omniwmctl_compgen "$suggestions"
+              fi
               return 0
               ;;
             window)
@@ -247,6 +295,39 @@ enum CLICompletionGenerator {
             test (count $tokens) -gt 0; or return 1
             set -l prev $tokens[-1]
             contains -- $prev $argv
+        end
+
+        function __omniwmctl_has_arg
+            set -l tokens (commandline -opc)
+            contains -- $argv[1] $tokens
+        end
+
+        function __omniwmctl_workspace_positionals
+            set -l count 0
+            set -l action_seen false
+            set -l skip_format_value false
+            for token in (commandline -opc)
+                if test "$action_seen" = false
+                    if test "$token" = "\(workspaceMoveActionName)"
+                        set action_seen true
+                    end
+                else if test "$skip_format_value" = true
+                    set skip_format_value false
+                else if test "$token" = "--format"
+                    set skip_format_value true
+                else if not string match -q -- '--*' "$token"
+                    set count (math $count + 1)
+                end
+            end
+            echo $count
+        end
+
+        function __omniwmctl_workspace_positionals_are
+            test (__omniwmctl_workspace_positionals) -eq "$argv[1]"
+        end
+
+        function __omniwmctl_workspace_positionals_at_most
+            test (__omniwmctl_workspace_positionals) -le "$argv[1]"
         end
         """
 
@@ -312,7 +393,13 @@ enum CLICompletionGenerator {
             "complete -c omniwmctl -f -n '__fish_seen_subcommand_from watch' -a '\(token)'"
         }
         let workspaceLines = workspaceActionNames.map { action in
-            "complete -c omniwmctl -f -n '__fish_seen_subcommand_from workspace' -a '\(action)'"
+            "complete -c omniwmctl -f -n '__fish_seen_subcommand_from workspace; and not __fish_seen_subcommand_from \(shellWords(workspaceActionNames))' -a '\(action)'"
+        }
+        let workspaceMoveDirectionLines = workspaceMoveDirections.map { direction in
+            "complete -c omniwmctl -f -n '__fish_seen_subcommand_from workspace; and __fish_seen_subcommand_from \(workspaceMoveActionName); and __omniwmctl_workspace_positionals_are 1' -a '\(direction)'"
+        }
+        let workspaceMoveFlagLines = workspaceMoveOptionalFlags.map { flag in
+            "complete -c omniwmctl -f -n '__fish_seen_subcommand_from workspace; and __fish_seen_subcommand_from \(workspaceMoveActionName); and __omniwmctl_workspace_positionals_at_most 2; and not __omniwmctl_has_arg \(flag)' -a '\(flag)'"
         }
         let windowLines = windowActionNames.map { action in
             "complete -c omniwmctl -f -n '__fish_seen_subcommand_from window' -a '\(action)'"
@@ -338,6 +425,8 @@ enum CLICompletionGenerator {
                 + subscribeLines
                 + watchLines
                 + workspaceLines
+                + workspaceMoveDirectionLines
+                + workspaceMoveFlagLines
                 + windowLines
                 + shellLines
         )
@@ -382,6 +471,20 @@ enum CLICompletionGenerator {
 
     private static var workspaceActionNames: [String] {
         IPCAutomationManifest.workspaceActionDescriptors.map(\.name.rawValue)
+    }
+
+    private static var workspaceMoveActionName: String {
+        IPCWorkspaceActionName.moveToMonitor.rawValue
+    }
+
+    private static var workspaceMoveDirections: [String] {
+        literalValues(for: .direction) ?? []
+    }
+
+    private static var workspaceMoveOptionalFlags: [String] {
+        IPCAutomationManifest.workspaceActionDescriptors
+            .first { $0.name == .moveToMonitor }?
+            .optionalFlags ?? []
     }
 
     private static var windowActionNames: [String] {

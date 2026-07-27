@@ -503,6 +503,30 @@ final class WorkspaceNavigationHandler {
         }
     }
 
+    func moveWorkspaceToMonitor(
+        _ workspaceId: WorkspaceDescriptor.ID,
+        direction: Direction,
+        force: Bool
+    ) -> WorkspaceMonitorMoveOutcome? {
+        guard let controller,
+              let sourceMonitor = controller.workspaceManager.monitorForWorkspace(workspaceId),
+              let targetMonitor = controller.workspaceManager.adjacentMonitor(
+                  from: sourceMonitor.id,
+                  direction: direction
+              )
+        else {
+            return nil
+        }
+
+        let outcome = controller.workspaceManager.moveWorkspaceToMonitor(
+            workspaceId,
+            to: targetMonitor.id,
+            force: force
+        )
+        controller.layoutRefreshController.commitWorkspaceMonitorTransition(outcome)
+        return outcome
+    }
+
     func switchWorkspace(index: Int) {
         guard let rawWorkspaceID = WorkspaceIDPolicy.rawID(from: max(0, index) + 1) else { return }
         switchWorkspace(rawWorkspaceID: rawWorkspaceID)

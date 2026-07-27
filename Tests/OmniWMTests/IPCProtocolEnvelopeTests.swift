@@ -22,6 +22,10 @@ final class IPCProtocolEnvelopeTests: XCTestCase {
         """.utf8)
     }
 
+    func testCurrentProtocolVersionIsNine() {
+        XCTAssertEqual(OmniWMIPCProtocol.version, 9)
+    }
+
     func testEnvelopeDecodesVersionWhenCommandNameIsUnknown() throws {
         let data = requestLine(version: 6, kind: "command", payload: #"{"name":"toggle-hidden-bar"}"#)
         XCTAssertThrowsError(try IPCWire.decodeRequest(from: data))
@@ -71,7 +75,7 @@ final class IPCProtocolEnvelopeTests: XCTestCase {
         XCTAssertNil(response.result)
     }
 
-    func testConnectionReturnsProtocolMismatchBeforeUnknownPayloadDecode() async throws {
+    func testV8ConnectionReturnsProtocolMismatchBeforeV9PayloadDecode() async throws {
         var sockets = [Int32](repeating: -1, count: 2)
         guard socketpair(AF_UNIX, SOCK_STREAM, 0, &sockets) == 0 else {
             throw ConnectionTestError.socketPairFailed
@@ -83,7 +87,8 @@ final class IPCProtocolEnvelopeTests: XCTestCase {
         let bridge = makeBridge(controller: controller)
         let connection = IPCConnection(handle: serverHandle, bridge: bridge, onClose: { _ in })
 
-        let request = requestLine(version: 6, kind: "command", payload: #"{"name":"toggle-hidden-bar"}"#)
+        let request = requestLine(version: 8, kind: "workspace", payload: #"{"name":"move-to-monitor"}"#)
+        XCTAssertThrowsError(try IPCWire.decodeRequest(from: request))
         await connection.process(String(decoding: request, as: UTF8.self))
 
         let clientDescriptor = clientHandle.fileDescriptor
@@ -92,7 +97,7 @@ final class IPCProtocolEnvelopeTests: XCTestCase {
 
         XCTAssertFalse(response.ok)
         XCTAssertEqual(response.id, "req-1")
-        XCTAssertEqual(response.kind, .command)
+        XCTAssertEqual(response.kind, .workspace)
         XCTAssertEqual(response.code, .protocolMismatch)
         XCTAssertEqual(protocolVersion(in: response), OmniWMIPCProtocol.version)
 

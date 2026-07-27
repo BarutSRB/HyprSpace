@@ -163,7 +163,7 @@ Turning **Enable IPC** on starts the server immediately and creates the Unix soc
 
 ## IPC Protocol
 
-**Protocol version:** 8
+**Protocol version:** 9
 
 ### Socket & Authorization
 
@@ -498,13 +498,21 @@ Window IDs are session-scoped. They become stale after OmniWM restarts. Obtain I
 
 ```
 omniwmctl workspace focus-name <name>
+omniwmctl workspace move-to-monitor <workspace> <left|right|up|down> [--force]
 ```
 
 | Action | Arguments | Description |
 |--------|-----------|-------------|
 | `focus-name` | `<name>` | Focus a workspace by raw workspace ID or unambiguous configured display name |
+| `move-to-monitor` | `<workspace> <left\|right\|up\|down> [--force]` | Move a workspace to an adjacent monitor |
 
 Numeric inputs are resolved as raw workspace IDs first. Display-name lookup is a convenience path and fails when multiple workspaces share the same display name.
+
+Monitor direction is resolved relative to the named workspace's current monitor. Moving a visible workspace transfers its visibility to the destination monitor, and the source monitor selects another eligible workspace. Moving an inactive workspace normally makes it visible on the destination while leaving the source monitor's visible workspace unchanged. If the destination's visible workspace is the current interaction workspace, the moved workspace is assigned there but remains inactive, preserving that interaction instead of replacing it. This action does not swap the two visible workspaces.
+
+If the moved workspace owns the exact focused managed-window token and no incompatible focus transition is pending, that token follows the workspace without a new AX focus request. Otherwise, OmniWM preserves the interaction monitor and any non-managed focus. OmniWM rejects the move when native-fullscreen, macOS-hidden app, scratchpad, or pending focus state cannot be transferred safely.
+
+Configured monitor assignment remains enforced unless `--force` is present. A forced move changes runtime placement without rewriting the workspace's persisted monitor configuration. The override lasts for the current OmniWM process and survives a transient disconnect and reconnect of the same output ID. It clears when the workspace returns to its configured home monitor, when configuration is reapplied, or when OmniWM restarts. If native fullscreen, a macOS-hidden app, a visible scratchpad, or an in-flight managed-focus transition makes rehoming unsafe, configuration reapply defers the clear until that state resolves. Configured workspace restore snapshots continue to prefer the Home Monitor. The flag may appear anywhere after `move-to-monitor`, although help and completion render the canonical trailing form.
 
 ---
 
@@ -757,7 +765,7 @@ Completions are context-aware: query names, selectors, field names, command path
 
 ```json
 {
-  "version": 3,
+  "version": 9,
   "id": "<uuid>",
   "kind": "<ping|version|command|query|rule|workspace|window|subscribe>",
   "authorizationToken": "<token>",
@@ -811,13 +819,31 @@ Completions are context-aware: query names, selectors, field names, command path
 }
 ```
 
-**Workspace:**
+**Workspace focus:**
 ```json
 {
   "name": "focus-name",
-  "workspaceName": "main"
+  "workspaceTarget": {
+    "kind": "display-name",
+    "value": "S"
+  }
 }
 ```
+
+**Workspace move:**
+```json
+{
+  "name": "move-to-monitor",
+  "workspaceTarget": {
+    "kind": "raw-id",
+    "value": "12"
+  },
+  "direction": "right",
+  "force": true
+}
+```
+
+Workspace requests use this flat wire shape. For `move-to-monitor`, `force` is optional while decoding; omitting it is equivalent to `false`.
 
 **Window:**
 ```json
@@ -831,7 +857,7 @@ Completions are context-aware: query names, selectors, field names, command path
 
 ```json
 {
-  "version": 3,
+  "version": 9,
   "id": "<request-id>",
   "ok": true,
   "kind": "<ping|version|command|query|rule|workspace|window|subscribe>",
@@ -848,7 +874,7 @@ Authorization, protocol, validation, and routing failures keep the originating r
 
 ```json
 {
-  "version": 3,
+  "version": 9,
   "id": "<request-id>",
   "ok": false,
   "kind": "query",
@@ -865,7 +891,7 @@ Events are sent on subscription connections after the initial response.
 
 ```json
 {
-  "version": 3,
+  "version": 9,
   "id": "<event-id>",
   "kind": "event",
   "channel": "focus",
@@ -912,6 +938,8 @@ This envelope is produced locally by the CLI, so it does not include IPC fields 
 | `unauthorized` | Missing or invalid authorization token |
 | `stale_window_id` | Window ID is from a previous session or no longer valid |
 | `not_found` | Target window, workspace, or rule not found |
+| `workspace_assignment_conflict` | Configured monitor assignment prevents the requested workspace move |
+| `workspace_state_conflict` | Current fullscreen, scratchpad, or pending focus state prevents the requested workspace move |
 | `internal_error` | Unexpected server-side error |
 
 ---

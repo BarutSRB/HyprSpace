@@ -319,6 +319,9 @@ final class WMController {
         workspaceManager.onWindowRemoved = { [weak self] entry in
             self?.windowActionHandlerStorage?.handleOverviewWindowRemoved(entry)
         }
+        workspaceManager.onDeferredWorkspaceMonitorMove = { [weak self] outcome in
+            self?.layoutRefreshController.commitWorkspaceMonitorTransition(outcome)
+        }
         focusPolicyEngine.onLeaseChanged = { [weak self] lease in
             self?.workspaceManager.recordReconcileEvent(
                 .focusLeaseChanged(

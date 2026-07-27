@@ -89,7 +89,7 @@ let package = Package(
         ),
         .testTarget(
             name: "OmniWMTests",
-            dependencies: ["OmniWM"],
+            dependencies: ["OmniWM", "OmniWMCtl"],
             path: "Tests/OmniWMTests",
             resources: [
                 .copy("Fixtures")
