@@ -156,7 +156,8 @@ final class WindowAdmissionPolicyTests: XCTestCase {
                 axRef: axRef,
                 token: token,
                 mode: .floating,
-                existingEntry: nil
+                existingEntry: nil,
+                placementOrigin: .discovery
             )
         )
         let state = try XCTUnwrap(
@@ -164,10 +165,11 @@ final class WindowAdmissionPolicyTests: XCTestCase {
         )
         XCTAssertEqual(state.reason, .degenerateGeometry)
         XCTAssertEqual(state.attempt, 1)
-        guard case let .candidate(triggerToken, _) = state.trigger else {
+        guard case let .candidate(triggerToken, _, placementOrigin) = state.trigger else {
             return XCTFail("Expected candidate retry")
         }
         XCTAssertEqual(triggerToken, token)
+        XCTAssertEqual(placementOrigin, .discovery)
         controller.axEventHandler.cancelCreatedWindowRetry(windowId: UInt32(token.windowId))
     }
 

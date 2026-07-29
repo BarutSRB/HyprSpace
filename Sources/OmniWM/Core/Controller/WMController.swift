@@ -136,6 +136,8 @@ final class WMController {
     @ObservationIgnored
     private var floatDemotionFirstSamplesByToken: [WindowToken: ContinuousClock.Instant] = [:]
     private static let floatDemotionStabilityInterval: Duration = .milliseconds(300)
+    private static let finderBundleId = "com.apple.finder"
+    private static let finderQuickLookSubrole = "Quick Look"
     @ObservationIgnored
     private var hiddenWorkspaceBarMonitorIds: Set<Monitor.ID> = []
     @ObservationIgnored
@@ -1206,9 +1208,10 @@ final class WMController {
         pid: pid_t,
         parentWindowId: UInt32? = nil,
         inheritTrackedParentWorkspace: Bool = false,
-        preferSameAppSiblingWorkspace: Bool = false,
         structuralReplacementWorkspaceId: WorkspaceDescriptor.ID? = nil,
-        restrictWorkspaceRuleToPlacementMonitor: Bool = true,
+        placementMode: TrackedWindowMode,
+        allowsFloatingSpawnPlacement: Bool = false,
+        placementOrigin: WorkspacePlacementOrigin = .liveCreate,
         createPlacementContext: WindowCreatePlacementContext? = nil,
         windowFrame: CGRect? = nil,
         fallbackWorkspaceId: WorkspaceDescriptor.ID?
@@ -1219,9 +1222,10 @@ final class WMController {
             pid: pid,
             parentWindowId: parentWindowId,
             inheritTrackedParentWorkspace: inheritTrackedParentWorkspace,
-            preferSameAppSiblingWorkspace: preferSameAppSiblingWorkspace,
             structuralReplacementWorkspaceId: structuralReplacementWorkspaceId,
-            restrictWorkspaceRuleToPlacementMonitor: restrictWorkspaceRuleToPlacementMonitor,
+            placementMode: placementMode,
+            allowsFloatingSpawnPlacement: allowsFloatingSpawnPlacement,
+            origin: placementOrigin,
             createPlacementContext: createPlacementContext,
             windowFrame: windowFrame,
             existingEntry: nil,
@@ -1256,26 +1260,16 @@ final class WMController {
         return windowServer.hasModalTag || windowServer.hasTransientSurfaceEvidence
     }
 
-    func shouldPreferSameAppSiblingWorkspace(
+    func allowsFloatingSpawnPlacement(
         for evaluation: WindowDecisionEvaluation,
-        inheritTrackedParentWorkspace: Bool
+        mode: TrackedWindowMode
     ) -> Bool {
-        guard let workspaceName = evaluation.decision.workspaceName,
-              workspaceManager.workspaceId(for: workspaceName, createIfMissing: false) != nil,
-              evaluation.decision.disposition == .managed,
-              !inheritTrackedParentWorkspace
-        else {
-            return false
-        }
-
-        let axFacts = evaluation.facts.ax
-        guard axFacts.attributeFetchSucceeded,
-              axFacts.role == kAXWindowRole as String
-        else {
-            return false
-        }
-
-        return axFacts.subrole == nil || axFacts.subrole == kAXStandardWindowSubrole as String
+        let ax = evaluation.facts.ax
+        return mode == .floating
+            && ax.attributeFetchSucceeded
+            && ax.bundleId == Self.finderBundleId
+            && ax.role == kAXWindowRole as String
+            && ax.subrole == Self.finderQuickLookSubrole
     }
 
     private func resolvedAppInfo(for pid: pid_t) -> AppInfoCache.AppInfo? {
@@ -1917,7 +1911,8 @@ final class WMController {
         existingEntry: WindowState?,
         fallbackWorkspaceId: WorkspaceDescriptor.ID?,
         structuralReplacementWorkspaceId: WorkspaceDescriptor.ID? = nil,
-        restrictWorkspaceRuleToPlacementMonitor: Bool = true,
+        placementMode: TrackedWindowMode,
+        placementOrigin: WorkspacePlacementOrigin,
         createPlacementContext: WindowCreatePlacementContext? = nil,
         windowFrame: CGRect? = nil,
         context: WindowRuleReevaluationContext = .automatic
@@ -1929,12 +1924,13 @@ final class WMController {
             pid: evaluation.token.pid,
             parentWindowId: evaluation.facts.windowServer?.parentId,
             inheritTrackedParentWorkspace: inheritTrackedParentWorkspace,
-            preferSameAppSiblingWorkspace: shouldPreferSameAppSiblingWorkspace(
-                for: evaluation,
-                inheritTrackedParentWorkspace: inheritTrackedParentWorkspace
-            ),
             structuralReplacementWorkspaceId: structuralReplacementWorkspaceId,
-            restrictWorkspaceRuleToPlacementMonitor: restrictWorkspaceRuleToPlacementMonitor,
+            placementMode: placementMode,
+            allowsFloatingSpawnPlacement: allowsFloatingSpawnPlacement(
+                for: evaluation,
+                mode: placementMode
+            ),
+            origin: placementOrigin,
             createPlacementContext: createPlacementContext,
             windowFrame: windowFrame ?? evaluation.facts.windowServer?.frame,
             existingEntry: existingEntry,
@@ -2281,6 +2277,9 @@ final class WMController {
             let createPlacementContext = existingEntry == nil
                 ? axEventHandler.pendingCreatePlacementContext(for: token.windowId)
                 : nil
+            let placementOrigin: WorkspacePlacementOrigin = createPlacementContext == nil
+                ? .discovery
+                : .liveCreate
 
             evaluatedAnyWindow = true
             let evaluation = evaluateWindowDisposition(axRef: axRef, pid: token.pid)
@@ -2315,7 +2314,8 @@ final class WMController {
                 axRef: axRef,
                 token: token,
                 mode: effectiveTrackedMode,
-                existingEntry: existingEntry
+                existingEntry: existingEntry,
+                placementOrigin: placementOrigin
             ) {
                 continue
             }
@@ -2337,7 +2337,8 @@ final class WMController {
                 existingEntry: existingEntry,
                 fallbackWorkspaceId: activeWorkspace()?.id,
                 structuralReplacementWorkspaceId: structuralMatch?.workspaceId,
-                restrictWorkspaceRuleToPlacementMonitor: effectiveTrackedMode != .floating,
+                placementMode: effectiveTrackedMode,
+                placementOrigin: placementOrigin,
                 createPlacementContext: createPlacementContext,
                 context: context
             )

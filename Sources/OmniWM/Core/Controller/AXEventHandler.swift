@@ -54,6 +54,7 @@ struct NiriCreateFocusTraceEvent: Equatable {
             focusedMonitorId: Monitor.ID?,
             nativeSpaceMonitorId: Monitor.ID?,
             frameMonitorId: Monitor.ID?,
+            interactionWorkspaceId: WorkspaceDescriptor.ID?,
             interactionMonitorId: Monitor.ID?
         )
         case candidateTracked(token: WindowToken, axPid: pid_t?, workspaceId: WorkspaceDescriptor.ID)
@@ -91,6 +92,7 @@ struct WindowCreatePlacementContext: Equatable {
     let pendingFocusedMonitorId: Monitor.ID?
     let focusedWorkspaceId: WorkspaceDescriptor.ID?
     let focusedMonitorId: Monitor.ID?
+    let interactionWorkspaceId: WorkspaceDescriptor.ID?
     let interactionMonitorId: Monitor.ID?
     let createdAt: Date
 }
@@ -114,9 +116,10 @@ extension NiriCreateFocusTraceEvent: CustomStringConvertible {
             focusedMonitorId,
             nativeSpaceMonitorId,
             frameMonitorId,
+            interactionWorkspaceId,
             interactionMonitorId
         ):
-            "create_placement_resolved token=\(token) workspace=\(workspaceId.uuidString) rung=\(rung.rawValue) pending_workspace=\(pendingWorkspaceId?.uuidString ?? "nil") pending_monitor=\(String(describing: pendingMonitorId)) focused_workspace=\(focusedWorkspaceId?.uuidString ?? "nil") focused_monitor=\(String(describing: focusedMonitorId)) native_monitor=\(String(describing: nativeSpaceMonitorId)) frame_monitor=\(String(describing: frameMonitorId)) interaction_monitor=\(String(describing: interactionMonitorId))"
+            "create_placement_resolved token=\(token) workspace=\(workspaceId.uuidString) rung=\(rung.rawValue) pending_workspace=\(pendingWorkspaceId?.uuidString ?? "nil") pending_monitor=\(String(describing: pendingMonitorId)) focused_workspace=\(focusedWorkspaceId?.uuidString ?? "nil") focused_monitor=\(String(describing: focusedMonitorId)) native_monitor=\(String(describing: nativeSpaceMonitorId)) frame_monitor=\(String(describing: frameMonitorId)) interaction_workspace=\(interactionWorkspaceId?.uuidString ?? "nil") interaction_monitor=\(String(describing: interactionMonitorId))"
         case let .candidateTracked(token, axPid, workspaceId):
             "candidate_tracked token=\(token) ax_pid=\(axPid.map(String.init) ?? "nil") workspace=\(workspaceId.uuidString)"
         case let .relayoutActivatedWindow(token, workspaceId):
@@ -579,6 +582,7 @@ final class AXEventHandler {
         windowId: UInt32,
         fallbackToken: WindowToken? = nil,
         fallbackAXRef: AXWindowRef? = nil,
+        placementOrigin: WorkspacePlacementOrigin = .liveCreate,
         retryTrigger: AdmissionRetryTrigger = .create
     ) {
         guard let controller else { return }
@@ -622,13 +626,19 @@ final class AXEventHandler {
             removeDeferredCreatedWindow(windowId)
             return
         }
+        let createPlacementContext = pendingCreatePlacementContext(for: Int(windowId))
+        let effectivePlacementOrigin = Self.effectivePlacementOrigin(
+            placementOrigin,
+            createPlacementContext: createPlacementContext
+        )
         let outcome = prepareCreateCandidate(
             windowId: windowId,
             windowInfo: windowInfo,
             fallbackToken: fallbackToken,
             fallbackAXRef: fallbackAXRef,
             allowsTrackedIdentityReplacement: retryTrigger.allowsTrackedIdentityReplacement,
-            createPlacementContext: createPlacementContextsByWindowId[windowId]
+            placementOrigin: effectivePlacementOrigin,
+            createPlacementContext: createPlacementContext
         )
         guard let candidate = preparedCreateCandidate(
             from: outcome,
@@ -667,17 +677,6 @@ final class AXEventHandler {
                 origin: .probe
             )
         }
-    }
-
-    func pendingCreatePlacementContext(for windowId: Int) -> WindowCreatePlacementContext? {
-        guard let windowId = UInt32(exactly: windowId) else { return nil }
-        pruneExpiredCreatePlacementContexts()
-        return createPlacementContextsByWindowId[windowId]
-    }
-
-    func discardCreatePlacementContext(for windowId: Int) {
-        guard let windowId = UInt32(exactly: windowId) else { return }
-        discardCreatePlacementContext(windowId: windowId)
     }
 
     @discardableResult
@@ -1105,6 +1104,11 @@ final class AXEventHandler {
 
         for windowId in deferredWindowIds {
             guard let controller else { return }
+            let retryState = admissionRetryStateByWindowId[windowId]
+            let retryTrigger = retryState?.trigger ?? .create
+            if case .identityRebind = retryTrigger {
+                continue
+            }
             if controller.isOwnedWindow(windowNumber: Int(windowId)) {
                 cancelCreatedWindowRetry(windowId: windowId)
                 discardCreatePlacementContext(windowId: windowId)
@@ -1114,9 +1118,10 @@ final class AXEventHandler {
             guard let windowInfo else {
                 _ = scheduleAdmissionRetry(
                     windowId: windowId,
-                    expectedToken: nil,
+                    expectedToken: retryState?.expectedToken,
+                    axRef: retryState?.axRef,
                     reason: .windowInfoMissing,
-                    trigger: .create
+                    trigger: retryTrigger
                 )
                 continue
             }
@@ -1138,16 +1143,24 @@ final class AXEventHandler {
                 deferCreatedWindow(windowId)
                 continue
             }
+            let createPlacementContext = pendingCreatePlacementContext(for: Int(windowId))
+            let placementOrigin = Self.effectivePlacementOrigin(
+                retryTrigger.placementOrigin,
+                createPlacementContext: createPlacementContext
+            )
             let outcome = prepareCreateCandidate(
                 windowId: windowId,
                 windowInfo: windowInfo,
-                allowsTrackedIdentityReplacement: true,
-                createPlacementContext: createPlacementContextsByWindowId[windowId]
+                fallbackToken: retryState?.expectedToken,
+                fallbackAXRef: retryState?.axRef,
+                allowsTrackedIdentityReplacement: retryTrigger.allowsTrackedIdentityReplacement,
+                placementOrigin: placementOrigin,
+                createPlacementContext: createPlacementContext
             )
             guard let candidate = preparedCreateCandidate(
                 from: outcome,
                 windowId: windowId,
-                trigger: .create
+                trigger: retryTrigger
             ) else {
                 continue
             }
@@ -1787,6 +1800,7 @@ final class AXEventHandler {
         let appFullscreen = focusedWindow.isFullscreen
 
         if let entry = controller.workspaceManager.entry(for: token) {
+            discardCreatePlacementContext(for: token.windowId)
             if appFullscreen {
                 suspendManagedWindowForNativeFullscreen(entry)
                 return
@@ -1974,19 +1988,23 @@ final class AXEventHandler {
         }
 
         let windowInfo = resolveWindowInfo(windowId)
+        let createPlacementContext = retainedCreatePlacementContext(
+            windowId: windowId,
+            controller: controller
+        )
         let outcome = prepareCreateCandidate(
             windowId: windowId,
             windowInfo: windowInfo,
             fallbackToken: token,
             fallbackAXRef: axRef,
-            createPlacementContext: createPlacementContextsByWindowId[windowId]
-                ?? liveCreatePlacementContext(controller: controller)
+            createPlacementContext: createPlacementContext
         )
         let candidate: PreparedCreate
         switch outcome {
         case let .prepared(prepared):
             candidate = prepared
         case .alreadyTracked:
+            discardCreatePlacementContext(windowId: windowId)
             return .handled
         case .identityRebindPending:
             return .handled
@@ -2014,6 +2032,7 @@ final class AXEventHandler {
                     callbackGeneration: callbackGeneration
                 )
             )
+            discardCreatePlacementContext(windowId: windowId)
             return .rejected
         }
         guard candidate.token == token else {
@@ -2029,6 +2048,7 @@ final class AXEventHandler {
                     axRef: candidate.axRef
                 )
             )
+            discardCreatePlacementContext(windowId: windowId)
             return .rejected
         }
 
@@ -2557,6 +2577,7 @@ final class AXEventHandler {
         fallbackToken: WindowToken? = nil,
         fallbackAXRef: AXWindowRef? = nil,
         allowsTrackedIdentityReplacement: Bool = false,
+        placementOrigin: WorkspacePlacementOrigin = .liveCreate,
         createPlacementContext: WindowCreatePlacementContext? = nil
     ) -> CreatePreparationOutcome {
         guard let controller else {
@@ -2695,19 +2716,19 @@ final class AXEventHandler {
         )
         let inheritTrackedParentWorkspace = controller.shouldInheritTrackedParentWorkspace(for: evaluation)
         let placementFrame = evaluation.facts.windowServer?.frame ?? matchingWindowInfo?.frame
-        let preferSameAppSiblingWorkspace = controller.shouldPreferSameAppSiblingWorkspace(
-            for: evaluation,
-            inheritTrackedParentWorkspace: inheritTrackedParentWorkspace
-        )
         let placement = controller.resolveWorkspaceForNewWindow(
             workspaceName: evaluation.decision.workspaceName,
             axRef: axRef,
             pid: token.pid,
             parentWindowId: evaluation.facts.windowServer?.parentId,
             inheritTrackedParentWorkspace: inheritTrackedParentWorkspace,
-            preferSameAppSiblingWorkspace: preferSameAppSiblingWorkspace,
             structuralReplacementWorkspaceId: replacementMatch?.workspaceId,
-            restrictWorkspaceRuleToPlacementMonitor: trackedMode != .floating,
+            placementMode: trackedMode,
+            allowsFloatingSpawnPlacement: controller.allowsFloatingSpawnPlacement(
+                for: evaluation,
+                mode: trackedMode
+            ),
+            placementOrigin: placementOrigin,
             createPlacementContext: createPlacementContext,
             windowFrame: placementFrame,
             fallbackWorkspaceId: controller.activeWorkspace()?.id
@@ -2817,39 +2838,6 @@ final class AXEventHandler {
         return !facts.ax.attributeFetchSucceeded
             || facts.ax.subrole == (kAXSystemDialogSubrole as String)
             || facts.windowServer?.hasTransientSurfaceEvidence == true
-    }
-
-    private func recordCreatePlacementTrace(
-        token: WindowToken,
-        placement: WorkspacePlacementResolution,
-        createPlacementContext: WindowCreatePlacementContext?,
-        windowFrame: CGRect?,
-        controller: WMController
-    ) {
-        recordNiriCreateFocusTrace(
-            .init(
-                kind: .createPlacementResolved(
-                    token: token,
-                    workspaceId: placement.workspaceId,
-                    rung: placement.rung,
-                    pendingWorkspaceId: createPlacementContext?.pendingFocusedWorkspaceId,
-                    pendingMonitorId: createPlacementContext?.pendingFocusedMonitorId,
-                    focusedWorkspaceId: createPlacementContext?.focusedWorkspaceId,
-                    focusedMonitorId: createPlacementContext?.focusedMonitorId,
-                    nativeSpaceMonitorId: createPlacementContext?.nativeSpaceMonitorId,
-                    frameMonitorId: placementTraceMonitorId(for: windowFrame, controller: controller),
-                    interactionMonitorId: createPlacementContext?.interactionMonitorId
-                )
-            )
-        )
-    }
-
-    private func placementTraceMonitorId(
-        for frame: CGRect?,
-        controller: WMController
-    ) -> Monitor.ID? {
-        guard let frame, !frame.isNull, !frame.isEmpty else { return nil }
-        return frame.center.monitorApproximation(in: controller.workspaceManager.monitors)?.id
     }
 
     private func prepareDestroyCandidate(
@@ -3401,12 +3389,12 @@ final class AXEventHandler {
         var visibleWindowIds: Set<Int>?
 
         func oldLiveTokenIsInvisible(_ token: WindowToken) -> Bool {
+            if let capturedWindowServerInfoByWindowId {
+                return !capturedWindowServerInfoByWindowId.isEmpty
+                    && capturedWindowServerInfoByWindowId[token.windowId] == nil
+            }
             if visibleWindowIds == nil {
-                visibleWindowIds = if let capturedWindowServerInfoByWindowId {
-                    Set(capturedWindowServerInfoByWindowId.keys)
-                } else {
-                    Set(visibleWindowInfoProvider().map { Int($0.id) })
-                }
+                visibleWindowIds = Set(visibleWindowInfoProvider().map { Int($0.id) })
             }
             guard let visibleWindowIds, !visibleWindowIds.isEmpty else { return false }
             return !visibleWindowIds.contains(token.windowId)
@@ -3424,8 +3412,8 @@ final class AXEventHandler {
             workspaceId: WorkspaceDescriptor.ID,
             source: StructuralReplacementMatchSource
         ) -> Bool {
-            if match != nil {
-                return false
+            if let match {
+                return match.token == token
             }
             match = StructuralReplacementMatch(token: token, workspaceId: workspaceId, source: source)
             return true

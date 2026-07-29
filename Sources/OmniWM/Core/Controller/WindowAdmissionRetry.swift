@@ -17,7 +17,8 @@ extension AXEventHandler {
         axRef: AXWindowRef,
         token: WindowToken,
         mode: TrackedWindowMode,
-        existingEntry: WindowState?
+        existingEntry: WindowState?,
+        placementOrigin: WorkspacePlacementOrigin = .liveCreate
     ) -> Bool {
         let requiresValidation = existingEntry == nil
             || existingEntry?.mode == .floating && mode == .tiling
@@ -44,7 +45,8 @@ extension AXEventHandler {
                 windowId: windowId,
                 pid: token.pid,
                 axRef: axRef,
-                reason: .degenerateGeometry
+                reason: .degenerateGeometry,
+                placementOrigin: placementOrigin
             )
         }
         return true
@@ -55,7 +57,8 @@ extension AXEventHandler {
         windowId: UInt32,
         pid: pid_t,
         axRef: AXWindowRef,
-        reason: WindowAdmissionPendingReason
+        reason: WindowAdmissionPendingReason,
+        placementOrigin: WorkspacePlacementOrigin = .liveCreate
     ) -> Bool {
         let token = WindowToken(pid: pid, windowId: Int(windowId))
         return scheduleAdmissionRetry(
@@ -63,7 +66,11 @@ extension AXEventHandler {
             expectedToken: token,
             axRef: axRef,
             reason: reason,
-            trigger: .candidate(token: token, axRef: axRef)
+            trigger: .candidate(
+                token: token,
+                axRef: axRef,
+                placementOrigin: placementOrigin
+            )
         )
     }
 
@@ -484,7 +491,7 @@ extension AXEventHandler {
             let triggerMatchesPID = switch state.trigger {
             case .create:
                 false
-            case let .candidate(token, _),
+            case let .candidate(token, _, _),
                  let .focused(token, _, _, _),
                  let .ruleReevaluation(token, _):
                 token.pid == pid
@@ -516,6 +523,7 @@ extension AXEventHandler {
                 )
             }
             cancelCreatedWindowRetry(windowId: windowId)
+            discardCreatePlacementContext(windowId: windowId)
         }
 
         for windowId in Array(identityAliasesByWindowId.keys) {
@@ -570,11 +578,12 @@ extension AXEventHandler {
         switch state.trigger {
         case .create:
             processCreatedWindow(windowId: windowId)
-        case let .candidate(token, axRef):
+        case let .candidate(token, axRef, placementOrigin):
             processCreatedWindow(
                 windowId: windowId,
                 fallbackToken: token,
                 fallbackAXRef: axRef,
+                placementOrigin: placementOrigin,
                 retryTrigger: state.trigger
             )
         case let .focused(token, source, observationGeneration, callbackGeneration):

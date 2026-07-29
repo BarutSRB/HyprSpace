@@ -308,6 +308,10 @@ struct AXWindowRef: Hashable, @unchecked Sendable {
 
 Some apps (Ghostty, browsers) destroy and recreate windows during internal operations. `AXEventHandler` correlates a destroy+create pair via `ManagedReplacementMetadata` and emits a `.windowRekeyed` event so the new window inherits the old one's workspace, mode, and position instead of being admitted fresh.
 
+**Workspace placement:**
+
+`PlacementResolver` applies continuity before fresh placement: automatic readmission keeps the existing workspace, structural replacements keep their original workspace and identity, tracked transient children inherit their parent workspace, and unique persisted boot-restore matches retain restore authority. A valid workspace rule is the initial default only while that running app instance has no tracked window; explicit rule application can still move existing windows. Later tiled and parentless floating live creates use a pending managed-focus destination and the interaction workspace captured when the create event arrived before mode-specific native-Space, focus, and frame fallbacks. Finder Quick Look is the narrow exception: native-Space and same-process tiled-window spawn placement remain ahead of interaction so its macOS focus churn cannot redirect the preview. Contextless startup and full-rescan discovery remain conservative and frame-distributed.
+
 ### 3.4 Stage 2 — WorldStore, the Single Writer
 
 `WorldStore` (`Core/World/WorldStore.swift`) is the heart of the architecture: the **only** path that mutates window-manager state. It is `@MainActor` and owns, as private properties, everything that constitutes the "world":

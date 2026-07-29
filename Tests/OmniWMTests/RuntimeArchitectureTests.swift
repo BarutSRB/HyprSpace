@@ -4037,6 +4037,12 @@ final class RuntimeArchitectureTests: XCTestCase {
             columnWidth: columnWidth,
             tabbedColumnIndex: -1
         )
+        let oldHandle = try XCTUnwrap(controller.workspaceManager.handle(for: oldToken))
+        _ = controller.workspaceManager.confirmManagedFocus(
+            oldToken,
+            in: workspaceId,
+            activateWorkspaceOnMonitor: false
+        )
 
         let monitor = try XCTUnwrap(controller.workspaceManager.monitor(for: workspaceId))
         var state = controller.workspaceManager.niriViewportState(for: workspaceId)
@@ -4079,6 +4085,8 @@ final class RuntimeArchitectureTests: XCTestCase {
         )
         XCTAssertNil(controller.workspaceManager.entry(for: oldToken))
         XCTAssertNotNil(controller.workspaceManager.entry(for: newToken))
+        XCTAssertTrue(controller.workspaceManager.handle(for: newToken) === oldHandle)
+        XCTAssertEqual(controller.workspaceManager.focusedToken, newToken)
 
         let plans = controller.workspaceManager.withEngineMutationScope {
             controller.niriLayoutHandler.layoutWithNiriEngine(

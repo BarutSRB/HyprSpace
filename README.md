@@ -688,7 +688,7 @@ OmniWM stores its editable config at `${XDG_CONFIG_HOME:-$HOME/.config}/omniwm/s
 Configure per-application behavior in Settings > App Rules:
 
 - **Always Float** - Force specific apps to always float (e.g., calculators, preferences windows)
-- **Assign to Workspace** - Open first matching app windows on a specific workspace; later windows follow the app's current workspace unless rules are explicitly applied
+- **Assign to Workspace** - Use a valid workspace assignment as the initial default whenever the matching app currently has no tracked windows. Additional windows open on the workspace active when creation began. Automatic rule reevaluation leaves managed windows in place, while explicit rule application can move them. Readmission, structural replacements, tracked transient children, and unique persisted boot-restore matches preserve their existing placement continuity.
 - **Initial Container Primary Span (Niri)** - Start matching resizable windows at 5–100% when they create or claim a new container; the container remains freely resizable afterward
 - **Minimum Size** - Prevent the layout engine from sizing windows below a threshold
 

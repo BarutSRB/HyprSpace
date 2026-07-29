@@ -6,18 +6,55 @@ import Foundation
 
 @MainActor
 extension AXEventHandler {
-    func captureCreatePlacementContext(windowId: UInt32, spaceId: UInt64) {
-        pruneExpiredCreatePlacementContexts()
-        guard createPlacementContextsByWindowId[windowId] == nil,
-              let controller
-        else {
-            return
-        }
+    static func effectivePlacementOrigin(
+        _ placementOrigin: WorkspacePlacementOrigin,
+        createPlacementContext: WindowCreatePlacementContext?
+    ) -> WorkspacePlacementOrigin {
+        createPlacementContext == nil ? placementOrigin : .liveCreate
+    }
 
-        createPlacementContextsByWindowId[windowId] = liveCreatePlacementContext(
+    func captureCreatePlacementContext(windowId: UInt32, spaceId: UInt64) {
+        guard let controller else { return }
+        guard pendingCreatePlacementContext(for: Int(windowId))?.nativeSpaceMonitorId == nil else { return }
+        let nativeSpaceMonitorId = spaceId == 0
+            ? nil
+            : resolveNativeSpacePlacementMonitorId(spaceId: spaceId, controller: controller)
+        _ = retainedCreatePlacementContext(
+            windowId: windowId,
             controller: controller,
-            nativeSpaceMonitorId: resolveNativeSpacePlacementMonitorId(spaceId: spaceId, controller: controller)
+            nativeSpaceMonitorId: nativeSpaceMonitorId
         )
+    }
+
+    func retainedCreatePlacementContext(
+        windowId: UInt32,
+        controller: WMController,
+        nativeSpaceMonitorId: Monitor.ID? = nil
+    ) -> WindowCreatePlacementContext {
+        if let context = pendingCreatePlacementContext(for: Int(windowId)) {
+            guard context.nativeSpaceMonitorId == nil, let nativeSpaceMonitorId else {
+                return context
+            }
+            let mergedContext = WindowCreatePlacementContext(
+                nativeSpaceMonitorId: nativeSpaceMonitorId,
+                pendingFocusedWorkspaceId: context.pendingFocusedWorkspaceId,
+                pendingFocusedMonitorId: context.pendingFocusedMonitorId,
+                focusedWorkspaceId: context.focusedWorkspaceId,
+                focusedMonitorId: context.focusedMonitorId,
+                interactionWorkspaceId: context.interactionWorkspaceId,
+                interactionMonitorId: context.interactionMonitorId,
+                createdAt: context.createdAt
+            )
+            createPlacementContextsByWindowId[windowId] = mergedContext
+            return mergedContext
+        }
+        pruneExpiredCreatePlacementContexts()
+        let context = liveCreatePlacementContext(
+            controller: controller,
+            nativeSpaceMonitorId: nativeSpaceMonitorId
+        )
+        createPlacementContextsByWindowId[windowId] = context
+        return context
     }
 
     func liveCreatePlacementContext(
@@ -25,6 +62,10 @@ extension AXEventHandler {
         nativeSpaceMonitorId: Monitor.ID? = nil
     ) -> WindowCreatePlacementContext {
         let focusedWorkspaceId = resolveFocusedPlacementWorkspaceId(controller: controller)
+        let interactionMonitorId = controller.workspaceManager.interactionMonitorId
+        let interactionWorkspaceId = interactionMonitorId.flatMap {
+            controller.workspaceManager.activeWorkspaceOrFirst(on: $0)?.id
+        }
         return WindowCreatePlacementContext(
             nativeSpaceMonitorId: nativeSpaceMonitorId,
             pendingFocusedWorkspaceId: controller.workspaceManager.pendingFocusedWorkspaceId,
@@ -33,7 +74,8 @@ extension AXEventHandler {
             focusedMonitorId: focusedWorkspaceId.flatMap {
                 controller.workspaceManager.monitorId(for: $0)
             },
-            interactionMonitorId: controller.workspaceManager.interactionMonitorId,
+            interactionWorkspaceId: interactionWorkspaceId,
+            interactionMonitorId: interactionMonitorId,
             createdAt: Date()
         )
     }
@@ -85,6 +127,58 @@ extension AXEventHandler {
         createPlacementContextsByWindowId = createPlacementContextsByWindowId.filter { _, context in
             now.timeIntervalSince(context.createdAt) < Self.createPlacementContextTTL
         }
+    }
+
+    func pendingCreatePlacementContext(
+        for windowId: Int,
+        now: Date = Date()
+    ) -> WindowCreatePlacementContext? {
+        guard let windowId = UInt32(exactly: windowId) else { return nil }
+        guard let context = createPlacementContextsByWindowId[windowId] else { return nil }
+        guard now.timeIntervalSince(context.createdAt) < Self.createPlacementContextTTL else {
+            createPlacementContextsByWindowId.removeValue(forKey: windowId)
+            return nil
+        }
+        return context
+    }
+
+    func discardCreatePlacementContext(for windowId: Int) {
+        guard let windowId = UInt32(exactly: windowId) else { return }
+        discardCreatePlacementContext(windowId: windowId)
+    }
+
+    func recordCreatePlacementTrace(
+        token: WindowToken,
+        placement: WorkspacePlacementResolution,
+        createPlacementContext: WindowCreatePlacementContext?,
+        windowFrame: CGRect?,
+        controller: WMController
+    ) {
+        recordNiriCreateFocusTrace(
+            .init(
+                kind: .createPlacementResolved(
+                    token: token,
+                    workspaceId: placement.workspaceId,
+                    rung: placement.rung,
+                    pendingWorkspaceId: createPlacementContext?.pendingFocusedWorkspaceId,
+                    pendingMonitorId: createPlacementContext?.pendingFocusedMonitorId,
+                    focusedWorkspaceId: createPlacementContext?.focusedWorkspaceId,
+                    focusedMonitorId: createPlacementContext?.focusedMonitorId,
+                    nativeSpaceMonitorId: createPlacementContext?.nativeSpaceMonitorId,
+                    frameMonitorId: placementTraceMonitorId(for: windowFrame, controller: controller),
+                    interactionWorkspaceId: createPlacementContext?.interactionWorkspaceId,
+                    interactionMonitorId: createPlacementContext?.interactionMonitorId
+                )
+            )
+        )
+    }
+
+    private func placementTraceMonitorId(
+        for frame: CGRect?,
+        controller: WMController
+    ) -> Monitor.ID? {
+        guard let frame, !frame.isNull, !frame.isEmpty else { return nil }
+        return frame.center.monitorApproximation(in: controller.workspaceManager.monitors)?.id
     }
 
     func resolveWindowInfo(_ windowId: UInt32) -> WindowServerInfo? {

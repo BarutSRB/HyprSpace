@@ -22,7 +22,11 @@ enum WindowAdmissionRejectionReason: String, Equatable {
 
 enum AdmissionRetryTrigger {
     case create
-    case candidate(token: WindowToken, axRef: AXWindowRef)
+    case candidate(
+        token: WindowToken,
+        axRef: AXWindowRef,
+        placementOrigin: WorkspacePlacementOrigin = .liveCreate
+    )
     case focused(
         token: WindowToken,
         source: ActivationEventSource,
@@ -41,6 +45,13 @@ enum AdmissionRetryTrigger {
     var allowsTrackedIdentityReplacement: Bool {
         if case .create = self { return true }
         return false
+    }
+
+    var placementOrigin: WorkspacePlacementOrigin {
+        guard case let .candidate(_, _, placementOrigin) = self else {
+            return .liveCreate
+        }
+        return placementOrigin
     }
 
     var priority: Int {

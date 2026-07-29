@@ -388,6 +388,10 @@ extension WorldStore {
         model.entries(forPid: pid)
     }
 
+    func hasEntries(forPid pid: pid_t) -> Bool {
+        model.hasEntries(forPid: pid)
+    }
+
     func windows(in workspace: WorkspaceDescriptor.ID) -> [WindowState] {
         model.windows(in: workspace)
     }

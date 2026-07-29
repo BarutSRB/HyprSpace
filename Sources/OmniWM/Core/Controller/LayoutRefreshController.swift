@@ -1494,6 +1494,9 @@ import QuartzCore
             let createPlacementContext = existingEntry == nil
                 ? controller.axEventHandler.pendingCreatePlacementContext(for: winId)
                 : nil
+            let placementOrigin: WorkspacePlacementOrigin = createPlacementContext == nil
+                ? .discovery
+                : .liveCreate
             let shouldPreservePreFullscreenState = existingEntry.map { existingEntry in
                 !appFullscreen
                     && (
@@ -1512,6 +1515,18 @@ import QuartzCore
                 )
             }
 
+            if yieldToDeferredCreate(
+                token: token,
+                bundleId: bundleId ?? evaluation.facts.ax.bundleId,
+                mode: effectiveTrackedMode,
+                facts: evaluation.facts,
+                capturedWindowServerInfoByWindowId: enumerationSnapshot.windowServerInfoByWindowId,
+                entry: existingEntry,
+                seenKeys: &seenKeys
+            ) {
+                continue
+            }
+
             guard let trackedMode = effectiveTrackedMode else {
                 if existingEntry != nil {
                     controller.axEventHandler.cancelTrackedTilingPromotionRetry(windowId: winId)
@@ -1524,10 +1539,12 @@ import QuartzCore
                             windowId: windowId,
                             pid: pid,
                             axRef: ax,
-                            reason: .factsDeferred
+                            reason: .factsDeferred,
+                            placementOrigin: placementOrigin
                         )
+                    } else {
+                        controller.axEventHandler.discardCreatePlacementContext(for: winId)
                     }
-                    controller.axEventHandler.discardCreatePlacementContext(for: winId)
                 }
                 continue
             }
@@ -1540,7 +1557,8 @@ import QuartzCore
                 axRef: ax,
                 token: token,
                 mode: trackedMode,
-                existingEntry: existingEntry
+                existingEntry: existingEntry,
+                placementOrigin: placementOrigin
             ) {
                 if let existingEntry {
                     seenKeys.insert(existingEntry.token)
@@ -1583,7 +1601,8 @@ import QuartzCore
                 existingEntry: existingEntry,
                 fallbackWorkspaceId: focusedWorkspaceId,
                 structuralReplacementWorkspaceId: structuralMatch?.workspaceId,
-                restrictWorkspaceRuleToPlacementMonitor: trackedMode != .floating,
+                placementMode: trackedMode,
+                placementOrigin: placementOrigin,
                 createPlacementContext: createPlacementContext,
                 windowFrame: candidate.capturedFrame
             )
@@ -1690,11 +1709,12 @@ import QuartzCore
             if refreshedEntry != nil {
                 _ = controller.workspaceManager.updateAdmissionHints(admissionHints, for: admittedToken)
             }
+            let admittedEntry = controller.workspaceManager.entry(for: admittedToken)
             if let candidate = FullRescanFloatingFocusCandidate(
                 token: admittedToken,
-                workspaceId: wsForWindow,
+                workspaceId: admittedEntry?.workspaceId ?? wsForWindow,
                 isNewAdmission: existingEntry == nil,
-                mode: admittedMode,
+                mode: admittedEntry?.mode ?? admittedMode,
                 createPlacementContext: createPlacementContext
             ) {
                 floatingFocusCandidate = Self.newestFullRescanFloatingFocusCandidate(
@@ -1752,10 +1772,8 @@ import QuartzCore
             controller.axEventHandler.retireManagedWindowFromAuthoritativeRescan(entry)
         }
 
-        let shouldPreserveMissingWindows = shouldPreserveMissingWindowsDuringNativeFullscreen(
-            controller: controller,
-            hadLifecycleContextAtStart: hadNativeFullscreenLifecycleContextAtStart
-        )
+        let shouldPreserveMissingWindows = hadNativeFullscreenLifecycleContextAtStart
+            || controller.workspaceManager.hasNativeFullscreenLifecycleContext
         let trackedEntries = controller.workspaceManager.allEntries()
         if shouldPreserveMissingWindows {
             // Native macOS fullscreen moves the app onto its own Space, so visible-window
@@ -1848,13 +1866,6 @@ import QuartzCore
         effects.subscribeManagedWindows = true
 
         return EffectPlan(workspacePlans: workspacePlans, effects: effects)
-    }
-
-    private func shouldPreserveMissingWindowsDuringNativeFullscreen(
-        controller: WMController,
-        hadLifecycleContextAtStart: Bool
-    ) -> Bool {
-        hadLifecycleContextAtStart || controller.workspaceManager.hasNativeFullscreenLifecycleContext
     }
 
     private enum ScratchpadRescanEvidence {

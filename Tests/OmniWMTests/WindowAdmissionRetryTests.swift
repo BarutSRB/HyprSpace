@@ -112,12 +112,61 @@ final class WindowAdmissionRetryTests: XCTestCase {
         let state = try XCTUnwrap(controller.axEventHandler.admissionRetryStateByWindowId[windowId])
         XCTAssertEqual(state.expectedToken, token)
         XCTAssertTrue(CFEqual(state.axRef?.element, axRef.element))
-        guard case let .candidate(triggerToken, triggerAXRef) = state.trigger else {
+        guard case let .candidate(triggerToken, triggerAXRef, _) = state.trigger else {
             return XCTFail("Expected concrete candidate retry")
         }
         XCTAssertEqual(triggerToken, token)
         XCTAssertTrue(CFEqual(triggerAXRef.element, axRef.element))
         controller.axEventHandler.handleCGSEvent(.destroyed(windowId: windowId, spaceId: 0))
+    }
+
+    func testDeferredDiscoveryCandidateRetainsRetryTriggerWhenDrained() async throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let windowId: UInt32 = 467_805
+        let token = WindowToken(pid: 467_705, windowId: Int(windowId))
+        let axRef = AXWindowRef(element: AXUIElementCreateApplication(token.pid), windowId: token.windowId)
+        XCTAssertTrue(
+            controller.axEventHandler.scheduleCandidateAdmissionRetry(
+                windowId: windowId,
+                pid: token.pid,
+                axRef: axRef,
+                reason: .factsDeferred,
+                placementOrigin: .discovery
+            )
+        )
+
+        var runningState = try XCTUnwrap(
+            controller.axEventHandler.admissionRetryStateByWindowId[windowId]
+        )
+        runningState.task?.cancel()
+        runningState.task = nil
+        runningState.executionPhase = .running(701)
+        controller.axEventHandler.admissionRetryStateByWindowId[windowId] = runningState
+        controller.layoutRefreshController.layoutState.activeFullEnumerationCount = 1
+        controller.axEventHandler.processCreatedWindow(
+            windowId: windowId,
+            fallbackToken: token,
+            fallbackAXRef: axRef,
+            placementOrigin: .discovery,
+            retryTrigger: runningState.trigger
+        )
+        controller.layoutRefreshController.layoutState.activeFullEnumerationCount = 0
+        controller.axEventHandler.windowInfoProvider = { _ in nil }
+
+        await controller.axEventHandler.drainDeferredCreatedWindows()
+
+        let rescheduled = try XCTUnwrap(
+            controller.axEventHandler.admissionRetryStateByWindowId[windowId]
+        )
+        guard case let .candidate(triggerToken, triggerAXRef, placementOrigin) = rescheduled.trigger else {
+            return XCTFail("Expected discovery candidate retry")
+        }
+        XCTAssertEqual(triggerToken, token)
+        XCTAssertTrue(CFEqual(triggerAXRef.element, axRef.element))
+        XCTAssertEqual(placementOrigin, .discovery)
+        XCTAssertEqual(rescheduled.attempt, runningState.attempt + 1)
+        XCTAssertNotNil(rescheduled.task)
+        controller.axEventHandler.cancelCreatedWindowRetry(windowId: windowId)
     }
 
     func testCandidateRetryCannotReplaceFocusedRetrySemantics() throws {
@@ -279,10 +328,15 @@ final class WindowAdmissionRetryTests: XCTestCase {
                 )
             )
         )
+        _ = controller.axEventHandler.retainedCreatePlacementContext(
+            windowId: windowId,
+            controller: controller
+        )
 
         controller.axEventHandler.cleanupFocusStateForTerminatedApp(pid: terminatedPID)
 
         XCTAssertNil(controller.axEventHandler.admissionRetryStateByWindowId[windowId])
+        XCTAssertNil(controller.axEventHandler.pendingCreatePlacementContext(for: Int(windowId)))
         XCTAssertEqual(
             controller.axEventHandler.identityAliasesByWindowId[Int(windowId)]?.current?.pids,
             [survivingPID]
@@ -377,7 +431,7 @@ final class WindowAdmissionRetryTests: XCTestCase {
         XCTAssertNotEqual(candidate.generation, execution.generation)
         XCTAssertEqual(candidate.executionPhase, .waiting)
         XCTAssertNotNil(candidate.task)
-        guard case let .candidate(candidateToken, candidateAXRef) = candidate.trigger else {
+        guard case let .candidate(candidateToken, candidateAXRef, _) = candidate.trigger else {
             return XCTFail("Expected candidate retry")
         }
         XCTAssertEqual(candidateToken, token)
@@ -425,6 +479,42 @@ final class WindowAdmissionRetryTests: XCTestCase {
         }
     }
 
+    func testManagedFocusedOutcomeDiscardsRetainedCreatePlacementContext() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let windowId: UInt32 = 467_431
+        let token = WindowToken(pid: 467_331, windowId: Int(windowId))
+        let axRef = WindowAdmissionTestSupport.track(
+            token,
+            in: workspaceId,
+            controller: controller
+        )
+        _ = controller.axEventHandler.retainedCreatePlacementContext(
+            windowId: windowId,
+            controller: controller
+        )
+        controller.hasStartedServices = true
+
+        controller.axEventHandler.handleActivationFactsResolved(
+            ActivationFacts(
+                pid: token.pid,
+                source: .focusedWindowChanged,
+                origin: .external,
+                observationGeneration: 0,
+                requestedAtSeq: 0,
+                focusedWindow: FocusedWindowFact(
+                    axRef: axRef,
+                    isFullscreen: false,
+                    isSystemModalSurface: false
+                )
+            )
+        )
+
+        XCTAssertNil(controller.axEventHandler.pendingCreatePlacementContext(for: Int(windowId)))
+    }
+
     func testRejectedFocusedFactsRetireRunningOwnerAndAllowCandidateRetry() throws {
         let controller = WindowAdmissionTestSupport.controller()
         let windowId: UInt32 = 467_423
@@ -461,6 +551,7 @@ final class WindowAdmissionRetryTests: XCTestCase {
         )
 
         XCTAssertNil(controller.axEventHandler.admissionRetryStateByWindowId[windowId])
+        XCTAssertNil(controller.axEventHandler.pendingCreatePlacementContext(for: Int(windowId)))
         XCTAssertTrue(
             controller.axEventHandler.scheduleCandidateAdmissionRetry(
                 windowId: windowId,

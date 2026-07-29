@@ -50,6 +50,36 @@ extension LayoutRefreshController {
         return candidate.workspaceId
     }
 
+    func yieldToDeferredCreate(
+        token: WindowToken,
+        bundleId: String?,
+        mode: TrackedWindowMode?,
+        facts: WindowRuleFacts,
+        capturedWindowServerInfoByWindowId: [Int: WindowServerInfo],
+        entry: WindowState?,
+        seenKeys: inout Set<WindowToken>
+    ) -> Bool {
+        guard let controller,
+              entry == nil,
+              let windowId = UInt32(exactly: token.windowId),
+              controller.axEventHandler.isCreatedWindowDeferred(windowId)
+        else {
+            return false
+        }
+        if let mode,
+           let match = controller.axEventHandler.structuralReplacementMatch(
+               token: token,
+               bundleId: bundleId,
+               mode: mode,
+               facts: facts,
+               capturedWindowServerInfoByWindowId: capturedWindowServerInfoByWindowId
+           )
+        {
+            seenKeys.insert(match.token)
+        }
+        return true
+    }
+
     func preserveFocusedSheetDuringFullRescan(
         windowServerInfoByWindowId: [Int: WindowServerInfo],
         seenKeys: inout Set<WindowToken>

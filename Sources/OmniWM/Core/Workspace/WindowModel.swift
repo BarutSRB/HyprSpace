@@ -369,6 +369,10 @@ final class WindowModel {
         return tokens.compactMap { entries[$0] }
     }
 
+    func hasEntries(forPid pid: pid_t) -> Bool {
+        tokensByPid[pid]?.isEmpty == false
+    }
+
     func entry(forWindowId windowId: Int) -> WindowState? {
         windowIdToToken[windowId].flatMap { entries[$0] }
     }

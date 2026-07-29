@@ -521,9 +521,12 @@ Configured monitor assignment remains enforced unless `--force` is present. A fo
 Manage persisted window rules that control layout behavior, default workspace placement, and the initial Niri
 container primary span for matching windows. Primary span is width in horizontal orientation and height in
 vertical orientation.
-Rule add, replace, and config reload update admission defaults; existing managed windows stay on their current
-workspace unless `rule apply` is used. Initial container primary span is a one-shot Niri admission hint and
-never resizes an existing container.
+Rule add, replace, and config reload trigger automatic reevaluation. A valid workspace assignment applies as
+the initial default whenever the matching app currently has no tracked windows. Additional windows use the
+workspace active when creation began. Automatic reevaluation preserves existing managed windows' workspaces, while
+readmission, structural replacements, tracked transient children, and unique persisted boot-restore matches
+preserve placement continuity. `rule apply` is the explicit path that may move existing managed windows.
+Initial container primary span is a one-shot Niri admission hint and never resizes an existing container.
 
 ```
 omniwmctl rule <action> [arguments...] [options...]
@@ -540,7 +543,7 @@ omniwmctl rule <action> [arguments...] [options...]
 | `--ax-role` | `<role>` | Match accessibility role |
 | `--ax-subrole` | `<subrole>` | Match accessibility subrole |
 | `--layout` | `<auto\|tile\|float>` | Layout action (`auto` = default behavior) |
-| `--assign-to-workspace` | `<raw-name>` | Open first matching app windows on this workspace raw name |
+| `--assign-to-workspace` | `<raw-name>` | Use this workspace as the initial default whenever the matching app currently has no tracked windows |
 | `--initial-container-primary-span` | `<proportion>` | Initial Niri container primary span for a resizable window, from `0.05` through `1.0` inclusive |
 | `--min-width` | `<points>` | Minimum window width in points |
 | `--min-height` | `<points>` | Minimum window height in points |
@@ -567,7 +570,7 @@ the stored `initialContainerPrimarySpan` proportion.
 omniwmctl rule add [options...]
 ```
 
-Supply `--bundle-id` and/or at least one matcher (`--app-name-substring`, `--title-substring`, `--title-regex`). Appends a new rule to the end of the rule list. First matching app windows use its placement defaults; already managed windows are not moved.
+Supply `--bundle-id` and/or at least one matcher (`--app-name-substring`, `--title-substring`, `--title-regex`). Appends a new rule to the end of the rule list. Its placement defaults apply whenever the matching app currently has no tracked windows; already managed windows are not moved.
 
 **Replace a rule:**
 
@@ -601,7 +604,8 @@ omniwmctl rule apply [--focused | --window <opaque-id> | --pid <pid>]
 
 Re-evaluates the current rule set against the target. Defaults to `--focused` if no target is specified. This is
 the explicit path for applying ongoing rule effects to already managed windows; the one-shot initial container
-primary-span hint is not reasserted on an existing container.
+primary-span hint is not reasserted on an existing container. Explicit application may move an existing window
+to its valid assigned workspace.
 
 | Target | Description |
 |--------|-------------|
@@ -615,7 +619,7 @@ primary-span hint is not reasserted on an existing container.
 # Float all Finder windows
 omniwmctl rule add --bundle-id com.apple.finder --layout float
 
-# Tile initial Safari windows on workspace 2
+# Tile Safari's first currently tracked window on workspace 2
 omniwmctl rule add --bundle-id com.apple.Safari --layout tile --assign-to-workspace 2
 
 # Start new Kitty containers at 50% of the primary axis in Niri

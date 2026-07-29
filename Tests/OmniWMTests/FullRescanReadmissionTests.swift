@@ -287,6 +287,7 @@ final class FullRescanReadmissionTests: XCTestCase {
             pendingFocusedMonitorId: nil,
             focusedWorkspaceId: nil,
             focusedMonitorId: nil,
+            interactionWorkspaceId: nil,
             interactionMonitorId: nil,
             createdAt: createdAt
         )

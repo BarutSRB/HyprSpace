@@ -21,6 +21,10 @@ enum ManagedWindowDestroyDisposition {
 }
 
 extension AXEventHandler {
+    func isCreatedWindowDeferred(_ windowId: UInt32) -> Bool {
+        deferredCreatedWindowIds.contains(windowId)
+    }
+
     func isAdmissionQuarantined(windowId: Int, axRef: AXWindowRef) -> Bool {
         guard let quarantine = admissionQuarantineByWindowId[windowId] else { return false }
         guard CFEqual(quarantine.axRef.element, axRef.element)
@@ -226,9 +230,7 @@ extension AXEventHandler {
         {
             return false
         }
-        if let admissionWindowId = UInt32(exactly: windowId),
-           createPlacementContextsByWindowId[admissionWindowId] != nil
-        {
+        if pendingCreatePlacementContext(for: windowId) != nil {
             return false
         }
         return true

@@ -2191,6 +2191,10 @@ final class WorkspaceManager {
         world.entries(forPid: pid)
     }
 
+    func hasEntries(forPid pid: pid_t) -> Bool {
+        world.hasEntries(forPid: pid)
+    }
+
     func entry(forWindowId windowId: Int) -> WindowState? {
         world.entry(forWindowId: windowId)
     }
