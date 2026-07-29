@@ -54,8 +54,12 @@ extension LayoutRefreshController {
         token: WindowToken,
         bundleId: String?,
         mode: TrackedWindowMode?,
+        factsAreDeferred: Bool = false,
         facts: WindowRuleFacts,
+        scope: RescanScope,
         capturedWindowServerInfoByWindowId: [Int: WindowServerInfo],
+        capturedWindowServerAuthoritativeWindowIds: Set<Int>? = nil,
+        capturedWindowServerAuthoritativePIDs: Set<pid_t>? = nil,
         entry: WindowState?,
         seenKeys: inout Set<WindowToken>
     ) -> Bool {
@@ -66,18 +70,116 @@ extension LayoutRefreshController {
         else {
             return false
         }
-        if let mode,
-           let match = controller.axEventHandler.structuralReplacementMatch(
-               token: token,
-               bundleId: bundleId,
-               mode: mode,
-               facts: facts,
-               capturedWindowServerInfoByWindowId: capturedWindowServerInfoByWindowId
-           )
-        {
-            seenKeys.insert(match.token)
+        guard let mode else {
+            if !factsAreDeferred {
+                controller.axEventHandler.recordDeferredReplacementAssessment(
+                    windowId: windowId,
+                    scope: scope
+                )
+            }
+            return true
         }
+        if let match = controller.axEventHandler.structuralReplacementMatch(
+            token: token,
+            bundleId: bundleId,
+            mode: mode,
+            facts: facts,
+            capturedWindowServerInfoByWindowId: capturedWindowServerInfoByWindowId,
+            capturedWindowServerAuthoritativeWindowIds: capturedWindowServerAuthoritativeWindowIds,
+            capturedWindowServerAuthoritativePIDs: capturedWindowServerAuthoritativePIDs
+        ) {
+            seenKeys.insert(match.token)
+            controller.axEventHandler.protectDeferredReplacement(
+                windowId: windowId,
+                token: match.token,
+                scope: scope
+            )
+        }
+        controller.axEventHandler.recordDeferredReplacementAssessment(
+            windowId: windowId,
+            scope: scope
+        )
         return true
+    }
+
+    func confirmedMissingEntriesDuringFullRescan(
+        seenKeys: Set<WindowToken>,
+        eligibleKeys: Set<WindowToken>?,
+        permitsMissingRetirement: Bool
+    ) -> [WindowState] {
+        if permitsMissingRetirement {
+            return confirmedMissingEntries(
+                keys: seenKeys,
+                eligibleKeys: eligibleKeys,
+                requiredConsecutiveMisses: 2
+            )
+        }
+        _ = confirmedMissingEntries(
+            keys: seenKeys,
+            eligibleKeys: [],
+            requiredConsecutiveMisses: 2
+        )
+        return []
+    }
+
+    func confirmedMissingEntries(
+        keys activeKeys: Set<WindowToken>,
+        eligibleKeys: Set<WindowToken>? = nil,
+        requiredConsecutiveMisses: Int = 1
+    ) -> [WindowState] {
+        guard let workspaceManager = controller?.workspaceManager else { return [] }
+        let threshold = max(1, requiredConsecutiveMisses)
+        let knownEntries = if let eligibleKeys {
+            eligibleKeys.compactMap { workspaceManager.entry(for: $0) }
+        } else {
+            workspaceManager.allEntries()
+        }
+
+        for token in activeKeys {
+            guard let handle = workspaceManager.handle(for: token) else { continue }
+            layoutState.consecutiveMissCountByHandle.removeValue(forKey: handle)
+        }
+
+        var confirmedMissing: [WindowState] = []
+        confirmedMissing.reserveCapacity(knownEntries.count)
+        for entry in knownEntries where !activeKeys.contains(entry.token) {
+            guard let handle = workspaceManager.handle(for: entry.token) else { continue }
+            if entry.layoutReason == .nativeFullscreen
+                || workspaceManager.spaceTopology.isWindowOnKnownInactiveSpace(entry.windowId)
+            {
+                layoutState.consecutiveMissCountByHandle.removeValue(forKey: handle)
+                continue
+            }
+            let misses = (layoutState.consecutiveMissCountByHandle[handle] ?? 0) + 1
+            if misses >= threshold {
+                confirmedMissing.append(entry)
+                layoutState.consecutiveMissCountByHandle.removeValue(forKey: handle)
+            } else {
+                layoutState.consecutiveMissCountByHandle[handle] = misses
+            }
+        }
+
+        let staleHandles = layoutState.consecutiveMissCountByHandle.keys.filter {
+            workspaceManager.handle(for: $0.id) !== $0
+        }
+        for handle in staleHandles {
+            layoutState.consecutiveMissCountByHandle.removeValue(forKey: handle)
+        }
+
+        return confirmedMissing.sorted {
+            if $0.pid == $1.pid {
+                return $0.windowId < $1.windowId
+            }
+            return $0.pid < $1.pid
+        }
+    }
+
+    func resetMissingDetectionCounts() {
+        layoutState.consecutiveMissCountByHandle.removeAll(keepingCapacity: true)
+    }
+
+    func recordWindowPresence(_ handle: WindowHandle) {
+        layoutState.consecutiveMissCountByHandle.removeValue(forKey: handle)
     }
 
     func preserveFocusedSheetDuringFullRescan(

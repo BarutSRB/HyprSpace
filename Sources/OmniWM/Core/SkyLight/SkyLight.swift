@@ -682,10 +682,7 @@ final class SkyLight {
         connectionId: Int32,
         copyWindowsWithOptionsAndTags: CopyWindowsWithOptionsAndTagsFunc
     ) -> [UInt32]? {
-        var signedSpaceId = Int64(bitPattern: spaceId)
-        guard let spaceNumber = CFNumberCreate(nil, .sInt64Type, &signedSpaceId) else { return nil }
-        defer { cfRelease(spaceNumber) }
-        let spaces = [spaceNumber] as CFArray
+        let spaces = [NSNumber(value: Int64(bitPattern: spaceId))] as CFArray
         var setTags: UInt64 = 0
         var clearTags: UInt64 = 0
         guard let windows = copyWindowsWithOptionsAndTags(

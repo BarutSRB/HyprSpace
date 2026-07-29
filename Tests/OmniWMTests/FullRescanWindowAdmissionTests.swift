@@ -256,7 +256,7 @@ final class FullRescanWindowAdmissionTests: XCTestCase {
             )
         )
         XCTAssertTrue(
-            controller.workspaceManager.confirmedMissingEntries(
+            controller.layoutRefreshController.confirmedMissingEntries(
                 keys: [],
                 requiredConsecutiveMisses: 2
             ).isEmpty
@@ -273,6 +273,7 @@ final class FullRescanWindowAdmissionTests: XCTestCase {
                     bundleId: bundleId,
                     mode: .tiling,
                     facts: facts,
+                    scope: .all,
                     capturedWindowServerInfoByWindowId: [
                         newToken.windowId: replacementWindowInfo(token: newToken, frame: matchingFrame)
                     ],
@@ -281,7 +282,13 @@ final class FullRescanWindowAdmissionTests: XCTestCase {
                 )
         )
         XCTAssertEqual(seenKeys, [oldToken])
-        let missingEntries = controller.workspaceManager.confirmedMissingEntries(
+        XCTAssertEqual(
+            controller.axEventHandler
+                .deferredReplacementProtectionsByWindowId[UInt32(newToken.windowId)]?
+                .protectedTokens,
+            [oldToken]
+        )
+        let missingEntries = controller.layoutRefreshController.confirmedMissingEntries(
             keys: seenKeys,
             requiredConsecutiveMisses: 2
         )
@@ -296,6 +303,7 @@ final class FullRescanWindowAdmissionTests: XCTestCase {
                     bundleId: bundleId,
                     mode: .tiling,
                     facts: facts,
+                    scope: .all,
                     capturedWindowServerInfoByWindowId: [:],
                     entry: try XCTUnwrap(controller.workspaceManager.entry(for: oldToken)),
                     seenKeys: &rejectedSeenKeys
@@ -308,12 +316,619 @@ final class FullRescanWindowAdmissionTests: XCTestCase {
                     bundleId: bundleId,
                     mode: .tiling,
                     facts: facts,
+                    scope: .all,
                     capturedWindowServerInfoByWindowId: [:],
                     entry: nil,
                     seenKeys: &rejectedSeenKeys
                 )
         )
         XCTAssertTrue(rejectedSeenKeys.isEmpty)
+    }
+
+    func testSuccessfulDeferredReplacementRekeyDoesNotScheduleMissingConfirmation() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        defer { controller.layoutRefreshController.resetState() }
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let pid: pid_t = 467_984
+        let oldToken = WindowToken(pid: pid, windowId: 467_985)
+        let newToken = WindowToken(pid: pid, windowId: 467_986)
+        let frame = CGRect(x: 80, y: 60, width: 720, height: 520)
+        let bundleId = replacementBundleId(pid)
+        _ = controller.workspaceManager.addWindow(
+            WindowAdmissionTestSupport.axRef(for: oldToken),
+            pid: pid,
+            windowId: oldToken.windowId,
+            to: workspaceId,
+            managedReplacementMetadata: replacementMetadata(
+                bundleId: bundleId,
+                workspaceId: workspaceId,
+                frame: frame
+            )
+        )
+        deferCreatedWindow(newToken, controller: controller)
+        var seenKeys: Set<WindowToken> = []
+        XCTAssertTrue(
+            controller.layoutRefreshController.yieldToDeferredCreate(
+                token: newToken,
+                bundleId: bundleId,
+                mode: .tiling,
+                facts: replacementFacts(token: newToken, bundleId: bundleId, frame: frame),
+                scope: .all,
+                capturedWindowServerInfoByWindowId: [
+                    newToken.windowId: replacementWindowInfo(token: newToken, frame: frame)
+                ],
+                entry: nil,
+                seenKeys: &seenKeys
+            )
+        )
+
+        let result = controller.axEventHandler.rekeyManagedWindowIdentity(
+            from: oldToken,
+            to: newToken,
+            windowId: UInt32(newToken.windowId),
+            axRef: WindowAdmissionTestSupport.axRef(for: newToken)
+        )
+
+        guard case .committed = result else {
+            return XCTFail("Expected synchronous replacement rekey")
+        }
+        XCTAssertNil(
+            controller.axEventHandler
+                .deferredReplacementProtectionsByWindowId[UInt32(newToken.windowId)]
+        )
+        XCTAssertNil(controller.layoutRefreshController.layoutState.pendingMissingConfirmationScope)
+        XCTAssertNil(controller.layoutRefreshController.layoutState.missingConfirmationTask)
+    }
+
+    func testDeferredReplacementRetryExhaustionSchedulesOneMissingConfirmation() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        defer {
+            controller.axEventHandler.resetCreatedWindowRetryState()
+            controller.layoutRefreshController.resetState()
+        }
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let pid: pid_t = 467_987
+        let oldToken = WindowToken(pid: pid, windowId: 467_988)
+        let newToken = WindowToken(pid: pid, windowId: 467_989)
+        let frame = CGRect(x: 80, y: 60, width: 720, height: 520)
+        let bundleId = replacementBundleId(pid)
+        _ = controller.workspaceManager.addWindow(
+            WindowAdmissionTestSupport.axRef(for: oldToken),
+            pid: pid,
+            windowId: oldToken.windowId,
+            to: workspaceId,
+            managedReplacementMetadata: replacementMetadata(
+                bundleId: bundleId,
+                workspaceId: workspaceId,
+                frame: frame
+            )
+        )
+        deferCreatedWindow(newToken, controller: controller)
+        let scope = RescanScope.targeted(appPIDs: [pid], nativeSpaceIds: [])
+        var seenKeys: Set<WindowToken> = []
+        XCTAssertTrue(
+            controller.layoutRefreshController.yieldToDeferredCreate(
+                token: newToken,
+                bundleId: bundleId,
+                mode: .tiling,
+                facts: replacementFacts(token: newToken, bundleId: bundleId, frame: frame),
+                scope: scope,
+                capturedWindowServerInfoByWindowId: [
+                    newToken.windowId: replacementWindowInfo(token: newToken, frame: frame)
+                ],
+                entry: nil,
+                seenKeys: &seenKeys
+            )
+        )
+        let axRef = WindowAdmissionTestSupport.axRef(for: newToken)
+        let trigger = AdmissionRetryTrigger.candidate(token: newToken, axRef: axRef)
+        controller.axEventHandler.admissionRetryStateByWindowId[UInt32(newToken.windowId)] =
+            AdmissionRetryState(
+                expectedToken: newToken,
+                axRef: axRef,
+                reason: .factsDeferred,
+                attempt: AXEventHandler.createdWindowRetryLimit,
+                generation: 1,
+                trigger: trigger,
+                exhausted: false,
+                executionPhase: .running(1)
+            )
+
+        XCTAssertFalse(
+            controller.axEventHandler.scheduleAdmissionRetry(
+                windowId: UInt32(newToken.windowId),
+                expectedToken: newToken,
+                axRef: axRef,
+                reason: .factsDeferred,
+                trigger: trigger
+            )
+        )
+        XCTAssertTrue(
+            controller.axEventHandler.admissionRetryStateByWindowId[UInt32(newToken.windowId)]?
+                .exhausted == true
+        )
+        XCTAssertNil(
+            controller.axEventHandler
+                .deferredReplacementProtectionsByWindowId[UInt32(newToken.windowId)]
+        )
+        XCTAssertEqual(controller.layoutRefreshController.layoutState.pendingMissingConfirmationScope, scope)
+        XCTAssertNotNil(controller.layoutRefreshController.layoutState.missingConfirmationTask)
+
+        controller.axEventHandler.rejectDeferredReplacement(windowId: UInt32(newToken.windowId))
+
+        XCTAssertNotNil(controller.layoutRefreshController.layoutState.missingConfirmationTask)
+        XCTAssertEqual(controller.layoutRefreshController.layoutState.pendingMissingConfirmationScope, scope)
+    }
+
+    func testAlreadyExhaustedRetrySettlesDeferredReplacementProtection() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        defer {
+            controller.axEventHandler.resetCreatedWindowRetryState()
+            controller.layoutRefreshController.resetState()
+        }
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let oldToken = WindowToken(pid: 467_995, windowId: 467_996)
+        let newToken = WindowToken(pid: oldToken.pid, windowId: 467_997)
+        _ = WindowAdmissionTestSupport.track(oldToken, in: workspaceId, controller: controller)
+        let scope = RescanScope.targeted(appPIDs: [oldToken.pid], nativeSpaceIds: [])
+        let windowId = UInt32(newToken.windowId)
+        let axRef = WindowAdmissionTestSupport.axRef(for: newToken)
+        let trigger = AdmissionRetryTrigger.candidate(token: newToken, axRef: axRef)
+        controller.axEventHandler.protectDeferredReplacement(
+            windowId: windowId,
+            token: oldToken,
+            scope: scope
+        )
+        controller.axEventHandler.admissionRetryStateByWindowId[windowId] =
+            AdmissionRetryState(
+                expectedToken: newToken,
+                axRef: axRef,
+                reason: .factsDeferred,
+                attempt: AXEventHandler.createdWindowRetryLimit,
+                generation: 1,
+                trigger: trigger,
+                exhausted: true
+            )
+
+        XCTAssertFalse(
+            controller.axEventHandler.scheduleAdmissionRetry(
+                windowId: windowId,
+                expectedToken: newToken,
+                axRef: axRef,
+                reason: .factsDeferred,
+                trigger: trigger
+            )
+        )
+        XCTAssertNil(
+            controller.axEventHandler.deferredReplacementProtectionsByWindowId[windowId]
+        )
+        XCTAssertEqual(controller.layoutRefreshController.layoutState.pendingMissingConfirmationScope, scope)
+        XCTAssertNotNil(controller.layoutRefreshController.layoutState.missingConfirmationTask)
+    }
+
+    func testInactiveSpaceDeferredReplacementProtectsOnlyProvenSamePIDMatch() async throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        defer {
+            controller.axEventHandler.resetCreatedWindowRetryState()
+            controller.layoutRefreshController.resetState()
+        }
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let pid: pid_t = 467_990
+        let oldToken = WindowToken(pid: pid, windowId: 467_991)
+        let newToken = WindowToken(pid: pid, windowId: 467_992)
+        let unrelatedToken = WindowToken(pid: pid, windowId: 467_994)
+        let frame = CGRect(x: 80, y: 60, width: 720, height: 520)
+        let bundleId = replacementBundleId(pid)
+        _ = controller.workspaceManager.addWindow(
+            WindowAdmissionTestSupport.axRef(for: oldToken),
+            pid: pid,
+            windowId: oldToken.windowId,
+            to: workspaceId,
+            managedReplacementMetadata: replacementMetadata(
+                bundleId: bundleId,
+                workspaceId: workspaceId,
+                frame: frame
+            )
+        )
+        _ = WindowAdmissionTestSupport.track(
+            unrelatedToken,
+            in: workspaceId,
+            controller: controller
+        )
+        var topology = SpaceTopology()
+        topology.displays = [
+            .init(displayIdentifier: "primary", spaceIds: [1, 2], currentSpaceId: 1)
+        ]
+        topology.activeSpaceId = 1
+        controller.workspaceManager.commitSpaceTopology(topology)
+        deferCreatedWindow(newToken, controller: controller)
+        var seenKeys: Set<WindowToken> = []
+        XCTAssertTrue(
+            controller.layoutRefreshController.yieldToDeferredCreate(
+                token: newToken,
+                bundleId: bundleId,
+                mode: .tiling,
+                facts: replacementFacts(token: newToken, bundleId: bundleId, frame: frame),
+                scope: .all,
+                capturedWindowServerInfoByWindowId: [
+                    newToken.windowId: replacementWindowInfo(token: newToken, frame: frame)
+                ],
+                entry: nil,
+                seenKeys: &seenKeys
+            )
+        )
+        controller.axEventHandler.windowInfoProvider = { windowId in
+            self.replacementWindowInfo(
+                token: WindowToken(pid: pid, windowId: Int(windowId)),
+                frame: frame
+            )
+        }
+
+        await controller.axEventHandler.drainDeferredCreatedWindows { _ in [2] }
+        await controller.axEventHandler.drainDeferredCreatedWindows { _ in [2] }
+        let firstProtectedTokens =
+            controller.axEventHandler.protectMissingEntriesDuringUnsettledAdmission(
+                candidates: [oldToken, unrelatedToken],
+                scope: .all
+            )
+        await controller.axEventHandler.drainDeferredCreatedWindows { _ in [2] }
+        let secondProtectedTokens =
+            controller.axEventHandler.protectMissingEntriesDuringUnsettledAdmission(
+                candidates: [oldToken, unrelatedToken],
+                scope: .all
+            )
+
+        XCTAssertTrue(controller.axEventHandler.isCreatedWindowDeferred(UInt32(newToken.windowId)))
+        XCTAssertEqual(firstProtectedTokens, [oldToken])
+        XCTAssertEqual(secondProtectedTokens, [oldToken])
+        let protection = try XCTUnwrap(
+            controller.axEventHandler.deferredReplacementProtectionsByWindowId[UInt32(newToken.windowId)]
+        )
+        XCTAssertEqual(protection.protectedTokens, [oldToken])
+        XCTAssertTrue(protection.fallbackProtectedTokens.isEmpty)
+        XCTAssertFalse(protection.permitsPIDFallback)
+        XCTAssertNil(controller.layoutRefreshController.layoutState.pendingMissingConfirmationScope)
+        XCTAssertNil(controller.layoutRefreshController.layoutState.missingConfirmationTask)
+    }
+
+    func testDeferredCreateDoesNotProtectReplacementOutsideCapturedCoverage() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let pid: pid_t = 467_970
+        let oldToken = WindowToken(pid: pid, windowId: 467_971)
+        let newToken = WindowToken(pid: pid, windowId: 467_972)
+        let frame = CGRect(x: 120, y: 80, width: 720, height: 520)
+        let bundleId = replacementBundleId(pid)
+        _ = controller.workspaceManager.addWindow(
+            AXWindowRef(element: AXUIElementCreateApplication(pid), windowId: oldToken.windowId),
+            pid: pid,
+            windowId: oldToken.windowId,
+            to: workspaceId,
+            managedReplacementMetadata: replacementMetadata(
+                bundleId: bundleId,
+                workspaceId: workspaceId,
+                frame: frame
+            )
+        )
+        deferCreatedWindow(newToken, controller: controller)
+
+        var seenKeys: Set<WindowToken> = []
+        XCTAssertTrue(
+            controller.layoutRefreshController.yieldToDeferredCreate(
+                token: newToken,
+                bundleId: bundleId,
+                mode: .tiling,
+                facts: replacementFacts(token: newToken, bundleId: bundleId, frame: frame),
+                scope: .all,
+                capturedWindowServerInfoByWindowId: [
+                    newToken.windowId: replacementWindowInfo(token: newToken, frame: frame)
+                ],
+                capturedWindowServerAuthoritativeWindowIds: [newToken.windowId],
+                entry: nil,
+                seenKeys: &seenKeys
+            )
+        )
+        XCTAssertTrue(seenKeys.isEmpty)
+    }
+
+    func testStructuralReplacementAcceptsEmptyBoundedWindowServerAuthority() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let pid: pid_t = 467_966
+        let oldToken = WindowToken(pid: pid, windowId: 467_967)
+        let newToken = WindowToken(pid: pid, windowId: 467_968)
+        let frame = CGRect(x: 120, y: 80, width: 720, height: 520)
+        let bundleId = replacementBundleId(pid)
+        _ = controller.workspaceManager.addWindow(
+            WindowAdmissionTestSupport.axRef(for: oldToken),
+            pid: pid,
+            windowId: oldToken.windowId,
+            to: workspaceId,
+            managedReplacementMetadata: replacementMetadata(
+                bundleId: bundleId,
+                workspaceId: workspaceId,
+                frame: frame
+            )
+        )
+        let facts = replacementFacts(token: newToken, bundleId: bundleId, frame: frame)
+
+        XCTAssertNil(
+            controller.axEventHandler.structuralReplacementMatch(
+                token: newToken,
+                bundleId: bundleId,
+                mode: .tiling,
+                facts: facts,
+                capturedWindowServerInfoByWindowId: [:]
+            )
+        )
+        XCTAssertEqual(
+            controller.axEventHandler.structuralReplacementMatch(
+                token: newToken,
+                bundleId: bundleId,
+                mode: .tiling,
+                facts: facts,
+                capturedWindowServerInfoByWindowId: [:],
+                capturedWindowServerAuthoritativeWindowIds: [oldToken.windowId],
+                capturedWindowServerAuthoritativePIDs: [pid]
+            )?.token,
+            oldToken
+        )
+    }
+
+    func testPostSnapshotDeferredCreateProtectsOnlyMatchingPIDFromMissingRetirement() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        defer {
+            controller.axEventHandler.resetCreatedWindowRetryState()
+            controller.layoutRefreshController.resetState()
+        }
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let oldToken = WindowToken(pid: 467_973, windowId: 467_974)
+        let newToken = WindowToken(pid: oldToken.pid, windowId: 467_975)
+        let unrelatedToken = WindowToken(pid: 467_976, windowId: 467_977)
+        for token in [oldToken, unrelatedToken] {
+            _ = WindowAdmissionTestSupport.track(token, in: workspaceId, controller: controller)
+        }
+        XCTAssertTrue(
+            controller.layoutRefreshController.confirmedMissingEntries(
+                keys: [],
+                requiredConsecutiveMisses: 2
+            ).isEmpty
+        )
+        deferCreatedWindow(newToken, controller: controller)
+        controller.axEventHandler.windowInfoProvider = { windowId in
+            guard windowId == UInt32(newToken.windowId) else { return nil }
+            return self.replacementWindowInfo(
+                token: newToken,
+                frame: CGRect(x: 80, y: 60, width: 720, height: 520)
+            )
+        }
+        let candidates: Set<WindowToken> = [oldToken, unrelatedToken]
+        let protectedTokens =
+            controller.axEventHandler.protectMissingEntriesDuringUnsettledAdmission(
+                candidates: candidates,
+                scope: .all
+            )
+
+        XCTAssertEqual(protectedTokens, [oldToken])
+        XCTAssertEqual(
+            controller.layoutRefreshController.confirmedMissingEntriesDuringFullRescan(
+                seenKeys: [],
+                eligibleKeys: candidates.subtracting(protectedTokens),
+                permitsMissingRetirement: true
+            ).map(\.token),
+            [unrelatedToken]
+        )
+        XCTAssertEqual(
+            controller.layoutRefreshController.confirmedMissingEntriesDuringFullRescan(
+                seenKeys: [],
+                eligibleKeys: [oldToken],
+                permitsMissingRetirement: true
+            ).map(\.token),
+            [oldToken]
+        )
+    }
+
+    func testRuleReevaluationRetryDoesNotProtectMissingSiblingWindow() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        defer {
+            controller.axEventHandler.resetCreatedWindowRetryState()
+            controller.layoutRefreshController.resetState()
+        }
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let pid: pid_t = 467_969
+        let missingToken = WindowToken(pid: pid, windowId: 467_970)
+        let retryToken = WindowToken(pid: pid, windowId: 467_971)
+        _ = WindowAdmissionTestSupport.track(missingToken, in: workspaceId, controller: controller)
+        let retryAXRef = WindowAdmissionTestSupport.axRef(for: retryToken)
+        _ = controller.workspaceManager.addWindow(
+            retryAXRef,
+            pid: retryToken.pid,
+            windowId: retryToken.windowId,
+            to: workspaceId,
+            mode: .floating
+        )
+        controller.axEventHandler.admissionRetryStateByWindowId[UInt32(retryToken.windowId)] =
+            AdmissionRetryState(
+                expectedToken: retryToken,
+                axRef: retryAXRef,
+                reason: .factsDeferred,
+                attempt: 1,
+                generation: 1,
+                trigger: .ruleReevaluation(token: retryToken, axRef: retryAXRef),
+                exhausted: false
+            )
+
+        XCTAssertTrue(
+            controller.axEventHandler.protectMissingEntriesDuringUnsettledAdmission(
+                candidates: [missingToken],
+                scope: .targeted(appPIDs: [pid], nativeSpaceIds: [])
+            ).isEmpty
+        )
+        XCTAssertNil(
+            controller.axEventHandler
+                .deferredReplacementProtectionsByWindowId[UInt32(retryToken.windowId)]
+        )
+    }
+
+    func testPIDLessDeferredCreateDoesNotBroadenMissingProtection() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        defer {
+            controller.axEventHandler.resetCreatedWindowRetryState()
+            controller.layoutRefreshController.resetState()
+        }
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let exactToken = WindowToken(pid: 467_984, windowId: 467_985)
+        let unrelatedToken = WindowToken(pid: 467_986, windowId: 467_987)
+        let pendingWindowId: UInt32 = 467_988
+        for token in [exactToken, unrelatedToken] {
+            _ = WindowAdmissionTestSupport.track(token, in: workspaceId, controller: controller)
+        }
+        controller.axEventHandler.windowInfoProvider = { _ in nil }
+        deferCreatedWindow(
+            WindowToken(pid: 467_989, windowId: Int(pendingWindowId)),
+            controller: controller
+        )
+        let candidates: Set<WindowToken> = [exactToken, unrelatedToken]
+
+        XCTAssertTrue(
+            controller.axEventHandler.protectMissingEntriesDuringUnsettledAdmission(
+                candidates: candidates,
+                scope: .all
+            ).isEmpty
+        )
+        controller.axEventHandler.protectDeferredReplacement(
+            windowId: pendingWindowId,
+            token: exactToken,
+            scope: .all
+        )
+        XCTAssertEqual(
+            controller.axEventHandler.protectMissingEntriesDuringUnsettledAdmission(
+                candidates: candidates,
+                scope: .all
+            ),
+            [exactToken]
+        )
+    }
+
+    func testFactsDeferredCandidateProtectsOnlyMatchingPIDFromMissingRetirement() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        defer {
+            controller.axEventHandler.resetCreatedWindowRetryState()
+            controller.layoutRefreshController.resetState()
+        }
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let oldToken = WindowToken(pid: 467_978, windowId: 467_979)
+        let unrelatedToken = WindowToken(pid: 467_980, windowId: 467_981)
+        for token in [oldToken, unrelatedToken] {
+            _ = WindowAdmissionTestSupport.track(token, in: workspaceId, controller: controller)
+        }
+        XCTAssertTrue(
+            controller.layoutRefreshController.confirmedMissingEntries(
+                keys: [],
+                requiredConsecutiveMisses: 2
+            ).isEmpty
+        )
+
+        let pendingToken = WindowToken(pid: oldToken.pid, windowId: 467_982)
+        controller.axEventHandler.admissionRetryStateByWindowId[UInt32(pendingToken.windowId)] =
+            AdmissionRetryState(
+                expectedToken: pendingToken,
+                axRef: WindowAdmissionTestSupport.axRef(for: pendingToken),
+                reason: .factsDeferred,
+                attempt: 1,
+                generation: 1,
+                trigger: .candidate(
+                    token: pendingToken,
+                    axRef: WindowAdmissionTestSupport.axRef(for: pendingToken)
+                ),
+                exhausted: false
+            )
+        let candidates: Set<WindowToken> = [oldToken, unrelatedToken]
+        let protectedTokens =
+            controller.axEventHandler.protectMissingEntriesDuringUnsettledAdmission(
+                candidates: candidates,
+                scope: .all
+            )
+
+        XCTAssertEqual(protectedTokens, [oldToken])
+        XCTAssertEqual(
+            controller.layoutRefreshController.confirmedMissingEntriesDuringFullRescan(
+                seenKeys: [],
+                eligibleKeys: candidates.subtracting(protectedTokens),
+                permitsMissingRetirement: true
+            ).map(\.token),
+            [unrelatedToken]
+        )
+        XCTAssertEqual(
+            controller.layoutRefreshController.confirmedMissingEntriesDuringFullRescan(
+                seenKeys: [],
+                eligibleKeys: [oldToken],
+                permitsMissingRetirement: true
+            ).map(\.token),
+            [oldToken]
+        )
+    }
+
+    func testExhaustedFactsRetryReenablesMissingRetirement() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let oldToken = WindowToken(pid: 467_980, windowId: 467_981)
+        let pendingToken = WindowToken(pid: oldToken.pid, windowId: 467_983)
+        let pendingAXRef = WindowAdmissionTestSupport.axRef(for: pendingToken)
+        _ = WindowAdmissionTestSupport.track(oldToken, in: workspaceId, controller: controller)
+        XCTAssertTrue(
+            controller.layoutRefreshController.confirmedMissingEntries(
+                keys: [],
+                requiredConsecutiveMisses: 2
+            ).isEmpty
+        )
+        controller.axEventHandler.admissionRetryStateByWindowId[UInt32(pendingToken.windowId)] =
+            AdmissionRetryState(
+                expectedToken: pendingToken,
+                axRef: pendingAXRef,
+                reason: .factsDeferred,
+                attempt: 8,
+                generation: 1,
+                trigger: .candidate(token: pendingToken, axRef: pendingAXRef),
+                exhausted: true
+            )
+        let protectedTokens =
+            controller.axEventHandler.protectMissingEntriesDuringUnsettledAdmission(
+                candidates: [oldToken],
+                scope: .all
+            )
+
+        XCTAssertTrue(protectedTokens.isEmpty)
+        XCTAssertEqual(
+            controller.layoutRefreshController.confirmedMissingEntriesDuringFullRescan(
+                seenKeys: [],
+                eligibleKeys: nil,
+                permitsMissingRetirement: true
+            ).map(\.token),
+            [oldToken]
+        )
     }
 
     func testDeferredCreateDoesNotProtectUnrelatedSamePIDWindow() throws {
@@ -339,7 +954,7 @@ final class FullRescanWindowAdmissionTests: XCTestCase {
             )
         )
         XCTAssertTrue(
-            controller.workspaceManager.confirmedMissingEntries(
+            controller.layoutRefreshController.confirmedMissingEntries(
                 keys: [],
                 requiredConsecutiveMisses: 2
             ).isEmpty
@@ -354,6 +969,7 @@ final class FullRescanWindowAdmissionTests: XCTestCase {
                 bundleId: bundleId,
                 mode: .tiling,
                 facts: facts,
+                scope: .all,
                 capturedWindowServerInfoByWindowId: [
                     newToken.windowId: replacementWindowInfo(token: newToken, frame: newFrame)
                 ],
@@ -363,10 +979,37 @@ final class FullRescanWindowAdmissionTests: XCTestCase {
         )
 
         XCTAssertTrue(seenKeys.isEmpty)
+        let candidates: Set<WindowToken> = [oldToken]
+        let protectedTokens =
+            controller.axEventHandler.protectMissingEntriesDuringUnsettledAdmission(
+                candidates: candidates,
+                scope: .all
+            )
+        XCTAssertTrue(protectedTokens.isEmpty)
+        XCTAssertTrue(
+            controller.layoutRefreshController.yieldToDeferredCreate(
+                token: newToken,
+                bundleId: bundleId,
+                mode: nil,
+                factsAreDeferred: true,
+                facts: facts,
+                scope: .all,
+                capturedWindowServerInfoByWindowId: [:],
+                entry: nil,
+                seenKeys: &seenKeys
+            )
+        )
+        XCTAssertTrue(
+            controller.axEventHandler.protectMissingEntriesDuringUnsettledAdmission(
+                candidates: candidates,
+                scope: .all
+            ).isEmpty
+        )
         XCTAssertEqual(
-            controller.workspaceManager.confirmedMissingEntries(
-                keys: seenKeys,
-                requiredConsecutiveMisses: 2
+            controller.layoutRefreshController.confirmedMissingEntriesDuringFullRescan(
+                seenKeys: seenKeys,
+                eligibleKeys: candidates.subtracting(protectedTokens),
+                permitsMissingRetirement: true
             ).map(\.token),
             [oldToken]
         )
@@ -397,7 +1040,7 @@ final class FullRescanWindowAdmissionTests: XCTestCase {
             )
         }
         XCTAssertTrue(
-            controller.workspaceManager.confirmedMissingEntries(
+            controller.layoutRefreshController.confirmedMissingEntries(
                 keys: [],
                 requiredConsecutiveMisses: 2
             ).isEmpty
@@ -412,6 +1055,7 @@ final class FullRescanWindowAdmissionTests: XCTestCase {
                 bundleId: bundleId,
                 mode: .tiling,
                 facts: facts,
+                scope: .all,
                 capturedWindowServerInfoByWindowId: [
                     newToken.windowId: replacementWindowInfo(token: newToken, frame: frame)
                 ],
@@ -421,11 +1065,19 @@ final class FullRescanWindowAdmissionTests: XCTestCase {
         )
 
         XCTAssertTrue(seenKeys.isEmpty)
+        let candidates: Set<WindowToken> = [firstOldToken, secondOldToken]
+        let protectedTokens =
+            controller.axEventHandler.protectMissingEntriesDuringUnsettledAdmission(
+                candidates: candidates,
+                scope: .all
+            )
+        XCTAssertTrue(protectedTokens.isEmpty)
         XCTAssertEqual(
             Set(
-                controller.workspaceManager.confirmedMissingEntries(
-                    keys: seenKeys,
-                    requiredConsecutiveMisses: 2
+                controller.layoutRefreshController.confirmedMissingEntriesDuringFullRescan(
+                    seenKeys: seenKeys,
+                    eligibleKeys: candidates.subtracting(protectedTokens),
+                    permitsMissingRetirement: true
                 ).map(\.token)
             ),
             [firstOldToken, secondOldToken]
@@ -466,6 +1118,7 @@ final class FullRescanWindowAdmissionTests: XCTestCase {
                 bundleId: bundleId,
                 mode: .tiling,
                 facts: facts,
+                scope: .all,
                 capturedWindowServerInfoByWindowId: [
                     newToken.windowId: replacementWindowInfo(token: newToken, frame: frame)
                 ],

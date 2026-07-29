@@ -42,6 +42,7 @@ extension AXEventHandler {
                 )
             )
             scheduleAXContextWarmup(for: candidate.token.pid)
+            rejectDeferredReplacement(windowId: candidate.windowId)
             return
         }
         guard trackedToken == candidate.token else {

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Copyright (C) 2026 BarutSRB — https://github.com/BarutSRB/OmniWM
 
+import AppKit
 import ApplicationServices
 import CoreGraphics
 import Foundation
@@ -556,6 +557,39 @@ final class FloatingCreatePlacementTests: XCTestCase {
         XCTAssertFalse(controller.allowsFloatingSpawnPlacement(for: otherAppQuickLook, mode: .floating))
     }
 
+    func testLiveFinderQuickLookUsesObservedAXSubrole() throws {
+        guard ProcessInfo.processInfo.environment["OMNIWM_RUN_FINDER_QUICK_LOOK_TESTS"] == "1" else {
+            throw XCTSkip("Set OMNIWM_RUN_FINDER_QUICK_LOOK_TESTS=1 with a Finder Quick Look window open")
+        }
+        let finder = try XCTUnwrap(
+            NSWorkspace.shared.runningApplications.first {
+                $0.bundleIdentifier == "com.apple.finder"
+            }
+        )
+        let windows = try AXWindowEnumerationInspector.enumerateApplication(
+            pid: finder.processIdentifier,
+            timeout: 1,
+            context: .init(
+                appPolicy: finder.activationPolicy,
+                bundleId: finder.bundleIdentifier,
+                includeTitle: false
+            )
+        )
+        let quickLook = try XCTUnwrap(
+            windows.first {
+                $0.role == kAXWindowRole as String && $0.subrole == "Quick Look"
+            },
+            "Open Finder Quick Look before running this integration test"
+        )
+        let controller = makeController()
+        let evaluation = placementEvaluation(
+            bundleId: finder.bundleIdentifier,
+            subrole: quickLook.subrole
+        )
+
+        XCTAssertTrue(controller.allowsFloatingSpawnPlacement(for: evaluation, mode: .floating))
+    }
+
     func testResolveLiveStandaloneFloatingPrefersCapturedInteractionWorkspace() throws {
         let fixture = try makeTwoMonitorFixture()
         let resolved = resolvePlacement(
@@ -778,6 +812,62 @@ final class FloatingCreatePlacementTests: XCTestCase {
 
         XCTAssertEqual(resolved.workspaceId, fixture.secondaryWorkspace)
         XCTAssertEqual(resolved.rung, .interactionWorkspace)
+    }
+
+    func testWorkspaceRuleAppliesOnlyWhileAppHasNoTrackedWindows() throws {
+        let fixture = try makeTwoMonitorFixture()
+        let pid: pid_t = 6_130
+        let context = placementContext(
+            interactionWorkspaceId: fixture.primaryWorkspace,
+            interactionMonitorId: fixture.primary.id
+        )
+        let first = resolvePlacement(
+            fixture,
+            workspaceName: "6",
+            pid: pid,
+            placementMode: .floating,
+            origin: .liveCreate,
+            createPlacementContext: context,
+            windowFrame: fixture.primary.frame,
+            fallbackWorkspaceId: fixture.primaryWorkspace
+        )
+        _ = fixture.controller.workspaceManager.addWindow(
+            axRef(pid, 576),
+            pid: pid,
+            windowId: 576,
+            to: first.workspaceId,
+            mode: .floating
+        )
+        let second = resolvePlacement(
+            fixture,
+            workspaceName: "6",
+            pid: pid,
+            placementMode: .tiling,
+            origin: .liveCreate,
+            createPlacementContext: context,
+            windowFrame: fixture.primary.frame,
+            fallbackWorkspaceId: fixture.primaryWorkspace
+        )
+
+        XCTAssertEqual(first.workspaceId, fixture.secondaryWorkspace)
+        XCTAssertEqual(first.rung, .workspaceRule)
+        XCTAssertEqual(second.workspaceId, fixture.primaryWorkspace)
+        XCTAssertEqual(second.rung, .interactionWorkspace)
+
+        _ = fixture.controller.workspaceManager.removeWindow(pid: pid, windowId: 576)
+        let afterLastWindowClosed = resolvePlacement(
+            fixture,
+            workspaceName: "6",
+            pid: pid,
+            placementMode: .tiling,
+            origin: .liveCreate,
+            createPlacementContext: context,
+            windowFrame: fixture.primary.frame,
+            fallbackWorkspaceId: fixture.primaryWorkspace
+        )
+
+        XCTAssertEqual(afterLastWindowClosed.workspaceId, fixture.secondaryWorkspace)
+        XCTAssertEqual(afterLastWindowClosed.rung, .workspaceRule)
     }
 
     func testResolveUnknownWorkspaceRuleFallsThroughToInteraction() throws {

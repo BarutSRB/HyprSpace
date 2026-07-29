@@ -60,6 +60,7 @@ final class WorkspaceManager {
     var onGapsChanged: (() -> Void)?
     var onSessionStateChanged: (() -> Void)?
     var onRuntimeInvalidation: ((WorkspaceDescriptor.ID?, InvalidationDomain) -> Void)?
+    var onWindowPresenceObserved: ((WindowHandle) -> Void)?
     var onWindowRemoved: ((WindowState) -> Void)?
     var onDeferredWorkspaceMonitorMove: ((WorkspaceMonitorMoveOutcome) -> Void)?
 
@@ -2081,6 +2082,9 @@ final class WorkspaceManager {
                 source: .workspaceManager
             )
         )
+        if let handle = world.handle(for: token) {
+            onWindowPresenceObserved?(handle)
+        }
         return token
     }
 
@@ -2442,23 +2446,6 @@ final class WorkspaceManager {
             CGRect(origin: origin, size: floatingState.lastFrame.size),
             in: visibleFrame
         )
-    }
-
-    @discardableResult
-    func confirmedMissingEntries(
-        keys activeKeys: Set<WindowToken>,
-        requiredConsecutiveMisses: Int = 1
-    ) -> [WindowState] {
-        let confirmedMissingKeys = world.confirmedMissingKeys(
-            keys: activeKeys,
-            requiredConsecutiveMisses: requiredConsecutiveMisses
-        )
-        return confirmedMissingKeys.compactMap { world.entry(for: $0) }.sorted {
-            if $0.pid == $1.pid {
-                return $0.windowId < $1.windowId
-            }
-            return $0.pid < $1.pid
-        }
     }
 
     @discardableResult

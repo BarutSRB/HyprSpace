@@ -374,6 +374,7 @@ final class AXEventHandler {
     weak var controller: WMController?
     var deferredCreatedWindowIds: Set<UInt32> = []
     private var deferredCreatedWindowOrder: [UInt32] = []
+    var deferredReplacementProtectionsByWindowId: [UInt32: DeferredReplacementProtection] = [:]
     var createPlacementContextsByWindowId: [UInt32: WindowCreatePlacementContext] = [:]
     private var pendingManagedReplacementBursts: [ManagedReplacementKey: PendingManagedReplacementBurst] = [:]
     private var pendingManagedReplacementTasks: [ManagedReplacementKey: Task<Void, Never>] = [:]
@@ -572,12 +573,6 @@ final class AXEventHandler {
         return topology.isKnownSpace(spaceId) && !topology.isCurrentSpace(spaceId)
     }
 
-    private func liveCreateSpace(for windowId: UInt32) -> UInt64 {
-        guard let controller else { return 0 }
-        return controller.workspaceManager.spaceTopology
-            .selectWindowSpace(from: SkyLight.shared.spacesForWindow(windowId)) ?? 0
-    }
-
     func processCreatedWindow(
         windowId: UInt32,
         fallbackToken: WindowToken? = nil,
@@ -609,6 +604,7 @@ final class AXEventHandler {
             cancelCreatedWindowRetry(windowId: windowId)
             discardCreatePlacementContext(windowId: windowId)
             removeDeferredCreatedWindow(windowId)
+            rejectDeferredReplacement(windowId: windowId)
             return
         }
 
@@ -624,6 +620,7 @@ final class AXEventHandler {
             cancelCreatedWindowRetry(windowId: windowId)
             discardCreatePlacementContext(windowId: windowId)
             removeDeferredCreatedWindow(windowId)
+            rejectDeferredReplacement(windowId: windowId)
             return
         }
         let createPlacementContext = pendingCreatePlacementContext(for: Int(windowId))
@@ -1095,7 +1092,9 @@ final class AXEventHandler {
         subscribeToWindows(windowIds)
     }
 
-    func drainDeferredCreatedWindows() async {
+    func drainDeferredCreatedWindows(
+        spaceIdsForWindow: (UInt32) -> [UInt64] = { SkyLight.shared.spacesForWindow($0) }
+    ) async {
         guard !deferredCreatedWindowOrder.isEmpty else { return }
 
         let deferredWindowIds = deferredCreatedWindowOrder
@@ -1112,6 +1111,7 @@ final class AXEventHandler {
             if controller.isOwnedWindow(windowNumber: Int(windowId)) {
                 cancelCreatedWindowRetry(windowId: windowId)
                 discardCreatePlacementContext(windowId: windowId)
+                rejectDeferredReplacement(windowId: windowId)
                 continue
             }
             let windowInfo = resolveWindowInfo(windowId)
@@ -1128,9 +1128,12 @@ final class AXEventHandler {
             if isOwnProcessPid(pid_t(windowInfo.pid)) {
                 cancelCreatedWindowRetry(windowId: windowId)
                 discardCreatePlacementContext(windowId: windowId)
+                rejectDeferredReplacement(windowId: windowId)
                 continue
             }
-            if shouldDeferCreateForInactiveNativeSpace(liveCreateSpace(for: windowId)) {
+            if shouldDeferCreateForInactiveNativeSpace(
+                liveCreateSpace(for: windowId, spaceIdsForWindow: spaceIdsForWindow)
+            ) {
                 WindowAdmissionTrace.record(
                     .init(
                         action: .admissionPending,
@@ -1210,7 +1213,7 @@ final class AXEventHandler {
                     newWindow: newWindow,
                     axRef: axRef
                 ) else {
-                    controller?.layoutRefreshController.requestFullRescan(reason: .staleFullRescan)
+                    requestTargetedFullRescan(for: [oldWindow.token.pid, newWindow.token.pid])
                     return
                 }
                 AXWindowService.invalidateCachedTitle(windowId: windowId)
@@ -1225,7 +1228,7 @@ final class AXEventHandler {
                         axRef: axRef
                     )
                 )
-                controller?.layoutRefreshController.requestFullRescan(reason: .staleFullRescan)
+                requestTargetedFullRescan(for: [oldWindow.token.pid, newWindow.token.pid])
                 return
             case let .pendingIdentityRebindTarget(
                 retryGeneration,
@@ -1253,14 +1256,15 @@ final class AXEventHandler {
                             axRef: axRef
                         )
                     )
-                    controller?.layoutRefreshController.requestFullRescan(reason: .staleFullRescan)
+                    requestTargetedFullRescan(for: [oldWindow.token.pid, newWindow.token.pid])
                     return
                 }
-                controller?.layoutRefreshController.requestFullRescan(reason: .staleFullRescan)
+                requestTargetedFullRescan(for: [oldWindow.token.pid, newWindow.token.pid])
                 return
             }
         }
         AXWindowService.invalidateCachedTitle(windowId: windowId)
+        rejectDeferredReplacement(windowId: windowId)
         removeDeferredCreatedWindow(windowId)
         handleWindowDestroyed(
             windowId: windowId,
@@ -1288,7 +1292,15 @@ final class AXEventHandler {
                 controller.workspaceManager.entries(forPid: token.pid)
             )
         }
-        controller.layoutRefreshController.requestFullRescan(reason: .staleFullRescan)
+        requestTargetedFullRescan(for: [token.pid])
+    }
+
+    func requestTargetedFullRescan(for appPIDs: Set<pid_t>) {
+        guard let controller, !appPIDs.isEmpty else { return }
+        controller.layoutRefreshController.requestFullRescan(
+            reason: .staleFullRescan,
+            scope: .targeted(appPIDs: appPIDs, nativeSpaceIds: [])
+        )
     }
 
     private func prepareManagedWindowRemoval(
@@ -2503,33 +2515,6 @@ final class AXEventHandler {
         return restored
     }
 
-    func handleAppHidden(pid: pid_t) {
-        guard let controller else { return }
-        controller.hiddenAppPIDs.insert(pid)
-
-        if let activeRequest = controller.intentLedger.activeManagedRequest,
-           activeRequest.token.pid == pid
-        {
-            _ = controller.intentLedger.cancelManagedRequest(requestId: activeRequest.requestId)
-            _ = controller.workspaceManager.cancelManagedFocusRequest(
-                matching: activeRequest.token,
-                workspaceId: activeRequest.workspaceId,
-                requestId: activeRequest.requestId
-            )
-            controller.intentLedger.discardPendingFocus(activeRequest.token)
-        }
-        if controller.workspaceManager.renderableFocusToken?.pid == pid {
-            _ = controller.workspaceManager.enterNonManagedFocus(
-                preserveFocusedToken: true
-            )
-        }
-
-        for entry in controller.workspaceManager.entries(forPid: pid) {
-            controller.workspaceManager.setLayoutReason(.macosHiddenApp, for: entry.token)
-        }
-        controller.layoutRefreshController.requestVisibilityRefresh(reason: .appHidden)
-    }
-
     func handleAppDeactivated(pid: pid_t) {
         guard let controller else { return }
         let workspaceManager = controller.workspaceManager
@@ -2545,30 +2530,35 @@ final class AXEventHandler {
         workspaceManager.suppressFocusBorder(for: focusedToken)
     }
 
-    func handleAppUnhidden(pid: pid_t) {
-        guard let controller else { return }
-        controller.hiddenAppPIDs.remove(pid)
-
-        for entry in controller.workspaceManager.entries(forPid: pid) {
-            if controller.workspaceManager.layoutReason(for: entry.token) == .macosHiddenApp {
-                controller.workspaceManager.restoreFromNativeState(for: entry.token)
+    func resetManagedReplacementState(for appPIDs: Set<pid_t>? = nil) {
+        if let appPIDs {
+            let keys = Set(pendingManagedReplacementTasks.keys)
+                .union(pendingManagedReplacementBursts.keys)
+                .filter { appPIDs.contains($0.pid) }
+            for key in keys {
+                pendingManagedReplacementTasks.removeValue(forKey: key)?.cancel()
+                pendingManagedReplacementBursts.removeValue(forKey: key)
             }
-        }
-        controller.layoutRefreshController.requestVisibilityRefresh(reason: .appUnhidden)
-    }
-
-    func resetManagedReplacementState() {
-        for (_, task) in pendingManagedReplacementTasks {
-            task.cancel()
-        }
-        pendingManagedReplacementTasks.removeAll()
-        pendingManagedReplacementBursts.removeAll()
-        if let controller {
-            for intent in controller.intentLedger.openReplacementFocusIntents() {
-                _ = controller.intentLedger.cancel(id: intent.id)
+            if let controller {
+                for pid in appPIDs {
+                    for intent in controller.intentLedger.openReplacementFocusIntents(pid: pid) {
+                        _ = controller.intentLedger.cancel(id: intent.id)
+                    }
+                }
             }
+        } else {
+            for (_, task) in pendingManagedReplacementTasks {
+                task.cancel()
+            }
+            pendingManagedReplacementTasks.removeAll()
+            pendingManagedReplacementBursts.removeAll()
+            if let controller {
+                for intent in controller.intentLedger.openReplacementFocusIntents() {
+                    _ = controller.intentLedger.cancel(id: intent.id)
+                }
+            }
+            nextManagedReplacementEventSequence = 0
         }
-        nextManagedReplacementEventSequence = 0
     }
 
     private func prepareCreateCandidate(
@@ -2817,6 +2807,7 @@ final class AXEventHandler {
             )
             cancelCreatedWindowRetry(windowId: windowId)
             discardCreatePlacementContext(windowId: windowId)
+            rejectDeferredReplacement(windowId: windowId)
             recordNiriCreateFocusTrace(
                 .init(
                     kind: .admissionRejected(
@@ -3367,7 +3358,9 @@ final class AXEventHandler {
         bundleId: String?,
         mode: TrackedWindowMode,
         facts: WindowRuleFacts,
-        capturedWindowServerInfoByWindowId: [Int: WindowServerInfo]? = nil
+        capturedWindowServerInfoByWindowId: [Int: WindowServerInfo]? = nil,
+        capturedWindowServerAuthoritativeWindowIds: Set<Int>? = nil,
+        capturedWindowServerAuthoritativePIDs: Set<pid_t>? = nil
     ) -> StructuralReplacementMatch? {
         guard let controller,
               let fallbackWorkspaceId = controller.activeWorkspace()?.id
@@ -3390,6 +3383,14 @@ final class AXEventHandler {
 
         func oldLiveTokenIsInvisible(_ token: WindowToken) -> Bool {
             if let capturedWindowServerInfoByWindowId {
+                if let capturedWindowServerAuthoritativeWindowIds {
+                    return capturedWindowServerAuthoritativeWindowIds.contains(token.windowId)
+                        && (
+                            capturedWindowServerAuthoritativePIDs?.contains(token.pid)
+                                ?? true
+                        )
+                        && capturedWindowServerInfoByWindowId[token.windowId] == nil
+                }
                 return !capturedWindowServerInfoByWindowId.isEmpty
                     && capturedWindowServerInfoByWindowId[token.windowId] == nil
             }
@@ -3929,13 +3930,22 @@ final class AXEventHandler {
         deferredCreatedWindowOrder.append(windowId)
     }
 
-    private func removeDeferredCreatedWindow(_ windowId: UInt32) {
+    func removeDeferredCreatedWindow(_ windowId: UInt32) {
         guard deferredCreatedWindowIds.remove(windowId) != nil else { return }
         deferredCreatedWindowOrder.removeAll { $0 == windowId }
     }
 }
 
 extension AXEventHandler {
+    private func liveCreateSpace(
+        for windowId: UInt32,
+        spaceIdsForWindow: (UInt32) -> [UInt64] = { SkyLight.shared.spacesForWindow($0) }
+    ) -> UInt64 {
+        guard let controller else { return 0 }
+        return controller.workspaceManager.spaceTopology
+            .selectWindowSpace(from: spaceIdsForWindow(windowId)) ?? 0
+    }
+
     private func handleCGSWindowDestroyed(
         windowId: UInt32,
         evidence: WindowDestroyEvidence
@@ -3944,6 +3954,7 @@ extension AXEventHandler {
         cancelCreatedWindowRetry(windowId: windowId)
         discardCreatePlacementContext(windowId: windowId)
         removeDeferredCreatedWindow(windowId)
+        rejectDeferredReplacement(windowId: windowId)
         handleWindowDestroyed(windowId: windowId, pidHint: nil, evidence: evidence)
     }
 

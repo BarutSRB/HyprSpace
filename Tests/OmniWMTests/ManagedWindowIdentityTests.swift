@@ -193,6 +193,11 @@ final class ManagedWindowIdentityTests: XCTestCase {
         )
         waitingState.executionPhase = .waiting
         controller.axEventHandler.admissionRetryStateByWindowId[pending.windowId] = waitingState
+        controller.axEventHandler.protectDeferredReplacement(
+            windowId: pending.windowId,
+            token: pending.oldWindow.token,
+            scope: .all
+        )
 
         guard case let .waitingIdentityRebindTarget(generation, oldWindow, newWindow) =
             controller.axEventHandler.managedWindowDestroyDisposition(
@@ -213,6 +218,10 @@ final class ManagedWindowIdentityTests: XCTestCase {
         )
 
         XCTAssertNil(controller.axEventHandler.admissionRetryStateByWindowId[pending.windowId])
+        XCTAssertNil(
+            controller.axEventHandler
+                .deferredReplacementProtectionsByWindowId[pending.windowId]
+        )
         XCTAssertNotNil(controller.workspaceManager.entry(for: pending.oldWindow.token))
         XCTAssertNil(controller.workspaceManager.entry(for: pending.newWindow.token))
     }
@@ -222,6 +231,11 @@ final class ManagedWindowIdentityTests: XCTestCase {
         let pending = try makePendingRebind(controller: controller, suffix: 2)
         controller.axEventHandler.managedWindowIdentityRebindAcknowledgementProvider = { _, _ in true }
         controller.axEventHandler.managedWindowIdentityRebindFinalizationProvider = { _, _ in true }
+        controller.axEventHandler.protectDeferredReplacement(
+            windowId: pending.windowId,
+            token: pending.oldWindow.token,
+            scope: .all
+        )
 
         controller.axEventHandler.handleRemoved(
             pid: pending.newWindow.token.pid,
@@ -248,6 +262,10 @@ final class ManagedWindowIdentityTests: XCTestCase {
         XCTAssertNotNil(controller.workspaceManager.entry(for: pending.oldWindow.token))
         XCTAssertNil(controller.workspaceManager.entry(for: pending.newWindow.token))
         XCTAssertNil(controller.axEventHandler.admissionRetryStateByWindowId[pending.windowId])
+        XCTAssertNil(
+            controller.axEventHandler
+                .deferredReplacementProtectionsByWindowId[pending.windowId]
+        )
     }
 
     func testDestroyDuringIdentityRebindAcknowledgementPreservesOldWorldEntry() async throws {

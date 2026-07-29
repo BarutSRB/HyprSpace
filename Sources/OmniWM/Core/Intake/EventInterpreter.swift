@@ -43,8 +43,8 @@ final class EventInterpreter: EventIntakeSink {
         case let .appHidden(pid):
             controller.axEventHandler.handleAppHidden(pid: pid)
 
-        case .appLaunched:
-            controller.serviceLifecycleManager.handleAppLaunched()
+        case let .appLaunched(pid):
+            controller.serviceLifecycleManager.handleAppLaunched(pid: pid)
 
         case let .appTerminated(pid):
             controller.serviceLifecycleManager.handleAppTerminated(pid: pid)
@@ -113,10 +113,7 @@ final class EventInterpreter: EventIntakeSink {
             controller.mouseEventHandler.suspendMultitouchForSleep()
 
         case .systemWake:
-            _ = controller.workspaceManager.recordReconcileEvent(.systemWake(source: .service))
-            controller.workspaceBarManager.cleanup()
-            controller.layoutRefreshController.requestFullRescan(reason: .unlock)
-            controller.mouseEventHandler.requestMultitouchRevalidation(.wake)
+            controller.serviceLifecycleManager.handleSystemWake()
 
         case let .windowConstraintsResolved(fact):
             controller.layoutRefreshController.applyResolvedConstraints(fact)

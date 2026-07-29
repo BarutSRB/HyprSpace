@@ -14,6 +14,86 @@ enum ActivationEventSource: String, Sendable {
     }
 }
 
+struct NativeSpaceManagedWindowReference: Equatable, Sendable {
+    let pid: pid_t
+    let windowId: Int
+}
+
+enum NativeSpaceInventoryScopeResolver {
+    static func scope(
+        spaceIds: Set<UInt64>,
+        topologies: [SpaceTopology],
+        managedWindows: [NativeSpaceManagedWindowReference]
+    ) -> RescanScope {
+        guard !spaceIds.isEmpty,
+              !spaceIds.contains(0),
+              !topologies.isEmpty
+        else { return .all }
+
+        var windowIdsByPID: [pid_t: Set<Int>] = [:]
+        for window in managedWindows
+            where topologies.contains(where: { topology in
+                topology.spaceForWindow(window.windowId).map(spaceIds.contains) == true
+            })
+        {
+            windowIdsByPID[window.pid, default: []].insert(window.windowId)
+        }
+        return .targeted(
+            appPIDs: [],
+            nativeSpaceIds: spaceIds,
+            nativeSpaceWindowIdsByPID: windowIdsByPID
+        )
+    }
+}
+
+struct NativeSpaceInventoryRequest: Sendable {
+    let baseline: SpaceTopology
+    private(set) var reason: RefreshReason
+    private(set) var includesActiveSpaceChange: Bool
+    private(set) var reconcilesWorkspaceMonitorState: Bool
+
+    init(reason: RefreshReason, baseline: SpaceTopology) {
+        self.baseline = baseline
+        self.reason = reason
+        includesActiveSpaceChange = reason == .activeSpaceChanged
+        reconcilesWorkspaceMonitorState = reason == .monitorConfigurationChanged
+    }
+
+    mutating func merge(reason: RefreshReason) {
+        includesActiveSpaceChange =
+            includesActiveSpaceChange
+                || reason == .activeSpaceChanged
+        reconcilesWorkspaceMonitorState =
+            reconcilesWorkspaceMonitorState
+                || reason == .monitorConfigurationChanged
+        switch (self.reason, reason) {
+        case (_, .monitorConfigurationChanged),
+             (.activeSpaceChanged, .unlock):
+            self.reason = reason
+        default:
+            break
+        }
+    }
+
+    func resolution(
+        for topology: SpaceTopology
+    ) -> (recordsActiveSpaceChange: Bool, rescanReason: RefreshReason?) {
+        let recordsActiveSpaceChange =
+            includesActiveSpaceChange
+                && currentSpacesByDisplay(topology) != currentSpacesByDisplay(baseline)
+        let rescanReason = reason == .activeSpaceChanged && !recordsActiveSpaceChange
+            ? nil
+            : reason
+        return (recordsActiveSpaceChange, rescanReason)
+    }
+
+    private func currentSpacesByDisplay(_ topology: SpaceTopology) -> [String: UInt64] {
+        topology.displays.reduce(into: [:]) {
+            $0[$1.displayIdentifier] = $1.currentSpaceId
+        }
+    }
+}
+
 @MainActor
 final class ServiceLifecycleManager {
     weak var controller: WMController?
@@ -29,7 +109,12 @@ final class ServiceLifecycleManager {
     private var sleepObserver: NSObjectProtocol?
     private var wakeObserver: NSObjectProtocol?
     private var permissionCheckerTask: Task<Void, Never>?
+    private var topologyInventoryStabilityTask: Task<Void, Never>?
+    private var topologyInventoryStabilityGeneration: UInt64 = 0
+    private var topologyInventoryRequest: NativeSpaceInventoryRequest?
     private(set) var isSecureInputActive = false
+    private static let topologyInventorySampleInterval: Duration = .milliseconds(100)
+    private static let topologyInventoryRetryInterval: Duration = .seconds(1)
 
     init(controller: WMController) {
         self.controller = controller
@@ -111,7 +196,7 @@ final class ServiceLifecycleManager {
             controller?.refreshUnavailableWorkspaceBarIconOverride(
                 bundleId: app.bundleIdentifier
             )
-            EventIntake.post(.appLaunched)
+            EventIntake.post(.appLaunched(pid: app.processIdentifier))
         }
         for app in NSWorkspace.shared.runningApplications {
             controller.refreshUnavailableWorkspaceBarIconOverride(
@@ -127,8 +212,11 @@ final class ServiceLifecycleManager {
         controller.axManager.onFrameApplySucceeded = { [weak self] result in
             self?.handleFrameApplySucceeded(result)
         }
-        controller.axManager.onManagedWindowBindingFailed = { [weak controller] in
-            controller?.layoutRefreshController.requestFullRescan(reason: .staleFullRescan)
+        controller.axManager.onManagedWindowBindingFailed = { [weak controller] pid in
+            controller?.layoutRefreshController.requestFullRescan(
+                reason: .staleFullRescan,
+                scope: .targeted(appPIDs: [pid], nativeSpaceIds: [])
+            )
         }
         setupWorkspaceObservation()
         controller.mouseEventHandler.setup()
@@ -240,7 +328,12 @@ final class ServiceLifecycleManager {
         performPostUpdateActions: Bool = true
     ) {
         guard let controller else { return }
-        guard isUsableMonitorConfiguration(currentMonitors) else { return }
+        guard isUsableMonitorConfiguration(currentMonitors) else {
+            if performPostUpdateActions {
+                scheduleStableTopologyInventory(reason: .monitorConfigurationChanged)
+            }
+            return
+        }
 
         controller.workspaceManager.applyMonitorConfigurationChange(currentMonitors)
         controller.resetMouseWarpTransientState()
@@ -253,7 +346,7 @@ final class ServiceLifecycleManager {
             .flatMap { controller.workspaceManager.workspace(for: $0) }
         controller.workspaceManager.garbageCollectUnusedWorkspaces(focusedWorkspaceId: focusedWsId)
 
-        controller.layoutRefreshController.requestFullRescan(reason: .monitorConfigurationChanged)
+        scheduleStableTopologyInventory(reason: .monitorConfigurationChanged)
         controller.reapplyQuakeTerminalGeometryForMonitorChange()
     }
 
@@ -264,8 +357,13 @@ final class ServiceLifecycleManager {
 
     func handleAppTerminated(pid: pid_t) {
         guard let controller else { return }
+        let allEntries = controller.workspaceManager.allEntries()
+        let dependentTargetPIDs = controller.axEventHandler.fullRescanTargetPIDsDepending(
+            onTerminatedPID: pid,
+            entries: allEntries
+        )
         controller.axEventHandler.cleanupFocusStateForTerminatedApp(pid: pid)
-        let removedEntries = controller.workspaceManager.entries(forPid: pid)
+        let removedEntries = allEntries.filter { $0.pid == pid }
         let scratchpadTokens = Set(removedEntries.compactMap { entry in
             let token = entry.token
             return controller.workspaceManager.isScratchpadToken(token)
@@ -289,21 +387,43 @@ final class ServiceLifecycleManager {
         }
         controller.surfaceReconciler.noteRestackOccurred()
         controller.appInfoCache.evict(pid: pid)
-        controller.layoutRefreshController.requestFullRescan(reason: .appTerminated)
+        if !dependentTargetPIDs.isEmpty {
+            controller.layoutRefreshController.requestFullRescan(
+                reason: .staleFullRescan,
+                scope: .targeted(appPIDs: dependentTargetPIDs, nativeSpaceIds: [])
+            )
+        }
+        if !affectedWorkspaces.isEmpty {
+            controller.layoutRefreshController.requestRelayout(
+                reason: .appTerminated,
+                affectedWorkspaceIds: affectedWorkspaces
+            )
+        }
     }
 
     func handleGapsChanged() {
         controller?.layoutRefreshController.requestRelayout(reason: .gapsChanged)
     }
 
-    func handleAppLaunched() {
-        controller?.layoutRefreshController.requestFullRescan(reason: .appLaunched)
+    func handleAppLaunched(pid: pid_t) {
+        controller?.layoutRefreshController.requestFullRescan(
+            reason: .appLaunched,
+            scope: .targeted(appPIDs: [pid], nativeSpaceIds: [])
+        )
     }
 
     func handleUnlockDetected() {
         guard let controller else { return }
-        controller.layoutRefreshController.requestFullRescan(reason: .unlock)
+        scheduleStableTopologyInventory(reason: .unlock)
         controller.mouseEventHandler.requestMultitouchRevalidation(.unlock)
+    }
+
+    func handleSystemWake() {
+        guard let controller else { return }
+        _ = controller.workspaceManager.recordReconcileEvent(.systemWake(source: .service))
+        controller.workspaceBarManager.cleanup()
+        scheduleStableTopologyInventory(reason: .unlock)
+        controller.mouseEventHandler.requestMultitouchRevalidation(.wake)
     }
 
     func performStartupRefresh() {
@@ -312,17 +432,118 @@ final class ServiceLifecycleManager {
 
     func handleActiveSpaceDidChange() {
         guard let controller else { return }
-        let previousCurrentSpaces = currentSpacesByDisplay(controller.workspaceManager.spaceTopology)
-        controller.spaceTracker.refresh()
-        guard currentSpacesByDisplay(controller.workspaceManager.spaceTopology) != previousCurrentSpaces else {
-            return
-        }
-        controller.workspaceManager.recordReconcileEvent(.activeSpaceChanged(source: .service))
-        controller.layoutRefreshController.requestFullRescan(reason: .activeSpaceChanged)
+        scheduleStableTopologyInventory(
+            reason: .activeSpaceChanged,
+            baseline: controller.workspaceManager.spaceTopology
+        )
     }
 
-    private func currentSpacesByDisplay(_ topology: SpaceTopology) -> [String: UInt64] {
-        topology.displays.reduce(into: [:]) { $0[$1.displayIdentifier] = $1.currentSpaceId }
+    private func scheduleStableTopologyInventory(
+        reason: RefreshReason,
+        baseline: SpaceTopology? = nil
+    ) {
+        guard let controller else { return }
+        if var request = topologyInventoryRequest {
+            request.merge(reason: reason)
+            topologyInventoryRequest = request
+        } else {
+            topologyInventoryRequest = NativeSpaceInventoryRequest(
+                reason: reason,
+                baseline: baseline ?? controller.workspaceManager.spaceTopology
+            )
+        }
+        controller.layoutRefreshController.beginInventoryStabilityBarrier()
+        topologyInventoryStabilityGeneration &+= 1
+        let generation = topologyInventoryStabilityGeneration
+        topologyInventoryStabilityTask?.cancel()
+        topologyInventoryStabilityTask = Task { @MainActor [weak self] in
+            var gate = NativeSpaceInventoryStabilityGate()
+            while !Task.isCancelled {
+                guard let self, let controller = self.controller else { return }
+                let sample = controller.spaceTracker.currentTopologySample()
+                let observation = gate.observe(sample)
+                if let topologyToApply = observation.topologyToApply {
+                    controller.spaceTracker.refresh(
+                        using: topologyToApply,
+                        windowMembershipUpdate: .carryForwardKnown,
+                        reconcilesNativeFullscreen: false
+                    )
+                }
+                if let authoritativeTopologyToApply = observation.authoritativeTopologyToApply {
+                    guard
+                        !Task.isCancelled,
+                        generation == self.topologyInventoryStabilityGeneration
+                    else { return }
+                    controller.spaceTracker.refresh(
+                        using: authoritativeTopologyToApply,
+                        windowMembershipUpdate: .query(preservesKnownOnMissing: true)
+                    )
+                    guard let request = self.topologyInventoryRequest else { return }
+                    let spaceIds = authoritativeTopologyToApply.inventorySpaceIds
+                    let scope = NativeSpaceInventoryScopeResolver.scope(
+                        spaceIds: spaceIds,
+                        topologies: [request.baseline, controller.workspaceManager.spaceTopology],
+                        managedWindows: self.managedWindowReferences(controller)
+                    )
+                    let authoritativeTopology = authoritativeTopologyToApply.topology
+                    let resolution = request.resolution(for: authoritativeTopology)
+                    self.topologyInventoryStabilityTask = nil
+                    self.topologyInventoryRequest = nil
+                    if resolution.recordsActiveSpaceChange {
+                        controller.workspaceManager.recordReconcileEvent(
+                            .activeSpaceChanged(source: .service)
+                        )
+                    }
+                    guard let rescanReason = resolution.rescanReason else {
+                        controller.layoutRefreshController.endInventoryStabilityBarrier()
+                        return
+                    }
+                    controller.layoutRefreshController.beginInventoryStabilityBarrier()
+                    controller.layoutRefreshController.requestFullRescan(
+                        reason: rescanReason,
+                        scope: scope,
+                        reconcilesWorkspaceMonitorState: request.reconcilesWorkspaceMonitorState
+                    )
+                    controller.layoutRefreshController.endInventoryStabilityBarrier()
+                    return
+                }
+                if observation.requestsGlobalFallback {
+                    guard
+                        !Task.isCancelled,
+                        generation == self.topologyInventoryStabilityGeneration,
+                        let request = self.topologyInventoryRequest
+                    else { return }
+                    controller.layoutRefreshController.requestFullRescan(
+                        reason: .staleFullRescan,
+                        scope: .all,
+                        reconcilesWorkspaceMonitorState: request.reconcilesWorkspaceMonitorState
+                    )
+                    controller.layoutRefreshController.releaseInventoryStabilityHold()
+                }
+                let interval = gate.usesRetryInterval
+                    ? Self.topologyInventoryRetryInterval
+                    : Self.topologyInventorySampleInterval
+                do {
+                    try await Task.sleep(for: interval)
+                } catch {
+                    return
+                }
+            }
+        }
+    }
+
+    private func managedWindowReferences(_ controller: WMController) -> [NativeSpaceManagedWindowReference] {
+        controller.workspaceManager.allEntries().map {
+            NativeSpaceManagedWindowReference(pid: $0.pid, windowId: $0.windowId)
+        }
+    }
+
+    private func cancelStableTopologyInventory() {
+        topologyInventoryStabilityGeneration &+= 1
+        topologyInventoryStabilityTask?.cancel()
+        topologyInventoryStabilityTask = nil
+        topologyInventoryRequest = nil
+        controller?.layoutRefreshController.cancelInventoryStabilityBarrier()
     }
 
     private func setupWorkspaceObservation() {
@@ -418,6 +639,7 @@ final class ServiceLifecycleManager {
     func stop() {
         guard let controller else { return }
         controller.hasStartedServices = false
+        cancelStableTopologyInventory()
 
         controller.eventIntake.close()
         controller.factResolver.stop()

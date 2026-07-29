@@ -202,10 +202,10 @@ final class WindowAdmissionIdentityLifecycleTests: XCTestCase {
         )
         XCTAssertNotNil(controller.axEventHandler.admissionRetryStateByWindowId[UInt32(windowId)])
         XCTAssertTrue(
-            controller.workspaceManager.confirmedMissingEntries(keys: [], requiredConsecutiveMisses: 2).isEmpty
+            controller.layoutRefreshController.confirmedMissingEntries(keys: [], requiredConsecutiveMisses: 2).isEmpty
         )
         let missingEntry = try XCTUnwrap(
-            controller.workspaceManager.confirmedMissingEntries(keys: [], requiredConsecutiveMisses: 2).first
+            controller.layoutRefreshController.confirmedMissingEntries(keys: [], requiredConsecutiveMisses: 2).first
         )
 
         controller.axEventHandler.retireManagedWindowFromAuthoritativeRescan(missingEntry)
@@ -233,10 +233,10 @@ final class WindowAdmissionIdentityLifecycleTests: XCTestCase {
             _ = controller.dwindleEngine?.addWindow(token: token, to: workspaceId, activeWindowFrame: nil)
         }
         XCTAssertTrue(
-            controller.workspaceManager.confirmedMissingEntries(keys: [], requiredConsecutiveMisses: 2).isEmpty
+            controller.layoutRefreshController.confirmedMissingEntries(keys: [], requiredConsecutiveMisses: 2).isEmpty
         )
         let missingEntry = try XCTUnwrap(
-            controller.workspaceManager.confirmedMissingEntries(keys: [], requiredConsecutiveMisses: 2).first
+            controller.layoutRefreshController.confirmedMissingEntries(keys: [], requiredConsecutiveMisses: 2).first
         )
 
         controller.axEventHandler.retireManagedWindowFromAuthoritativeRescan(missingEntry)

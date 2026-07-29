@@ -49,13 +49,12 @@ extension AXEventHandler {
         }
 
         clearTerminalFrameFailure(windowId: token.windowId)
-        if let windowId = UInt32(exactly: token.windowId) {
-            cancelCreatedWindowRetry(windowId: windowId)
-        }
+        cancelCreatedWindowRetry(windowId: token.windowId)
         cancelPostCreateLifecycleVerification(for: token)
         cancelSameAppCloseProbe(matchingFocusedToken: token, reason: policy.traceReason)
         clearManagedFocusState(matching: token, workspaceId: workspaceId)
         _ = controller.workspaceManager.removeWindow(pid: token.pid, windowId: token.windowId)
+        finishDeferredReplacementAfterTracking(windowId: token.windowId)
         controller.axManager.removeWindowState(pid: token.pid, expectedWindow: entry.axRef)
         if removesScratchpadResources {
             controller.cleanupScratchpadWindowResources(for: token)

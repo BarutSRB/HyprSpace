@@ -21,13 +21,17 @@ extension LayoutRefreshController {
         }
     }
 
-    func applyRefreshMetadata(_ refresh: ScheduledRefresh, to plan: inout EffectPlan) {
+    func applyRefreshMetadata(
+        _ refresh: ScheduledRefresh,
+        includePostLayoutActions: Bool = true,
+        to plan: inout EffectPlan
+    ) {
         applyWorkspaceMonitorRelocations(
             refresh.workspaceMonitorRelocations,
             reconcileDurableState: refresh.reconcilesWorkspaceMonitorState,
             to: &plan
         )
-        if !refresh.postLayoutActions.isEmpty {
+        if includePostLayoutActions, !refresh.postLayoutActions.isEmpty {
             plan.postLayoutActions.append(contentsOf: refresh.postLayoutActions)
         }
         if refresh.suppressesWindowActivation {
@@ -262,6 +266,7 @@ extension LayoutRefreshController {
         kind: ScheduledRefreshKind,
         reason: RefreshReason,
         affectedWorkspaceIds: Set<WorkspaceDescriptor.ID> = [],
+        additionalAffectedWorkspaceIds: Set<WorkspaceDescriptor.ID> = [],
         workspaceMonitorRelocations: [WindowToken: ScheduledWorkspaceMonitorRelocation] = [:],
         reconcilesWorkspaceMonitorState: Bool = false,
         suppressesWindowActivation: Bool = false
@@ -272,10 +277,34 @@ extension LayoutRefreshController {
                 kind: kind,
                 reason: reason,
                 affectedWorkspaceIds: affectedWorkspaceIds,
+                additionalAffectedWorkspaceIds: additionalAffectedWorkspaceIds,
                 workspaceMonitorRelocations: workspaceMonitorRelocations,
                 reconcilesWorkspaceMonitorState: reconcilesWorkspaceMonitorState,
                 suppressesWindowActivation: suppressesWindowActivation || reason == .overviewMutation
             )
+        )
+    }
+
+    func mergeDeferredLayout(
+        into windowRemoval: inout ScheduledRefresh,
+        from layout: ScheduledRefresh
+    ) {
+        let newerFollowUp = windowRemoval.followUpRefresh
+        windowRemoval.followUpRefresh = layout.followUpRefresh
+        mergeFollowUp(
+            into: &windowRemoval,
+            kind: layout.kind,
+            reason: layout.reason,
+            affectedWorkspaceIds: layout.affectedWorkspaceIds,
+            additionalAffectedWorkspaceIds:
+            layout.additionalAffectedWorkspaceIds,
+            workspaceMonitorRelocations: layout.workspaceMonitorRelocations,
+            reconcilesWorkspaceMonitorState: layout.reconcilesWorkspaceMonitorState,
+            suppressesWindowActivation: layout.suppressesWindowActivation
+        )
+        windowRemoval.followUpRefresh = mergeFollowUpRefresh(
+            windowRemoval.followUpRefresh,
+            with: newerFollowUp
         )
     }
 
@@ -292,12 +321,21 @@ extension LayoutRefreshController {
         case let (existing?, incoming?):
             let suppressesWindowActivation = existing.suppressesWindowActivation
                 || incoming.suppressesWindowActivation
+            let mergedScope = mergedWorkspaceRefreshScope(
+                WorkspaceRefreshScope(
+                    affectedWorkspaceIds: existing.affectedWorkspaceIds,
+                    additionalAffectedWorkspaceIds: existing.additionalAffectedWorkspaceIds
+                ),
+                WorkspaceRefreshScope(
+                    affectedWorkspaceIds: incoming.affectedWorkspaceIds,
+                    additionalAffectedWorkspaceIds: incoming.additionalAffectedWorkspaceIds
+                )
+            )
             var merged = incoming
             merged.suppressesWindowActivation = suppressesWindowActivation
-            merged.affectedWorkspaceIds = mergedAffectedWorkspaceIds(
-                existing.affectedWorkspaceIds,
-                incoming.affectedWorkspaceIds
-            )
+            merged.affectedWorkspaceIds = mergedScope.affectedWorkspaceIds
+            merged.additionalAffectedWorkspaceIds =
+                mergedScope.additionalAffectedWorkspaceIds
             merged.workspaceMonitorRelocations = mergedWorkspaceMonitorRelocations(
                 existing.workspaceMonitorRelocations,
                 incoming.workspaceMonitorRelocations
@@ -310,10 +348,9 @@ extension LayoutRefreshController {
                 }
                 var kept = existing
                 kept.suppressesWindowActivation = suppressesWindowActivation
-                kept.affectedWorkspaceIds = mergedAffectedWorkspaceIds(
-                    existing.affectedWorkspaceIds,
-                    incoming.affectedWorkspaceIds
-                )
+                kept.affectedWorkspaceIds = merged.affectedWorkspaceIds
+                kept.additionalAffectedWorkspaceIds =
+                    merged.additionalAffectedWorkspaceIds
                 kept.workspaceMonitorRelocations = merged.workspaceMonitorRelocations
                 kept.reconcilesWorkspaceMonitorState = merged.reconcilesWorkspaceMonitorState
                 return kept
@@ -322,11 +359,64 @@ extension LayoutRefreshController {
         }
     }
 
-    func mergedAffectedWorkspaceIds(
-        _ existing: Set<WorkspaceDescriptor.ID>,
-        _ incoming: Set<WorkspaceDescriptor.ID>
-    ) -> Set<WorkspaceDescriptor.ID> {
-        guard !existing.isEmpty, !incoming.isEmpty else { return [] }
-        return existing.union(incoming)
+    func mergeWindowRemovalPayloads(
+        _ existingPayloads: [WindowRemovalPayload],
+        with incomingPayloads: [WindowRemovalPayload]
+    ) -> [WindowRemovalPayload] {
+        existingPayloads + incomingPayloads
+    }
+
+    func mergeAbsorbedVisibility(
+        into refresh: inout ScheduledRefresh,
+        from incoming: ScheduledRefresh
+    ) {
+        switch incoming.kind {
+        case .visibilityRefresh:
+            refresh.needsVisibilityReconciliation = true
+            refresh.visibilityReason = incoming.reason
+        case .fullRescan,
+             .windowRemoval,
+             .immediateRelayout,
+             .relayout:
+            guard incoming.needsVisibilityReconciliation else { return }
+            refresh.needsVisibilityReconciliation = true
+            refresh.visibilityReason = incoming.visibilityReason ?? refresh.visibilityReason
+        }
+    }
+
+    func absorbIntoActiveFullRescan(_ refresh: ScheduledRefresh) {
+        guard var activeRefresh = layoutState.activeRefresh else { return }
+        activeRefresh.postLayoutActions.append(contentsOf: refresh.postLayoutActions)
+        activeRefresh.workspaceMonitorRelocations = mergedWorkspaceMonitorRelocations(
+            activeRefresh.workspaceMonitorRelocations,
+            refresh.workspaceMonitorRelocations
+        )
+        activeRefresh.reconcilesWorkspaceMonitorState = activeRefresh.reconcilesWorkspaceMonitorState
+            || refresh.reconcilesWorkspaceMonitorState
+        activeRefresh.suppressesWindowActivation = activeRefresh.suppressesWindowActivation
+            || refresh.suppressesWindowActivation
+        mergeAbsorbedVisibility(into: &activeRefresh, from: refresh)
+        layoutState.activeRefresh = activeRefresh
+    }
+
+    func mergedWorkspaceRefreshScope(
+        _ existing: WorkspaceRefreshScope,
+        _ incoming: WorkspaceRefreshScope
+    ) -> WorkspaceRefreshScope {
+        let includesActiveWorkspaces =
+            existing.affectedWorkspaceIds.isEmpty
+                || incoming.affectedWorkspaceIds.isEmpty
+        let explicitWorkspaceIds = existing.additionalAffectedWorkspaceIds
+            .union(incoming.additionalAffectedWorkspaceIds)
+            .union(existing.affectedWorkspaceIds)
+            .union(incoming.affectedWorkspaceIds)
+        return WorkspaceRefreshScope(
+            affectedWorkspaceIds: includesActiveWorkspaces
+                ? []
+                : explicitWorkspaceIds,
+            additionalAffectedWorkspaceIds: includesActiveWorkspaces
+                ? explicitWorkspaceIds
+                : []
+        )
     }
 }

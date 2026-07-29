@@ -896,15 +896,4 @@ extension WorldStore {
     func setObservedMinSize(_ size: CGSize, for token: WindowToken) -> Bool {
         model.setObservedMinSize(size, for: token)
     }
-
-    func confirmedMissingKeys(
-        keys activeKeys: Set<WindowToken>,
-        requiredConsecutiveMisses: Int = 1
-    ) -> [WindowToken] {
-        model.confirmedMissingKeys(
-            keys: activeKeys,
-            requiredConsecutiveMisses: requiredConsecutiveMisses,
-            spaceTopology: spaceTopology
-        )
-    }
 }

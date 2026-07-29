@@ -97,6 +97,37 @@ extension AXEventHandler {
         }
     }
 
+    func fullRescanIdentityDependencyPIDsByWindowId(
+        entries: [WindowState]
+    ) -> [Int: Set<pid_t>] {
+        var result = identityAliasesByWindowId.reduce(into: [Int: Set<pid_t>]()) { result, element in
+            if !element.value.pids.isEmpty {
+                result[element.key] = element.value.pids
+            }
+        }
+        for entry in entries {
+            if let pid = AXWindowService.processIdentifier(entry.axRef) {
+                result[entry.windowId, default: []].insert(pid)
+            }
+        }
+        return result
+    }
+
+    func fullRescanTargetPIDsDepending(
+        onTerminatedPID terminatedPID: pid_t,
+        entries: [WindowState]
+    ) -> Set<pid_t> {
+        let dependencyPIDsByWindowId = fullRescanIdentityDependencyPIDsByWindowId(entries: entries)
+        return Set(entries.compactMap { entry in
+            guard entry.pid != terminatedPID,
+                  dependencyPIDsByWindowId[entry.windowId]?.contains(terminatedPID) == true
+            else {
+                return nil
+            }
+            return entry.pid
+        })
+    }
+
     func managedWindowToken(_ token: WindowToken, matchesObservedPid pid: pid_t) -> Bool {
         if token.pid == pid { return true }
         guard let entry = controller?.workspaceManager.entry(for: token) else { return false }
@@ -182,6 +213,7 @@ extension AXEventHandler {
             return false
         }
         cancelCreatedWindowRetry(windowId: windowId)
+        discardDeferredReplacementProtection(windowId: windowId)
         return true
     }
 

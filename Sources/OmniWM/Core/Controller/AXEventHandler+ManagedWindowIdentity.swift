@@ -157,7 +157,7 @@ extension AXEventHandler {
                 retryGeneration: retryGeneration,
                 executionOwner: executionOwner
             )
-            controller.layoutRefreshController.requestFullRescan(reason: .staleFullRescan)
+            requestTargetedFullRescan(for: [oldWindow.token.pid, newWindow.token.pid])
             return
         }
 
@@ -178,7 +178,7 @@ extension AXEventHandler {
                 retryGeneration: retryGeneration,
                 executionOwner: executionOwner
             )
-            controller.layoutRefreshController.requestFullRescan(reason: .staleFullRescan)
+            requestTargetedFullRescan(for: [oldWindow.token.pid, newWindow.token.pid])
             return
         }
         controller.axManager.commitFrameApplicationStateForRebind(
@@ -206,7 +206,7 @@ extension AXEventHandler {
                 retryGeneration: retryGeneration,
                 executionOwner: executionOwner
             )
-            controller.layoutRefreshController.requestFullRescan(reason: .staleFullRescan)
+            requestTargetedFullRescan(for: [oldWindow.token.pid, newWindow.token.pid])
             return
         }
         if let sizeConstraints {
@@ -228,7 +228,7 @@ extension AXEventHandler {
                 retryGeneration: retryGeneration,
                 executionOwner: executionOwner
             )
-            controller.layoutRefreshController.requestFullRescan(reason: .staleFullRescan)
+            requestTargetedFullRescan(for: [oldWindow.token.pid, newWindow.token.pid])
             return
         }
         guard let currentEntry = currentManagedWindowIdentityRebindEntry(
@@ -244,7 +244,7 @@ extension AXEventHandler {
                 retryGeneration: retryGeneration,
                 executionOwner: executionOwner
             )
-            controller.layoutRefreshController.requestFullRescan(reason: .staleFullRescan)
+            requestTargetedFullRescan(for: [oldWindow.token.pid, newWindow.token.pid])
             return
         }
         finishManagedWindowIdentityRebind(
@@ -377,7 +377,8 @@ extension AXEventHandler {
         }
         if state.identityRebindTargetDestroyed {
             cancelCreatedWindowRetry(windowId: windowId)
-            controller.layoutRefreshController.requestFullRescan(reason: .staleFullRescan)
+            discardDeferredReplacementProtection(windowId: windowId)
+            requestTargetedFullRescan(for: [oldWindow.token.pid, newWindow.token.pid])
             return
         }
         if controller.hasStartedServices,
@@ -388,7 +389,7 @@ extension AXEventHandler {
                 retryGeneration: retryGeneration,
                 executionOwner: executionOwner
             )
-            controller.layoutRefreshController.requestFullRescan(reason: .staleFullRescan)
+            requestTargetedFullRescan(for: [oldWindow.token.pid, newWindow.token.pid])
             return
         }
         state.task = nil
@@ -422,6 +423,7 @@ extension AXEventHandler {
             return
         }
         cancelCreatedWindowRetry(windowId: windowId)
+        discardDeferredReplacementProtection(windowId: windowId)
     }
 
     private func finishManagedWindowIdentityRebind(

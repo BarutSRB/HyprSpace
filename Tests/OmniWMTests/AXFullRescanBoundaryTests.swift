@@ -1516,7 +1516,7 @@ final class AXFullRescanBoundaryTests: XCTestCase {
 
                 XCTAssertEqual(seenKeys, [token])
                 XCTAssertTrue(
-                    controller.workspaceManager.confirmedMissingEntries(
+                    controller.layoutRefreshController.confirmedMissingEntries(
                         keys: seenKeys,
                         requiredConsecutiveMisses: 2
                     ).isEmpty
@@ -1729,7 +1729,7 @@ final class AXFullRescanBoundaryTests: XCTestCase {
             seenKeys: &seenKeys
         )
         XCTAssertTrue(
-            controller.workspaceManager.confirmedMissingEntries(
+            controller.layoutRefreshController.confirmedMissingEntries(
                 keys: seenKeys,
                 requiredConsecutiveMisses: 2
             ).isEmpty
@@ -1740,7 +1740,7 @@ final class AXFullRescanBoundaryTests: XCTestCase {
             seenKeys: &seenKeys
         )
         let missingEntry = try XCTUnwrap(
-            controller.workspaceManager.confirmedMissingEntries(
+            controller.layoutRefreshController.confirmedMissingEntries(
                 keys: seenKeys,
                 requiredConsecutiveMisses: 2
             ).first
@@ -1856,6 +1856,36 @@ final class AXFullRescanBoundaryTests: XCTestCase {
         XCTAssertTrue(promotions.isEmpty)
     }
 
+    func testFullRescanSelectionSortsWorkspaceRuleCandidatesByWindowId() {
+        let pid: pid_t = 72_047
+        let lowerWindowId = 72_048
+        let higherWindowId = 72_049
+        let selected = AXManager.selectFullRescanCandidates(
+            [
+                higherWindowId: [
+                    candidate(
+                        pid: pid,
+                        windowId: higherWindowId,
+                        route: .persistent,
+                        isManageable: true
+                    )
+                ],
+                lowerWindowId: [
+                    candidate(
+                        pid: pid,
+                        windowId: lowerWindowId,
+                        route: .persistent,
+                        isManageable: true
+                    )
+                ]
+            ],
+            activationPolicyByPID: [pid: .regular],
+            preservingPIDsByWindowId: [:]
+        )
+
+        XCTAssertEqual(selected.map(\.windowId), [lowerWindowId, higherWindowId])
+    }
+
     func testOneShotPromotionBatchesAreDeterministicAndSerializedBySortedPID() async {
         let firstPID: pid_t = 72_039
         let secondPID: pid_t = 72_040
@@ -1923,6 +1953,151 @@ final class AXFullRescanBoundaryTests: XCTestCase {
         XCTAssertTrue(suppression.contains(newWindowId))
     }
 
+    func testTargetResolutionKeepsExplicitAppsWholeAndNativeSpaceAppsExact() throws {
+        let explicitPID: pid_t = 72_200
+        let resolvedPID: pid_t = 72_201
+        let explicitDependencyPID: pid_t = 72_202
+        let resolvedDependencyPID: pid_t = 72_203
+        let explicitWindowId = 72_204
+        let resolvedWindowId = 72_205
+        let unrelatedResolvedWindowId = 72_206
+        let nativeSpaceId: UInt64 = 72_207
+
+        let resolution = try XCTUnwrap(
+            AXManager.fullRescanTargetResolution(
+                scope: .targeted(
+                    appPIDs: [explicitPID],
+                    nativeSpaceIds: [nativeSpaceId]
+                ),
+                resolvedTargetPIDs: [resolvedPID],
+                resolvedTargetWindowIds: [resolvedWindowId],
+                preservingPIDsByWindowId: [
+                    explicitWindowId: explicitPID,
+                    resolvedWindowId: resolvedPID,
+                    unrelatedResolvedWindowId: resolvedPID
+                ],
+                ownerPIDByWindowId: [
+                    explicitWindowId: explicitPID,
+                    resolvedWindowId: resolvedPID,
+                    unrelatedResolvedWindowId: resolvedPID
+                ],
+                identityDependencyPIDsByWindowId: [
+                    explicitWindowId: [explicitDependencyPID],
+                    resolvedWindowId: [resolvedDependencyPID],
+                    unrelatedResolvedWindowId: [72_208]
+                ]
+            )
+        )
+
+        XCTAssertEqual(resolution.explicitAppPIDs, [explicitPID])
+        XCTAssertEqual(resolution.resolvedTargetPIDs, [resolvedPID])
+        XCTAssertEqual(resolution.resolvedTargetWindowIds, [resolvedWindowId])
+        XCTAssertEqual(resolution.targetPIDs, [explicitPID, resolvedPID])
+        XCTAssertEqual(resolution.relevantWindowIds, [explicitWindowId, resolvedWindowId])
+        XCTAssertFalse(resolution.relevantWindowIds.contains(unrelatedResolvedWindowId))
+        XCTAssertEqual(
+            resolution.dependencyPIDs,
+            [explicitDependencyPID, resolvedDependencyPID]
+        )
+        XCTAssertEqual(
+            resolution.targetPIDsByDependencyPID[explicitDependencyPID],
+            [explicitPID]
+        )
+        XCTAssertEqual(
+            resolution.targetPIDsByDependencyPID[resolvedDependencyPID],
+            [resolvedPID]
+        )
+        XCTAssertEqual(
+            resolution.effectiveScope,
+            .targeted(
+                appPIDs: [
+                    explicitPID,
+                    resolvedPID,
+                    explicitDependencyPID,
+                    resolvedDependencyPID
+                ],
+                nativeSpaceIds: [nativeSpaceId]
+            )
+        )
+    }
+
+    func testAuthoritativeTargetsExcludeOnlyRootsWithFailedDependencies() {
+        let firstTargetPID: pid_t = 72_210
+        let secondTargetPID: pid_t = 72_211
+        let failedDependencyPID: pid_t = 72_212
+        let successfulDependencyPID: pid_t = 72_213
+
+        let authoritative = AXManager.authoritativeFullRescanTargetPIDs(
+            targetPIDs: [firstTargetPID, secondTargetPID],
+            successfullyEnumeratedPIDs: [
+                firstTargetPID,
+                secondTargetPID,
+                successfulDependencyPID
+            ],
+            failedPIDs: [failedDependencyPID],
+            dependencyPIDs: [failedDependencyPID, successfulDependencyPID],
+            targetPIDsByDependencyPID: [
+                failedDependencyPID: [firstTargetPID],
+                successfulDependencyPID: [secondTargetPID]
+            ]
+        )
+
+        XCTAssertEqual(authoritative, [secondTargetPID])
+    }
+
+    func testTargetRootAlsoActsAsDependencyForSharedManagedIdentity() throws {
+        let logicalPID: pid_t = 72_214
+        let proxyPID: pid_t = 72_215
+        let windowId = 72_216
+        let resolution = try XCTUnwrap(
+            AXManager.fullRescanTargetResolution(
+                scope: .targeted(
+                    appPIDs: [logicalPID, proxyPID],
+                    nativeSpaceIds: []
+                ),
+                resolvedTargetPIDs: [],
+                resolvedTargetWindowIds: [],
+                preservingPIDsByWindowId: [windowId: logicalPID],
+                ownerPIDByWindowId: [windowId: logicalPID],
+                identityDependencyPIDsByWindowId: [windowId: [proxyPID]]
+            )
+        )
+
+        XCTAssertEqual(resolution.dependencyPIDs, [proxyPID])
+        XCTAssertEqual(resolution.targetPIDsByDependencyPID[proxyPID], [logicalPID])
+        XCTAssertTrue(AXManager.authoritativeFullRescanTargetPIDs(
+            targetPIDs: resolution.targetPIDs,
+            successfullyEnumeratedPIDs: [logicalPID],
+            failedPIDs: [proxyPID],
+            dependencyPIDs: resolution.dependencyPIDs,
+            targetPIDsByDependencyPID: resolution.targetPIDsByDependencyPID
+        ).isEmpty)
+    }
+
+    func testScopedManagedWindowBindingPIDsAreExact() {
+        let contextPID: pid_t = 72_220
+        let sharedPID: pid_t = 72_221
+        let windowPID: pid_t = 72_222
+        let emptyScopedPID: pid_t = 72_223
+
+        XCTAssertEqual(
+            AXManager.managedWindowBindingPIDs(
+                contextPIDs: [contextPID, sharedPID],
+                windowPIDs: [sharedPID, windowPID],
+                scopedPIDs: nil
+            ),
+            [contextPID, sharedPID, windowPID]
+        )
+        XCTAssertEqual(
+            AXManager.managedWindowBindingPIDs(
+                contextPIDs: [contextPID, sharedPID],
+                windowPIDs: [sharedPID, windowPID],
+                scopedPIDs: [sharedPID, emptyScopedPID]
+            ),
+            [sharedPID, emptyScopedPID]
+        )
+    }
+
     func testManagedWindowBindingRetryBackoffIsBounded() async {
         XCTAssertEqual(AXManager.managedWindowBindingRetryDelay(afterFailure: 1), .milliseconds(100))
         XCTAssertEqual(AXManager.managedWindowBindingRetryDelay(afterFailure: 2), .milliseconds(250))
@@ -1949,15 +2124,61 @@ final class AXFullRescanBoundaryTests: XCTestCase {
         manager.managedWindowBindingRetryDelayProvider = {
             $0 <= 3 ? .zero : nil
         }
-        manager.onManagedWindowBindingFailed = { [weak manager] in
+        var observedPIDs: [pid_t] = []
+        manager.onManagedWindowBindingFailed = { [weak manager] failedPID in
             retryCount += 1
-            manager?.reconcileManagedWindowBindings([entry])
+            observedPIDs.append(failedPID)
+            manager?.reconcileManagedWindowBindings([entry], scopedPIDs: [failedPID])
             retries.fulfill()
         }
 
         manager.bindManagedWindows([entry])
         await fulfillment(of: [retries], timeout: 1)
         XCTAssertEqual(retryCount, 3)
+        XCTAssertEqual(observedPIDs, [pid, pid, pid])
+    }
+
+    func testFailedTargetedEnumerationResubmitsPendingManagedWindowBindingRetry() async throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let manager = controller.axManager
+        defer {
+            manager.onManagedWindowBindingFailed = nil
+            manager.cleanup()
+            controller.layoutRefreshController.resetState()
+        }
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let pid: pid_t = 910_323
+        let token = WindowToken(pid: pid, windowId: 910_324)
+        _ = controller.workspaceManager.addWindow(
+            WindowAdmissionTestSupport.axRef(for: token),
+            pid: pid,
+            windowId: token.windowId,
+            to: workspaceId
+        )
+        let retries = expectation(description: "binding retry survives failed targeted scan")
+        retries.expectedFulfillmentCount = 2
+        var observedPIDs: [pid_t] = []
+        manager.managedWindowBindingRetryDelayProvider = {
+            $0 <= 2 ? .zero : nil
+        }
+        manager.onManagedWindowBindingFailed = { failedPID in
+            observedPIDs.append(failedPID)
+            retries.fulfill()
+            guard observedPIDs.count == 1 else { return }
+            controller.layoutRefreshController.requestFullRescan(
+                reason: .staleFullRescan,
+                scope: .targeted(appPIDs: [failedPID], nativeSpaceIds: [])
+            )
+        }
+
+        manager.bindManagedWindows(controller.workspaceManager.allEntries())
+
+        await fulfillment(of: [retries], timeout: 2)
+        await WindowAdmissionTestSupport.drainLayoutRefreshes(controller)
+        XCTAssertEqual(observedPIDs, [pid, pid])
+        XCTAssertNotNil(controller.workspaceManager.entry(for: token))
     }
 
     private func candidate(

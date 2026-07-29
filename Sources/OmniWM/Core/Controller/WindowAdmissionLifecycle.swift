@@ -68,6 +68,24 @@ enum AdmissionRetryTrigger {
             4
         }
     }
+
+    var protectionPIDs: Set<pid_t> {
+        switch self {
+        case .create:
+            []
+        case let .candidate(token, _, _),
+             let .focused(token, _, _, _),
+             let .ruleReevaluation(token, _):
+            [token.pid]
+        case let .identityRebind(oldWindow, newWindow, _, _, _):
+            [oldWindow.token.pid, newWindow.token.pid]
+        }
+    }
+
+    var protectsMissingEntriesDuringAdmission: Bool {
+        if case .ruleReevaluation = self { return false }
+        return true
+    }
 }
 
 enum ManagedWindowIdentityRebindResult {
@@ -120,6 +138,13 @@ struct AdmissionRetrySchedule {
     let axRef: AXWindowRef?
     let reason: WindowAdmissionPendingReason
     let trigger: AdmissionRetryTrigger
+}
+
+struct DeferredReplacementProtection {
+    var protectedTokens: Set<WindowToken>
+    var scope: RescanScope
+    var fallbackProtectedTokens: Set<WindowToken> = []
+    var permitsPIDFallback = true
 }
 
 enum AdmissionIncarnationRelation: Equatable {
@@ -186,6 +211,10 @@ struct WindowIdentityAliasGeneration {
 struct WindowIdentityAliasHistory {
     private(set) var current: WindowIdentityAliasGeneration?
     private(set) var previous: WindowIdentityAliasGeneration?
+
+    var pids: Set<pid_t> {
+        (current?.pids ?? []).union(previous?.pids ?? [])
+    }
 
     mutating func commit(_ aliases: FullRescanWindowIdentityAliases) {
         previous = current

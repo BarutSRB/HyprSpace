@@ -318,6 +318,9 @@ final class WMController {
         workspaceManager.onRuntimeInvalidation = { [weak self] workspaceId, domains in
             self?.handleRuntimeInvalidation(workspaceId: workspaceId, domains: domains)
         }
+        workspaceManager.onWindowPresenceObserved = { [weak self] handle in
+            self?.layoutRefreshController.recordWindowPresence(handle)
+        }
         workspaceManager.onWindowRemoved = { [weak self] entry in
             self?.windowActionHandlerStorage?.handleOverviewWindowRemoved(entry)
         }
@@ -1037,7 +1040,7 @@ final class WMController {
     func updateWorkspaceConfig() {
         workspaceManager.applySettings()
         syncMonitorsToNiriEngine()
-        layoutRefreshController.requestFullRescan(reason: .workspaceConfigChanged)
+        layoutRefreshController.requestRelayout(reason: .workspaceConfigChanged)
     }
 
     func rebuildAppRulesCache() {

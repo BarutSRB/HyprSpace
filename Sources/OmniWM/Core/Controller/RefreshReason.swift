@@ -34,6 +34,62 @@ enum RefreshRequestRoute: Equatable, Sendable {
     case windowRemoval
 }
 
+enum RescanScope: Equatable, Sendable {
+    case all
+    case targeted(
+        appPIDs: Set<pid_t>,
+        nativeSpaceIds: Set<UInt64>,
+        nativeSpaceWindowIdsByPID: [pid_t: Set<Int>] = [:]
+    )
+
+    var appPIDs: Set<pid_t> {
+        guard case let .targeted(appPIDs, _, _) = self else { return [] }
+        return appPIDs
+    }
+
+    var nativeSpaceIds: Set<UInt64> {
+        guard case let .targeted(_, nativeSpaceIds, _) = self else { return [] }
+        return nativeSpaceIds
+    }
+
+    var nativeSpaceWindowIdsByPID: [pid_t: Set<Int>] {
+        guard case let .targeted(_, _, windowIdsByPID) = self else { return [:] }
+        return windowIdsByPID
+    }
+
+    var targetedPIDs: Set<pid_t> {
+        appPIDs.union(nativeSpaceWindowIdsByPID.keys)
+    }
+
+    var nativeSpaceWindowIds: Set<Int> {
+        Set(nativeSpaceWindowIdsByPID.values.joined())
+    }
+
+    var isEmpty: Bool {
+        guard case let .targeted(appPIDs, nativeSpaceIds, windowIdsByPID) = self else { return false }
+        return appPIDs.isEmpty && nativeSpaceIds.isEmpty && windowIdsByPID.isEmpty
+    }
+
+    func merged(with other: RescanScope) -> RescanScope {
+        switch (self, other) {
+        case (.all, _),
+             (_, .all):
+            .all
+        case let (
+            .targeted(existingPIDs, existingSpaceIds, existingWindowIdsByPID),
+            .targeted(incomingPIDs, incomingSpaceIds, incomingWindowIdsByPID)
+        ):
+            .targeted(
+                appPIDs: existingPIDs.union(incomingPIDs),
+                nativeSpaceIds: incomingSpaceIds.isEmpty ? existingSpaceIds : incomingSpaceIds,
+                nativeSpaceWindowIdsByPID: incomingSpaceIds.isEmpty
+                    ? existingWindowIdsByPID
+                    : incomingWindowIdsByPID
+            )
+        }
+    }
+}
+
 enum RefreshReason: String, Sendable {
     case startup
     case appLaunched
@@ -70,14 +126,14 @@ enum RefreshReason: String, Sendable {
              .activeSpaceChanged,
              .monitorConfigurationChanged,
              .appRulesChanged,
-             .workspaceConfigChanged,
-             .appTerminated,
              .staleFullRescan:
             .fullRescan
         case .layoutConfigChanged,
              .monitorSettingsChanged,
              .gapsChanged,
+             .workspaceConfigChanged,
              .workspaceLayoutToggled,
+             .appTerminated,
              .windowRuleReevaluation,
              .observedConstraintsChanged,
              .axWindowCreated,

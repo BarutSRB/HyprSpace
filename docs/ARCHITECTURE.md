@@ -359,11 +359,17 @@ Some apps (Ghostty, browsers) destroy and recreate windows during internal opera
 
 | Route | When | What it does |
 |-------|------|--------------|
-| `fullRescan` | Startup, app launch/terminate, space change, display change | Full enumeration + relayout |
-| `relayout` | Config change, window created, frame changed | Recompute from current state (debounced) |
+| `fullRescan` | Startup/global fallback, app launch/rebind recovery, space/wake/display inventory | Global or scope-limited enumeration + relayout |
+| `relayout` | Config change, app termination, window created, frame changed | Recompute from current state (debounced) |
 | `immediateRelayout` | Commands, gestures, workspace switch | Synchronous relayout |
 | `visibilityRefresh` | App hidden/unhidden | Show/hide only |
 | `windowRemoval` | Window destroyed | Remove + relayout + focus recovery |
+
+**Inventory scope and authority.** Startup, app-rule reevaluation, and incomplete scoped evidence retain the global inventory path. App launch and identity/binding recovery enumerate only the affected app PIDs. Active-Space changes enumerate the newly active native Spaces plus apps previously or currently known on those Spaces. Wake, unlock, and display changes apply each first usable topology sample immediately for frame-write safety by carrying forward known membership without issuing per-window membership queries, while deferring native-fullscreen lifecycle reconciliation. A matching second sample performs one membership-query pass, preserves last-known membership when a private query is inconclusive, and reconciles fullscreen state before issuing one coalesced scoped inventory. For each requested native Space, `SLSCopyWindowsWithOptionsAndTags` supplies raw membership. OmniWM deduplicates those IDs and performs one initial bulk WindowServer detail query; targeted reconciliation can issue additional bulk queries for preserved managed IDs and AX-discovered dependency windows. AX work is limited to selected application roots, although each selected root still enumerates `kAXWindows` and resolves WindowServer IDs before filtering.
+
+A scoped scan may update missing-window counters only for explicit app roots whose AX enumeration and identity dependencies succeeded. Unrelated windows retain their existing counters and bindings. `LayoutRefreshController.LayoutState` owns these transient observations keyed by stable `WindowHandle` identity, so rekeys preserve an observation while a same-token reincarnation starts clean. Observing or resetting them does not mutate `WorldStore`, create a semantic reconcile transaction, advance world sequence, rebuild snapshots, or emit trace records. Missing windows still require two consecutive authoritative observations; the first scoped miss schedules one delayed confirmation of the same scope. A failed or unavailable native-Space query promotes the request to the global safety path rather than treating an unknown inventory as empty.
+
+Scoped reconciliation reduces application-root enumeration and full AX-fact work relative to a global scan; it does not make refresh proportional only to changed windows. Topology refresh still checks native-Space membership for each tracked managed window, and selected AX roots still enumerate their window lists. Its latency and allocation benefit remains unproven until measured.
 
 **Plan-building runs inside a commit.** `buildRelayoutEffectPlan` calls `NiriLayoutHandler.layoutWithNiriEngine` (and the Dwindle equivalent), which run `syncWindows`/`removeWindows`/`restoreInitialPlacements` on the engines inside `workspaceManager.withBatchedLayoutBuild` — a single synchronous `layout_build` commit that also stamps each plan's `plannedSeq`. The layout engines return raw `[WindowToken: CGRect]` frame maps; the handlers wrap those into a `WorkspaceLayoutPlan` → `WorkspaceLayoutDiff` → `EffectPlan` (`Core/Layout/LayoutBoundary.swift`).
 
@@ -469,7 +475,7 @@ WorkspaceManager
 
 **`WorldStore.commit` is the only mutation path**, entered through `WorkspaceManager.recordReconcileEvent(_ event: WMEvent)` (which supplies the snapshot/resolve closures and writes the resolved `ActionPlan` back through the in-commit mutators).
 
-**`WindowModel`** (`Core/Workspace/WindowModel.swift`) is a reference-type per-window registry — but it is now **private to `WorldStore`**, not a shared source of truth. It stores one `WindowState` per `WindowToken` plus reverse indexes (`windowIdToToken`, `tokensByWorkspace`, `tokensByWorkspaceMode`, `tokensByPid`), constraint/min-size caches, and missing-detection counters.
+**`WindowModel`** (`Core/Workspace/WindowModel.swift`) is a reference-type per-window registry — but it is now **private to `WorldStore`**, not a shared source of truth. It stores one `WindowState` per `WindowToken` plus reverse indexes (`windowIdToToken`, `tokensByWorkspace`, `tokensByWorkspaceMode`, `tokensByPid`) and constraint/min-size caches. Missing-detection counters are transient reconciliation state owned by `LayoutRefreshController.LayoutState`, as described in [Stage 3](#35-stage-3--the-effector--refresh-pipeline), and do not enter `WorldStore` commits.
 
 **`WindowState`** (`Core/Workspace/WindowState.swift`) is the per-window record — a `struct` (the old nested `WindowModel.Entry` is gone):
 

@@ -917,7 +917,8 @@ final class AppAXContext {
 
     func getWindowsAsync(
         timeoutSeconds: TimeInterval = 0.5,
-        includeTitle: Bool = false
+        includeTitle: Bool = false,
+        includedWindowIds: Set<Int>? = nil
     ) async throws -> [AXEnumeratedWindow] {
         guard let thread else {
             WindowAdmissionTrace.record(
@@ -958,6 +959,7 @@ final class AppAXContext {
             pendingNotificationRemovals,
             windowBindingEpoch,
             inspectionContext,
+            includedWindowIds,
             enumerationCallbackGeneration,
             enumerationBindingGeneration
         ] job -> [AXEnumeratedWindow] in
@@ -992,15 +994,29 @@ final class AppAXContext {
 
             for element in windowElements {
                 try job.checkCancellation()
+                guard let windowId = try AXWindowEnumerationInspector.windowId(
+                    for: element,
+                    deadline: deadline,
+                    checkCancellation: { try job.checkCancellation() }
+                ) else {
+                    continue
+                }
+                if let includedWindowIds, !includedWindowIds.contains(windowId) {
+                    if let existingElement = windows[windowId] {
+                        newWindows[windowId] = existingElement
+                        seenIds.insert(windowId)
+                    }
+                    continue
+                }
                 guard let enumeratedWindow = try AXWindowEnumerationInspector.inspect(
                     element,
+                    windowId: windowId,
                     deadline: deadline,
                     context: inspectionContext,
                     checkCancellation: { try job.checkCancellation() }
                 ) else {
                     continue
                 }
-                let windowId = enumeratedWindow.axRef.windowId
                 if let resolvedElementPid = enumeratedWindow.axPid, resolvedElementPid != pid {
                     DiagnosticsEventRecorder.shared.recordLifecycle(
                         name: "ax.pidMismatch.expected=\(pid)",

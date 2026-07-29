@@ -165,7 +165,8 @@ enum AXWindowEnumerationInspector {
     static func enumerateApplication(
         pid: pid_t,
         timeout: TimeInterval,
-        context: AXWindowInspectionContext = .unidentified
+        context: AXWindowInspectionContext = .unidentified,
+        includedWindowIds: Set<Int>? = nil
     ) throws -> [AXEnumeratedWindow] {
         let deadline = ProcessInfo.processInfo.systemUptime + timeout
         let appElement = AXUIElementCreateApplication(pid)
@@ -178,8 +179,16 @@ enum AXWindowEnumerationInspector {
         results.reserveCapacity(windowElements.count)
         for element in windowElements {
             try Task.checkCancellation()
+            guard let windowId = try windowId(
+                for: element,
+                deadline: deadline,
+                checkCancellation: { try Task.checkCancellation() }
+            ), includedWindowIds?.contains(windowId) ?? true else {
+                continue
+            }
             if let window = try inspect(
                 element,
+                windowId: windowId,
                 deadline: deadline,
                 context: context,
                 checkCancellation: { try Task.checkCancellation() }
@@ -216,12 +225,11 @@ enum AXWindowEnumerationInspector {
         return elements
     }
 
-    static func inspect(
-        _ element: AXUIElement,
+    static func windowId(
+        for element: AXUIElement,
         deadline: TimeInterval,
-        context: AXWindowInspectionContext = .unidentified,
         checkCancellation: () throws -> Void
-    ) throws -> AXEnumeratedWindow? {
+    ) throws -> Int? {
         try checkCancellation()
         try setRemainingTimeout(on: element, until: deadline)
         defer { AXUIElementSetMessagingTimeout(element, 0) }
@@ -230,6 +238,30 @@ enum AXWindowEnumerationInspector {
         let windowIdResult = _AXUIElementGetWindow(element, &windowIdRaw)
         try checkCancellation()
         guard windowIdResult == .success else { return nil }
+        return Int(windowIdRaw)
+    }
+
+    static func inspect(
+        _ element: AXUIElement,
+        windowId knownWindowId: Int? = nil,
+        deadline: TimeInterval,
+        context: AXWindowInspectionContext = .unidentified,
+        checkCancellation: () throws -> Void
+    ) throws -> AXEnumeratedWindow? {
+        try checkCancellation()
+        try setRemainingTimeout(on: element, until: deadline)
+        defer { AXUIElementSetMessagingTimeout(element, 0) }
+
+        let windowId: Int
+        if let knownWindowId {
+            windowId = knownWindowId
+        } else {
+            var windowIdRaw: CGWindowID = 0
+            let windowIdResult = _AXUIElementGetWindow(element, &windowIdRaw)
+            try checkCancellation()
+            guard windowIdResult == .success else { return nil }
+            windowId = Int(windowIdRaw)
+        }
 
         let resolvedPid = try resolvedPID(
             for: element,
@@ -264,7 +296,7 @@ enum AXWindowEnumerationInspector {
             checkCancellation: checkCancellation
         )
         return AXEnumeratedWindow(
-            axRef: AXWindowRef(element: element, windowId: Int(windowIdRaw)),
+            axRef: AXWindowRef(element: element, windowId: windowId),
             axPid: resolvedPid,
             role: role,
             subrole: subrole,

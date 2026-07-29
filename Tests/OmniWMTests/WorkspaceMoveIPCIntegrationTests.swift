@@ -831,12 +831,12 @@ final class WorkspaceMoveIPCIntegrationTests: XCTestCase {
         XCTAssertTrue(preserved.allowsTerminalRecovery)
     }
 
-    func testFullRescanMergePreservesDurableWorkspaceMonitorReconciliation() throws {
+    func testFullRescanUpgradePreservesDurableWorkspaceMonitorReconciliation() throws {
         let fixture = try makeFixture()
         let controller = fixture.controller
 
         try withBlockedRefreshes(controller, affectedWorkspaceId: fixture.interactionWorkspaceId) {
-            controller.layoutRefreshController.requestFullRescan(reason: .workspaceConfigChanged)
+            controller.layoutRefreshController.requestRelayout(reason: .workspaceConfigChanged)
             controller.layoutRefreshController.requestFullRescan(reason: .appLaunched)
 
             let pending = try XCTUnwrap(controller.layoutRefreshController.layoutState.pendingRefresh)
@@ -890,7 +890,7 @@ final class WorkspaceMoveIPCIntegrationTests: XCTestCase {
         }
     }
 
-    func testFullRescanSupersedingWindowRemovalPreservesDeferredWorkspaceRelocation() throws {
+    func testFullRescanKeepsDeferredWorkspaceRelocationInFollowUp() throws {
         let fixture = try makeFixture()
         let controller = fixture.controller
         let token = WindowToken(pid: 943_004, windowId: 943_104)
@@ -922,13 +922,16 @@ final class WorkspaceMoveIPCIntegrationTests: XCTestCase {
 
             let pending = try XCTUnwrap(controller.layoutRefreshController.layoutState.pendingRefresh)
             XCTAssertEqual(pending.kind, .fullRescan)
-            XCTAssertEqual(pending.workspaceMonitorRelocations[token]?.frame, frame)
+            XCTAssertTrue(pending.workspaceMonitorRelocations.isEmpty)
+            XCTAssertEqual(
+                pending.followUpRefresh?.workspaceMonitorRelocations[token]?.frame,
+                frame
+            )
             XCTAssertTrue(
                 try XCTUnwrap(
-                    pending.workspaceMonitorRelocations[token]
+                    pending.followUpRefresh?.workspaceMonitorRelocations[token]
                 ).allowsTerminalRecovery
             )
-            XCTAssertNil(pending.followUpRefresh)
             XCTAssertTrue(pending.suppressesWindowActivation)
             XCTAssertTrue(pending.affectedWorkspaceIds.isEmpty)
         }

@@ -296,6 +296,10 @@ final class WindowAdmissionRetryTests: XCTestCase {
 
     func testAppTerminationRetiresAdmissionRetryAndOnlyItsIdentityAliases() {
         let controller = WindowAdmissionTestSupport.controller()
+        defer {
+            controller.axEventHandler.resetCreatedWindowRetryState()
+            controller.layoutRefreshController.resetState()
+        }
         let terminatedPID: pid_t = 467_310
         let survivingPID: pid_t = 467_311
         let windowId: UInt32 = 467_409
@@ -317,25 +321,38 @@ final class WindowAdmissionRetryTests: XCTestCase {
         XCTAssertTrue(
             controller.axEventHandler.scheduleAdmissionRetry(
                 windowId: windowId,
-                expectedToken: token,
-                axRef: terminatedAXRef,
+                expectedToken: nil,
                 reason: .factsDeferred,
-                trigger: .focused(
-                    token: token,
-                    source: .focusedWindowChanged,
-                    observationGeneration: 7,
-                    callbackGeneration: nil
-                )
+                trigger: .create
             )
         )
         _ = controller.axEventHandler.retainedCreatePlacementContext(
             windowId: windowId,
             controller: controller
         )
+        let protectionScope = RescanScope.targeted(
+            appPIDs: [terminatedPID, survivingPID],
+            nativeSpaceIds: []
+        )
+        controller.axEventHandler.protectDeferredReplacement(
+            windowId: windowId,
+            token: WindowToken(pid: survivingPID, windowId: 467_410),
+            scope: protectionScope
+        )
+        controller.layoutRefreshController.layoutState.activeFullEnumerationCount = 1
+        controller.axEventHandler.processCreatedWindow(windowId: windowId)
+        controller.layoutRefreshController.layoutState.activeFullEnumerationCount = 0
+        XCTAssertTrue(controller.axEventHandler.isCreatedWindowDeferred(windowId))
 
         controller.axEventHandler.cleanupFocusStateForTerminatedApp(pid: terminatedPID)
 
         XCTAssertNil(controller.axEventHandler.admissionRetryStateByWindowId[windowId])
+        XCTAssertFalse(controller.axEventHandler.isCreatedWindowDeferred(windowId))
+        XCTAssertNil(
+            controller.axEventHandler.deferredReplacementProtectionsByWindowId[windowId]
+        )
+        XCTAssertNil(controller.layoutRefreshController.layoutState.pendingMissingConfirmationScope)
+        XCTAssertNil(controller.layoutRefreshController.layoutState.missingConfirmationTask)
         XCTAssertNil(controller.axEventHandler.pendingCreatePlacementContext(for: Int(windowId)))
         XCTAssertEqual(
             controller.axEventHandler.identityAliasesByWindowId[Int(windowId)]?.current?.pids,
@@ -345,6 +362,63 @@ final class WindowAdmissionRetryTests: XCTestCase {
             controller.axEventHandler.identityAliasesByWindowId[Int(windowId)]?.current?.axRefs.count,
             1
         )
+    }
+
+    func testManagedRetirementSettlesAdmissionProtectionAfterWorldRemoval() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        defer {
+            controller.axEventHandler.resetCreatedWindowRetryState()
+            controller.layoutRefreshController.resetState()
+        }
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let protectedToken = WindowToken(pid: 467_312, windowId: 467_411)
+        let retiringToken = WindowToken(pid: protectedToken.pid, windowId: 467_412)
+        _ = WindowAdmissionTestSupport.track(
+            protectedToken,
+            in: workspaceId,
+            controller: controller
+        )
+        let retiringAXRef = WindowAdmissionTestSupport.track(
+            retiringToken,
+            in: workspaceId,
+            controller: controller
+        )
+        let windowId = UInt32(retiringToken.windowId)
+        let scope = RescanScope.targeted(appPIDs: [retiringToken.pid], nativeSpaceIds: [])
+        controller.axEventHandler.admissionRetryStateByWindowId[windowId] =
+            AdmissionRetryState(
+                expectedToken: retiringToken,
+                axRef: retiringAXRef,
+                reason: .factsDeferred,
+                attempt: 1,
+                generation: 1,
+                trigger: .candidate(token: retiringToken, axRef: retiringAXRef),
+                exhausted: false
+            )
+        controller.axEventHandler.protectDeferredReplacement(
+            windowId: windowId,
+            token: protectedToken,
+            scope: scope
+        )
+        let retiringEntry = try XCTUnwrap(
+            controller.workspaceManager.entry(for: retiringToken)
+        )
+
+        controller.axEventHandler.retireManagedWindow(
+            retiringEntry,
+            reason: .staleIncarnation
+        )
+
+        XCTAssertNil(controller.workspaceManager.entry(for: retiringToken))
+        XCTAssertNotNil(controller.workspaceManager.entry(for: protectedToken))
+        XCTAssertNil(controller.axEventHandler.admissionRetryStateByWindowId[windowId])
+        XCTAssertNil(
+            controller.axEventHandler.deferredReplacementProtectionsByWindowId[windowId]
+        )
+        XCTAssertEqual(controller.layoutRefreshController.layoutState.pendingMissingConfirmationScope, scope)
+        XCTAssertNotNil(controller.layoutRefreshController.layoutState.missingConfirmationTask)
     }
 
     func testHigherPriorityRunningPreemptionKeepsAttemptAndChangesGeneration() throws {
@@ -609,6 +683,160 @@ final class WindowAdmissionRetryTests: XCTestCase {
         guard case .candidate = candidate.trigger else {
             return XCTFail("Expected candidate retry")
         }
+    }
+
+    func testStaleFocusedRetryRetirementSettlesDeferredReplacementProtection() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        defer {
+            controller.axEventHandler.resetCreatedWindowRetryState()
+            controller.layoutRefreshController.resetState()
+        }
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let oldToken = WindowToken(pid: 467_325, windowId: 467_425)
+        let retryToken = WindowToken(pid: oldToken.pid, windowId: 467_426)
+        let windowId = UInt32(retryToken.windowId)
+        _ = WindowAdmissionTestSupport.track(oldToken, in: workspaceId, controller: controller)
+        _ = installRunningFocusedRetry(
+            controller: controller,
+            windowId: windowId,
+            token: retryToken,
+            axRef: WindowAdmissionTestSupport.axRef(for: retryToken),
+            generation: 84,
+            executionOwner: 22
+        )
+        let scope = RescanScope.targeted(appPIDs: [oldToken.pid], nativeSpaceIds: [])
+        controller.axEventHandler.protectDeferredReplacement(
+            windowId: windowId,
+            token: oldToken,
+            scope: scope
+        )
+
+        controller.axEventHandler.retireStaleFocusedAdmissionRetry(
+            pid: retryToken.pid,
+            observationGeneration: 0
+        )
+
+        XCTAssertNil(controller.axEventHandler.admissionRetryStateByWindowId[windowId])
+        XCTAssertNil(
+            controller.axEventHandler.deferredReplacementProtectionsByWindowId[windowId]
+        )
+        XCTAssertEqual(controller.layoutRefreshController.layoutState.pendingMissingConfirmationScope, scope)
+        XCTAssertNotNil(controller.layoutRefreshController.layoutState.missingConfirmationTask)
+    }
+
+    func testRuleReevaluationCancellationSettlesDeferredReplacementProtection() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        defer {
+            controller.axEventHandler.resetCreatedWindowRetryState()
+            controller.layoutRefreshController.resetState()
+        }
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let protectedToken = WindowToken(pid: 467_335, windowId: 467_435)
+        let retryToken = WindowToken(pid: protectedToken.pid, windowId: 467_436)
+        _ = WindowAdmissionTestSupport.track(
+            protectedToken,
+            in: workspaceId,
+            controller: controller
+        )
+        let retryAXRef = WindowAdmissionTestSupport.axRef(for: retryToken)
+        _ = controller.workspaceManager.addWindow(
+            retryAXRef,
+            pid: retryToken.pid,
+            windowId: retryToken.windowId,
+            to: workspaceId,
+            mode: .floating
+        )
+        let windowId = UInt32(retryToken.windowId)
+        let scope = RescanScope.targeted(appPIDs: [retryToken.pid], nativeSpaceIds: [])
+        controller.axEventHandler.admissionRetryStateByWindowId[windowId] =
+            AdmissionRetryState(
+                expectedToken: retryToken,
+                axRef: retryAXRef,
+                reason: .factsDeferred,
+                attempt: 1,
+                generation: 85,
+                trigger: .ruleReevaluation(
+                    token: retryToken,
+                    axRef: retryAXRef
+                ),
+                exhausted: false
+            )
+        controller.axEventHandler.protectDeferredReplacement(
+            windowId: windowId,
+            token: protectedToken,
+            scope: scope
+        )
+
+        controller.axEventHandler.cancelTrackedTilingPromotionRetry(
+            windowId: retryToken.windowId
+        )
+
+        XCTAssertNil(controller.axEventHandler.admissionRetryStateByWindowId[windowId])
+        XCTAssertNil(
+            controller.axEventHandler.deferredReplacementProtectionsByWindowId[windowId]
+        )
+        XCTAssertEqual(controller.layoutRefreshController.layoutState.pendingMissingConfirmationScope, scope)
+        XCTAssertNotNil(controller.layoutRefreshController.layoutState.missingConfirmationTask)
+    }
+
+    func testRuleReevaluationCompletionSettlesDeferredReplacementProtection() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        defer {
+            controller.axEventHandler.resetCreatedWindowRetryState()
+            controller.layoutRefreshController.resetState()
+        }
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let protectedToken = WindowToken(pid: 467_336, windowId: 467_437)
+        let retryToken = WindowToken(pid: protectedToken.pid, windowId: 467_438)
+        _ = WindowAdmissionTestSupport.track(
+            protectedToken,
+            in: workspaceId,
+            controller: controller
+        )
+        let retryAXRef = WindowAdmissionTestSupport.axRef(for: retryToken)
+        let windowId = UInt32(retryToken.windowId)
+        let generation: UInt64 = 86
+        let executionOwner: UInt64 = 23
+        let scope = RescanScope.targeted(appPIDs: [retryToken.pid], nativeSpaceIds: [])
+        controller.axEventHandler.admissionRetryStateByWindowId[windowId] =
+            AdmissionRetryState(
+                expectedToken: retryToken,
+                axRef: retryAXRef,
+                reason: .factsDeferred,
+                attempt: 1,
+                generation: generation,
+                trigger: .ruleReevaluation(token: retryToken, axRef: retryAXRef),
+                exhausted: false,
+                executionPhase: .running(executionOwner)
+            )
+        controller.axEventHandler.protectDeferredReplacement(
+            windowId: windowId,
+            token: protectedToken,
+            scope: scope
+        )
+
+        controller.axEventHandler.finishRuleReevaluationRetry(
+            windowId: windowId,
+            generation: generation,
+            executionOwner: executionOwner,
+            token: retryToken,
+            axRef: retryAXRef,
+            reason: .factsDeferred,
+            stale: false
+        )
+
+        XCTAssertNil(controller.axEventHandler.admissionRetryStateByWindowId[windowId])
+        XCTAssertNil(
+            controller.axEventHandler.deferredReplacementProtectionsByWindowId[windowId]
+        )
+        XCTAssertEqual(controller.layoutRefreshController.layoutState.pendingMissingConfirmationScope, scope)
+        XCTAssertNotNil(controller.layoutRefreshController.layoutState.missingConfirmationTask)
     }
 
     func testStaleFocusedFactCompletionCannotMutateNewerRetryOwner() throws {

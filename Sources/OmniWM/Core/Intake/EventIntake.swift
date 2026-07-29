@@ -12,7 +12,7 @@ enum IntakeEvent: Sendable {
     case appActivated(pid: pid_t)
     case appDeactivated(pid: pid_t)
     case appHidden(pid: pid_t)
-    case appLaunched
+    case appLaunched(pid: pid_t)
     case appTerminated(pid: pid_t)
     case appUnhidden(pid: pid_t)
     case axFocusedWindowChanged(pid: pid_t, callbackGeneration: UInt64?)
