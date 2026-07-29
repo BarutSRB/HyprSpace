@@ -98,6 +98,12 @@ struct ManagedDisplaySpaces: Sendable {
     let fullscreenSpaceIds: Set<UInt64>
 }
 
+enum NativeSpaceWindowInventoryResult: Equatable, Sendable {
+    case unavailable
+    case queryFailed
+    case authoritative([UInt64: [WindowServerInfo]])
+}
+
 private typealias CFReleaseFunc = @convention(c) (CFTypeRef) -> Void
 private let cfRelease: CFReleaseFunc = {
     let lib = dlopen("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation", RTLD_LAZY)!
@@ -153,6 +159,14 @@ final class SkyLight {
     private typealias CopyManagedDisplaySpacesFunc = @convention(c) (Int32) -> CFArray?
     private typealias GetActiveSpaceFunc = @convention(c) (Int32) -> UInt64
     private typealias CopySpacesForWindowsFunc = @convention(c) (Int32, Int32, CFArray) -> CFArray?
+    private typealias CopyWindowsWithOptionsAndTagsFunc = @convention(c) (
+        Int32,
+        UInt32,
+        CFArray,
+        UInt32,
+        UnsafeMutablePointer<UInt64>,
+        UnsafeMutablePointer<UInt64>
+    ) -> CFArray?
     private typealias GetSpaceManagementModeFunc = @convention(c) (Int32) -> Int32
     private typealias DisplayCreateUUIDFromDisplayIDFunc = @convention(c) (CGDirectDisplayID) -> Unmanaged<CFUUID>?
 
@@ -237,11 +251,13 @@ final class SkyLight {
     private let copyManagedDisplaySpaces: CopyManagedDisplaySpacesFunc
     private let getActiveSpace: GetActiveSpaceFunc
     private let copySpacesForWindows: CopySpacesForWindowsFunc
+    private let copyWindowsWithOptionsAndTags: CopyWindowsWithOptionsAndTagsFunc?
     private let getSpaceManagementMode: GetSpaceManagementModeFunc
 
     private let capabilitySymbols: [String]
 
     private static let allSpacesMask: Int32 = 0x7
+    private static let nativeSpaceWindowOptions: UInt32 = 0x7
     private static let fullscreenSpaceType = 4
 
     private nonisolated static let displayCreateUUIDFromDisplayID: DisplayCreateUUIDFromDisplayIDFunc? = {
@@ -343,6 +359,10 @@ final class SkyLight {
         copyManagedDisplaySpaces = resolve("SLSCopyManagedDisplaySpaces", as: CopyManagedDisplaySpacesFunc.self)
         getActiveSpace = resolve("SLSGetActiveSpace", as: GetActiveSpaceFunc.self)
         copySpacesForWindows = resolve("SLSCopySpacesForWindows", as: CopySpacesForWindowsFunc.self)
+        copyWindowsWithOptionsAndTags = resolveOptional(
+            "SLSCopyWindowsWithOptionsAndTags",
+            as: CopyWindowsWithOptionsAndTagsFunc.self
+        )
         getSpaceManagementMode = resolve("SLSGetSpaceManagementMode", as: GetSpaceManagementModeFunc.self)
 
         capabilitySymbols = capability
@@ -579,6 +599,151 @@ final class SkyLight {
 
     func spaceForWindow(_ windowId: UInt32) -> UInt64? {
         spacesForWindow(windowId).first
+    }
+
+    func nativeSpaceWindowInventory(
+        spaceIds: Set<UInt64>
+    ) -> NativeSpaceWindowInventoryResult {
+        guard !spaceIds.contains(0) else { return .queryFailed }
+        guard !spaceIds.isEmpty else { return .authoritative([:]) }
+        guard let copyWindowsWithOptionsAndTags else { return .unavailable }
+
+        let cid = getMainConnectionID()
+        guard cid != 0 else { return .queryFailed }
+
+        var windowIdsBySpace: [UInt64: [UInt32]] = [:]
+        windowIdsBySpace.reserveCapacity(spaceIds.count)
+        var seenWindowIds = Set<UInt32>()
+
+        for spaceId in spaceIds {
+            guard let windowIds = nativeSpaceWindowIds(
+                spaceId: spaceId,
+                connectionId: cid,
+                copyWindowsWithOptionsAndTags: copyWindowsWithOptionsAndTags
+            ) else {
+                return .queryFailed
+            }
+            windowIdsBySpace[spaceId] = windowIds
+            seenWindowIds.formUnion(windowIds)
+        }
+
+        guard !seenWindowIds.isEmpty else {
+            return .authoritative(windowIdsBySpace.mapValues { _ in [] })
+        }
+
+        guard let windowInfoById = queryWindowInfo(windowIds: seenWindowIds) else { return .queryFailed }
+
+        guard let inventory = Self.mergeNativeSpaceWindowInventory(
+            windowIdsBySpace: windowIdsBySpace,
+            windowInfoById: windowInfoById
+        ) else {
+            return .queryFailed
+        }
+        return .authoritative(inventory)
+    }
+
+    func queryWindowInfo(
+        windowIds: Set<UInt32>
+    ) -> [UInt32: WindowServerInfo]? {
+        guard !windowIds.isEmpty else { return [:] }
+        let cid = getMainConnectionID()
+        guard cid != 0,
+              let windowCount = UInt32(exactly: windowIds.count)
+        else {
+            return nil
+        }
+
+        let windowNumbers = windowIds.map { NSNumber(value: $0) } as CFArray
+        guard let query = windowQueryWindows(cid, windowNumbers, windowCount) else { return nil }
+        defer { cfRelease(query) }
+        guard let iterator = windowQueryResultCopyWindows(query) else { return nil }
+        defer { cfRelease(iterator) }
+
+        var windowInfoById: [UInt32: WindowServerInfo] = [:]
+        windowInfoById.reserveCapacity(windowIds.count)
+        while windowIteratorAdvance(iterator) {
+            let windowId = windowIteratorGetWindowID(iterator)
+            guard windowIds.contains(windowId) else { continue }
+            windowInfoById[windowId] = WindowServerInfo(
+                id: windowId,
+                pid: windowIteratorGetPID(iterator),
+                level: windowIteratorGetLevel(iterator),
+                frame: windowIteratorGetBounds(iterator),
+                tags: windowIteratorGetTags(iterator),
+                attributes: windowIteratorGetAttributes(iterator),
+                parentId: windowIteratorGetParentID(iterator)
+            )
+        }
+        return windowInfoById
+    }
+
+    private func nativeSpaceWindowIds(
+        spaceId: UInt64,
+        connectionId: Int32,
+        copyWindowsWithOptionsAndTags: CopyWindowsWithOptionsAndTagsFunc
+    ) -> [UInt32]? {
+        var signedSpaceId = Int64(bitPattern: spaceId)
+        guard let spaceNumber = CFNumberCreate(nil, .sInt64Type, &signedSpaceId) else { return nil }
+        defer { cfRelease(spaceNumber) }
+        let spaces = [spaceNumber] as CFArray
+        var setTags: UInt64 = 0
+        var clearTags: UInt64 = 0
+        guard let windows = copyWindowsWithOptionsAndTags(
+            connectionId,
+            0,
+            spaces,
+            Self.nativeSpaceWindowOptions,
+            &setTags,
+            &clearTags
+        ) else {
+            return nil
+        }
+        defer { cfRelease(windows) }
+
+        var windowIds: [UInt32] = []
+        let count = CFArrayGetCount(windows)
+        windowIds.reserveCapacity(count)
+        for index in 0 ..< count {
+            let pointer = CFArrayGetValueAtIndex(windows, index)
+            let rawWindowId = unsafeBitCast(pointer, to: CFTypeRef.self)
+            guard let numericWindowId = Self.numericUInt64(rawWindowId),
+                  let windowId = UInt32(exactly: numericWindowId),
+                  windowId != 0
+            else {
+                return nil
+            }
+            windowIds.append(windowId)
+        }
+        return windowIds
+    }
+
+    nonisolated static func mergeNativeSpaceWindowInventory(
+        windowIdsBySpace: [UInt64: [UInt32]],
+        windowInfoById: [UInt32: WindowServerInfo]
+    ) -> [UInt64: [WindowServerInfo]]? {
+        var inventory: [UInt64: [WindowServerInfo]] = [:]
+        inventory.reserveCapacity(windowIdsBySpace.count)
+
+        for (spaceId, windowIds) in windowIdsBySpace {
+            var windows: [WindowServerInfo] = []
+            windows.reserveCapacity(windowIds.count)
+            var seenWindowIds = Set<UInt32>()
+            seenWindowIds.reserveCapacity(windowIds.count)
+            for windowId in windowIds where seenWindowIds.insert(windowId).inserted {
+                guard let info = windowInfoById[windowId] else { return nil }
+                windows.append(info)
+            }
+            inventory[spaceId] = windows
+        }
+
+        return inventory
+    }
+
+    nonisolated static func isSuitableNativeSpaceWindow(_ info: WindowServerInfo) -> Bool {
+        guard info.id != 0, info.pid > 0 else { return false }
+        guard info.parentId == 0 else { return false }
+        guard info.level == 0 || info.level == 3 || info.level == 8 else { return false }
+        return info.hasDocumentTag || info.hasFloatingTag
     }
 
     func managedSpaces() -> [ManagedDisplaySpaces] {
