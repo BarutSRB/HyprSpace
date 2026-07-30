@@ -259,13 +259,6 @@ final class SpaceTracker {
         controller.workspaceManager.reconcileNativeFullscreenWithTopology(for: entry.token)
     }
 
-    func noteWindowDestroyed(windowId: Int) {
-        guard let controller else { return }
-        var topology = controller.workspaceManager.spaceTopology
-        guard topology.windowSpace.removeValue(forKey: windowId) != nil else { return }
-        controller.workspaceManager.commitSpaceTopology(topology)
-    }
-
     private func refreshedTopology(preserving topology: SpaceTopology) -> SpaceTopology? {
         let managed = SkyLight.shared.managedSpaces()
         guard !managed.isEmpty else { return nil }

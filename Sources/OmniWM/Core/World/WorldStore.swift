@@ -231,6 +231,15 @@ final class WorldStore {
 
         case let .windowRekeyed(from, to, workspaceId, _, _, newAXRef, metadata, _):
             guard phase == .beforePlan else { return }
+            let previousSpaceId = from.windowId == to.windowId
+                ? nil
+                : spaceTopology.windowSpace.removeValue(forKey: from.windowId)
+            if spaceTopology.windowSpace[to.windowId] == nil,
+               let previousSpaceId,
+               spaceTopology.isKnownSpace(previousSpaceId)
+            {
+                spaceTopology.windowSpace[to.windowId] = previousSpaceId
+            }
             model.rekeyWindow(
                 from: from,
                 to: to,
@@ -243,6 +252,7 @@ final class WorldStore {
         case let .windowRemoved(token, _, _):
             guard phase == .afterPlan else { return }
             model.removeWindow(key: token)
+            spaceTopology.windowSpace.removeValue(forKey: token.windowId)
             reconcileNiriMembership(for: token, keeping: nil, monitors: monitors)
 
         case let .workspaceAssigned(token, _, to, _, _):

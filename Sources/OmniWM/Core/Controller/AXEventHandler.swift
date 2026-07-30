@@ -458,14 +458,12 @@ final class AXEventHandler {
                 .init(action: .cgsDestroyed, windowId: Int(windowId), reason: "destroyed")
             )
             handleCGSSpaceWindowDestroyed(windowId: windowId)
-            controller.spaceTracker.noteWindowDestroyed(windowId: Int(windowId))
 
         case let .closed(windowId):
             WindowAdmissionTrace.record(
                 .init(action: .cgsDestroyed, windowId: Int(windowId), reason: "closed")
             )
             handleCGSWindowDestroyed(windowId: windowId, evidence: .windowClosed)
-            controller.spaceTracker.noteWindowDestroyed(windowId: Int(windowId))
 
         case let .frameChanged(windowId):
             handleFrameChanged(windowId: windowId)
@@ -2530,35 +2528,32 @@ final class AXEventHandler {
         workspaceManager.suppressFocusBorder(for: focusedToken)
     }
 
-    func resetManagedReplacementState(for appPIDs: Set<pid_t>? = nil) {
-        if let appPIDs {
-            let keys = Set(pendingManagedReplacementTasks.keys)
-                .union(pendingManagedReplacementBursts.keys)
-                .filter { appPIDs.contains($0.pid) }
-            for key in keys {
-                pendingManagedReplacementTasks.removeValue(forKey: key)?.cancel()
-                pendingManagedReplacementBursts.removeValue(forKey: key)
+    func awaitPendingManagedReplacementBursts(for appPIDs: Set<pid_t>? = nil) async {
+        let tasks = pendingManagedReplacementTasks
+            .filter { appPIDs?.contains($0.key.pid) ?? true }
+            .sorted {
+                ($0.key.pid, $0.key.workspaceId.uuidString)
+                    < ($1.key.pid, $1.key.workspaceId.uuidString)
             }
-            if let controller {
-                for pid in appPIDs {
-                    for intent in controller.intentLedger.openReplacementFocusIntents(pid: pid) {
-                        _ = controller.intentLedger.cancel(id: intent.id)
-                    }
-                }
-            }
-        } else {
-            for (_, task) in pendingManagedReplacementTasks {
-                task.cancel()
-            }
-            pendingManagedReplacementTasks.removeAll()
-            pendingManagedReplacementBursts.removeAll()
-            if let controller {
-                for intent in controller.intentLedger.openReplacementFocusIntents() {
-                    _ = controller.intentLedger.cancel(id: intent.id)
-                }
-            }
-            nextManagedReplacementEventSequence = 0
+            .map(\.value)
+        for task in tasks {
+            guard !Task.isCancelled else { return }
+            await task.value
         }
+    }
+
+    func resetManagedReplacementState() {
+        for (_, task) in pendingManagedReplacementTasks {
+            task.cancel()
+        }
+        pendingManagedReplacementTasks.removeAll()
+        pendingManagedReplacementBursts.removeAll()
+        if let controller {
+            for intent in controller.intentLedger.openReplacementFocusIntents() {
+                _ = controller.intentLedger.cancel(id: intent.id)
+            }
+        }
+        nextManagedReplacementEventSequence = 0
     }
 
     private func prepareCreateCandidate(

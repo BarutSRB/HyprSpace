@@ -142,6 +142,108 @@ final class ScopedMissingDetectionTests: XCTestCase {
         )
     }
 
+    func testExactDepartedSpaceNativeFullscreenTokenUsesTwoMissConfirmation() throws {
+        let (controller, workspaceId) = try makeFixture()
+        let token = WindowToken(pid: 468_124, windowId: 468_125)
+        track([token], in: workspaceId, controller: controller)
+        XCTAssertTrue(controller.workspaceManager.requestNativeFullscreenEnter(token, in: workspaceId))
+        XCTAssertTrue(controller.workspaceManager.markNativeFullscreenSuspended(token))
+
+        XCTAssertTrue(
+            controller.layoutRefreshController.confirmedMissingEntries(
+                keys: [],
+                eligibleKeys: [token],
+                requiredConsecutiveMisses: 2
+            ).isEmpty
+        )
+        XCTAssertTrue(
+            controller.layoutRefreshController.confirmedMissingEntries(
+                keys: [],
+                eligibleKeys: [token],
+                nativeFullscreenRetirementKeys: [token],
+                requiredConsecutiveMisses: 2
+            ).isEmpty
+        )
+        XCTAssertEqual(
+            controller.layoutRefreshController.confirmedMissingEntries(
+                keys: [],
+                eligibleKeys: [token],
+                nativeFullscreenRetirementKeys: [token],
+                requiredConsecutiveMisses: 2
+            ).map(\.token),
+            [token]
+        )
+    }
+
+    func testExactNativeFullscreenRetirementKeysExcludeUnscopedAndKnownSpaceWindows() throws {
+        let (controller, workspaceId) = try makeFixture()
+        let departedToken = WindowToken(pid: 468_126, windowId: 468_127)
+        let unscopedToken = WindowToken(pid: departedToken.pid, windowId: 468_128)
+        let knownSpaceToken = WindowToken(pid: departedToken.pid, windowId: 468_129)
+        let standardToken = WindowToken(pid: departedToken.pid, windowId: 468_130)
+        track(
+            [departedToken, unscopedToken, knownSpaceToken, standardToken],
+            in: workspaceId,
+            controller: controller
+        )
+        for token in [departedToken, unscopedToken, knownSpaceToken] {
+            XCTAssertTrue(controller.workspaceManager.markNativeFullscreenSuspended(token))
+        }
+        let currentSpaceId: UInt64 = 468_131
+        controller.workspaceManager.commitSpaceTopology(
+            SpaceTopology(
+                displays: [
+                    .init(
+                        displayIdentifier: "primary",
+                        spaceIds: [currentSpaceId],
+                        currentSpaceId: currentSpaceId
+                    )
+                ],
+                activeSpaceId: currentSpaceId,
+                fullscreenSpaceIds: [],
+                windowSpace: [knownSpaceToken.windowId: currentSpaceId]
+            )
+        )
+
+        let keys = controller.layoutRefreshController.exactNativeFullscreenRetirementKeys(
+            scope: .targeted(
+                appPIDs: [],
+                nativeSpaceIds: [],
+                nativeSpaceWindowIdsByPID: [
+                    departedToken.pid: [
+                        departedToken.windowId,
+                        knownSpaceToken.windowId,
+                        standardToken.windowId
+                    ]
+                ]
+            ),
+            trackedEntries: controller.workspaceManager.allEntries()
+        )
+
+        XCTAssertEqual(keys, [departedToken])
+    }
+
+    func testStructuralReplacementRestorePreservesAppFullscreenState() throws {
+        let (controller, workspaceId) = try makeFixture()
+        let oldToken = WindowToken(pid: 468_132, windowId: 468_133)
+        let newToken = WindowToken(pid: oldToken.pid, windowId: 468_134)
+        track([oldToken], in: workspaceId, controller: controller)
+        XCTAssertTrue(controller.workspaceManager.markNativeFullscreenSuspended(oldToken))
+
+        controller.layoutRefreshController.restoreNativeFullscreenAfterStructuralReplacement(
+            from: oldToken,
+            to: newToken,
+            appFullscreen: true
+        )
+
+        XCTAssertNotNil(controller.workspaceManager.nativeFullscreenRecord(for: oldToken))
+        XCTAssertEqual(controller.workspaceManager.layoutReason(for: oldToken), .nativeFullscreen)
+        XCTAssertFalse(
+            controller.layoutRefreshController
+                .consumeNativeFullscreenRestoredFrameApply(for: oldToken)
+        )
+    }
+
     func testSeenEligibleTokenClearsItsMissCount() throws {
         let (controller, workspaceId) = try makeFixture()
         let token = WindowToken(pid: 468_110, windowId: 468_111)

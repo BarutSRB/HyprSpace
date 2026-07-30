@@ -6,6 +6,46 @@ import Foundation
 
 @MainActor
 extension LayoutRefreshController {
+    func restoreNativeFullscreenAfterStructuralReplacement(
+        from oldToken: WindowToken,
+        to newToken: WindowToken,
+        appFullscreen: Bool
+    ) {
+        guard !appFullscreen,
+              let workspaceManager = controller?.workspaceManager
+        else {
+            return
+        }
+        let trackedToken = workspaceManager.entry(for: newToken) == nil
+            ? oldToken
+            : newToken
+        guard workspaceManager.nativeFullscreenRecord(for: trackedToken) != nil
+            || workspaceManager.layoutReason(for: trackedToken) == .nativeFullscreen
+        else {
+            return
+        }
+        _ = workspaceManager.restoreNativeFullscreenRecord(for: trackedToken)
+        markNativeFullscreenRestoredForFrameApply(trackedToken)
+    }
+
+    func exactNativeFullscreenRetirementKeys(
+        scope: RescanScope,
+        trackedEntries: [WindowState]
+    ) -> Set<WindowToken> {
+        guard case let .targeted(_, _, nativeSpaceWindowIdsByPID) = scope,
+              let workspaceManager = controller?.workspaceManager
+        else { return [] }
+        return Set(
+            trackedEntries.lazy
+                .filter {
+                    $0.layoutReason == .nativeFullscreen
+                        && nativeSpaceWindowIdsByPID[$0.pid]?.contains($0.windowId) == true
+                        && workspaceManager.spaceTopology.spaceForWindow($0.windowId) == nil
+                }
+                .map(\.token)
+        )
+    }
+
     struct FullRescanFloatingFocusCandidate: Equatable {
         let token: WindowToken
         let workspaceId: WorkspaceDescriptor.ID
@@ -105,18 +145,21 @@ extension LayoutRefreshController {
     func confirmedMissingEntriesDuringFullRescan(
         seenKeys: Set<WindowToken>,
         eligibleKeys: Set<WindowToken>?,
+        nativeFullscreenRetirementKeys: Set<WindowToken> = [],
         permitsMissingRetirement: Bool
     ) -> [WindowState] {
         if permitsMissingRetirement {
             return confirmedMissingEntries(
                 keys: seenKeys,
                 eligibleKeys: eligibleKeys,
+                nativeFullscreenRetirementKeys: nativeFullscreenRetirementKeys,
                 requiredConsecutiveMisses: 2
             )
         }
         _ = confirmedMissingEntries(
             keys: seenKeys,
             eligibleKeys: [],
+            nativeFullscreenRetirementKeys: [],
             requiredConsecutiveMisses: 2
         )
         return []
@@ -125,6 +168,7 @@ extension LayoutRefreshController {
     func confirmedMissingEntries(
         keys activeKeys: Set<WindowToken>,
         eligibleKeys: Set<WindowToken>? = nil,
+        nativeFullscreenRetirementKeys: Set<WindowToken> = [],
         requiredConsecutiveMisses: Int = 1
     ) -> [WindowState] {
         guard let workspaceManager = controller?.workspaceManager else { return [] }
@@ -144,7 +188,10 @@ extension LayoutRefreshController {
         confirmedMissing.reserveCapacity(knownEntries.count)
         for entry in knownEntries where !activeKeys.contains(entry.token) {
             guard let handle = workspaceManager.handle(for: entry.token) else { continue }
-            if entry.layoutReason == .nativeFullscreen
+            if (
+                entry.layoutReason == .nativeFullscreen
+                    && !nativeFullscreenRetirementKeys.contains(entry.token)
+            )
                 || workspaceManager.spaceTopology.isWindowOnKnownInactiveSpace(entry.windowId)
             {
                 layoutState.consecutiveMissCountByHandle.removeValue(forKey: handle)
@@ -263,6 +310,14 @@ extension LayoutRefreshController {
 
     func markNativeFullscreenRestoredForFrameApply(_ token: WindowToken) {
         nativeFullscreenRestoredFrameApplyTokens.insert(token)
+    }
+
+    func rekeyNativeFullscreenRestoredFrameApply(
+        from oldToken: WindowToken,
+        to newToken: WindowToken
+    ) {
+        guard nativeFullscreenRestoredFrameApplyTokens.remove(oldToken) != nil else { return }
+        nativeFullscreenRestoredFrameApplyTokens.insert(newToken)
     }
 
     func consumeNativeFullscreenRestoredFrameApply(for token: WindowToken) -> Bool {

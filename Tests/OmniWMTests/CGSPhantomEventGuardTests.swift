@@ -50,6 +50,21 @@ final class CGSPhantomEventGuardTests: XCTestCase {
             pid: 945_001, windowId: Int(windowId), to: workspaceId
         )
         _ = controller.niriEngine?.addWindow(token: token, to: workspaceId, afterSelection: nil)
+        let spaceId: UInt64 = 945_201
+        controller.workspaceManager.commitSpaceTopology(
+            SpaceTopology(
+                displays: [
+                    .init(
+                        displayIdentifier: "test-display",
+                        spaceIds: [spaceId],
+                        currentSpaceId: spaceId
+                    )
+                ],
+                activeSpaceId: spaceId,
+                fullscreenSpaceIds: [],
+                windowSpace: [token.windowId: spaceId]
+            )
+        )
         controller.axEventHandler.windowInfoProvider = { id in
             guard id == windowId else { return nil }
             return WindowServerInfo(
@@ -66,6 +81,10 @@ final class CGSPhantomEventGuardTests: XCTestCase {
 
         XCTAssertNotNil(controller.workspaceManager.entry(for: token))
         XCTAssertNotNil(controller.niriEngine?.findNode(for: token, in: workspaceId))
+        XCTAssertEqual(
+            controller.workspaceManager.spaceTopology.spaceForWindow(token.windowId),
+            spaceId
+        )
         XCTAssertEqual(controller.workspaceManager.invariantViolationCountsDump(), "clean")
     }
 
@@ -194,7 +213,10 @@ final class CGSPhantomEventGuardTests: XCTestCase {
         XCTAssertEqual(controller.workspaceManager.layoutReason(for: targetToken), .nativeFullscreen)
         XCTAssertTrue(controller.workspaceManager.showsNativeFullscreenPlaceholder(for: targetToken))
         XCTAssertTrue(controller.workspaceManager.spaceTopology.isFullscreenSpace(fullscreenSpaceId))
-        XCTAssertNil(controller.workspaceManager.spaceTopology.spaceForWindow(targetToken.windowId))
+        XCTAssertEqual(
+            controller.workspaceManager.spaceTopology.spaceForWindow(targetToken.windowId),
+            fullscreenSpaceId
+        )
 
         controller.axEventHandler.handleCGSEvent(.closed(windowId: UInt32(targetToken.windowId)))
 
@@ -217,6 +239,7 @@ final class CGSPhantomEventGuardTests: XCTestCase {
         XCTAssertNotNil(controller.workspaceManager.entry(for: peerToken))
         XCTAssertNotNil(engine.findNode(for: peerToken, in: workspaceId))
         XCTAssertTrue(controller.workspaceManager.spaceTopology.isFullscreenSpace(fullscreenSpaceId))
+        XCTAssertNil(controller.workspaceManager.spaceTopology.spaceForWindow(targetToken.windowId))
 
         controller.axEventHandler.handleCGSEvent(
             .destroyed(windowId: UInt32(targetToken.windowId), spaceId: fullscreenSpaceId)
@@ -279,9 +302,39 @@ final class CGSPhantomEventGuardTests: XCTestCase {
                 .contains("deadlineReset: false")
         )
 
-        let removed = try await Self.waitForRemoval(of: targetToken, controller: controller)
+        let nativeSpaceId: UInt64 = 948_201
+        var inventoryCallCount = 0
+        var sawTargetAtInventory = false
+        controller.layoutRefreshController.nativeSpaceWindowInventoryProvider = { spaceIds in
+            XCTAssertEqual(spaceIds, [nativeSpaceId])
+            inventoryCallCount += 1
+            sawTargetAtInventory =
+                sawTargetAtInventory || controller.workspaceManager.entry(for: targetToken) != nil
+            return .authoritative([
+                nativeSpaceId: [
+                    WindowServerInfo(
+                        id: UInt32(peerToken.windowId),
+                        pid: peerToken.pid,
+                        level: 0,
+                        frame: CGRect(x: 0, y: 0, width: 800, height: 600)
+                    )
+                ]
+            ])
+        }
+        controller.layoutRefreshController.requestFullRescan(
+            reason: .activeSpaceChanged,
+            scope: .targeted(
+                appPIDs: [],
+                nativeSpaceIds: [nativeSpaceId],
+                nativeSpaceWindowIdsByPID: [
+                    pid: [peerToken.windowId]
+                ]
+            )
+        )
+        await WindowAdmissionTestSupport.drainLayoutRefreshes(controller)
 
-        XCTAssertTrue(removed)
+        XCTAssertEqual(inventoryCallCount, 1)
+        XCTAssertFalse(sawTargetAtInventory)
         XCTAssertNil(controller.workspaceManager.entry(for: targetToken))
         XCTAssertNil(controller.workspaceManager.nativeFullscreenRecord(for: targetToken))
         XCTAssertNil(engine.findNode(for: targetToken, in: workspaceId))
@@ -295,10 +348,19 @@ final class CGSPhantomEventGuardTests: XCTestCase {
         XCTAssertNotEqual(controller.workspaceManager.pendingFocusedToken, targetToken)
         XCTAssertNotNil(controller.workspaceManager.entry(for: peerToken))
         XCTAssertNotNil(engine.findNode(for: peerToken, in: workspaceId))
+        let replacementTraceLines = controller.axEventHandler.managedReplacementTraceDump()
+            .split(separator: "\n")
+        XCTAssertEqual(
+            replacementTraceLines.filter {
+                $0.contains(" flushed(policy:")
+                    && $0.contains("destroyCount: 1")
+            }.count,
+            1
+        )
         XCTAssertEqual(controller.workspaceManager.invariantViolationCountsDump(), "clean")
     }
 
-    func testCGSCloseStillRekeysMatchedManagedReplacement() throws {
+    func testManagedReplacementAwaitPreservesLateMatchedCreate() async throws {
         let controller = Self.controller()
         let workspaceId = try XCTUnwrap(controller.workspaceManager.workspaceId(for: "1", createIfMissing: true))
         _ = controller.workspaceManager.focusWorkspace(named: "1")
@@ -344,27 +406,53 @@ final class CGSPhantomEventGuardTests: XCTestCase {
         XCTAssertTrue(controller.workspaceManager.markNativeFullscreenSuspended(oldToken))
         controller.axEventHandler.handleCGSEvent(.closed(windowId: UInt32(oldToken.windowId)))
         XCTAssertNotNil(controller.workspaceManager.entry(for: oldToken))
+        let desktopSpaceId: UInt64 = 949_201
+        controller.workspaceManager.commitSpaceTopology(
+            SpaceTopology(
+                displays: [
+                    .init(
+                        displayIdentifier: "test-display",
+                        spaceIds: [desktopSpaceId],
+                        currentSpaceId: desktopSpaceId
+                    )
+                ],
+                activeSpaceId: desktopSpaceId,
+                fullscreenSpaceIds: [],
+                windowSpace: [
+                    oldToken.windowId: desktopSpaceId,
+                    peerToken.windowId: desktopSpaceId
+                ]
+            )
+        )
 
         let newToken = WindowToken(pid: pid, windowId: 949_103)
         let newAXRef = AXWindowRef(
             element: AXUIElementCreateApplication(pid),
             windowId: newToken.windowId
         )
-        controller.axEventHandler.enqueueManagedReplacementCreate(
-            .init(
-                windowId: UInt32(newToken.windowId),
-                token: newToken,
-                axRef: newAXRef,
-                ruleEffects: .none,
-                admissionHints: .none,
-                replacementMetadata: metadata,
-                structuralReplacementMatch: nil,
-                requiresPostCreateLifecycleVerification: false
+        var createDelivered = false
+        let createTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(20))
+            createDelivered = true
+            controller.axEventHandler.enqueueManagedReplacementCreate(
+                .init(
+                    windowId: UInt32(newToken.windowId),
+                    token: newToken,
+                    axRef: newAXRef,
+                    ruleEffects: .none,
+                    admissionHints: .none,
+                    replacementMetadata: metadata,
+                    structuralReplacementMatch: nil,
+                    requiresPostCreateLifecycleVerification: false
+                )
             )
-        )
+        }
+        await controller.axEventHandler.awaitPendingManagedReplacementBursts(for: [pid])
 
+        XCTAssertTrue(createDelivered)
         XCTAssertNil(controller.workspaceManager.entry(for: oldToken))
         XCTAssertNotNil(controller.workspaceManager.entry(for: newToken))
+        await createTask.value
         XCTAssertTrue(controller.workspaceManager.handle(for: newToken) === oldHandle)
         let newNode = try XCTUnwrap(engine.findNode(for: newToken, in: workspaceId))
         XCTAssertTrue(newNode === oldNode)
@@ -381,7 +469,69 @@ final class CGSPhantomEventGuardTests: XCTestCase {
         XCTAssertTrue(controller.workspaceManager.showsNativeFullscreenPlaceholder(for: newToken))
         XCTAssertFalse(controller.workspaceManager.showsNativeFullscreenPlaceholder(for: oldToken))
         XCTAssertNotNil(controller.workspaceManager.entry(for: peerToken))
+        XCTAssertNil(controller.workspaceManager.spaceTopology.spaceForWindow(oldToken.windowId))
+        XCTAssertEqual(
+            controller.workspaceManager.spaceTopology.spaceForWindow(newToken.windowId),
+            desktopSpaceId
+        )
+        let replacementTraceLines = controller.axEventHandler.managedReplacementTraceDump()
+            .split(separator: "\n")
+        XCTAssertEqual(
+            replacementTraceLines.filter { $0.contains(" flushed(policy:") }.count,
+            1
+        )
+        XCTAssertEqual(
+            replacementTraceLines.filter { $0.contains(" matched(policy:") }.count,
+            1
+        )
         XCTAssertEqual(controller.workspaceManager.invariantViolationCountsDump(), "clean")
+    }
+
+    func testManagedReplacementDoesNotTransferVanishedSpaceMembership() throws {
+        let controller = Self.controller()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let oldToken = WindowToken(pid: 949_301, windowId: 949_302)
+        let newToken = WindowToken(pid: oldToken.pid, windowId: 949_303)
+        _ = controller.workspaceManager.addWindow(
+            AXWindowRef(
+                element: AXUIElementCreateApplication(oldToken.pid),
+                windowId: oldToken.windowId
+            ),
+            pid: oldToken.pid,
+            windowId: oldToken.windowId,
+            to: workspaceId
+        )
+        let currentSpaceId: UInt64 = 949_304
+        let vanishedSpaceId: UInt64 = 949_305
+        controller.workspaceManager.commitSpaceTopology(
+            SpaceTopology(
+                displays: [
+                    .init(
+                        displayIdentifier: "test-display",
+                        spaceIds: [currentSpaceId],
+                        currentSpaceId: currentSpaceId
+                    )
+                ],
+                activeSpaceId: currentSpaceId,
+                fullscreenSpaceIds: [],
+                windowSpace: [oldToken.windowId: vanishedSpaceId]
+            )
+        )
+
+        let entry = controller.workspaceManager.rekeyWindow(
+            from: oldToken,
+            to: newToken,
+            newAXRef: AXWindowRef(
+                element: AXUIElementCreateApplication(newToken.pid),
+                windowId: newToken.windowId
+            )
+        )
+
+        XCTAssertNotNil(entry)
+        XCTAssertNil(controller.workspaceManager.spaceTopology.spaceForWindow(oldToken.windowId))
+        XCTAssertNil(controller.workspaceManager.spaceTopology.spaceForWindow(newToken.windowId))
     }
 
     func testCGSCreateForTrackedWindowVerifiesIdentityWithoutMutation() throws {
@@ -466,21 +616,6 @@ final class CGSPhantomEventGuardTests: XCTestCase {
             parentWindowId: nil,
             frame: frame
         )
-    }
-
-    private static func waitForRemoval(
-        of token: WindowToken,
-        controller: WMController
-    ) async throws -> Bool {
-        let clock = ContinuousClock()
-        let deadline = clock.now.advanced(by: .seconds(1))
-        while clock.now < deadline {
-            if controller.workspaceManager.entry(for: token) == nil {
-                return true
-            }
-            try await clock.sleep(for: .milliseconds(10))
-        }
-        return controller.workspaceManager.entry(for: token) == nil
     }
 
     private static func controller() -> WMController {

@@ -500,6 +500,10 @@ extension AXEventHandler {
                 to: newToken,
                 entry: entry
             )
+            controller.layoutRefreshController.rekeyNativeFullscreenRestoredFrameApply(
+                from: oldToken,
+                to: newToken
+            )
             controller.dwindleLayoutHandler.rekeyPendingGroupRevealTransaction(
                 from: oldToken,
                 to: newToken,

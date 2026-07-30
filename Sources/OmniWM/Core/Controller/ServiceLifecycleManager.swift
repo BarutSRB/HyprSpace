@@ -30,10 +30,22 @@ enum NativeSpaceInventoryScopeResolver {
               !topologies.isEmpty
         else { return .all }
 
+        let currentKnownSpaceIds = Set(
+            topologies.last?.displays.flatMap(\.spaceIds) ?? []
+        )
+        var relevantSpaceIds = spaceIds
+        for topology in topologies.dropLast() {
+            for display in topology.displays {
+                for spaceId in display.spaceIds where !currentKnownSpaceIds.contains(spaceId) {
+                    relevantSpaceIds.insert(spaceId)
+                }
+            }
+        }
+
         var windowIdsByPID: [pid_t: Set<Int>] = [:]
         for window in managedWindows
             where topologies.contains(where: { topology in
-                topology.spaceForWindow(window.windowId).map(spaceIds.contains) == true
+                topology.spaceForWindow(window.windowId).map(relevantSpaceIds.contains) == true
             })
         {
             windowIdsByPID[window.pid, default: []].insert(window.windowId)

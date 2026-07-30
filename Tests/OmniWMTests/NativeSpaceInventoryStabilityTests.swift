@@ -346,6 +346,41 @@ final class NativeSpaceInventoryStabilityTests: XCTestCase {
         )
     }
 
+    func testScopeIncludesManagedWindowsFromSpaceMissingInCurrentTopology() {
+        var previous = makeTopology(
+            displays: [
+                .init(displayIdentifier: "primary", spaceIds: [1, 2, 99], currentSpaceId: 99)
+            ],
+            currentSpaceId: 99,
+            activeSpaceId: 99,
+            fullscreenSpaceIds: [99]
+        )
+        previous.windowSpace = [10: 99, 20: 2]
+        var current = makeTopology(
+            displays: [
+                .init(displayIdentifier: "primary", spaceIds: [1, 2], currentSpaceId: 1)
+            ]
+        )
+        current.windowSpace = [30: 1]
+
+        XCTAssertEqual(
+            NativeSpaceInventoryScopeResolver.scope(
+                spaceIds: [1],
+                topologies: [previous, current],
+                managedWindows: [
+                    .init(pid: 100, windowId: 10),
+                    .init(pid: 200, windowId: 20),
+                    .init(pid: 300, windowId: 30)
+                ]
+            ),
+            .targeted(
+                appPIDs: [],
+                nativeSpaceIds: [1],
+                nativeSpaceWindowIdsByPID: [100: [10], 300: [30]]
+            )
+        )
+    }
+
     func testScopeFallsBackToAllForMissingOrInvalidSpaceEvidence() {
         XCTAssertEqual(
             NativeSpaceInventoryScopeResolver.scope(

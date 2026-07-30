@@ -382,6 +382,57 @@ final class FullRescanWindowAdmissionTests: XCTestCase {
         XCTAssertNil(controller.layoutRefreshController.layoutState.missingConfirmationTask)
     }
 
+    func testStructuralReplacementRestoreClearsPostRekeyNativeFullscreenState() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let pid: pid_t = 467_982
+        let oldToken = WindowToken(pid: pid, windowId: 467_983)
+        let newToken = WindowToken(pid: pid, windowId: 467_984)
+        let frame = CGRect(x: 80, y: 60, width: 720, height: 520)
+        let bundleId = replacementBundleId(pid)
+        _ = controller.workspaceManager.addWindow(
+            WindowAdmissionTestSupport.axRef(for: oldToken),
+            pid: pid,
+            windowId: oldToken.windowId,
+            to: workspaceId
+        )
+        XCTAssertTrue(controller.workspaceManager.requestNativeFullscreenEnter(oldToken, in: workspaceId))
+        XCTAssertTrue(controller.workspaceManager.markNativeFullscreenSuspended(oldToken))
+        let facts = replacementFacts(token: newToken, bundleId: bundleId, frame: frame)
+
+        XCTAssertTrue(
+            controller.axEventHandler.rekeyStructuralManagedReplacement(
+                match: .init(
+                    token: oldToken,
+                    workspaceId: workspaceId,
+                    source: .liveInvisible
+                ),
+                token: newToken,
+                windowId: UInt32(newToken.windowId),
+                axRef: WindowAdmissionTestSupport.axRef(for: newToken),
+                bundleId: bundleId,
+                mode: .tiling,
+                facts: facts
+            )
+        )
+        controller.layoutRefreshController.restoreNativeFullscreenAfterStructuralReplacement(
+            from: oldToken,
+            to: newToken,
+            appFullscreen: false
+        )
+
+        XCTAssertNil(controller.workspaceManager.entry(for: oldToken))
+        XCTAssertNotNil(controller.workspaceManager.entry(for: newToken))
+        XCTAssertNil(controller.workspaceManager.nativeFullscreenRecord(for: newToken))
+        XCTAssertEqual(controller.workspaceManager.layoutReason(for: newToken), .standard)
+        XCTAssertTrue(
+            controller.layoutRefreshController
+                .consumeNativeFullscreenRestoredFrameApply(for: newToken)
+        )
+    }
+
     func testDeferredReplacementRetryExhaustionSchedulesOneMissingConfirmation() throws {
         let controller = WindowAdmissionTestSupport.controller()
         defer {

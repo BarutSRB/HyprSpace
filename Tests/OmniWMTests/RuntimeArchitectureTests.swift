@@ -5036,7 +5036,17 @@ final class RuntimeArchitectureTests: XCTestCase {
         XCTAssertEqual(record.transition, .suspended)
         XCTAssertTrue(controller.workspaceManager.showsNativeFullscreenPlaceholder(for: targetToken))
         XCTAssertNotNil(controller.workspaceManager.entry(for: targetToken))
-        XCTAssertFalse(controller.workspaceManager.isWindowOnObservedNativeFullscreenSpace(targetToken.windowId))
+        XCTAssertTrue(controller.workspaceManager.isWindowOnObservedNativeFullscreenSpace(targetToken.windowId))
+        XCTAssertEqual(
+            controller.workspaceManager.spaceTopology.spaceForWindow(targetToken.windowId),
+            fullscreenSpaceId
+        )
+
+        controller.axEventHandler.handleCGSEvent(
+            .closed(windowId: UInt32(targetToken.windowId))
+        )
+
+        XCTAssertNil(controller.workspaceManager.entry(for: targetToken))
         XCTAssertNil(controller.workspaceManager.spaceTopology.spaceForWindow(targetToken.windowId))
         XCTAssertEqual(controller.workspaceManager.invariantViolationCountsDump(), "clean")
     }

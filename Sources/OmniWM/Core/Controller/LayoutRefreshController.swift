@@ -1295,23 +1295,21 @@ import QuartzCore
     }
 
     private func executeFullRefresh(refresh: ScheduledRefresh, generation: UInt64) async throws -> Bool {
-        layoutState.activeFullEnumerationCount += 1
-        defer { layoutState.activeFullEnumerationCount -= 1 }
-
         guard let controller else { return false }
         guard isCurrentRefreshGeneration(generation) else { return false }
-        switch refresh.rescanScope {
-        case .all:
-            controller.axEventHandler.resetManagedReplacementState()
-        case .targeted:
-            controller.axEventHandler.resetManagedReplacementState(
-                for: refresh.rescanScope.targetedPIDs
-            )
-        }
 
         if controller.isFrontmostAppLockScreen() || controller.isLockScreenActive {
             return false
         }
+
+        await controller.axEventHandler.awaitPendingManagedReplacementBursts(
+            for: refresh.rescanScope == .all ? nil : refresh.rescanScope.targetedPIDs
+        )
+        try Task.checkCancellation()
+        guard isCurrentRefreshGeneration(generation) else { return false }
+
+        layoutState.activeFullEnumerationCount += 1
+        defer { layoutState.activeFullEnumerationCount -= 1 }
 
         var plan = try await buildFullEffectPlan(
             removalPayloads: refresh.windowRemovalPayloads,
@@ -1730,6 +1728,11 @@ import QuartzCore
                    sizeConstraints: candidate.enumeratedWindow.decisionEvidence.sizeConstraints
                )
             {
+                restoreNativeFullscreenAfterStructuralReplacement(
+                    from: structuralMatch.token,
+                    to: token,
+                    appFullscreen: appFullscreen
+                )
                 seenKeys.insert(token)
                 seenKeys.insert(structuralMatch.token)
                 affectedWorkspaceIds.insert(structuralMatch.workspaceId)
@@ -1920,17 +1923,22 @@ import QuartzCore
         let shouldPreserveMissingWindows = hadNativeFullscreenLifecycleContextAtStart
             || controller.workspaceManager.hasNativeFullscreenLifecycleContext
         let trackedEntries = controller.workspaceManager.allEntries()
+        let nativeFullscreenRetirementKeys = exactNativeFullscreenRetirementKeys(
+            scope: scope,
+            trackedEntries: trackedEntries
+        )
         if shouldPreserveMissingWindows {
-            // Native macOS fullscreen moves the app onto its own Space, so visible-window
-            // enumeration temporarily excludes the rest of the managed workspace.
-            for entry in trackedEntries {
+            for entry in trackedEntries where !nativeFullscreenRetirementKeys.contains(entry.token) {
                 seenKeys.insert(.init(pid: entry.pid, windowId: entry.windowId))
             }
         } else {
             for entry in trackedEntries
                 where controller.hiddenAppPIDs.contains(entry.pid)
                 || controller.workspaceManager.layoutReason(for: entry.token) == .macosHiddenApp
-                || controller.workspaceManager.layoutReason(for: entry.token) == .nativeFullscreen
+                || (
+                    controller.workspaceManager.layoutReason(for: entry.token) == .nativeFullscreen
+                        && !nativeFullscreenRetirementKeys.contains(entry.token)
+                )
             {
                 seenKeys.insert(.init(pid: entry.pid, windowId: entry.windowId))
             }
@@ -1991,7 +1999,10 @@ import QuartzCore
                 guard !seenKeys.contains(token),
                       let entry = controller.workspaceManager.entry(for: token)
                 else { return false }
-                return entry.layoutReason != .nativeFullscreen
+                return (
+                    entry.layoutReason != .nativeFullscreen
+                        || nativeFullscreenRetirementKeys.contains(token)
+                )
                     && !controller.workspaceManager.spaceTopology
                     .isWindowOnKnownInactiveSpace(entry.windowId)
             })
@@ -2001,6 +2012,7 @@ import QuartzCore
         let missingEntries = confirmedMissingEntriesDuringFullRescan(
             seenKeys: seenKeys,
             eligibleKeys: missingDetectionEligibleKeys,
+            nativeFullscreenRetirementKeys: nativeFullscreenRetirementKeys,
             permitsMissingRetirement: permitsMissingRetirement
         )
         for entry in missingEntries {
