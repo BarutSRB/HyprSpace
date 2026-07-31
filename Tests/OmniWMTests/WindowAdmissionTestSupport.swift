@@ -116,7 +116,9 @@ enum WindowAdmissionTestSupport {
     static func frameResult(
         request: AXFrameApplicationRequest,
         observed: CGRect,
-        failure: AXFrameWriteFailureReason
+        failure: AXFrameWriteFailureReason,
+        sizeError: AXError = .attributeUnsupported,
+        positionError: AXError = .success
     ) -> AXFrameApplyResult {
         AXFrameApplyResult(
             requestId: request.requestId,
@@ -129,9 +131,31 @@ enum WindowAdmissionTestSupport {
                 targetFrame: request.frame,
                 observedFrame: observed,
                 writeOrder: .sizeThenPosition,
-                sizeError: .attributeUnsupported,
-                positionError: .success,
+                sizeError: sizeError,
+                positionError: positionError,
                 failureReason: failure
+            )
+        )
+    }
+
+    static func verificationMismatchFrameResult(
+        request: AXFrameApplicationRequest,
+        observed: CGRect
+    ) -> AXFrameApplyResult {
+        AXFrameApplyResult(
+            requestId: request.requestId,
+            pid: request.pid,
+            windowId: request.windowId,
+            expectedWindow: request.expectedWindow,
+            targetFrame: request.frame,
+            currentFrameHint: request.currentFrameHint,
+            writeResult: AXFrameWriteResult(
+                targetFrame: request.frame,
+                observedFrame: observed,
+                writeOrder: .sizeThenPosition,
+                sizeError: .success,
+                positionError: .success,
+                failureReason: .verificationMismatch
             )
         )
     }

@@ -238,7 +238,7 @@ OmniWM is fundamentally **reactive**. Every signal — a window appearing, a hot
 │    engines under a build scope to build an EffectPlan, drops stale    │
 │    plans via seq/InvalidationMarks, executes frame diffs.            │
 │  AXManager → AppAXContext: writes CGRects on per-app run-loop threads.│
-│  AXFrameApplicationLedger: dedup / verify / retry / learn quantum.   │
+│  AXFrameApplicationLedger: dedup / verify / retry / convergence.     │
 └───────────────────────────────┬──────────────────────────────────────┘
                                  │  noteWorldChanged()
                                  v
@@ -705,10 +705,11 @@ IPCClient ──── Unix socket ────► IPCConnection (actor, per cli
 
 **Frame application.** `AXManager.applyFramesParallel` (still the live entry point — "parallel" refers to the per-app *thread* fan-out, not GCD) coalesces requests per pid and dispatches one `setFramesBatch` to each app's thread. The verification and retry bookkeeping lives in **`AXFrameApplicationLedger`**:
 
-1. `prepareFrameApplication` dedups a target against the last-applied / pending frame within tolerance.
+1. `prepareFrameApplication` dedups a target against the last-applied / pending frame within tolerance or the exact target of an accepted size convergence.
 2. The write happens on the app thread via `AXWindowService.setFrame` (writes `kAXSize`/`kAXPosition` in order, then reads back to verify).
 3. `handleFrameApplyResults` verifies observed vs. target; on mismatch it retries within a per-window budget (`retryBudgetByWindowId`, default 1) — re-enqueued synchronously by `AXManager`, scheduled via a per-window `Task { @MainActor }` generation counter, **not** the `DeadlineWheel`.
-4. On repeated mismatch it calls `learnSizeQuantum` to record the app's snap quantum (capped at 16pt), so OmniWM stops fighting apps that round their own size to a grid.
+4. After the evidence retry, a repeated `verificationMismatch` is accepted only when both AX setters succeeded, both readbacks match, and the observed frame preserves the AX top-left position (`minX` and AppKit `maxY`) while differing solely by a bounded (≤16pt) app size snap. The ledger records the observed frame with that exact requested target, clears retry/failure state, and terminal observers receive normalized verified success. A different target always produces a new write; unstable readback, position drift, larger size deltas, and AX setter failures remain terminal refusals.
+5. `FrameApplyTrace` records the raw AX result and the distinct `accepted-size-convergence` decision, keeping platform write evidence separate from ledger policy.
 
 **Inactive-workspace suppression.** Windows on non-visible workspaces are tracked in `AXManager.inactiveWorkspaceWindowIds` (a `Set<Int>` rebuilt by `LayoutRefreshController`) and checked live before each write, avoiding pointless AX calls and visual glitches.
 
@@ -865,7 +866,7 @@ AXEventHandler → LayoutRefreshController.requestRelayout(.axWindowCreated)  [S
     v
 LayoutRefreshController.executeEffectPlan → AXManager.applyFramesParallel
     │  per-pid batch → AppAXContext.setFramesBatch on the app's AX thread
-    │  AXFrameApplicationLedger verifies / retries / learns size quantum
+    │  AXFrameApplicationLedger verifies / retries / settles exact convergence
     v
 SurfaceReconciler.noteWorldChanged → WorldView → border/bar diff-applied [STAGE 4]
 ```
@@ -962,7 +963,7 @@ CLIRenderer displays the result
 | `LayoutRefreshController` | The effector: schedules refreshes, runs the display-link loop, executes `EffectPlan`s. |
 | `RefreshReason` / `RefreshRequestRoute` | Why a refresh was requested, and which route it maps to (`fullRescan`/`relayout`/`immediateRelayout`/`visibilityRefresh`/`windowRemoval`). |
 | `AXManager` | Per-app AX frame writer; owns `AXFrameApplicationLedger`. `applyFramesParallel` = per-app thread fan-out. |
-| `AXFrameApplicationLedger` | Dedups, verifies, retries, and learns a per-window size quantum for frame writes. |
+| `AXFrameApplicationLedger` | Dedups, verifies, retries, and records exact accepted size convergence for frame writes. |
 | `SurfaceReconciler` | Stage 4: derives border/bars/tab-rails/native-fullscreen placeholders from `WorldView` and diff-applies them. |
 | `WorldView` | Read-only facade over world state used by `SurfaceDerivation`. |
 | `SurfaceCoordinator` / `SurfaceScene` | Registry + policy store for OmniWM-owned surfaces (hit-testing, capture exclusion, focus-recovery suppression). |

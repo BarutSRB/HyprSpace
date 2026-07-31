@@ -2443,11 +2443,11 @@ final class AXManager {
     }
 
     func handleFrameApplyResults(_ results: [AXFrameApplyResult]) {
-        let outcome = frameLedger.handleFrameApplyResults(results) { [weak self] result in
-            self?.handleAcceptedFrameApplySuccess(result)
-        }
         for result in results {
             FrameApplyTrace.recordResult(result)
+        }
+        let outcome = frameLedger.handleFrameApplyResults(results) { [weak self] result in
+            self?.handleAcceptedFrameApplySuccess(result)
         }
         for retry in outcome.retries {
             FrameApplyTrace.recordEvent(

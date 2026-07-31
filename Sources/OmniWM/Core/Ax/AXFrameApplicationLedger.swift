@@ -54,6 +54,20 @@ struct AXFrameApplyOutcome {
 
 @MainActor
 final class AXFrameApplicationLedger {
+    private struct AppliedFrameState {
+        let frame: CGRect
+        let convergedTargetFrame: CGRect?
+    }
+
+    private struct RecentFrameWriteFailure {
+        let pid: pid_t
+        var expectedWindow: AXWindowRef
+        let reason: AXFrameWriteFailureReason
+        let targetFrame: CGRect
+        let observedFrame: CGRect?
+        let settersSucceeded: Bool
+    }
+
     private struct PendingFrameObserver {
         var windowId: Int
         let pid: pid_t
@@ -63,32 +77,96 @@ final class AXFrameApplicationLedger {
         var observers: [AXFrameApplicationTerminalObserver]
     }
 
-    private var lastAppliedFrames: [Int: CGRect] = [:]
+    private var appliedFrameStates: [Int: AppliedFrameState] = [:]
     private var assumedAppliedWindowIds: Set<Int> = []
     private var pendingFrameWrites: [Int: CGRect] = [:]
     private var pendingFrameWindows: [Int: AXWindowRef] = [:]
-    private var recentFrameWriteFailures: [Int: AXFrameWriteFailureReason] = [:]
+    private var recentFrameWriteFailures: [Int: RecentFrameWriteFailure] = [:]
     private var retryBudgetByWindowId: [Int: Int] = [:]
     private var forceApplyWindowIds: Set<Int> = []
     private var pendingFrameRequestIdByWindowId: [Int: AXFrameRequestId] = [:]
     private var pendingFrameObserversByRequestId: [AXFrameRequestId: PendingFrameObserver] = [:]
     private var observerRequestIdByWindowId: [Int: AXFrameRequestId] = [:]
     private var rekeyedWindowIdsByPreviousId: [Int: Int] = [:]
-    private var sizeQuantumByWindowId: [Int: CGSize] = [:]
     private var nextFrameApplicationRequestId: AXFrameRequestId = 1
 
-    private static let maxLearnableSnapQuantum: CGFloat = 16
+    private static let maxAcceptedSizeSnap: CGFloat = 16
+
+    private static func isBoundedAXTopLeftSizeConvergence(target: CGRect, observed: CGRect) -> Bool {
+        guard !target.isNull,
+              !observed.isNull,
+              target.origin.x.isFinite,
+              target.origin.y.isFinite,
+              target.width.isFinite,
+              target.height.isFinite,
+              observed.origin.x.isFinite,
+              observed.origin.y.isFinite,
+              observed.width.isFinite,
+              observed.height.isFinite,
+              target.width > 1,
+              target.height > 1,
+              observed.width > 1,
+              observed.height > 1,
+              abs(observed.minX - target.minX) < FrameTolerance.frameWrite,
+              abs(observed.maxY - target.maxY) < FrameTolerance.frameWrite
+        else {
+            return false
+        }
+        let widthDelta = abs(observed.width - target.width)
+        let heightDelta = abs(observed.height - target.height)
+        guard widthDelta <= Self.maxAcceptedSizeSnap,
+              heightDelta <= Self.maxAcceptedSizeSnap
+        else {
+            return false
+        }
+        return widthDelta >= FrameTolerance.frameWrite
+            || heightDelta >= FrameTolerance.frameWrite
+    }
+
+    private func isStableSizeConvergence(
+        priorFailure: RecentFrameWriteFailure,
+        result: AXFrameApplyResult,
+        observedFrame: CGRect
+    ) -> Bool {
+        guard priorFailure.pid == result.pid,
+              sameAXWindowIdentity(priorFailure.expectedWindow, result.expectedWindow),
+              priorFailure.reason == .verificationMismatch,
+              result.writeResult.failureReason == .verificationMismatch,
+              priorFailure.settersSucceeded,
+              result.writeResult.sizeError == .success,
+              result.writeResult.positionError == .success,
+              priorFailure.targetFrame.approximatelyEqual(
+                  to: result.targetFrame,
+                  tolerance: FrameTolerance.frameWrite
+              ),
+              let priorObservedFrame = priorFailure.observedFrame,
+              priorObservedFrame.approximatelyEqual(
+                  to: observedFrame,
+                  tolerance: FrameTolerance.frameWrite
+              ),
+              Self.isBoundedAXTopLeftSizeConvergence(
+                  target: priorFailure.targetFrame,
+                  observed: priorObservedFrame
+              )
+        else {
+            return false
+        }
+        return Self.isBoundedAXTopLeftSizeConvergence(
+            target: result.targetFrame,
+            observed: observedFrame
+        )
+    }
 
     func forceApplyNextFrame(for windowId: Int) {
         forceApplyWindowIds.insert(windowId)
     }
 
     func lastAppliedFrame(for windowId: Int) -> CGRect? {
-        lastAppliedFrames[windowId]
+        appliedFrameStates[windowId]?.frame
     }
 
     func recentFrameWriteFailure(for windowId: Int) -> AXFrameWriteFailureReason? {
-        recentFrameWriteFailures[windowId]
+        recentFrameWriteFailures[windowId]?.reason
     }
 
     func hasPendingFrameWrite(for windowId: Int) -> Bool {
@@ -100,7 +178,7 @@ final class AXFrameApplicationLedger {
     }
 
     func stateDump() -> String {
-        let windowIds = Set(lastAppliedFrames.keys)
+        let windowIds = Set(appliedFrameStates.keys)
             .union(pendingFrameWrites.keys)
             .union(recentFrameWriteFailures.keys)
             .union(retryBudgetByWindowId.keys)
@@ -108,10 +186,15 @@ final class AXFrameApplicationLedger {
         return windowIds.sorted()
             .map { windowId in
                 var parts = ["win=\(windowId)"]
-                if let frame = lastAppliedFrames[windowId] { parts.append("lastApplied=\(TraceFormat.rect(frame))") }
+                if let state = appliedFrameStates[windowId] {
+                    parts.append("lastApplied=\(TraceFormat.rect(state.frame))")
+                    if let target = state.convergedTargetFrame {
+                        parts.append("convergedTarget=\(TraceFormat.rect(target))")
+                    }
+                }
                 if let pending = pendingFrameWrites[windowId] { parts.append("pending=\(TraceFormat.rect(pending))") }
                 if let failure = recentFrameWriteFailures[windowId] {
-                    parts.append("failure=\(failure.traceDescription)")
+                    parts.append("failure=\(failure.reason.traceDescription)")
                 }
                 if let retry = retryBudgetByWindowId[windowId] { parts.append("retryBudget=\(retry)") }
                 return parts.joined(separator: " ")
@@ -119,45 +202,37 @@ final class AXFrameApplicationLedger {
             .joined(separator: "\n")
     }
 
-    private func frameWithinConvergence(cached: CGRect, target: CGRect, windowId: Int) -> Bool {
-        guard let quantum = sizeQuantumByWindowId[windowId] else {
-            return cached.approximatelyEqual(to: target, tolerance: FrameTolerance.frameWrite)
-        }
-        guard abs(cached.minX - target.minX) < FrameTolerance.frameWrite,
-              abs(cached.minY - target.minY) < FrameTolerance.frameWrite
-        else {
-            return false
-        }
-        return abs(cached.width - target.width) <= max(FrameTolerance.frameWrite, quantum.width)
-            && abs(cached.height - target.height) <= max(FrameTolerance.frameWrite, quantum.height)
-    }
-
-    private func learnSizeQuantum(windowId: Int, target: CGRect, observed: CGRect) {
-        let widthDelta = abs(observed.width - target.width)
-        let heightDelta = abs(observed.height - target.height)
-        let snapWidth = widthDelta > FrameTolerance.frameWrite && widthDelta <= Self.maxLearnableSnapQuantum
-            ? widthDelta.rounded(.up) : 0
-        let snapHeight = heightDelta > FrameTolerance.frameWrite && heightDelta <= Self.maxLearnableSnapQuantum
-            ? heightDelta.rounded(.up) : 0
-        guard snapWidth > 0 || snapHeight > 0 else { return }
-        let existing = sizeQuantumByWindowId[windowId] ?? .zero
-        sizeQuantumByWindowId[windowId] = CGSize(
-            width: max(existing.width, snapWidth),
-            height: max(existing.height, snapHeight)
-        )
-        lastAppliedFrames[windowId] = observed
+    private func frameWithinConvergence(state: AppliedFrameState, target: CGRect) -> Bool {
+        state.frame.approximatelyEqual(to: target, tolerance: FrameTolerance.frameWrite)
+            || state.convergedTargetFrame?.approximatelyEqual(
+                to: target,
+                tolerance: FrameTolerance.frameWrite
+            ) == true
     }
 
     func shouldSuppressFrameChangeRelayout(for windowId: Int, observedFrame: CGRect?) -> Bool {
         if pendingFrameWrites[windowId] != nil {
             return true
         }
-        guard let observedFrame,
-              let lastAppliedFrame = lastAppliedFrames[windowId]
-        else {
+        guard let observedFrame else {
+            if appliedFrameStates[windowId]?.convergedTargetFrame != nil {
+                appliedFrameStates.removeValue(forKey: windowId)
+            }
             return false
         }
-        return observedFrame.approximatelyEqual(to: lastAppliedFrame, tolerance: FrameTolerance.frameWrite)
+        guard let appliedState = appliedFrameStates[windowId] else {
+            return false
+        }
+        guard observedFrame.approximatelyEqual(
+            to: appliedState.frame,
+            tolerance: FrameTolerance.frameWrite
+        ) else {
+            if appliedState.convergedTargetFrame != nil {
+                appliedFrameStates.removeValue(forKey: windowId)
+            }
+            return false
+        }
+        return true
     }
 
     func rekeyWindowState(oldWindowId: Int, newWindowId: Int) {
@@ -170,12 +245,8 @@ final class AXFrameApplicationLedger {
             rekeyedWindowIdsByPreviousId[previousWindowId] = newWindowId
         }
 
-        if let frame = lastAppliedFrames.removeValue(forKey: oldWindowId) {
-            lastAppliedFrames[newWindowId] = frame
-        }
-
-        if let quantum = sizeQuantumByWindowId.removeValue(forKey: oldWindowId) {
-            sizeQuantumByWindowId[newWindowId] = quantum
+        if let state = appliedFrameStates.removeValue(forKey: oldWindowId) {
+            appliedFrameStates[newWindowId] = state
         }
 
         if assumedAppliedWindowIds.remove(oldWindowId) != nil {
@@ -196,7 +267,11 @@ final class AXFrameApplicationLedger {
             pendingFrameRequestIdByWindowId[newWindowId] = requestId
         }
 
-        if let failure = recentFrameWriteFailures.removeValue(forKey: oldWindowId) {
+        if var failure = recentFrameWriteFailures.removeValue(forKey: oldWindowId) {
+            failure.expectedWindow = AXWindowRef(
+                element: failure.expectedWindow.element,
+                windowId: newWindowId
+            )
             recentFrameWriteFailures[newWindowId] = failure
         }
 
@@ -223,17 +298,19 @@ final class AXFrameApplicationLedger {
     }
 
     func confirmFrameWrite(for windowId: Int, frame: CGRect) {
-        lastAppliedFrames[windowId] = frame
+        appliedFrameStates[windowId] = AppliedFrameState(
+            frame: frame,
+            convergedTargetFrame: nil
+        )
         assumedAppliedWindowIds.remove(windowId)
         recentFrameWriteFailures.removeValue(forKey: windowId)
         retryBudgetByWindowId.removeValue(forKey: windowId)
-        sizeQuantumByWindowId.removeValue(forKey: windowId)
         clearSettledRekeyMappings(to: windowId)
     }
 
     func removeWindowState(windowId: Int) -> [AXFrameTerminalDelivery] {
         let deliveries = cancelObserver(for: windowId)
-        lastAppliedFrames.removeValue(forKey: windowId)
+        appliedFrameStates.removeValue(forKey: windowId)
         assumedAppliedWindowIds.remove(windowId)
         pendingFrameWrites.removeValue(forKey: windowId)
         pendingFrameWindows.removeValue(forKey: windowId)
@@ -241,7 +318,6 @@ final class AXFrameApplicationLedger {
         recentFrameWriteFailures.removeValue(forKey: windowId)
         retryBudgetByWindowId.removeValue(forKey: windowId)
         forceApplyWindowIds.remove(windowId)
-        sizeQuantumByWindowId.removeValue(forKey: windowId)
         pruneRekeyMappingsAfterRemovingWindowState(for: windowId)
         return deliveries
     }
@@ -260,7 +336,7 @@ final class AXFrameApplicationLedger {
 
     func suppressFrameWrite(windowId: Int) -> [AXFrameTerminalDelivery] {
         let deliveries = cancelObserver(for: windowId)
-        lastAppliedFrames.removeValue(forKey: windowId)
+        appliedFrameStates.removeValue(forKey: windowId)
         assumedAppliedWindowIds.remove(windowId)
         pendingFrameWrites.removeValue(forKey: windowId)
         pendingFrameWindows.removeValue(forKey: windowId)
@@ -268,7 +344,6 @@ final class AXFrameApplicationLedger {
         recentFrameWriteFailures.removeValue(forKey: windowId)
         retryBudgetByWindowId.removeValue(forKey: windowId)
         forceApplyWindowIds.remove(windowId)
-        sizeQuantumByWindowId.removeValue(forKey: windowId)
         clearSettledRekeyMappings(to: windowId)
         return deliveries
     }
@@ -282,7 +357,8 @@ final class AXFrameApplicationLedger {
         verify: Bool = true,
         terminalObserver: AXFrameApplicationTerminalObserver?
     ) -> AXFrameEnqueueDecision {
-        let cachedFrame = lastAppliedFrames[windowId]
+        let cachedState = appliedFrameStates[windowId]
+        let cachedFrame = cachedState?.frame
         let pendingFrame = pendingFrameWrites[windowId]
         let hasRecentFailure = recentFrameWriteFailures[windowId] != nil
         let shouldForceApply = forceApplyWindowIds.remove(windowId) != nil
@@ -307,8 +383,8 @@ final class AXFrameApplicationLedger {
                 if terminalObserver == nil || isRetry {
                     return AXFrameEnqueueDecision()
                 }
-            } else if let cached = cachedFrame,
-                      frameWithinConvergence(cached: cached, target: frame, windowId: windowId),
+            } else if let cachedState,
+                      frameWithinConvergence(state: cachedState, target: frame),
                       !hasRecentFailure,
                       !shouldReverifyAssumedFrame
             {
@@ -323,7 +399,7 @@ final class AXFrameApplicationLedger {
                                     expectedWindow: expectedWindow,
                                     frame: frame,
                                     currentFrameHint: cachedFrame,
-                                    observedFrame: cached
+                                    observedFrame: cachedState.frame
                                 ),
                                 observers: [terminalObserver]
                             )
@@ -346,6 +422,12 @@ final class AXFrameApplicationLedger {
 
         let existingObserverRequestId = observerRequestIdByWindowId[windowId]
         let requestId = makeNextFrameApplicationRequestId()
+        if let cachedState, cachedState.convergedTargetFrame != nil {
+            appliedFrameStates[windowId] = AppliedFrameState(
+                frame: cachedState.frame,
+                convergedTargetFrame: nil
+            )
+        }
         pendingFrameWrites[windowId] = frame
         pendingFrameWindows[windowId] = expectedWindow
         pendingFrameRequestIdByWindowId[windowId] = requestId
@@ -416,12 +498,14 @@ final class AXFrameApplicationLedger {
             pendingFrameRequestIdByWindowId.removeValue(forKey: resolvedWindowId)
 
             if let confirmedFrame = resolvedResult.confirmedFrame {
-                lastAppliedFrames[resolvedWindowId] = confirmedFrame
+                appliedFrameStates[resolvedWindowId] = AppliedFrameState(
+                    frame: confirmedFrame,
+                    convergedTargetFrame: nil
+                )
                 if resolvedResult.writeResult.observedFrame == nil {
                     assumedAppliedWindowIds.insert(resolvedWindowId)
                 } else {
                     assumedAppliedWindowIds.remove(resolvedWindowId)
-                    sizeQuantumByWindowId.removeValue(forKey: resolvedWindowId)
                 }
                 recentFrameWriteFailures.removeValue(forKey: resolvedWindowId)
                 retryBudgetByWindowId.removeValue(forKey: resolvedWindowId)
@@ -431,9 +515,17 @@ final class AXFrameApplicationLedger {
                 continue
             }
 
-            let priorFailureReason = recentFrameWriteFailures[resolvedWindowId]
+            let priorFailure = recentFrameWriteFailures[resolvedWindowId]
             if let failureReason = resolvedResult.writeResult.failureReason {
-                recentFrameWriteFailures[resolvedWindowId] = failureReason
+                recentFrameWriteFailures[resolvedWindowId] = RecentFrameWriteFailure(
+                    pid: resolvedResult.pid,
+                    expectedWindow: resolvedResult.expectedWindow,
+                    reason: failureReason,
+                    targetFrame: resolvedResult.targetFrame,
+                    observedFrame: resolvedResult.writeResult.observedFrame,
+                    settersSucceeded: resolvedResult.writeResult.sizeError == .success
+                        && resolvedResult.writeResult.positionError == .success
+                )
             }
 
             let remainingRetries = retryBudgetByWindowId[resolvedWindowId] ?? 0
@@ -445,9 +537,35 @@ final class AXFrameApplicationLedger {
             else {
                 retryBudgetByWindowId.removeValue(forKey: resolvedWindowId)
                 if let failureReason = resolvedResult.writeResult.failureReason,
-                   priorFailureReason == failureReason,
+                   priorFailure?.reason == failureReason,
                    let observedFrame = resolvedResult.writeResult.observedFrame
                 {
+                    if failureReason == .verificationMismatch,
+                       let priorFailure,
+                       isStableSizeConvergence(
+                           priorFailure: priorFailure,
+                           result: resolvedResult,
+                           observedFrame: observedFrame
+                       )
+                    {
+                        appliedFrameStates[resolvedWindowId] = AppliedFrameState(
+                            frame: observedFrame,
+                            convergedTargetFrame: resolvedResult.targetFrame
+                        )
+                        let acceptedResult = acceptedSizeConvergenceResult(
+                            resolvedResult,
+                            observedFrame: observedFrame
+                        )
+                        assumedAppliedWindowIds.remove(resolvedWindowId)
+                        recentFrameWriteFailures.removeValue(forKey: resolvedWindowId)
+                        FrameApplyTrace.recordAcceptedSizeConvergence(acceptedResult)
+                        onAcceptedSuccess(acceptedResult)
+                        outcome.deliveries.append(
+                            contentsOf: notifyPendingFrameObserver(with: acceptedResult)
+                        )
+                        clearSettledRekeyMappings(to: resolvedWindowId)
+                        continue
+                    }
                     outcome.terminalRefusals.append(
                         AXFrameTerminalRefusal(
                             pid: resolvedResult.pid,
@@ -457,13 +575,6 @@ final class AXFrameApplicationLedger {
                             failureReason: failureReason
                         )
                     )
-                    if failureReason == .verificationMismatch {
-                        learnSizeQuantum(
-                            windowId: resolvedWindowId,
-                            target: resolvedResult.targetFrame,
-                            observed: observedFrame
-                        )
-                    }
                 }
                 outcome.deliveries.append(contentsOf: notifyPendingFrameObserver(with: resolvedResult))
                 clearSettledRekeyMappings(to: resolvedWindowId)
@@ -492,7 +603,7 @@ final class AXFrameApplicationLedger {
     func cancelAllPendingFrameState() -> [AXFrameTerminalDelivery] {
         let deliveries = pendingFrameObserversByRequestId.map { requestId, pendingObserver in
             let currentFrameHint = pendingFrameWrites[pendingObserver.windowId]
-                ?? lastAppliedFrames[pendingObserver.windowId]
+                ?? appliedFrameStates[pendingObserver.windowId]?.frame
                 ?? pendingObserver.currentFrameHint
             return AXFrameTerminalDelivery(
                 result: AXFrameApplyResult(
@@ -532,7 +643,7 @@ final class AXFrameApplicationLedger {
         else {
             return []
         }
-        let currentFrameHint = pendingFrameWrites[windowId] ?? lastAppliedFrames[windowId]
+        let currentFrameHint = pendingFrameWrites[windowId] ?? appliedFrameStates[windowId]?.frame
         return [
             AXFrameTerminalDelivery(
                 result: AXFrameApplyResult(
@@ -640,6 +751,28 @@ final class AXFrameApplicationLedger {
                 ),
                 sizeError: .success,
                 positionError: .success,
+                failureReason: nil
+            )
+        )
+    }
+
+    private func acceptedSizeConvergenceResult(
+        _ result: AXFrameApplyResult,
+        observedFrame: CGRect
+    ) -> AXFrameApplyResult {
+        AXFrameApplyResult(
+            requestId: result.requestId,
+            pid: result.pid,
+            windowId: result.windowId,
+            expectedWindow: result.expectedWindow,
+            targetFrame: result.targetFrame,
+            currentFrameHint: result.currentFrameHint,
+            writeResult: AXFrameWriteResult(
+                targetFrame: result.targetFrame,
+                observedFrame: observedFrame,
+                writeOrder: result.writeResult.writeOrder,
+                sizeError: result.writeResult.sizeError,
+                positionError: result.writeResult.positionError,
                 failureReason: nil
             )
         )

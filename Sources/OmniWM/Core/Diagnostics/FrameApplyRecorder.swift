@@ -49,6 +49,22 @@ enum FrameApplyTrace {
         )
     }
 
+    static func recordAcceptedSizeConvergence(_ result: AXFrameApplyResult) {
+        guard shared.isActive else { return }
+        shared.record(
+            Record(
+                timestamp: Date(),
+                pid: result.pid,
+                windowId: result.windowId,
+                outcome: "outcome=accepted-size-convergence",
+                target: result.targetFrame,
+                hint: result.currentFrameHint,
+                observed: result.writeResult.observedFrame,
+                confirmed: result.confirmedFrame
+            )
+        )
+    }
+
     static func recordEvent(pid: pid_t, windowId: Int, outcome: String, target: CGRect? = nil) {
         shared.record(
             Record(
