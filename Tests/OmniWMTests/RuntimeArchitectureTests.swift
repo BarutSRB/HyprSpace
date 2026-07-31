@@ -674,17 +674,9 @@ final class RuntimeArchitectureTests: XCTestCase {
             controller.layoutRefreshController.layoutState.pendingRefresh = nil
         }
 
-        var state = controller.workspaceManager.niriViewportState(for: workspaceId)
-        controller.niriLayoutHandler.activateNode(
+        controller.niriLayoutHandler.activatePointerHoveredWindow(
             node,
-            in: workspaceId,
-            state: &state,
-            options: .init(
-                ensureVisible: false,
-                layoutRefresh: false,
-                focusOrigin: .pointerHover,
-                startAnimation: false
-            )
+            in: workspaceId
         )
 
         XCTAssertNil(controller.layoutRefreshController.layoutState.pendingRefresh)
@@ -752,40 +744,163 @@ final class RuntimeArchitectureTests: XCTestCase {
 
     @MainActor
     func testNiriFocusFollowsMouseDispatchFocusesHoveredWindowImmediately() throws {
+        try assertNiriFocusFollowsMouseReveal(
+            animationsEnabled: true,
+            orientation: .horizontal
+        )
+    }
+
+    @MainActor
+    func testNiriFocusFollowsMouseRevealsPortraitWindowWithoutAnimations() throws {
+        try assertNiriFocusFollowsMouseReveal(
+            animationsEnabled: false,
+            orientation: .vertical
+        )
+    }
+
+    @MainActor
+    private func assertNiriFocusFollowsMouseReveal(
+        animationsEnabled: Bool,
+        orientation: Monitor.Orientation,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
         var focusedTokens: [WindowToken] = []
+        var focusObservedPendingRelayout: [Bool] = []
+        weak var focusController: WMController?
         let controller = Self.controller(
             windowFocusOperations: WindowFocusOperations(
                 activateApp: { _ in },
                 focusSpecificWindow: { pid, windowId, _ in
                     focusedTokens.append(WindowToken(pid: pid, windowId: Int(windowId)))
+                    focusObservedPendingRelayout.append(
+                        focusController?.layoutRefreshController.layoutState.pendingRefresh != nil
+                    )
                 },
                 raiseWindow: { _ in }
             )
         )
+        focusController = controller
+        controller.motionPolicy.animationsEnabled = animationsEnabled
+        let displayId = controller.workspaceManager.monitors[0].displayId
+        let monitorSize = switch orientation {
+        case .horizontal:
+            CGSize(width: 1_000, height: 800)
+        case .vertical:
+            CGSize(width: 800, height: 1_000)
+        }
+        let monitor = Monitor(
+            id: .init(displayId: displayId),
+            displayId: displayId,
+            frame: CGRect(origin: .zero, size: monitorSize),
+            visibleFrame: CGRect(origin: .zero, size: monitorSize),
+            hasNotch: false,
+            name: "Focus Follows Mouse Reveal"
+        )
+        controller.workspaceManager.applyMonitorConfigurationChange([monitor])
         let workspaceId = try XCTUnwrap(controller.workspaceManager.workspaceId(for: "1", createIfMissing: true))
+        defer {
+            controller.layoutRefreshController.stopScrollAnimation(for: displayId)
+            controller.workspaceManager.animationDriver.removeMotions(for: [workspaceId])
+        }
         _ = controller.workspaceManager.focusWorkspace(named: "1")
         controller.setFocusFollowsMouse(true)
         controller.niriLayoutHandler.enableNiriLayout()
-        let monitor = try XCTUnwrap(controller.workspaceManager.monitor(for: workspaceId))
-        let targetFrame = CGRect(
-            x: monitor.visibleFrame.minX + 24,
-            y: monitor.visibleFrame.minY + 24,
-            width: 240,
-            height: 160
+        controller.workspaceManager.setGaps(to: 8)
+        let workspaceMonitor = try XCTUnwrap(
+            controller.workspaceManager.monitor(for: workspaceId),
+            file: file,
+            line: line
         )
-        let token = controller.workspaceManager.addWindow(
-            AXWindowRef(element: AXUIElementCreateApplication(765_704), windowId: 765_804),
-            pid: 765_704,
-            windowId: 765_804,
-            to: workspaceId
+        let engine = try XCTUnwrap(controller.niriEngine, file: file, line: line)
+        let workingFrame = controller.insetWorkingFrame(for: workspaceMonitor)
+        let gap = controller.innerGap(for: workspaceMonitor)
+        let primarySpan = switch orientation {
+        case .horizontal:
+            workingFrame.width * 0.7
+        case .vertical:
+            workingFrame.height * 0.7
+        }
+        let tokens = (0 ..< 2).map { index in
+            let pid = pid_t(765_704 + index)
+            let windowId = 765_804 + index
+            return controller.workspaceManager.addWindow(
+                AXWindowRef(element: AXUIElementCreateApplication(pid), windowId: windowId),
+                pid: pid,
+                windowId: windowId,
+                to: workspaceId
+            )
+        }
+        var nodes: [NiriWindow] = []
+        for token in tokens {
+            let node = engine.addWindow(
+                token: token,
+                to: workspaceId,
+                afterSelection: nodes.last?.id,
+                focusedToken: nodes.last?.token
+            )
+            nodes.append(node)
+        }
+        for column in engine.columns(in: workspaceId) {
+            switch orientation {
+            case .horizontal:
+                column.width = .fixed(primarySpan)
+                column.cachedWidth = primarySpan
+            case .vertical:
+                column.height = .fixed(primarySpan)
+                column.cachedHeight = primarySpan
+            }
+        }
+        controller.workspaceManager.withNiriViewportState(for: workspaceId) { state in
+            state.selectedNodeId = nodes[0].id
+            state.activeColumnIndex = 0
+            state.jumpOffset(to: 0)
+        }
+
+        let primaryBounds: (CGRect) -> ClosedRange<CGFloat> = switch orientation {
+        case .horizontal:
+            { $0.minX ... $0.maxX }
+        case .vertical:
+            { $0.minY ... $0.maxY }
+        }
+        let framesBeforeHover = engine.calculateLayout(
+            state: controller.workspaceManager.niriViewportState(for: workspaceId),
+            workspaceId: workspaceId,
+            monitorFrame: workingFrame,
+            screenFrame: workspaceMonitor.frame,
+            gaps: (horizontal: gap, vertical: gap),
+            orientation: orientation
         )
-        let node = try XCTUnwrap(controller.niriEngine?.addWindow(
-            token: token,
-            to: workspaceId,
-            afterSelection: nil
-        ))
-        node.frame = targetFrame
-        node.renderedFrame = targetFrame
+        let targetFrameBeforeHover = try XCTUnwrap(
+            framesBeforeHover[tokens[1]],
+            file: file,
+            line: line
+        )
+        let viewportBounds = primaryBounds(workingFrame)
+        let targetBoundsBeforeHover = primaryBounds(targetFrameBeforeHover)
+        XCTAssertTrue(
+            targetBoundsBeforeHover.overlaps(viewportBounds),
+            file: file,
+            line: line
+        )
+        XCTAssertTrue(
+            targetBoundsBeforeHover.lowerBound < viewportBounds.lowerBound
+                || targetBoundsBeforeHover.upperBound > viewportBounds.upperBound,
+            file: file,
+            line: line
+        )
+        let visibleTargetFrame = targetFrameBeforeHover.intersection(workingFrame)
+        let visibleTargetBounds = primaryBounds(visibleTargetFrame)
+        XCTAssertFalse(visibleTargetFrame.isNull, file: file, line: line)
+        XCTAssertGreaterThan(visibleTargetFrame.width, 0, file: file, line: line)
+        XCTAssertGreaterThan(visibleTargetFrame.height, 0, file: file, line: line)
+        XCTAssertLessThan(
+            visibleTargetBounds.upperBound - visibleTargetBounds.lowerBound,
+            targetBoundsBeforeHover.upperBound - targetBoundsBeforeHover.lowerBound,
+            file: file,
+            line: line
+        )
+
         let blocker = Task { @MainActor in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(1))
@@ -804,11 +919,115 @@ final class RuntimeArchitectureTests: XCTestCase {
             controller.layoutRefreshController.layoutState.pendingRefresh = nil
         }
 
-        controller.mouseEventHandler.dispatchMouseMoved(at: targetFrame.center)
+        controller.mouseEventHandler.dispatchMouseMoved(
+            at: visibleTargetFrame.center,
+            windowIdUnderPointer: tokens[1].windowId
+        )
 
-        XCTAssertEqual(focusedTokens.last, token)
-        XCTAssertNil(controller.layoutRefreshController.layoutState.pendingRefresh)
-        XCTAssertEqual(controller.intentLedger.activeManagedRequest?.origin, .pointerHover)
+        XCTAssertEqual(focusedTokens, [tokens[1]], file: file, line: line)
+        XCTAssertEqual(focusObservedPendingRelayout, [false], file: file, line: line)
+        let stateAfterHover = controller.workspaceManager.niriViewportState(for: workspaceId)
+        XCTAssertEqual(stateAfterHover.selectedNodeId, nodes[1].id, file: file, line: line)
+        XCTAssertEqual(stateAfterHover.activeColumnIndex, 1, file: file, line: line)
+        XCTAssertEqual(
+            controller.intentLedger.activeManagedRequest?.origin,
+            .pointerHover,
+            file: file,
+            line: line
+        )
+
+        let entry = try XCTUnwrap(
+            controller.workspaceManager.entry(for: tokens[1]),
+            file: file,
+            line: line
+        )
+        let request = try XCTUnwrap(
+            controller.intentLedger.activeManagedRequest,
+            file: file,
+            line: line
+        )
+        controller.axEventHandler.handleManagedAppActivation(
+            entry: entry,
+            isWorkspaceActive: true,
+            appFullscreen: false,
+            activeRequestId: request.requestId
+        )
+        XCTAssertEqual(
+            controller.workspaceManager.niriViewportState(for: workspaceId),
+            stateAfterHover,
+            file: file,
+            line: line
+        )
+        XCTAssertNil(controller.intentLedger.activeManagedRequest, file: file, line: line)
+
+        let framesAfterHover = engine.calculateLayout(
+            state: stateAfterHover,
+            workspaceId: workspaceId,
+            monitorFrame: workingFrame,
+            screenFrame: workspaceMonitor.frame,
+            gaps: (horizontal: gap, vertical: gap),
+            orientation: orientation
+        )
+        let targetFrameAfterHover = try XCTUnwrap(
+            framesAfterHover[tokens[1]],
+            file: file,
+            line: line
+        )
+        let targetBoundsAfterHover = primaryBounds(targetFrameAfterHover)
+        XCTAssertGreaterThanOrEqual(
+            targetBoundsAfterHover.lowerBound,
+            viewportBounds.lowerBound - 0.5,
+            file: file,
+            line: line
+        )
+        XCTAssertLessThanOrEqual(
+            targetBoundsAfterHover.upperBound,
+            viewportBounds.upperBound + 0.5,
+            file: file,
+            line: line
+        )
+
+        if animationsEnabled {
+            XCTAssertTrue(
+                controller.workspaceManager.animationDriver.hasMotion(in: workspaceId),
+                file: file,
+                line: line
+            )
+            XCTAssertTrue(
+                controller.niriLayoutHandler.hasScrollAnimation(for: workspaceId),
+                file: file,
+                line: line
+            )
+            XCTAssertNil(
+                controller.layoutRefreshController.layoutState.pendingRefresh,
+                file: file,
+                line: line
+            )
+        } else {
+            XCTAssertFalse(
+                controller.workspaceManager.animationDriver.hasMotion(in: workspaceId),
+                file: file,
+                line: line
+            )
+            XCTAssertFalse(
+                controller.niriLayoutHandler.hasScrollAnimation(for: workspaceId),
+                file: file,
+                line: line
+            )
+            let pendingRefresh = try XCTUnwrap(
+                controller.layoutRefreshController.layoutState.pendingRefresh,
+                file: file,
+                line: line
+            )
+            XCTAssertEqual(pendingRefresh.kind, .immediateRelayout, file: file, line: line)
+            XCTAssertEqual(pendingRefresh.reason, .layoutCommand, file: file, line: line)
+            XCTAssertEqual(
+                pendingRefresh.affectedWorkspaceIds,
+                [workspaceId],
+                file: file,
+                line: line
+            )
+        }
     }
 
     @MainActor

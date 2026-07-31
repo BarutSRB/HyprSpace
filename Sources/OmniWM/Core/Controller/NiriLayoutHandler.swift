@@ -395,6 +395,42 @@ enum StructuralMutationOutcome: Equatable {
         requestLayoutCommandRelayout(in: workspaceId)
     }
 
+    func activatePointerHoveredWindow(
+        _ window: NiriWindow,
+        in workspaceId: WorkspaceDescriptor.ID
+    ) {
+        guard let controller, let engine = controller.niriEngine else { return }
+        var shouldStartScrollAnimation = false
+        var shouldRequestRelayout = false
+
+        controller.workspaceManager.withNiriViewportState(for: workspaceId) { state in
+            activateNode(
+                window,
+                in: workspaceId,
+                state: &state,
+                options: .init(
+                    layoutRefresh: false,
+                    axFocus: false,
+                    startAnimation: false
+                )
+            )
+            shouldStartScrollAnimation = state.hasPendingOffsetAnimation
+            shouldRequestRelayout = state.offsetTransition.kind == .jump
+        }
+
+        controller.focusWindow(window.token, origin: .pointerHover)
+
+        if shouldStartScrollAnimation {
+            startScrollAnimationIfNeeded(
+                for: workspaceId,
+                state: controller.workspaceManager.niriViewportState(for: workspaceId),
+                engine: engine
+            )
+        } else if shouldRequestRelayout {
+            requestLayoutCommandRelayout(in: workspaceId)
+        }
+    }
+
     func layoutWithNiriEngine(
         activeWorkspaces: Set<WorkspaceDescriptor.ID>,
         useScrollAnimationPath: Bool = false,

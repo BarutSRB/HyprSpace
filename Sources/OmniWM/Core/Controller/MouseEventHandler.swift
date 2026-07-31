@@ -1292,19 +1292,10 @@ final class MouseEventHandler {
 
         switch target {
         case let .niri(workspaceId, window):
-            controller.workspaceManager.withNiriViewportState(for: workspaceId) { vstate in
-                controller.niriLayoutHandler.activateNode(
-                    window,
-                    in: workspaceId,
-                    state: &vstate,
-                    options: .init(
-                        ensureVisible: false,
-                        layoutRefresh: false,
-                        focusOrigin: .pointerHover,
-                        startAnimation: false
-                    )
-                )
-            }
+            controller.niriLayoutHandler.activatePointerHoveredWindow(
+                window,
+                in: workspaceId
+            )
         case let .dwindle(workspaceId, token):
             controller.dwindleLayoutHandler.activateWindow(
                 token,
