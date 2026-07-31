@@ -240,14 +240,14 @@ extension LayoutRefreshController {
               let entry = controller.workspaceManager.entry(for: token),
               let metadata = entry.managedReplacementMetadata,
               metadata.role == (kAXSheetRole as String),
-              let parentWindowId = metadata.parentWindowId,
-              parentWindowId != 0,
               let windowId = UInt32(exactly: token.windowId),
               let windowInfo = windowServerInfoByWindowId[token.windowId]
               ?? controller.axEventHandler.resolveWindowInfo(windowId),
               windowInfo.id == windowId,
               windowInfo.pid == token.pid,
-              windowInfo.parentId == parentWindowId
+              windowInfo.parentId != 0,
+              metadata.parentWindowId == nil
+              || metadata.parentWindowId == windowInfo.parentId
         else {
             return
         }
