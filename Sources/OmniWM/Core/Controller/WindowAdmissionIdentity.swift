@@ -45,10 +45,19 @@ extension AXEventHandler {
         failedPIDs: Set<pid_t> = [],
         sizeConstraints: WindowSizeConstraints? = nil
     ) -> FullRescanIdentityResolution {
-        guard let controller,
-              let existingEntry = controller.workspaceManager.entry(forWindowId: windowId)
-        else {
+        guard let controller else {
             return .process(nil)
+        }
+        let token = WindowToken(pid: pid, windowId: windowId)
+        guard let existingEntry = controller.workspaceManager.entry(forWindowId: windowId) else {
+            guard let sourceToken = pendingFullRescanIdentityRebindSource(
+                for: token,
+                axRef: axRef,
+                controller: controller
+            ) else {
+                return .process(nil)
+            }
+            return .preserve(sourceToken)
         }
         let isSameElement = CFEqual(existingEntry.axRef.element, axRef.element)
         let isKnownAlias = isKnownAXIdentityAlias(windowId: windowId, axRef: axRef)
@@ -61,7 +70,6 @@ extension AXEventHandler {
         {
             return .preserve(existingEntry.token)
         }
-        let token = WindowToken(pid: pid, windowId: windowId)
         if existingEntry.token == token, isSameElement {
             return .process(existingEntry)
         }
@@ -79,6 +87,26 @@ extension AXEventHandler {
             return .preserve(existingEntry.token)
         }
         return .process(rekeyedEntry)
+    }
+
+    private func pendingFullRescanIdentityRebindSource(
+        for targetToken: WindowToken,
+        axRef: AXWindowRef,
+        controller: WMController
+    ) -> WindowToken? {
+        guard let windowId = UInt32(exactly: targetToken.windowId),
+              let state = admissionRetryStateByWindowId[windowId],
+              !state.exhausted,
+              !state.identityRebindTargetDestroyed,
+              case let .identityRebind(oldWindow, newWindow, _, _, _) = state.trigger,
+              newWindow.token == targetToken,
+              sameAXWindowIdentity(newWindow.axRef, axRef),
+              let sourceEntry = controller.workspaceManager.entry(for: oldWindow.token),
+              sameAXWindowIdentity(sourceEntry.axRef, oldWindow.axRef)
+        else {
+            return nil
+        }
+        return oldWindow.token
     }
 
     func updateIdentityAliases(
