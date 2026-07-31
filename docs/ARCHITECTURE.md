@@ -173,7 +173,8 @@ The application starts in `Sources/OmniWMApp/OmniWMApp.swift`:
 8. **`IPCServer`** — started only if `ipcEnabled` is set.
 9. **Automatic update checks** — started last, only after bootstrap succeeds.
 
-`applicationWillTerminate` flushes the window-restore catalog, settings, and runtime state, then stops the IPC server.
+`applicationWillTerminate` tears down the status bar and Hidden Bar assessment assertion, stops window-management
+services, flushes the window-restore catalog, settings, and runtime state, then stops the IPC server.
 
 ### Service Startup
 

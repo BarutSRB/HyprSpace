@@ -81,6 +81,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     public func applicationWillTerminate(_: Notification) {
+        statusBarController?.cleanup()
         if let controller = AppDelegate.sharedBootstrap?.controller {
             controller.serviceLifecycleManager.stop()
             controller.workspaceManager.flushPersistedWindowRestoreCatalogNow()
