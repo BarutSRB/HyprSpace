@@ -378,6 +378,44 @@ final class CommandPaletteController: NSObject, NSWindowDelegate {
         }
     }
 
+    static func modeNavigationTarget(
+        currentMode: CommandPaletteMode,
+        isMenuModeAvailable: Bool,
+        keyCode: UInt16,
+        relevantModifiers: NSEvent.ModifierFlags,
+        charactersIgnoringModifiers: String?
+    ) -> CommandPaletteMode? {
+        if relevantModifiers == .command {
+            switch charactersIgnoringModifiers {
+            case "1":
+                return .windows
+            case "2":
+                return isMenuModeAvailable ? .menu : nil
+            case "3":
+                return .clipboard
+            default:
+                return nil
+            }
+        }
+
+        guard keyCode == UInt16(kVK_Tab),
+              relevantModifiers.isEmpty || relevantModifiers == .shift
+        else {
+            return nil
+        }
+
+        let availableModes = CommandPaletteMode.allCases.filter {
+            $0 != .menu || isMenuModeAvailable
+        }
+        guard let currentIndex = availableModes.firstIndex(of: currentMode) else {
+            return availableModes.first
+        }
+
+        let offset = relevantModifiers == .shift ? -1 : 1
+        let targetIndex = (currentIndex + offset + availableModes.count) % availableModes.count
+        return availableModes[targetIndex]
+    }
+
     static func selectedWindowHint(isSummonRightAvailable: Bool) -> InlineHint? {
         guard isSummonRightAvailable else { return nil }
         return InlineHint(title: "Summon Right", shortcut: "⇧↩")
@@ -760,12 +798,15 @@ final class CommandPaletteController: NSObject, NSWindowDelegate {
 
     private func handleKeyDown(_ event: NSEvent) -> Bool {
         let relevantModifiers = event.modifierFlags.intersection([.shift, .command, .control, .option])
-        let commandOnly = relevantModifiers == .command
 
-        if commandOnly,
-           let characters = event.charactersIgnoringModifiers,
-           handleModeShortcut(characters)
-        {
+        if let targetMode = Self.modeNavigationTarget(
+            currentMode: selectedMode,
+            isMenuModeAvailable: isMenuModeAvailable,
+            keyCode: event.keyCode,
+            relevantModifiers: relevantModifiers,
+            charactersIgnoringModifiers: event.charactersIgnoringModifiers
+        ) {
+            selectedMode = targetMode
             return true
         }
 
@@ -853,23 +894,6 @@ final class CommandPaletteController: NSObject, NSWindowDelegate {
 
         if let restoreTarget {
             _ = focus(target: restoreTarget)
-        }
-    }
-
-    private func handleModeShortcut(_ characters: String) -> Bool {
-        switch characters {
-        case "1":
-            selectedMode = .windows
-            return true
-        case "2":
-            guard isMenuModeAvailable else { return false }
-            selectedMode = .menu
-            return true
-        case "3":
-            selectedMode = .clipboard
-            return true
-        default:
-            return false
         }
     }
 

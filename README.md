@@ -600,10 +600,11 @@ A true quake/sticky terminal (powered by Ghostty's libghostty) that slides in fr
 
 #### Command Palette
 
-Quickly search windows or app menus from one shared palette:
+Quickly search windows, app menus, or clipboard history from one shared palette:
 - Open it from the global shortcut shown in `Keyboard Shortcuts`
-- Use `Cmd + 1` for `Windows` and `Cmd + 2` for `Menu` when menu search is available
-- Type to fuzzy-search by window title, app name, or menu item
+- Use `Tab` / `Shift + Tab` to cycle forward or backward through the available modes
+- Use `Cmd + 1` for `Windows`, `Cmd + 2` for `Menu`, and `Cmd + 3` for `Clipboard`
+- Type to fuzzy-search by window title, app name, menu item, or clipboard content
 - Menu results always show keyboard shortcuts when available
 - `Up` / `Down` move the selection
 - `Enter` activates the selected result
