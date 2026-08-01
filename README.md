@@ -301,7 +301,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/macOS-26.0%2B-green?logo=apple&logoColor=white" alt="macOS">
   <img src="https://img.shields.io/badge/Apple%20Silicon-supported-green?logo=apple&logoColor=white" alt="Apple Silicon">
-  <img src="https://img.shields.io/badge/Claude%20Code-Assisted-green?logo=claude&logoColor=white" alt="Claude Code">
+  <img src="https://custom-icon-badges.demolab.com/badge/OpenAI-Assisted-green?logo=openai&logoColor=white" alt="OpenAI Assisted">
 </p>
 <p align="center">
   <a href="https://trendshift.io/repositories/16758" target="_blank"><img src="https://trendshift.io/api/badge/repositories/16758" alt="BarutSRB%2FOmniWM | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
