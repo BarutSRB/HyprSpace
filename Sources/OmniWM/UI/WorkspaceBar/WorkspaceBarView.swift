@@ -473,7 +473,9 @@ private struct WorkspaceLabelButton: View {
             Text(item.name)
                 .font(.system(.caption, design: .monospaced).weight(.medium))
                 .foregroundColor(resolvedLabelColor)
+                .lineLimit(1)
                 .frame(minWidth: 16)
+                .fixedSize(horizontal: true, vertical: false)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
