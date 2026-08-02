@@ -261,6 +261,7 @@ final class AXEventHandler {
     private struct PendingFocusedManagedActivation {
         let source: ActivationEventSource
         let origin: ActivationCallOrigin
+        let observationGeneration: UInt64
         let appFullscreen: Bool
         let request: PendingFocusedManagedActivationRequest
         let callbackGeneration: UInt64?
@@ -362,7 +363,7 @@ final class AXEventHandler {
     static let createPlacementContextTTL: TimeInterval = 15
     private static let activationRetryLimit = 5
     private static let windowCloseFocusRecoveryDuration: TimeInterval = 0.6
-    private static let sameAppCloseProbeDelay: Duration = .milliseconds(80)
+    static let sameAppCloseProbeDelay: Duration = .milliseconds(80)
     private static let mouseFocusIntentDuration: TimeInterval = 0.35
     private static let createFocusTraceLimit = 128
     private static let managedReplacementTraceLimit = 128
@@ -775,6 +776,16 @@ final class AXEventHandler {
         ManagedReplacementFocusKey(pid: pid, workspaceId: workspaceId)
     }
 
+    func hasPendingManagedReplacementDestroy(
+        _ token: WindowToken,
+        workspaceId: WorkspaceDescriptor.ID
+    ) -> Bool {
+        let key = ManagedReplacementKey(pid: token.pid, workspaceId: workspaceId)
+        return pendingManagedReplacementBursts[key]?.destroys.contains {
+            $0.candidate.token == token
+        } == true
+    }
+
     private func selectedNiriWindowToken(
         in workspaceId: WorkspaceDescriptor.ID
     ) -> WindowToken? {
@@ -842,7 +853,6 @@ final class AXEventHandler {
                 isBurstOpen: true
             )
         )
-        cancelSameAppCloseProbe(matchingFocusedToken: anchor, reason: "managed_replacement_focus_transaction")
     }
 
     private func markManagedReplacementFocusBurstClosed(for key: ManagedReplacementKey) {
@@ -1399,7 +1409,8 @@ final class AXEventHandler {
         entry observedEntry: WindowState,
         requestDisposition: ActivationRequestDisposition,
         source: ActivationEventSource,
-        origin: ActivationCallOrigin
+        origin: ActivationCallOrigin,
+        observationGeneration: UInt64
     ) -> Bool {
         guard source == .focusedWindowChanged, origin == .external else { return false }
         guard case .unrelatedNoRequest = requestDisposition else { return false }
@@ -1432,8 +1443,10 @@ final class AXEventHandler {
 
         deferSameAppCloseProbe(
             focusedToken: focusedToken,
+            focusedWorkspaceId: focusedEntry.workspaceId,
             observedToken: observedEntry.token,
-            source: source
+            source: source,
+            observationGeneration: observationGeneration
         )
         return true
     }
@@ -1442,7 +1455,8 @@ final class AXEventHandler {
         entry observedEntry: WindowState,
         requestDisposition: ActivationRequestDisposition,
         source: ActivationEventSource,
-        origin: ActivationCallOrigin
+        origin: ActivationCallOrigin,
+        observationGeneration: UInt64
     ) -> Bool {
         if hasRecentMouseFocusIntent(for: observedEntry.token) {
             clearManagedReplacementFocusTransaction(
@@ -1468,7 +1482,8 @@ final class AXEventHandler {
             entry: observedEntry,
             requestDisposition: requestDisposition,
             source: source,
-            origin: origin
+            origin: origin,
+            observationGeneration: observationGeneration
         ) {
             return true
         }
@@ -1536,61 +1551,6 @@ final class AXEventHandler {
             return false
         }
         return true
-    }
-
-    private func deferSameAppCloseProbe(
-        focusedToken: WindowToken,
-        observedToken: WindowToken,
-        source: ActivationEventSource
-    ) {
-        guard let controller else { return }
-        if let open = controller.intentLedger.openSameAppCloseProbe(),
-           open.payload.focusedToken == focusedToken,
-           open.payload.observedToken == observedToken
-        {
-            return
-        }
-
-        cancelSameAppCloseProbe()
-        let intent = controller.intentLedger.registerSameAppCloseProbe(
-            SameAppCloseProbePayload(
-                focusedToken: focusedToken,
-                observedToken: observedToken,
-                source: source
-            )
-        )
-        controller.deadlineWheel.schedule(intentId: intent.id, after: Self.sameAppCloseProbeDelay)
-    }
-
-    private func handleSameAppCloseProbeDeadline(_ payload: SameAppCloseProbePayload) {
-        guard let controller else { return }
-        guard controller.workspaceManager.focusedToken == payload.focusedToken,
-              controller.workspaceManager.entry(for: payload.focusedToken) != nil,
-              controller.intentLedger.activeManagedRequest == nil
-        else {
-            return
-        }
-        handleAppActivation(
-            pid: payload.observedToken.pid,
-            source: payload.source,
-            origin: .probe
-        )
-    }
-
-    func cancelSameAppCloseProbe(
-        matchingFocusedToken token: WindowToken? = nil,
-        reason _: String = "cancel"
-    ) {
-        guard let controller,
-              let open = controller.intentLedger.openSameAppCloseProbe()
-        else {
-            return
-        }
-        if let token, open.payload.focusedToken != token {
-            return
-        }
-        _ = controller.intentLedger.cancel(id: open.intent.id)
-        controller.deadlineWheel.cancel(intentId: open.intent.id)
     }
 
     func noteMouseFocusIntent(token: WindowToken) {
@@ -1719,45 +1679,21 @@ final class AXEventHandler {
             )
         }
 
+        let focusCausality = sameAppFocusCausality(
+            pid: pid,
+            source: source,
+            origin: origin,
+            focusedToken: focusedToken
+        )
         return controller.factResolver.resolveActivationFacts(
             pid: pid,
             source: source,
             origin: origin,
             observationGeneration: observationGeneration,
+            sameAppFocusCausality: focusCausality,
             callbackGeneration: callbackGeneration,
             focusedAdmissionRetryExecution: focusedAdmissionRetryExecution
         )
-    }
-
-    func handleIntentExpired(_ intentId: IntentID) {
-        guard let controller else { return }
-        guard let intent = controller.intentLedger.openIntent(id: intentId) else { return }
-
-        switch intent.kind {
-        case .activateApp,
-             .replacementFocus:
-            _ = controller.intentLedger.markExpired(id: intentId)
-
-        case let .focusPolicyLease(owner):
-            _ = controller.intentLedger.markExpired(id: intentId)
-            controller.focusPolicyEngine.handleLeaseDeadlineExpired(owner: owner, intentId: intentId)
-
-        case let .sameAppCloseProbe(payload):
-            _ = controller.intentLedger.markExpired(id: intentId)
-            handleSameAppCloseProbeDeadline(payload)
-
-        case .focusWindow:
-            guard let liveRequest = controller.intentLedger.activeManagedRequest(requestId: intentId) else {
-                _ = controller.intentLedger.markExpired(id: intentId)
-                return
-            }
-            controller.retryManagedFocusFronting(liveRequest)
-            handleAppActivation(
-                pid: liveRequest.token.pid,
-                source: liveRequest.lastActivationSource ?? .focusedWindowChanged,
-                origin: .retry
-            )
-        }
     }
 
     func handleActivationFactsResolved(_ facts: ActivationFacts) {
@@ -1805,6 +1741,13 @@ final class AXEventHandler {
             return
         }
         let token = canonicalObservedWindowToken(pid: pid, axRef: axRef)
+        if let causality = facts.sameAppFocusCausality,
+           controller.workspaceManager.entry(for: token) != nil,
+           !hasRecentMouseFocusIntent(for: token),
+           !preservesSameAppFocusCausality(causality)
+        {
+            return
+        }
         controller.workspaceManager.setSystemModalFocus(focusedWindow.isSystemModalSurface ? token : nil)
 
         let appFullscreen = focusedWindow.isFullscreen
@@ -1828,7 +1771,8 @@ final class AXEventHandler {
                 entry: entry,
                 requestDisposition: requestDisposition,
                 source: source,
-                origin: origin
+                origin: origin,
+                observationGeneration: facts.observationGeneration
             ) {
                 if case let .conflictsWithPendingRequest(request) = requestDisposition {
                     continueManagedFocusRequest(
@@ -1889,6 +1833,7 @@ final class AXEventHandler {
             axRef: axRef,
             source: source,
             origin: origin,
+            observationGeneration: facts.observationGeneration,
             requestDisposition: requestDisposition,
             appFullscreen: appFullscreen,
             callbackGeneration: facts.callbackGeneration
@@ -1987,6 +1932,7 @@ final class AXEventHandler {
         axRef: AXWindowRef,
         source: ActivationEventSource,
         origin: ActivationCallOrigin,
+        observationGeneration: UInt64,
         requestDisposition: ActivationRequestDisposition,
         appFullscreen: Bool,
         callbackGeneration: UInt64?
@@ -2077,6 +2023,7 @@ final class AXEventHandler {
                 activation: .init(
                     source: source,
                     origin: origin,
+                    observationGeneration: observationGeneration,
                     appFullscreen: appFullscreen,
                     request: .init(requestDisposition),
                     callbackGeneration: callbackGeneration
@@ -2090,6 +2037,7 @@ final class AXEventHandler {
                 focusedActivation: .init(
                     source: source,
                     origin: origin,
+                    observationGeneration: observationGeneration,
                     appFullscreen: appFullscreen,
                     request: .init(requestDisposition),
                     callbackGeneration: callbackGeneration
@@ -2114,6 +2062,7 @@ final class AXEventHandler {
             activation: .init(
                 source: source,
                 origin: origin,
+                observationGeneration: observationGeneration,
                 appFullscreen: appFullscreen,
                 request: .init(requestDisposition),
                 callbackGeneration: callbackGeneration
@@ -2158,7 +2107,8 @@ final class AXEventHandler {
             entry: entry,
             requestDisposition: requestDisposition,
             source: activation.source,
-            origin: activation.origin
+            origin: activation.origin,
+            observationGeneration: activation.observationGeneration
         ) {
             if case let .conflictsWithPendingRequest(request) = requestDisposition {
                 continueManagedFocusRequest(
@@ -2543,6 +2493,14 @@ final class AXEventHandler {
     }
 
     func resetManagedReplacementState() {
+        if let open = controller?.intentLedger.openSameAppCloseProbe(),
+           hasPendingManagedReplacementDestroy(open.payload.focusedToken)
+        {
+            cancelSameAppCloseProbe(
+                matchingFocusedToken: open.payload.focusedToken,
+                reason: "managed_replacement_reset"
+            )
+        }
         for (_, task) in pendingManagedReplacementTasks {
             task.cancel()
         }
@@ -3027,7 +2985,7 @@ final class AXEventHandler {
             return false
         }
 
-        return rekeyManagedReplacement(from: match.token, to: candidate)
+        return rekeyManagedReplacement(from: match.token, to: candidate).isHandled
     }
 
     private func shouldDelayManagedReplacementDestroy(_ candidate: PreparedDestroy) -> Bool {
@@ -3107,6 +3065,7 @@ final class AXEventHandler {
         let pendingDestroy = PendingManagedDestroy(sequence: nextManagedReplacementSequence(), candidate: candidate)
         burst.append(destroy: pendingDestroy)
         pendingManagedReplacementBursts[key] = burst
+        holdSameAppCloseProbe(matchingFocusedToken: candidate.token)
         let resetExistingDeadline = isNewBurst
         recordManagedReplacementTrace(
             key: key,
@@ -3168,16 +3127,16 @@ final class AXEventHandler {
         return matchedPair
     }
 
-    @discardableResult
     private func completeManagedReplacement(
         destroy: PendingManagedDestroy,
         create: PendingManagedCreate
-    ) -> Bool {
-        guard rekeyManagedReplacement(from: destroy.candidate.token, to: create.candidate) else {
-            return false
+    ) -> ManagedWindowIdentityRebindResult {
+        let result = rekeyManagedReplacement(from: destroy.candidate.token, to: create.candidate)
+        guard result.isHandled else {
+            return result
         }
         completeDelayedFocusedManagedAdmission(create)
-        return true
+        return result
     }
 
     private func completeDelayedFocusedManagedAdmission(_ create: PendingManagedCreate) {
@@ -3236,9 +3195,11 @@ final class AXEventHandler {
         }
     }
 
-    @discardableResult
-    private func rekeyManagedReplacement(from oldToken: WindowToken, to create: PreparedCreate) -> Bool {
-        let result = rekeyManagedWindowIdentity(
+    private func rekeyManagedReplacement(
+        from oldToken: WindowToken,
+        to create: PreparedCreate
+    ) -> ManagedWindowIdentityRebindResult {
+        rekeyManagedWindowIdentity(
             from: oldToken,
             to: create.token,
             windowId: create.windowId,
@@ -3246,7 +3207,6 @@ final class AXEventHandler {
             managedReplacementMetadata: create.replacementMetadata,
             admissionHints: create.admissionHints
         )
-        return result.isHandled
     }
 
     private func makeManagedReplacementMetadata(
@@ -3649,24 +3609,64 @@ final class AXEventHandler {
         )
 
         if let pair = matchedManagedReplacementPair(in: burst) {
-            if completeManagedReplacement(destroy: pair.destroy, create: pair.create) {
-                recordManagedReplacementTrace(
-                    key: key,
-                    kind: .matched(
-                        policy: managedReplacementPolicyName(burst.policy),
-                        elapsedMillis: elapsedMillis
-                    )
+            let closeProbe = sameAppCloseProbePayload(
+                matchingFocusedToken: pair.destroy.candidate.token
+            )
+            let result = completeManagedReplacement(destroy: pair.destroy, create: pair.create)
+            switch result {
+            case .committed:
+                cancelSameAppCloseProbe(matchingDestroyIn: burst)
+            case .pending:
+                cancelSameAppCloseProbe(
+                    matchingDestroyIn: burst,
+                    excludingFocusedToken: pair.destroy.candidate.token
                 )
-                replayManagedReplacementEvents(
-                    burst.orderedEvents(excludingSequences: pair.excludedSequences)
-                )
-            } else {
+            case .rejected:
+                cancelSameAppCloseProbe(matchingDestroyIn: burst)
                 replayManagedReplacementEvents(burst.orderedEvents)
+                return
+            }
+            recordManagedReplacementTrace(
+                key: key,
+                kind: .matched(
+                    policy: managedReplacementPolicyName(burst.policy),
+                    elapsedMillis: elapsedMillis
+                )
+            )
+            replayManagedReplacementEvents(
+                burst.orderedEvents(excludingSequences: pair.excludedSequences)
+            )
+            if case .committed = result,
+               let closeProbe
+            {
+                let focusedToken = controller?.workspaceManager.entry(for: pair.create.candidate.token) != nil
+                    ? pair.create.candidate.token
+                    : pair.destroy.candidate.token
+                handleSameAppCloseProbeDeadline(closeProbe, focusedToken: focusedToken)
             }
             return
         }
 
+        cancelSameAppCloseProbe(matchingDestroyIn: burst)
         replayManagedReplacementEvents(burst.orderedEvents)
+    }
+
+    private func cancelSameAppCloseProbe(
+        matchingDestroyIn burst: PendingManagedReplacementBurst,
+        excludingFocusedToken excludedToken: WindowToken? = nil
+    ) {
+        guard let open = controller?.intentLedger.openSameAppCloseProbe(),
+              open.payload.focusedToken != excludedToken,
+              burst.destroys.contains(where: {
+                  $0.candidate.token == open.payload.focusedToken
+              })
+        else {
+            return
+        }
+        cancelSameAppCloseProbe(
+            matchingFocusedToken: open.payload.focusedToken,
+            reason: "managed_replacement_destroy_replayed"
+        )
     }
 
     private func nextManagedReplacementSequence() -> UInt64 {

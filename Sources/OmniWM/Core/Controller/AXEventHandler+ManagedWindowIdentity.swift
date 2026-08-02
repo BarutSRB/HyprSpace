@@ -435,6 +435,16 @@ extension AXEventHandler {
         admissionHints: ManagedWindowAdmissionHints?
     ) {
         guard let controller else { return }
+        let completesPendingManagedReplacement = admissionRetryStateByWindowId[windowId].map { state in
+            guard !state.exhausted,
+                  case let .identityRebind(retryOld, retryNew, metadata, _, _) = state.trigger
+            else {
+                return false
+            }
+            return retryOld.token == oldWindow.token
+                && retryNew.token == newWindow.token
+                && metadata != nil
+        } ?? false
         if let admissionHints {
             _ = controller.workspaceManager.updateAdmissionHints(admissionHints, for: newWindow.token)
         }
@@ -449,7 +459,10 @@ extension AXEventHandler {
         finishAdmissionRetryAfterTracking(windowId: windowId)
         discardCreatePlacementContext(windowId: windowId)
         cancelPostCreateLifecycleVerification(for: oldWindow.token)
-        cancelSameAppCloseProbe(matchingFocusedToken: oldWindow.token, reason: "identity_rebind")
+        let closeProbe = cancelSameAppCloseProbe(
+            matchingFocusedToken: oldWindow.token,
+            reason: "identity_rebind"
+        )
         clearTerminalFrameFailure(windowId: oldWindow.token.windowId)
         admissionQuarantineByWindowId.removeValue(forKey: oldWindow.token.windowId)
         identityAliasesByWindowId.removeValue(forKey: oldWindow.token.windowId)
@@ -471,6 +484,11 @@ extension AXEventHandler {
         )
         controller.requestWorkspaceBarRefresh()
         controller.surfaceReconciler.noteRestackOccurred()
+        if completesPendingManagedReplacement,
+           let closeProbe
+        {
+            handleSameAppCloseProbeDeadline(closeProbe, focusedToken: newWindow.token)
+        }
     }
 
     private func commitManagedWindowIdentityRebind(

@@ -305,8 +305,7 @@ extension AXEventHandler {
         guard relation != .replacement,
               relation != .bindsIdentity || !state.exhausted
         else {
-            state.task?.cancel()
-            admissionRetryStateByWindowId[windowId] = nil
+            cancelCreatedWindowRetry(windowId: windowId)
             return nil
         }
         return state
@@ -397,6 +396,10 @@ extension AXEventHandler {
         windowId: UInt32
     ) {
         state?.task?.cancel()
+        cancelSameAppCloseProbe(
+            for: schedule.trigger,
+            reason: "identity_rebind_retry_exhausted"
+        )
         let generation = state?.generation ?? nextAdmissionRetryGeneration
         admissionRetryStateByWindowId[windowId] = AdmissionRetryState(
             expectedToken: schedule.expectedToken,
@@ -706,7 +709,9 @@ extension AXEventHandler {
     }
 
     func cancelCreatedWindowRetry(windowId: UInt32) {
-        admissionRetryStateByWindowId.removeValue(forKey: windowId)?.task?.cancel()
+        guard let state = admissionRetryStateByWindowId.removeValue(forKey: windowId) else { return }
+        state.task?.cancel()
+        cancelSameAppCloseProbe(for: state.trigger, reason: "identity_rebind_retry_cancelled")
     }
 
     func cancelCreatedWindowRetry(windowId: Int) {
@@ -717,9 +722,21 @@ extension AXEventHandler {
     func resetCreatedWindowRetryState() {
         for (_, state) in admissionRetryStateByWindowId {
             state.task?.cancel()
+            cancelSameAppCloseProbe(for: state.trigger, reason: "identity_rebind_retry_reset")
         }
         admissionRetryStateByWindowId.removeAll()
         deferredReplacementProtectionsByWindowId.removeAll()
+    }
+
+    private func cancelSameAppCloseProbe(
+        for trigger: AdmissionRetryTrigger,
+        reason: String
+    ) {
+        guard case let .identityRebind(oldWindow, _, _, _, _) = trigger else { return }
+        cancelSameAppCloseProbe(
+            matchingFocusedToken: oldWindow.token,
+            reason: reason
+        )
     }
 
     private func admissionIncarnationRelation(

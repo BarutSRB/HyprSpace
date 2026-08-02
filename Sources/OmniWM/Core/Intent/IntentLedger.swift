@@ -36,6 +36,7 @@ struct SameAppCloseProbePayload: Equatable, Sendable {
     let focusedToken: WindowToken
     let observedToken: WindowToken
     let source: ActivationEventSource
+    var observationGeneration: UInt64
 }
 
 enum IntentKind: Equatable, Sendable {
@@ -328,6 +329,16 @@ final class IntentLedger {
         }
         guard let open, case let .sameAppCloseProbe(payload) = open.kind else { return nil }
         return (open, payload)
+    }
+
+    func updateSameAppCloseProbe(id: IntentID, _ mutate: (inout SameAppCloseProbePayload) -> Void) {
+        guard let index = entries.firstIndex(where: { $0.id == id && $0.phase == .pending }),
+              case var .sameAppCloseProbe(payload) = entries[index].kind
+        else {
+            return
+        }
+        mutate(&payload)
+        entries[index].kind = .sameAppCloseProbe(payload)
     }
 
     func intent(id: IntentID) -> Intent? {

@@ -10,6 +10,11 @@ struct FocusedWindowFact: Sendable {
     let isSystemModalSurface: Bool
 }
 
+struct SameAppFocusCausality: Equatable, Sendable {
+    let focusedToken: WindowToken
+    let workspaceId: WorkspaceDescriptor.ID
+}
+
 struct ActivationFacts: Sendable {
     let pid: pid_t
     let source: ActivationEventSource
@@ -17,6 +22,7 @@ struct ActivationFacts: Sendable {
     let observationGeneration: UInt64
     let requestedAtSeq: UInt64
     let focusedWindow: FocusedWindowFact?
+    let sameAppFocusCausality: SameAppFocusCausality?
     let callbackGeneration: UInt64?
     let focusedAdmissionRetryExecution: FocusedAdmissionRetryExecution?
 
@@ -27,6 +33,7 @@ struct ActivationFacts: Sendable {
         observationGeneration: UInt64,
         requestedAtSeq: UInt64,
         focusedWindow: FocusedWindowFact?,
+        sameAppFocusCausality: SameAppFocusCausality? = nil,
         callbackGeneration: UInt64? = nil,
         focusedAdmissionRetryExecution: FocusedAdmissionRetryExecution? = nil
     ) {
@@ -36,6 +43,7 @@ struct ActivationFacts: Sendable {
         self.observationGeneration = observationGeneration
         self.requestedAtSeq = requestedAtSeq
         self.focusedWindow = focusedWindow
+        self.sameAppFocusCausality = sameAppFocusCausality
         self.callbackGeneration = callbackGeneration
         self.focusedAdmissionRetryExecution = focusedAdmissionRetryExecution
     }
@@ -54,6 +62,7 @@ final class FactResolver {
         let origin: ActivationCallOrigin
         let observationGeneration: UInt64
         let requestedAtSeq: UInt64
+        let sameAppFocusCausality: SameAppFocusCausality?
         let callbackGeneration: UInt64?
         let focusedAdmissionRetryExecution: FocusedAdmissionRetryExecution?
     }
@@ -72,6 +81,7 @@ final class FactResolver {
         source: ActivationEventSource,
         origin: ActivationCallOrigin,
         observationGeneration: UInt64,
+        sameAppFocusCausality: SameAppFocusCausality? = nil,
         callbackGeneration: UInt64? = nil,
         focusedAdmissionRetryExecution: FocusedAdmissionRetryExecution? = nil
     ) -> Bool {
@@ -81,6 +91,7 @@ final class FactResolver {
             origin: origin,
             observationGeneration: observationGeneration,
             requestedAtSeq: EventIntake.currentSeq(),
+            sameAppFocusCausality: sameAppFocusCausality,
             callbackGeneration: callbackGeneration,
             focusedAdmissionRetryExecution: focusedAdmissionRetryExecution
         )
@@ -99,6 +110,7 @@ final class FactResolver {
                         observationGeneration: request.observationGeneration,
                         requestedAtSeq: request.requestedAtSeq,
                         focusedWindow: factProvider(request.pid),
+                        sameAppFocusCausality: request.sameAppFocusCausality,
                         callbackGeneration: request.callbackGeneration,
                         focusedAdmissionRetryExecution: request.focusedAdmissionRetryExecution
                     )
@@ -146,6 +158,7 @@ final class FactResolver {
                     observationGeneration: request.observationGeneration,
                     requestedAtSeq: request.requestedAtSeq,
                     focusedWindow: focusedWindow,
+                    sameAppFocusCausality: request.sameAppFocusCausality,
                     callbackGeneration: request.callbackGeneration,
                     focusedAdmissionRetryExecution: request.focusedAdmissionRetryExecution
                 )
