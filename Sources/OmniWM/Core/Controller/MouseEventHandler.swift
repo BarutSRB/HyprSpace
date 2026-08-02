@@ -32,6 +32,11 @@ final class MouseEventHandler {
         }
     }
 
+    enum MouseMoveMode: Equatable {
+        case swap
+        case insert
+    }
+
     private enum MouseWheelColumnAxis {
         case horizontal
         case vertical
@@ -101,7 +106,6 @@ final class MouseEventHandler {
         var lastFocusFollowsMouseTime: Date = .distantPast
         let focusFollowsMouseDebounce: TimeInterval = 0.1
         var dragGhostController: DragGhostController?
-        var moveIsInsertMode: Bool = false
 
         var gesturePhase: GesturePhase = .idle
         var gestureStartX: CGFloat = 0.0
@@ -603,7 +607,6 @@ final class MouseEventHandler {
             controller.niriEngine?.interactiveMoveCancel()
             state.dragGhostController?.endDrag()
             state.isMoving = false
-            state.moveIsInsertMode = false
             state.activeInteractionButton = nil
         }
 
@@ -798,7 +801,12 @@ final class MouseEventHandler {
 
         guard let engine = controller.niriEngine else { return false }
 
-        if button == .left, modifiers.contains(.maskAlternate) {
+        if button == .left,
+           let moveMode = Self.mouseMoveMode(
+               modifiers: modifiers,
+               required: controller.settings.mouseMoveModifierKey.cgEventFlags
+           )
+        {
             if let tiledWindow = engine.hitTestTiled(point: location, in: wsId),
                let monitor = controller.workspaceManager.monitor(for: wsId)
             {
@@ -810,7 +818,7 @@ final class MouseEventHandler {
                     monitor: monitor
                 )
 
-                let isInsertMode = modifiers.contains(.maskShift)
+                let isInsertMode = moveMode == .insert
                 var moveStarted = false
                 controller.workspaceManager.withNiriViewportState(for: wsId) { vstate in
                     if engine.interactiveMoveBegin(
@@ -829,7 +837,6 @@ final class MouseEventHandler {
                     }
                 }
                 if moveStarted {
-                    state.moveIsInsertMode = isInsertMode
                     state.isMoving = true
                     state.activeInteractionButton = button
                     NSCursor.closedHand.set()
@@ -1098,7 +1105,6 @@ final class MouseEventHandler {
 
             state.dragGhostController?.endDrag()
             state.isMoving = false
-            state.moveIsInsertMode = false
             state.activeInteractionButton = nil
             NSCursor.arrow.set()
             return
@@ -2068,6 +2074,21 @@ final class MouseEventHandler {
 
     nonisolated static func mouseWheelModifiersMatch(_ modifiers: CGEventFlags, required: CGEventFlags) -> Bool {
         modifierFlagsMatch(modifiers, required: required)
+    }
+
+    nonisolated static func mouseMoveMode(
+        modifiers: CGEventFlags,
+        required: CGEventFlags?
+    ) -> MouseMoveMode? {
+        guard let required, !required.isEmpty else { return nil }
+        let relevantModifiers = modifiers.intersection(mouseRelevantModifierFlags)
+        if relevantModifiers == required {
+            return .swap
+        }
+        if relevantModifiers == required.union(.maskShift) {
+            return .insert
+        }
+        return nil
     }
 
     nonisolated static func modifierFlagsMatch(_ modifiers: CGEventFlags, required: CGEventFlags) -> Bool {

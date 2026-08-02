@@ -194,6 +194,7 @@ struct CanonicalTOMLConfig: Codable, Equatable {
         var scrollEnabled: Bool
         var scrollSensitivity: Double
         var scrollModifierKey: String
+        var mouseMoveModifierKey: String
         var mouseResizeModifierKey: String
         var fingerCount: Int
         var invertDirection: Bool
@@ -932,6 +933,12 @@ extension CanonicalTOMLConfig.Gestures {
             default: defaults.scrollModifierKey,
             recovering: recovering
         )
+        mouseMoveModifierKey = try container.decode(
+            String.self,
+            forKey: .mouseMoveModifierKey,
+            default: defaults.mouseMoveModifierKey,
+            recovering: recovering
+        )
         mouseResizeModifierKey = try container.decode(
             String.self,
             forKey: .mouseResizeModifierKey,
@@ -1215,6 +1222,7 @@ extension CanonicalTOMLConfig {
             scrollEnabled: export.scrollGestureEnabled,
             scrollSensitivity: export.scrollSensitivity,
             scrollModifierKey: export.scrollModifierKey,
+            mouseMoveModifierKey: export.mouseMoveModifierKey,
             mouseResizeModifierKey: export.mouseResizeModifierKey,
             fingerCount: export.gestureFingerCount,
             invertDirection: export.gestureInvertDirection,
@@ -1343,6 +1351,7 @@ extension CanonicalTOMLConfig {
             scrollGestureEnabled: gestures.scrollEnabled,
             scrollSensitivity: gestures.scrollSensitivity,
             scrollModifierKey: gestures.scrollModifierKey,
+            mouseMoveModifierKey: gestures.mouseMoveModifierKey,
             mouseResizeModifierKey: gestures.mouseResizeModifierKey,
             gestureFingerCount: gestures.fingerCount,
             gestureInvertDirection: gestures.invertDirection,

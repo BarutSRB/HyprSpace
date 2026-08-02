@@ -194,6 +194,66 @@ final class SettingsTOMLCodecTests: XCTestCase {
         XCTAssertEqual(try SettingsTOMLCodec.decode(withoutKey).trackpadScrollStyle, TrackpadScrollStyle.snap.rawValue)
     }
 
+    func testMouseMoveModifierRoundTrips() throws {
+        XCTAssertEqual(SettingsExport.defaults().mouseMoveModifierKey, MouseMoveModifierKey.option.rawValue)
+        XCTAssertTrue(
+            String(decoding: try SettingsTOMLCodec.encode(.defaults()), as: UTF8.self)
+                .contains("mouseMoveModifierKey = \"option\"")
+        )
+
+        for modifier in [MouseMoveModifierKey.off, .controlOption] {
+            var export = SettingsExport.defaults()
+            export.mouseMoveModifierKey = modifier.rawValue
+            let data = try SettingsTOMLCodec.encode(export)
+
+            XCTAssertEqual(try SettingsTOMLCodec.decode(data).mouseMoveModifierKey, modifier.rawValue)
+        }
+    }
+
+    func testMouseMoveModifierRecoversToOptionWhenMissing() throws {
+        let withoutKey = try defaultsWithReplacements(
+            ("mouseMoveModifierKey = \"option\"\n", "")
+        )
+
+        XCTAssertEqual(
+            try SettingsTOMLCodec.decode(withoutKey).mouseMoveModifierKey,
+            MouseMoveModifierKey.option.rawValue
+        )
+    }
+
+    @MainActor
+    func testUnsupportedMouseMoveModifierFallsBackToOptionWhenApplied() throws {
+        var export = SettingsExport.defaults()
+        export.mouseMoveModifierKey = "shift"
+        let decoded = try SettingsTOMLCodec.decode(SettingsTOMLCodec.encode(export))
+        let settings = makeSettingsStore()
+
+        settings.applyExport(decoded)
+
+        XCTAssertEqual(settings.mouseMoveModifierKey, .option)
+        XCTAssertEqual(settings.toExport().mouseMoveModifierKey, MouseMoveModifierKey.option.rawValue)
+    }
+
+    @MainActor
+    func testMouseMoveModifierStoreMappingRoundTrips() {
+        let source = makeSettingsStore()
+        source.mouseMoveModifierKey = .controlCommand
+        let destination = makeSettingsStore()
+
+        destination.applyExport(source.toExport())
+
+        XCTAssertEqual(destination.mouseMoveModifierKey, .controlCommand)
+        XCTAssertEqual(destination.toExport().mouseMoveModifierKey, MouseMoveModifierKey.controlCommand.rawValue)
+    }
+
+    func testMalformedMouseMoveModifierTypeRejectsDecode() throws {
+        let malformed = try defaultsWithReplacements(
+            ("mouseMoveModifierKey = \"option\"\n", "mouseMoveModifierKey = 3\n")
+        )
+
+        XCTAssertThrowsError(try SettingsTOMLCodec.decode(malformed))
+    }
+
     func testWorkspaceSwipeSettingsRoundTrip() throws {
         let defaults = SettingsExport.defaults()
         XCTAssertFalse(defaults.workspaceSwipeEnabled)

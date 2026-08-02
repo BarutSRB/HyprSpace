@@ -69,6 +69,21 @@ extension ScrollModifierKey {
     }
 }
 
+extension MouseMoveModifierKey {
+    var cgEventFlags: CGEventFlags? {
+        switch self {
+        case .off: nil
+        case .option: .maskAlternate
+        case .control: .maskControl
+        case .command: .maskCommand
+        case .controlOption: [.maskControl, .maskAlternate]
+        case .optionCommand: [.maskAlternate, .maskCommand]
+        case .controlCommand: [.maskControl, .maskCommand]
+        case .controlOptionCommand: [.maskControl, .maskAlternate, .maskCommand]
+        }
+    }
+}
+
 extension MouseResizeModifierKey {
     var cgEventFlag: CGEventFlags {
         switch self {

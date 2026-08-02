@@ -401,6 +401,12 @@ final class SettingsStore {
         didSet { scheduleSave() }
     }
 
+    var mouseMoveModifierKey = MouseMoveModifierKey(
+        rawValue: SettingsStore.defaultExport.mouseMoveModifierKey
+    ) ?? .option {
+        didSet { scheduleSave() }
+    }
+
     var mouseResizeModifierKey = MouseResizeModifierKey(
         rawValue: SettingsStore.defaultExport.mouseResizeModifierKey
     ) ?? .option {
@@ -747,6 +753,7 @@ final class SettingsStore {
             scrollGestureEnabled: scrollGestureEnabled,
             scrollSensitivity: scrollSensitivity,
             scrollModifierKey: scrollModifierKey.rawValue,
+            mouseMoveModifierKey: mouseMoveModifierKey.rawValue,
             mouseResizeModifierKey: mouseResizeModifierKey.rawValue,
             gestureFingerCount: gestureFingerCount.rawValue,
             gestureInvertDirection: gestureInvertDirection,
@@ -893,6 +900,7 @@ final class SettingsStore {
         scrollGestureEnabled = export.scrollGestureEnabled
         scrollSensitivity = export.scrollSensitivity
         scrollModifierKey = ScrollModifierKey(rawValue: export.scrollModifierKey) ?? .optionShift
+        mouseMoveModifierKey = MouseMoveModifierKey(rawValue: export.mouseMoveModifierKey) ?? .option
         mouseResizeModifierKey = MouseResizeModifierKey(rawValue: export.mouseResizeModifierKey) ?? .option
         gestureFingerCount = GestureFingerCount(rawValue: export.gestureFingerCount) ?? .three
         gestureInvertDirection = export.gestureInvertDirection

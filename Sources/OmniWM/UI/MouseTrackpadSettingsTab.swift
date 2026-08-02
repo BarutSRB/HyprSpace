@@ -24,7 +24,7 @@ struct MouseTrackpadSettingsTab: View {
             niriColumnScrollingSection
             workspaceSwipeSection
             trackpadDirectionSection
-            mouseResizeSection
+            mouseMoveAndResizeSection
             focusFollowsMouseSection
         }
         .formStyle(.grouped)
@@ -142,8 +142,19 @@ struct MouseTrackpadSettingsTab: View {
         }
     }
 
-    private var mouseResizeSection: some View {
-        Section("Mouse Resize") {
+    private var mouseMoveAndResizeSection: some View {
+        Section("Mouse Move & Resize") {
+            Picker("Left Mouse Move Modifier", selection: $settings.mouseMoveModifierKey) {
+                ForEach(MouseMoveModifierKey.allCases, id: \.self) { key in
+                    Text(key.displayName).tag(key)
+                }
+            }
+
+            SettingsCaption(
+                "Hold this modifier and left-drag to swap Niri tiled windows. "
+                    + "Add Shift to insert instead; choose Off to leave modified drags to apps."
+            )
+
             Picker("Right Mouse Resize Modifier", selection: $settings.mouseResizeModifierKey) {
                 ForEach(MouseResizeModifierKey.allCases, id: \.self) { key in
                     Text(key.displayName).tag(key)
