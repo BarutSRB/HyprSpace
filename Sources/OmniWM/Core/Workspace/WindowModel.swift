@@ -280,7 +280,8 @@ final class WindowModel {
         entry.token = newToken
         entry.axRef = newAXRef
         constraintsCacheByToken.removeValue(forKey: oldToken)
-        if let minSize = observedMinSizeByToken.removeValue(forKey: oldToken) {
+        let preservesAXIncarnation = CFEqual(entry.axRef.element, newAXRef.element)
+        if let minSize = observedMinSizeByToken.removeValue(forKey: oldToken), preservesAXIncarnation {
             observedMinSizeByToken[newToken] = minSize
         }
         if let handle = handleByToken.removeValue(forKey: oldToken) {
