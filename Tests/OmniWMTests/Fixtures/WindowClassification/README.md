@@ -1,7 +1,7 @@
 # Window classification fixtures
 
 Each `*.json` file is a `WindowClassificationRegressionFixture`.
-`WindowClassificationRegressionTests` feeds `observation.input` and its referenced rules snapshot through
+`WindowClassificationRegressionTests` feeds each observation and its referenced rules snapshot through
 `WindowClassificationReproducer.recompute` and asserts the result matches the independently
 authored `expectedDecision`. The captured `observedDecision` is evidence only and never defines
 correct behavior.

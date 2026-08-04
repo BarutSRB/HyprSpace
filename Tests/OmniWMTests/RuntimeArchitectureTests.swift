@@ -5395,6 +5395,171 @@ final class RuntimeArchitectureTests: XCTestCase {
     }
 
     @MainActor
+    func testAutomaticTransientWidgetDecisionPreservesModeWhileHelpTagEvicts() throws {
+        let controller = Self.controller()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let transientWidgetDecision = WindowDecision(
+            disposition: .unmanaged,
+            source: .builtInRule(WindowRuleEngine.transientWidgetSurfaceRuleName),
+            layoutDecisionKind: .fallbackLayout,
+            workspaceName: nil,
+            ruleEffects: .none,
+            admissionHints: .none,
+            heuristicReasons: [],
+            deferredReason: nil
+        )
+        let helpTagDecision = WindowDecision(
+            disposition: .unmanaged,
+            source: .builtInRule(WindowRuleEngine.helpTagSurfaceRuleName),
+            layoutDecisionKind: .explicitLayout,
+            workspaceName: nil,
+            ruleEffects: .none,
+            admissionHints: .none,
+            heuristicReasons: [],
+            deferredReason: nil
+        )
+
+        for (offset, mode) in [TrackedWindowMode.tiling, .floating].enumerated() {
+            let pid = pid_t(940_100 + offset)
+            let windowId = 940_200 + offset
+            let token = controller.workspaceManager.addWindow(
+                AXWindowRef(element: AXUIElementCreateApplication(pid), windowId: windowId),
+                pid: pid,
+                windowId: windowId,
+                to: workspaceId,
+                mode: mode
+            )
+            let entry = try XCTUnwrap(controller.workspaceManager.entry(for: token))
+
+            XCTAssertEqual(
+                controller.trackedModePreservingAutomaticFallbackState(
+                    decision: transientWidgetDecision,
+                    existingEntry: entry,
+                    context: .automatic
+                ),
+                mode
+            )
+            XCTAssertNil(
+                controller.trackedModePreservingAutomaticFallbackState(
+                    decision: helpTagDecision,
+                    existingEntry: entry,
+                    context: .automatic
+                )
+            )
+        }
+    }
+
+    @MainActor
+    func testTransientWidgetWindowServerResolutionUsesAtMostOneTargetedLookup() {
+        let controller = Self.controller()
+        let token = WindowToken(pid: 940_301, windowId: 940_302)
+        let exactWindowInfo = WindowServerInfo(
+            id: 940_302,
+            pid: 940_301,
+            level: 0,
+            frame: .zero,
+            tags: 5_369_504_898,
+            attributes: 3,
+            parentId: 940_300
+        )
+        let candidateFacts = AXWindowFacts(
+            role: kAXWindowRole as String,
+            subrole: kAXUnknownSubrole as String,
+            title: nil,
+            hasCloseButton: false,
+            hasFullscreenButton: false,
+            fullscreenButtonEnabled: false,
+            hasZoomButton: false,
+            hasMinimizeButton: false,
+            appPolicy: .regular,
+            bundleId: "org.example.widget-host",
+            attributeFetchSucceeded: true
+        )
+        let ordinaryFacts = AXWindowFacts(
+            role: kAXWindowRole as String,
+            subrole: kAXStandardWindowSubrole as String,
+            title: nil,
+            hasCloseButton: true,
+            hasFullscreenButton: true,
+            fullscreenButtonEnabled: true,
+            hasZoomButton: true,
+            hasMinimizeButton: true,
+            appPolicy: .regular,
+            bundleId: "org.example.widget-host",
+            attributeFetchSucceeded: true
+        )
+        let helpTagFacts = AXWindowFacts(
+            role: kAXHelpTagRole as String,
+            subrole: kAXUnknownSubrole as String,
+            title: nil,
+            hasCloseButton: false,
+            hasFullscreenButton: false,
+            fullscreenButtonEnabled: false,
+            hasZoomButton: false,
+            hasMinimizeButton: false,
+            appPolicy: .regular,
+            bundleId: WindowRuleEngine.cleanShotBundleId,
+            attributeFetchSucceeded: true
+        )
+        var queryCount = 0
+        controller.axEventHandler.windowInfoProvider = { _ in
+            queryCount += 1
+            return exactWindowInfo
+        }
+
+        XCTAssertNil(
+            controller.resolveWindowServerInfoForDisposition(
+                token: token,
+                bundleId: ordinaryFacts.bundleId,
+                axFacts: ordinaryFacts,
+                preferredWindowInfo: nil
+            )
+        )
+        XCTAssertEqual(queryCount, 0)
+        XCTAssertNil(
+            controller.resolveWindowServerInfoForDisposition(
+                token: token,
+                bundleId: helpTagFacts.bundleId,
+                axFacts: helpTagFacts,
+                preferredWindowInfo: nil
+            )
+        )
+        XCTAssertEqual(queryCount, 0)
+        XCTAssertEqual(
+            controller.resolveWindowServerInfoForDisposition(
+                token: token,
+                bundleId: candidateFacts.bundleId,
+                axFacts: candidateFacts,
+                preferredWindowInfo: exactWindowInfo
+            ),
+            exactWindowInfo
+        )
+        XCTAssertEqual(queryCount, 0)
+        XCTAssertEqual(
+            controller.resolveWindowServerInfoForDisposition(
+                token: token,
+                bundleId: candidateFacts.bundleId,
+                axFacts: candidateFacts,
+                preferredWindowInfo: nil
+            ),
+            exactWindowInfo
+        )
+        XCTAssertEqual(queryCount, 1)
+        XCTAssertEqual(
+            controller.resolveWindowServerInfoForDisposition(
+                token: token,
+                bundleId: WindowRuleEngine.cleanShotBundleId,
+                axFacts: ordinaryFacts,
+                preferredWindowInfo: nil
+            ),
+            exactWindowInfo
+        )
+        XCTAssertEqual(queryCount, 2)
+    }
+
+    @MainActor
     func testManualFloatUsesCurrentTiledSizeNotStaleFloatingFrame() throws {
         let controller = Self.controller()
         let ws = try XCTUnwrap(controller.workspaceManager.workspaceId(for: "1", createIfMissing: true))

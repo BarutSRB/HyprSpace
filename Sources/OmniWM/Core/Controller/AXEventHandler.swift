@@ -142,6 +142,13 @@ extension NiriCreateFocusTraceEvent: CustomStringConvertible {
     }
 }
 
+private enum FocusedAdmissionAttempt: Equatable {
+    case handled
+    case admissionPending(WindowAdmissionPendingReason)
+    case admissionRejected(WindowAdmissionRejectionReason)
+    case rejected
+}
+
 @MainActor
 final class AXEventHandler {
     struct ManagedReplacementTraceEvent: Equatable {
@@ -1889,7 +1896,8 @@ final class AXEventHandler {
                 || controller.workspaceManager.nonManagedFocusToken == token
                 || NSWorkspace.shared.frontmostApplication?.processIdentifier == token.pid
             if ownsProvisionalFocus {
-                _ = controller.workspaceManager.enterNonManagedFocus(target: token)
+                let provisionalTarget: WindowToken? = reason.suppressesNonManagedFocusTarget ? nil : token
+                _ = controller.workspaceManager.enterNonManagedFocus(target: provisionalTarget)
                 controller.surfaceReconciler.noteRestackOccurred()
                 recordNiriCreateFocusTrace(
                     .init(kind: .provisionalNonManagedFocusEntered(pid: pid, source: source))
@@ -1906,9 +1914,9 @@ final class AXEventHandler {
             return
         }
 
-        _ = controller.workspaceManager.enterNonManagedFocus(
-            target: token
-        )
+        let nonManagedTarget: WindowToken? = admissionAttempt
+            == .admissionRejected(.nonRenderableTransientSurface) ? nil : token
+        _ = controller.workspaceManager.enterNonManagedFocus(target: nonManagedTarget)
         controller.surfaceReconciler.noteRestackOccurred()
 
         recordNiriCreateFocusTrace(
@@ -1919,12 +1927,6 @@ final class AXEventHandler {
                 )
             )
         )
-    }
-
-    private enum FocusedAdmissionAttempt: Equatable {
-        case handled
-        case admissionPending(WindowAdmissionPendingReason)
-        case rejected
     }
 
     private func admitFocusedWindowBeforeNonManagedFallback(
@@ -1989,7 +1991,7 @@ final class AXEventHandler {
                 )
             )
             discardCreatePlacementContext(windowId: windowId)
-            return .rejected
+            return .admissionRejected(reason)
         }
         guard candidate.token == token else {
             WindowAdmissionTrace.record(
@@ -2527,7 +2529,7 @@ final class AXEventHandler {
             return .ignored(token: fallbackToken, reason: .invalidIdentity)
         }
         let ownedWindow = controller.isOwnedWindow(windowNumber: Int(windowId))
-        let windowInfoToken = windowInfo.map { WindowToken(pid: pid_t($0.pid), windowId: Int(windowId)) }
+        let windowInfoToken = windowInfo?.token(matching: windowId)
         let token = fallbackToken ?? windowInfoToken
         guard let token,
               token.windowId == Int(windowId)
@@ -2594,12 +2596,13 @@ final class AXEventHandler {
         let app = NSRunningApplication(processIdentifier: token.pid)
         let bundleId = resolveBundleId(token.pid) ?? app?.bundleIdentifier
         let appFullscreen = AXWindowService.isFullscreen(axRef)
-        let matchingWindowInfo = windowInfo.flatMap { pid_t($0.pid) == token.pid ? $0 : nil }
+        let matchingWindowInfo = WMController.exactWindowServerInfo(windowInfo, for: token)
         let evaluation = controller.evaluateWindowDisposition(
             axRef: axRef,
             pid: token.pid,
             appFullscreen: appFullscreen,
-            windowInfo: matchingWindowInfo
+            windowInfo: matchingWindowInfo,
+            windowServerLookupAttempted: true
         )
         WindowAdmissionTrace.record(
             .init(
@@ -2636,9 +2639,14 @@ final class AXEventHandler {
         )
 
         guard let trackedMode else {
-            return evaluation.decision.disposition == .undecided
-                ? .pending(token: token, axRef: axRef, reason: .factsDeferred)
-                : .ignored(token: token, reason: .policyIgnored)
+            if evaluation.decision.disposition == .undecided {
+                return .pending(
+                    token: token,
+                    axRef: axRef,
+                    reason: evaluation.decision.admissionPendingReason
+                )
+            }
+            return .ignored(token: token, reason: evaluation.decision.admissionRejectionReason)
         }
         if controller.shouldDeferAdmission(
             evaluation: evaluation,

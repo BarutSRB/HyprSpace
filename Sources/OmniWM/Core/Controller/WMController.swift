@@ -1851,6 +1851,14 @@ final class WMController {
         existingEntry: WindowState?,
         context: WindowRuleReevaluationContext
     ) -> TrackedWindowMode? {
+        if context == .automatic,
+           let existingEntry,
+           decision.isTransientWidgetSurfaceDecision
+        {
+            floatDemotionFirstSamplesByToken.removeValue(forKey: existingEntry.token)
+            return existingEntry.mode
+        }
+
         guard let trackedMode = trackedModeForLifecycle(
             decision: decision,
             existingEntry: existingEntry
@@ -1948,6 +1956,7 @@ final class WMController {
         appFullscreen: Bool? = nil,
         applyingManualOverride: Bool = true,
         windowInfo: WindowServerInfo? = nil,
+        windowServerLookupAttempted: Bool = false,
         admissionGeometry: WindowAdmissionGeometryEvidence? = nil
     ) -> WindowDecisionEvaluation {
         let token = WindowToken(pid: pid, windowId: axRef.windowId)
@@ -1974,25 +1983,51 @@ final class WMController {
             sizeConstraints: sizeConstraints,
             windowServer: nil
         )
-        let resolvedWindowInfo = baseFacts.windowServer ?? resolveWindowServerInfoForDisposition(
-            token: token,
-            bundleId: baseFacts.ax.bundleId ?? appInfo?.bundleId,
-            preferredWindowInfo: windowInfo
-        )
-        let facts = WindowRuleFacts(
-            appName: baseFacts.appName,
-            ax: baseFacts.ax,
-            sizeConstraints: baseFacts.sizeConstraints,
-            windowServer: resolvedWindowInfo
-        )
         let fullscreen = appFullscreen ?? AXWindowService.isFullscreen(axRef)
-        return makeWindowDispositionEvaluation(
-            token: token,
-            facts: facts,
-            appFullscreen: fullscreen,
-            applyingManualOverride: applyingManualOverride,
-            admissionGeometry: admissionGeometry
-        )
+        let bundleId = baseFacts.ax.bundleId ?? appInfo?.bundleId
+        var lookupAttempted = windowServerLookupAttempted || windowInfo != nil
+        var resolvedWindowInfo = Self.exactWindowServerInfo(windowInfo, for: token)
+        if resolvedWindowInfo == nil,
+           !lookupAttempted,
+           bundleId == WindowRuleEngine.cleanShotBundleId
+        {
+            lookupAttempted = true
+            resolvedWindowInfo = resolveWindowServerInfoForDisposition(
+                token: token,
+                bundleId: bundleId,
+                axFacts: baseFacts.ax,
+                preferredWindowInfo: nil
+            )
+        }
+
+        func evaluate(with windowServer: WindowServerInfo?) -> WindowDecisionEvaluation {
+            makeWindowDispositionEvaluation(
+                token: token,
+                facts: WindowRuleFacts(
+                    appName: baseFacts.appName,
+                    ax: baseFacts.ax,
+                    sizeConstraints: baseFacts.sizeConstraints,
+                    windowServer: windowServer
+                ),
+                appFullscreen: fullscreen,
+                applyingManualOverride: applyingManualOverride,
+                admissionGeometry: admissionGeometry
+            )
+        }
+
+        var evaluation = evaluate(with: resolvedWindowInfo)
+        if evaluation.decision.deferredReason == .windowServerEvidenceMissing,
+           !lookupAttempted
+        {
+            resolvedWindowInfo = resolveWindowServerInfoForDisposition(
+                token: token,
+                bundleId: bundleId,
+                axFacts: baseFacts.ax,
+                preferredWindowInfo: nil
+            )
+            evaluation = evaluate(with: resolvedWindowInfo)
+        }
+        return evaluation
     }
 
     func evaluateWindowDisposition(
@@ -2027,7 +2062,7 @@ final class WMController {
                 appName: appInfo?.name,
                 ax: axFacts,
                 sizeConstraints: evidence.sizeConstraints,
-                windowServer: windowInfo
+                windowServer: Self.exactWindowServerInfo(windowInfo, for: token)
             ),
             appFullscreen: appFullscreen,
             applyingManualOverride: applyingManualOverride,
@@ -2098,22 +2133,42 @@ final class WMController {
         )
     }
 
-    private func resolveWindowServerInfoForDisposition(
+    static func exactWindowServerInfo(
+        _ windowInfo: WindowServerInfo?,
+        for token: WindowToken
+    ) -> WindowServerInfo? {
+        guard let windowInfo,
+              let windowId = UInt32(exactly: token.windowId),
+              windowInfo.id == windowId,
+              pid_t(windowInfo.pid) == token.pid
+        else {
+            return nil
+        }
+        return windowInfo
+    }
+
+    func resolveWindowServerInfoForDisposition(
         token: WindowToken,
         bundleId: String?,
+        axFacts: AXWindowFacts,
         preferredWindowInfo: WindowServerInfo?
     ) -> WindowServerInfo? {
-        if let preferredWindowInfo {
-            return preferredWindowInfo
+        if preferredWindowInfo != nil {
+            return Self.exactWindowServerInfo(preferredWindowInfo, for: token)
         }
 
-        guard bundleId == WindowRuleEngine.cleanShotBundleId,
+        guard axFacts.role != (kAXHelpTagRole as String),
+              bundleId == WindowRuleEngine.cleanShotBundleId
+              || WindowRuleEngine.isTransientWidgetAXCandidate(axFacts),
               let windowId = UInt32(exactly: token.windowId)
         else {
             return nil
         }
 
-        return SkyLight.shared.queryWindowInfo(windowId)
+        return Self.exactWindowServerInfo(
+            axEventHandler.resolveWindowInfo(windowId),
+            for: token
+        )
     }
 
     func decideWindowDisposition(

@@ -1167,6 +1167,161 @@ final class AXFullRescanBoundaryTests: XCTestCase {
         XCTAssertNil(controller.workspaceManager.cachedConstraints(for: token))
     }
 
+    func testCapturedParentedTransientWidgetEvidenceNeverUsesLiveWindowServerProvider() {
+        let controller = WindowAdmissionTestSupport.controller()
+        let token = WindowToken(pid: 86_312, windowId: 7_916)
+        let evidence = AXWindowDecisionEvidence(
+            facts: AXWindowFacts(
+                role: kAXWindowRole as String,
+                subrole: kAXUnknownSubrole as String,
+                title: "Extension",
+                hasCloseButton: false,
+                hasFullscreenButton: false,
+                fullscreenButtonEnabled: false,
+                hasZoomButton: false,
+                hasMinimizeButton: false,
+                appPolicy: .regular,
+                bundleId: "com.google.Chrome",
+                attributeFetchSucceeded: true
+            ),
+            sizeConstraints: WindowSizeConstraints(
+                minSize: CGSize(width: 100, height: 100),
+                maxSize: .zero,
+                isFixed: false
+            )
+        )
+        let geometry = WindowAdmissionGeometryEvidence(
+            isSizeSettable: true,
+            frame: CGRect(x: 2_128, y: 126, width: 320, height: 425)
+        )
+        let exactWindowInfo = WindowServerInfo(
+            id: UInt32(token.windowId),
+            pid: token.pid,
+            level: 0,
+            frame: geometry.frame ?? .zero,
+            tags: 5_369_504_898,
+            attributes: 3,
+            parentId: 7_905
+        )
+        var queryCount = 0
+        controller.axEventHandler.windowInfoProvider = { _ in
+            queryCount += 1
+            return exactWindowInfo
+        }
+
+        let missing = controller.evaluateWindowDisposition(
+            token: token,
+            evidence: evidence,
+            appFullscreen: false,
+            windowInfo: nil,
+            admissionGeometry: geometry
+        )
+        let mismatched = controller.evaluateWindowDisposition(
+            token: token,
+            evidence: evidence,
+            appFullscreen: false,
+            windowInfo: WindowServerInfo(
+                id: exactWindowInfo.id + 1,
+                pid: exactWindowInfo.pid,
+                level: 0,
+                frame: exactWindowInfo.frame,
+                tags: exactWindowInfo.tags,
+                attributes: exactWindowInfo.attributes,
+                parentId: exactWindowInfo.parentId
+            ),
+            admissionGeometry: geometry
+        )
+        let exact = controller.evaluateWindowDisposition(
+            token: token,
+            evidence: evidence,
+            appFullscreen: false,
+            windowInfo: exactWindowInfo,
+            admissionGeometry: geometry
+        )
+
+        XCTAssertEqual(missing.decision.disposition, .undecided)
+        XCTAssertEqual(missing.decision.deferredReason, .windowServerEvidenceMissing)
+        XCTAssertEqual(mismatched.decision.disposition, .undecided)
+        XCTAssertEqual(mismatched.decision.deferredReason, .windowServerEvidenceMissing)
+        XCTAssertEqual(exact.decision.disposition, .unmanaged)
+        XCTAssertEqual(queryCount, 0)
+    }
+
+    func testCapturedHelpTagEvidenceNeedsNoWindowServerLookupOrDeferral() {
+        let controller = WindowAdmissionTestSupport.controller()
+        let token = WindowToken(pid: 86_312, windowId: 7_918)
+        let evidence = AXWindowDecisionEvidence(
+            facts: AXWindowFacts(
+                role: kAXHelpTagRole as String,
+                subrole: kAXUnknownSubrole as String,
+                title: nil,
+                hasCloseButton: false,
+                hasFullscreenButton: false,
+                fullscreenButtonEnabled: false,
+                hasZoomButton: false,
+                hasMinimizeButton: false,
+                appPolicy: .regular,
+                bundleId: "com.google.Chrome",
+                attributeFetchSucceeded: true
+            ),
+            sizeConstraints: WindowSizeConstraints(
+                minSize: CGSize(width: 100, height: 100),
+                maxSize: .zero,
+                isFixed: false
+            )
+        )
+        let geometry = WindowAdmissionGeometryEvidence(
+            isSizeSettable: true,
+            frame: CGRect(x: 1_287, y: 1_403, width: 118, height: 22)
+        )
+        var queryCount = 0
+        controller.axEventHandler.windowInfoProvider = { _ in
+            queryCount += 1
+            return WindowServerInfo(
+                id: UInt32(token.windowId),
+                pid: token.pid,
+                level: 0,
+                frame: geometry.frame ?? .zero,
+                tags: 5_369_504_386,
+                attributes: 3,
+                parentId: 7_905
+            )
+        }
+
+        let missing = controller.evaluateWindowDisposition(
+            token: token,
+            evidence: evidence,
+            appFullscreen: false,
+            windowInfo: nil,
+            admissionGeometry: geometry
+        )
+        let mismatched = controller.evaluateWindowDisposition(
+            token: token,
+            evidence: evidence,
+            appFullscreen: false,
+            windowInfo: WindowServerInfo(
+                id: UInt32(token.windowId + 1),
+                pid: token.pid + 1,
+                level: 7,
+                frame: .zero,
+                tags: UInt64.max,
+                attributes: UInt32.max,
+                parentId: 0
+            ),
+            admissionGeometry: geometry
+        )
+
+        for evaluation in [missing, mismatched] {
+            XCTAssertEqual(evaluation.decision.disposition, .unmanaged)
+            XCTAssertEqual(
+                evaluation.decision.source,
+                .builtInRule(WindowRuleEngine.helpTagSurfaceRuleName)
+            )
+            XCTAssertNil(evaluation.decision.deferredReason)
+        }
+        XCTAssertEqual(queryCount, 0)
+    }
+
     func testFullscreenButtonEvidenceTreatsMissingSentinelsAsAbsent() throws {
         let noValue = try XCTUnwrap(axBoundaryErrorValue(.noValue))
         let unsupported = try XCTUnwrap(axBoundaryErrorValue(.attributeUnsupported))

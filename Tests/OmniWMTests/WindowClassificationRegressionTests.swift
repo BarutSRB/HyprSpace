@@ -14,7 +14,7 @@ final class WindowClassificationRegressionTests: XCTestCase {
             let name = url.lastPathComponent
             let fixture = try WindowClassificationFixtureLoader.load(url)
             let got = WindowClassificationReproducer.recompute(
-                fixture.observation.input,
+                fixture.observation,
                 rules: fixture.rules
             )
             XCTAssertEqual(got, fixture.expectedDecision, "\(name): decision")
@@ -38,7 +38,7 @@ final class WindowClassificationRegressionTests: XCTestCase {
         fixture.observation.observedDecision.disposition =
             fixture.expectedDecision.disposition == "managed" ? "floating" : "managed"
         let got = WindowClassificationReproducer.recompute(
-            fixture.observation.input,
+            fixture.observation,
             rules: fixture.rules
         )
         XCTAssertEqual(got, fixture.expectedDecision)

@@ -1671,11 +1671,13 @@ import QuartzCore
                     if decision.disposition == .undecided,
                        let windowId = UInt32(exactly: winId)
                     {
+                        let reason: WindowAdmissionPendingReason = decision.deferredReason
+                            == .windowServerEvidenceMissing ? .windowServerEvidenceMissing : .factsDeferred
                         _ = controller.axEventHandler.scheduleCandidateAdmissionRetry(
                             windowId: windowId,
                             pid: pid,
                             axRef: ax,
-                            reason: .factsDeferred,
+                            reason: reason,
                             placementOrigin: placementOrigin
                         )
                     } else {

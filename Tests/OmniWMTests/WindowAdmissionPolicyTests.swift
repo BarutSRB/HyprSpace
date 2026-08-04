@@ -173,6 +173,102 @@ final class WindowAdmissionPolicyTests: XCTestCase {
         controller.axEventHandler.cancelCreatedWindowRetry(windowId: UInt32(token.windowId))
     }
 
+    func testTraceSequenceThirteenRetriesDegenerateProxyThenRejectsMatureParentedSurface() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let token = WindowToken(pid: 86_312, windowId: 7_916)
+        let windowId = try XCTUnwrap(UInt32(exactly: token.windowId))
+        let axRef = AXWindowRef(element: AXUIElementCreateApplication(token.pid), windowId: token.windowId)
+        let evidence = AXWindowDecisionEvidence(
+            facts: AXWindowFacts(
+                role: kAXWindowRole as String,
+                subrole: kAXUnknownSubrole as String,
+                title: "Extension",
+                hasCloseButton: false,
+                hasFullscreenButton: false,
+                fullscreenButtonEnabled: false,
+                hasZoomButton: false,
+                hasMinimizeButton: false,
+                appPolicy: .regular,
+                bundleId: "com.google.Chrome",
+                attributeFetchSucceeded: true
+            ),
+            sizeConstraints: WindowSizeConstraints(
+                minSize: CGSize(width: 100, height: 100),
+                maxSize: .zero,
+                isFixed: false
+            )
+        )
+        let proxyInfo = WindowServerInfo(
+            id: windowId,
+            pid: token.pid,
+            level: 0,
+            frame: .zero,
+            tags: 4_294_967_296,
+            attributes: 1,
+            parentId: 0
+        )
+        let proxyEvaluation = controller.evaluateWindowDisposition(
+            token: token,
+            evidence: evidence,
+            appFullscreen: false,
+            windowInfo: proxyInfo,
+            admissionGeometry: WindowAdmissionGeometryEvidence(
+                isSizeSettable: false,
+                frame: proxyInfo.frame
+            )
+        )
+
+        XCTAssertEqual(proxyEvaluation.decision.disposition, .floating)
+        XCTAssertTrue(
+            controller.axEventHandler.deferAdmissionIfNeeded(
+                evaluation: proxyEvaluation,
+                axRef: axRef,
+                token: token,
+                mode: .floating,
+                existingEntry: nil
+            )
+        )
+        let retryState = try XCTUnwrap(controller.axEventHandler.admissionRetryStateByWindowId[windowId])
+        XCTAssertEqual(retryState.reason, .degenerateGeometry)
+        XCTAssertEqual(retryState.attempt, 1)
+        guard case let .candidate(retryToken, _, placementOrigin) = retryState.trigger else {
+            return XCTFail("Expected bounded candidate retry")
+        }
+        XCTAssertEqual(retryToken, token)
+        XCTAssertEqual(placementOrigin, .liveCreate)
+
+        let matureFrame = CGRect(x: 2_128, y: 126, width: 320, height: 425)
+        let matureEvaluation = controller.evaluateWindowDisposition(
+            token: token,
+            evidence: evidence,
+            appFullscreen: false,
+            windowInfo: WindowServerInfo(
+                id: windowId,
+                pid: token.pid,
+                level: 0,
+                frame: matureFrame,
+                tags: 5_369_504_898,
+                attributes: 3,
+                parentId: 7_905
+            ),
+            admissionGeometry: WindowAdmissionGeometryEvidence(
+                isSizeSettable: true,
+                frame: matureFrame
+            )
+        )
+
+        XCTAssertEqual(matureEvaluation.decision.disposition, .unmanaged)
+        XCTAssertEqual(
+            matureEvaluation.decision.source,
+            .builtInRule(WindowRuleEngine.transientWidgetSurfaceRuleName)
+        )
+        XCTAssertNil(matureEvaluation.decision.deferredReason)
+        XCTAssertNil(matureEvaluation.decision.trackedMode)
+        XCTAssertEqual(matureEvaluation.decision.admissionRejectionReason, .nonRenderableTransientSurface)
+        XCTAssertNil(controller.workspaceManager.entry(for: token))
+        controller.axEventHandler.cancelCreatedWindowRetry(windowId: windowId)
+    }
+
     func testManualTilePromotionDefersUnmanageableFloatingWindow() throws {
         let controller = WindowAdmissionTestSupport.controller()
         let workspaceId = try XCTUnwrap(

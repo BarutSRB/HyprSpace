@@ -8,16 +8,45 @@ enum WindowAdmissionPendingReason: String, Equatable {
     case windowInfoMissing = "window_info_missing"
     case axWindowMissing = "ax_window_missing"
     case factsDeferred = "facts_deferred"
+    case windowServerEvidenceMissing = "window_server_evidence_missing"
     case degenerateGeometry = "degenerate_geometry"
+
+    var suppressesNonManagedFocusTarget: Bool {
+        self == .windowServerEvidenceMissing
+    }
 }
 
 enum WindowAdmissionRejectionReason: String, Equatable {
     case invalidIdentity = "invalid_identity"
     case ownedWindow = "owned_window"
     case policyIgnored = "policy_ignored"
+    case nonRenderableTransientSurface = "non_renderable_transient_surface"
     case quarantined = "quarantined"
     case retryExhausted = "retry_exhausted"
     case terminalFrameRefusal = "terminal_frame_refusal"
+
+    var suppressesNonManagedFocusTarget: Bool {
+        self == .nonRenderableTransientSurface
+    }
+}
+
+extension WindowDecision {
+    @MainActor
+    var admissionPendingReason: WindowAdmissionPendingReason {
+        deferredReason == .windowServerEvidenceMissing ? .windowServerEvidenceMissing : .factsDeferred
+    }
+
+    @MainActor
+    var admissionRejectionReason: WindowAdmissionRejectionReason {
+        isNonRenderableTransientSurfaceDecision ? .nonRenderableTransientSurface : .policyIgnored
+    }
+}
+
+extension WindowServerInfo {
+    func token(matching windowId: UInt32) -> WindowToken? {
+        guard id == windowId else { return nil }
+        return WindowToken(pid: pid_t(pid), windowId: Int(windowId))
+    }
 }
 
 enum AdmissionRetryTrigger {

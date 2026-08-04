@@ -242,4 +242,89 @@ final class ManagedFocusAdmissionTests: XCTestCase {
 
         XCTAssertNil(controller.axEventHandler.admissionRetryStateByWindowId[windowId])
     }
+
+    func testTraceShapedTransientDecisionSuppressesRenderableFocusTargetAndBorder() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        _ = controller.workspaceManager.focusWorkspace(named: "1")
+        let parentToken = controller.workspaceManager.addWindow(
+            AXWindowRef(element: AXUIElementCreateApplication(86_312), windowId: 7_905),
+            pid: 86_312,
+            windowId: 7_905,
+            to: workspaceId
+        )
+        XCTAssertTrue(
+            controller.workspaceManager.confirmManagedFocus(
+                parentToken,
+                in: workspaceId,
+                activateWorkspaceOnMonitor: false
+            )
+        )
+        let parentFrame = CGRect(x: 1_280, y: 70, width: 1_200, height: 1_350)
+        let managedWorld = WorldView(controller: controller, borderFrameResolver: { windowId in
+            windowId == parentToken.windowId ? parentFrame : nil
+        })
+        XCTAssertNotNil(SurfaceDerivation.deriveBorder(world: managedWorld))
+
+        let token = WindowToken(pid: 86_312, windowId: 7_916)
+        let popupFrame = CGRect(x: 2_128, y: 126, width: 320, height: 425)
+        let evaluation = controller.evaluateWindowDisposition(
+            token: token,
+            evidence: AXWindowDecisionEvidence(
+                facts: AXWindowFacts(
+                    role: kAXWindowRole as String,
+                    subrole: kAXUnknownSubrole as String,
+                    title: "Extension",
+                    hasCloseButton: false,
+                    hasFullscreenButton: false,
+                    fullscreenButtonEnabled: false,
+                    hasZoomButton: false,
+                    hasMinimizeButton: false,
+                    appPolicy: .regular,
+                    bundleId: "com.google.Chrome",
+                    attributeFetchSucceeded: true
+                ),
+                sizeConstraints: WindowSizeConstraints(
+                    minSize: CGSize(width: 100, height: 100),
+                    maxSize: .zero,
+                    isFixed: false
+                )
+            ),
+            appFullscreen: false,
+            windowInfo: WindowServerInfo(
+                id: UInt32(token.windowId),
+                pid: token.pid,
+                level: 0,
+                frame: popupFrame,
+                tags: 5_369_504_898,
+                attributes: 3,
+                parentId: UInt32(parentToken.windowId)
+            ),
+            admissionGeometry: WindowAdmissionGeometryEvidence(
+                isSizeSettable: true,
+                frame: popupFrame
+            )
+        )
+        let rejectionReason = evaluation.decision.admissionRejectionReason
+
+        XCTAssertEqual(evaluation.decision.disposition, .unmanaged)
+        XCTAssertEqual(rejectionReason, .nonRenderableTransientSurface)
+        XCTAssertTrue(WindowAdmissionPendingReason.windowServerEvidenceMissing.suppressesNonManagedFocusTarget)
+        XCTAssertFalse(WindowAdmissionPendingReason.factsDeferred.suppressesNonManagedFocusTarget)
+        XCTAssertTrue(rejectionReason.suppressesNonManagedFocusTarget)
+        XCTAssertFalse(WindowAdmissionRejectionReason.policyIgnored.suppressesNonManagedFocusTarget)
+
+        XCTAssertTrue(
+            controller.workspaceManager.enterNonManagedFocus(
+                target: rejectionReason.suppressesNonManagedFocusTarget ? nil : token
+            )
+        )
+        XCTAssertTrue(controller.workspaceManager.isNonManagedFocusActive)
+        XCTAssertNil(controller.workspaceManager.nonManagedFocusToken)
+        XCTAssertNil(controller.workspaceManager.renderableFocusToken)
+        let nonManagedWorld = WorldView(controller: controller, borderFrameResolver: { _ in popupFrame })
+        XCTAssertNil(SurfaceDerivation.deriveBorder(world: nonManagedWorld))
+    }
 }

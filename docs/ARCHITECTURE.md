@@ -642,14 +642,16 @@ Window create/move/front-app events originate here; AX *destroy/miniaturize/focu
 
 `decision(facts) -> WindowDecision` compiles user rules + built-in rules into `CompiledRule`s and ranks matches by specificity then declaration order. Evaluation precedence (first decisive match wins):
 
-1. System text-input panels → unmanaged
-2. Explicit user rule (bundle ID, app name, title literal/regex, AX role/subrole)
-3. Explicit built-in rule (default-floating apps, browser PiP regex, Steam tile)
-4. CleanShot recording overlay → unmanaged
-5. Required-title-missing → deferral
-6. App in native fullscreen → managed
-7. Attribute-fetch failure → deferral
-8. `AXWindowService` heuristic (size constraints, role/subrole)
+1. `AXHelpTag` role → hard unmanaged
+2. System text-input panels → unmanaged
+3. Explicit user rule (bundle ID, app name, title literal/regex, AX role/subrole)
+4. Explicit built-in rule (default-floating apps, browser PiP regex, Steam tile)
+5. CleanShot recording overlay → floating
+6. Required-title-missing → deferral
+7. App in native fullscreen → managed
+8. Attribute-fetch failure → deferral
+9. Exact AX/WindowServer transient-widget signature → unmanaged; missing exact WindowServer evidence → deferral
+10. `AXWindowService` heuristic (size constraints, role/subrole)
 
 ```swift
 struct WindowDecision {
@@ -659,6 +661,16 @@ struct WindowDecision {
     let ruleEffects: ManagedWindowRuleEffects   // minWidth/minHeight
 }
 ```
+
+The hard help-tag decision is app-independent and trusts a known `AXHelpTag` role without WindowServer
+evidence. It runs before configurable rules, contributes no rule effects, and keeps tooltip/help surfaces out of
+world state and auxiliary surfaces. The transient-widget decision is also app-independent and intentionally
+narrow: `AXWindow` + `AXUnknown`, no standard window buttons, and exact matching WindowServer identity with
+level zero, a nonzero non-self parent, a floating tag, and no document or modal tag. It does not inspect or
+require the parent to be tracked. Live evaluation performs at most one targeted WindowServer lookup only after
+this AX shape remains undecided (or for CleanShot's existing special case). Full-rescan reduction uses only its
+captured WindowServer snapshot. Existing tracked windows retain their mode during automatic reevaluation for
+the generic transient decision, while the hard help-tag exclusion can evict a previously tracked help surface.
 
 Per-app `initialContainerPrimarySpan` is an admission hint, not an ongoing `ManagedWindowRuleEffects` constraint.
 `WindowRuleEngine` takes it only from the single winning rule, and Niri consumes it once when a resizable

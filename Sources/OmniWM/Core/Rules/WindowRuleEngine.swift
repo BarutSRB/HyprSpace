@@ -26,6 +26,7 @@ enum WindowDecisionLayoutKind: String, Equatable, Sendable {
 enum WindowDecisionDeferredReason: String, Equatable, Sendable {
     case attributeFetchFailed
     case requiredTitleMissing
+    case windowServerEvidenceMissing
 }
 
 enum WindowDecisionAdmissionOutcome: String, Equatable, Sendable {
@@ -99,6 +100,21 @@ struct WindowDecision: Equatable, Sendable {
 
     var isResolved: Bool {
         disposition != .undecided
+    }
+
+    @MainActor
+    var isTransientWidgetSurfaceDecision: Bool {
+        source == .builtInRule(WindowRuleEngine.transientWidgetSurfaceRuleName)
+    }
+
+    @MainActor
+    var isHelpTagSurfaceDecision: Bool {
+        source == .builtInRule(WindowRuleEngine.helpTagSurfaceRuleName)
+    }
+
+    @MainActor
+    var isNonRenderableTransientSurfaceDecision: Bool {
+        isTransientWidgetSurfaceDecision || isHelpTagSurfaceDecision
     }
 }
 
@@ -224,6 +240,8 @@ final class WindowRuleEngine {
     static let cleanShotBundleId = "pl.maketheweb.cleanshotx"
     static let systemTextInputPanelRuleName = "systemTextInputPanel"
     static let ownedWindowRuleName = "ownedWindow"
+    nonisolated static let helpTagSurfaceRuleName = "helpTagSurface"
+    nonisolated static let transientWidgetSurfaceRuleName = "transientWidgetSurface"
     private static let cleanShotRecordingOverlayRuleName = "cleanShotRecordingOverlay"
     private static let systemTextInputPanelBundleIds: Set<String> = [
         "com.apple.characterpaletteim",
@@ -383,11 +401,34 @@ final class WindowRuleEngine {
         )
     }
 
+    nonisolated static func isTransientWidgetAXCandidate(_ facts: AXWindowFacts) -> Bool {
+        facts.attributeFetchSucceeded
+            && facts.role == (kAXWindowRole as String)
+            && facts.subrole == (kAXUnknownSubrole as String)
+            && !facts.hasCloseButton
+            && !facts.hasFullscreenButton
+            && !facts.hasZoomButton
+            && !facts.hasMinimizeButton
+    }
+
     func decision(
         for facts: WindowRuleFacts,
         token: WindowToken?,
         appFullscreen: Bool
     ) -> WindowDecision {
+        if facts.ax.role == (kAXHelpTagRole as String) {
+            return WindowDecision(
+                disposition: .unmanaged,
+                source: .builtInRule(Self.helpTagSurfaceRuleName),
+                layoutDecisionKind: .explicitLayout,
+                workspaceName: nil,
+                ruleEffects: .none,
+                admissionHints: .none,
+                heuristicReasons: [],
+                deferredReason: nil
+            )
+        }
+
         if let bundleId = facts.ax.bundleId?.lowercased(),
            Self.systemTextInputPanelBundleIds.contains(bundleId)
         {
@@ -504,6 +545,16 @@ final class WindowRuleEngine {
             )
         }
 
+        if let transientWidgetDecision = transientWidgetSurfaceDecision(
+            for: facts,
+            token: token,
+            workspaceName: workspaceName,
+            effects: effects,
+            admissionHints: admissionHints
+        ) {
+            return transientWidgetDecision
+        }
+
         let heuristic = AXWindowService.heuristicDisposition(
             for: facts.ax,
             sizeConstraints: facts.sizeConstraints
@@ -518,6 +569,58 @@ final class WindowRuleEngine {
             admissionHints: admissionHints,
             heuristicReasons: heuristic.reasons,
             deferredReason: heuristic.disposition == .undecided ? .attributeFetchFailed : nil
+        )
+    }
+
+    private func transientWidgetSurfaceDecision(
+        for facts: WindowRuleFacts,
+        token: WindowToken?,
+        workspaceName: String?,
+        effects: ManagedWindowRuleEffects,
+        admissionHints: ManagedWindowAdmissionHints
+    ) -> WindowDecision? {
+        guard Self.isTransientWidgetAXCandidate(facts.ax),
+              let token
+        else {
+            return nil
+        }
+
+        guard let windowServer = facts.windowServer,
+              let windowId = UInt32(exactly: token.windowId),
+              windowServer.id == windowId,
+              pid_t(windowServer.pid) == token.pid
+        else {
+            return WindowDecision(
+                disposition: .undecided,
+                source: .builtInRule(Self.transientWidgetSurfaceRuleName),
+                layoutDecisionKind: .fallbackLayout,
+                workspaceName: workspaceName,
+                ruleEffects: effects,
+                admissionHints: admissionHints,
+                heuristicReasons: [],
+                deferredReason: .windowServerEvidenceMissing
+            )
+        }
+
+        guard windowServer.level == 0,
+              windowServer.parentId != 0,
+              windowServer.parentId != windowServer.id,
+              windowServer.hasFloatingTag,
+              !windowServer.hasDocumentTag,
+              !windowServer.hasModalTag
+        else {
+            return nil
+        }
+
+        return WindowDecision(
+            disposition: .unmanaged,
+            source: .builtInRule(Self.transientWidgetSurfaceRuleName),
+            layoutDecisionKind: .fallbackLayout,
+            workspaceName: workspaceName,
+            ruleEffects: effects,
+            admissionHints: admissionHints,
+            heuristicReasons: [],
+            deferredReason: nil
         )
     }
 
