@@ -618,7 +618,7 @@ final class DurableParkTests: XCTestCase {
             FrameApplyTrace.shared.endCapture()
             manager.cleanup()
         }
-        manager.commitFrameApplicationStateForRebind(
+        let retainedParkTarget = manager.commitFrameApplicationStateForRebind(
             from: AXManagedWindowIdentity(
                 token: WindowToken(pid: pid, windowId: oldWindowId),
                 axRef: oldRef
@@ -632,11 +632,9 @@ final class DurableParkTests: XCTestCase {
         XCTAssertFalse(manager.pendingParkWindowIds.contains(oldWindowId))
         XCTAssertTrue(manager.pendingParkWindowIds.contains(newWindowId))
         XCTAssertNil(manager.pendingParkFrameRequest(for: newWindowId))
-        XCTAssertTrue(
-            FrameApplyTrace.shared.dump().contains(
-                "win=\(newWindowId) pid=\(pid) outcome=ax-park-failed/contextUnavailable"
-            )
-        )
+        XCTAssertNotNil(retainedParkTarget)
+        XCTAssertEqual(retainedParkTarget?.frame, parkFrame)
+        XCTAssertEqual(retainedParkTarget?.pid, pid)
         let laterRequest = try XCTUnwrap(
             manager.prepareParkFrameApplications([
                 .init(pid: pid, window: newRef, frame: parkFrame)
@@ -671,7 +669,7 @@ final class DurableParkTests: XCTestCase {
             FrameApplyTrace.shared.endCapture()
             manager.cleanup()
         }
-        manager.commitFrameApplicationStateForRebind(
+        let retainedParkTarget = manager.commitFrameApplicationStateForRebind(
             from: AXManagedWindowIdentity(
                 token: WindowToken(pid: pid, windowId: oldWindowId),
                 axRef: oldRef
@@ -684,11 +682,9 @@ final class DurableParkTests: XCTestCase {
 
         XCTAssertFalse(manager.pendingParkWindowIds.contains(oldWindowId))
         XCTAssertTrue(manager.pendingParkWindowIds.contains(newWindowId))
-        XCTAssertTrue(
-            FrameApplyTrace.shared.dump().contains(
-                "win=\(newWindowId) pid=\(pid) outcome=ax-park-failed/contextUnavailable"
-            )
-        )
+        XCTAssertNotNil(retainedParkTarget)
+        XCTAssertEqual(retainedParkTarget?.frame, parkFrame)
+        XCTAssertEqual(retainedParkTarget?.pid, pid)
         let laterRequest = try XCTUnwrap(
             manager.prepareParkFrameApplications([
                 .init(pid: pid, window: newRef, frame: parkFrame)

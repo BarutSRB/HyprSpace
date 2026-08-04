@@ -1297,9 +1297,18 @@ final class WMController {
 
         let target = refusal.targetFrame.size
         let observed = refusal.observedFrame.size
+        let existing = workspaceManager.observedMinSize(for: token) ?? CGSize(width: 1, height: 1)
         let observedMin = CGSize(
-            width: observed.width > target.width + FrameTolerance.frameWrite ? observed.width : 1,
-            height: observed.height > target.height + FrameTolerance.frameWrite ? observed.height : 1
+            width: Self.updatedObservedMinimumAxis(
+                existing: existing.width,
+                target: target.width,
+                observed: observed.width
+            ),
+            height: Self.updatedObservedMinimumAxis(
+                existing: existing.height,
+                target: target.height,
+                observed: observed.height
+            )
         )
         guard observedMin.width > 1 || observedMin.height > 1 else { return }
 
@@ -1308,6 +1317,16 @@ final class WMController {
             reason: .observedConstraintsChanged,
             affectedWorkspaceIds: [entry.workspaceId]
         )
+    }
+
+    private static func updatedObservedMinimumAxis(
+        existing: CGFloat,
+        target: CGFloat,
+        observed: CGFloat
+    ) -> CGFloat {
+        if observed > target + FrameTolerance.frameWrite { return observed }
+        if target < existing - FrameTolerance.frameWrite { return 1 }
+        return existing
     }
 
     private func evaluateSizeConstraints(
