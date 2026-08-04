@@ -1186,6 +1186,22 @@ enum StructuralMutationOutcome: Equatable {
             canRestoreHiddenWorkspaceWindows: snapshot.isActiveWorkspace,
             reassertHidden: true
         )
+        let startsAnimation = directives.contains {
+            if case .startNiriScroll = $0 { return true }
+            return false
+        }
+        let hasPendingAnimationWork = controller.map {
+            hasPendingNiriAnimationWork(
+                state: state,
+                driver: $0.workspaceManager.animationDriver,
+                engine: pass.engine,
+                workspaceId: pass.wsId
+            )
+        } == true
+        let hasRegisteredAnimation = hasScrollAnimation(for: pass.wsId)
+        if hasPendingAnimationWork, !startsAnimation, !hasRegisteredAnimation {
+            directives.append(.startNiriScroll(workspaceId: pass.wsId))
+        }
         return WorkspaceLayoutPlan(
             workspaceId: pass.wsId,
             monitor: snapshot.monitor,
