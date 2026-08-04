@@ -54,10 +54,13 @@ extension AXEventHandler {
         }
 
         if changesRuntimeIdentity {
-            controller.axManager.commitFrameApplicationStateForRebind(
+            let retainedParkTarget = controller.axManager.commitFrameApplicationStateForRebind(
                 from: oldWindow,
                 to: newWindow
             )
+            if let retainedParkTarget {
+                controller.axManager.applyParkFramesParallel([retainedParkTarget])
+            }
             bindCurrentManagedWindows(afterRebinding: oldWindow, to: newWindow)
         }
         finishManagedWindowIdentityRebind(
@@ -181,11 +184,14 @@ extension AXEventHandler {
             requestTargetedFullRescan(for: [oldWindow.token.pid, newWindow.token.pid])
             return
         }
-        controller.axManager.commitFrameApplicationStateForRebind(
+        let retainedParkTarget = controller.axManager.commitFrameApplicationStateForRebind(
             from: oldWindow,
             to: newWindow,
             acknowledgement: acknowledgement
         )
+        if let retainedParkTarget {
+            controller.axManager.applyParkFramesParallel([retainedParkTarget])
+        }
         requiresBindingRefresh = true
         guard currentManagedWindowIdentityRebindEntry(
             from: oldWindow,

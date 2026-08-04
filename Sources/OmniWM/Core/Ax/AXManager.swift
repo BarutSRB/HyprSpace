@@ -565,11 +565,12 @@ final class AXManager {
         return true
     }
 
+    @discardableResult
     func commitFrameApplicationStateForRebind(
         from oldWindow: AXManagedWindowIdentity,
         to newWindow: AXManagedWindowIdentity,
         acknowledgement: AXManagedWindowRebindAcknowledgement? = nil
-    ) {
+    ) -> AXFrameApplicationTarget? {
         let oldWindowId = oldWindow.token.windowId
         let newWindowId = newWindow.token.windowId
         let parkFrame = pendingParkFrameRequestsByWindowId[oldWindowId]?.request.frame
@@ -614,16 +615,15 @@ final class AXManager {
         for delivery in deliveries {
             delivery.deliver()
         }
+        var retainedParkTarget: AXFrameApplicationTarget?
         if shouldReissuePark {
             markParkPending(for: newWindowId, pid: newWindow.token.pid)
             if let parkFrame {
-                applyParkFramesParallel([
-                    AXFrameApplicationTarget(
-                        pid: newWindow.token.pid,
-                        window: newWindow.axRef,
-                        frame: parkFrame
-                    )
-                ])
+                retainedParkTarget = AXFrameApplicationTarget(
+                    pid: newWindow.token.pid,
+                    window: newWindow.axRef,
+                    frame: parkFrame
+                )
             }
         }
         FrameApplyTrace.recordEvent(
@@ -631,6 +631,7 @@ final class AXManager {
             windowId: oldWindowId,
             outcome: "outcome=rebind→\(newWindowId)"
         )
+        return retainedParkTarget
     }
 
     private func resetFrameApplicationStateForRebind(
