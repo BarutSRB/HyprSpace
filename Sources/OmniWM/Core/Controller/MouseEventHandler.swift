@@ -101,6 +101,7 @@ final class MouseEventHandler {
         var isResizing: Bool = false
         var isMoving: Bool = false
         var activeInteractionButton: MouseButton?
+        var capturedInteractionButton: MouseButton?
         var resizeLayout: LayoutType?
 
         var lastFocusFollowsMouseTime: Date = .distantPast
@@ -202,7 +203,7 @@ final class MouseEventHandler {
                     CGEvent.tapEnable(tap: tap, enable: true)
                 }
                 Task { @MainActor in
-                    MouseEventHandler._instance?.cancelActiveMouseInteraction()
+                    MouseEventHandler._instance?.recoverAfterTapDisable()
                 }
                 return Unmanaged.passUnretained(event)
             }
@@ -262,6 +263,7 @@ final class MouseEventHandler {
 
     func cleanup() {
         cancelActiveMouseInteraction()
+        state.capturedInteractionButton = nil
         if let source = state.moveTapRunLoopSource {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
             state.moveTapRunLoopSource = nil
@@ -360,7 +362,7 @@ final class MouseEventHandler {
             handleInputSuppressionBegan()
             return
         }
-        if shouldBlockOwnWindowInput(at: location) {
+        if !isCapturedInteraction(button), shouldBlockOwnWindowInput(at: location) {
             cancelActiveMouseInteraction()
             return
         }
@@ -372,7 +374,7 @@ final class MouseEventHandler {
             handleInputSuppressionBegan()
             return
         }
-        if shouldBlockOwnWindowInput(at: location) {
+        if !isCapturedInteraction(button), shouldBlockOwnWindowInput(at: location) {
             cancelActiveMouseInteraction()
             return
         }
@@ -461,7 +463,12 @@ final class MouseEventHandler {
     }
 
     func receiveTapMouseUp(at location: CGPoint, button: MouseButton = .left) {
-        if shouldBlockOwnWindowInput(at: location) {
+        defer {
+            if state.capturedInteractionButton == button {
+                state.capturedInteractionButton = nil
+            }
+        }
+        if !isCapturedInteraction(button), shouldBlockOwnWindowInput(at: location) {
             dropPendingTapEvents()
         } else {
             flushQueuedTapEventsBeforeImmediateDispatch()
@@ -621,6 +628,16 @@ final class MouseEventHandler {
         if wasActive {
             NSCursor.arrow.set()
         }
+    }
+
+    private func recoverAfterTapDisable() {
+        cancelActiveMouseInteraction()
+        guard let button = state.capturedInteractionButton,
+              pressedMouseButtonsProvider() & button.pressedMask == 0
+        else {
+            return
+        }
+        state.capturedInteractionButton = nil
     }
 
     private func finishActiveResize() {
@@ -839,6 +856,7 @@ final class MouseEventHandler {
                 if moveStarted {
                     state.isMoving = true
                     state.activeInteractionButton = button
+                    state.capturedInteractionButton = button
                     NSCursor.closedHand.set()
 
                     if let entry = controller.workspaceManager.entry(for: tiledWindow.handle),
@@ -885,6 +903,7 @@ final class MouseEventHandler {
         ) {
             state.isResizing = true
             state.activeInteractionButton = button
+            state.capturedInteractionButton = button
             state.currentHoveredEdges = edges
             controller.niriLayoutHandler.cancelActiveAnimations(for: wsId)
             edges.cursor.set()
@@ -928,6 +947,7 @@ final class MouseEventHandler {
         engine.cancelAnimations(in: wsId)
         state.isResizing = true
         state.activeInteractionButton = button
+        state.capturedInteractionButton = button
         state.currentHoveredEdges = edges
         state.resizeLayout = .dwindle
         edges.cursor.set()
@@ -944,16 +964,8 @@ final class MouseEventHandler {
         state.activeInteractionButton == nil || state.activeInteractionButton == button
     }
 
-    private func shouldSuppressRightMouseEvent(type: CGEventType) -> Bool {
-        guard state.activeInteractionButton == .right else { return false }
-        switch type {
-        case .rightMouseDown,
-             .rightMouseDragged,
-             .rightMouseUp:
-            return state.isResizing
-        default:
-            return false
-        }
+    private func isCapturedInteraction(_ button: MouseButton) -> Bool {
+        state.capturedInteractionButton == button
     }
 
     private func handleMouseDraggedFromTap(
@@ -2015,8 +2027,10 @@ final class MouseEventHandler {
             case .leftMouseDown:
                 _ = handler.receiveTapMouseDown(at: screenLocation, modifiers: modifiers)
             case .leftMouseDragged:
+                suppressEvent = handler.isCapturedInteraction(.left)
                 handler.receiveTapMouseDragged(at: screenLocation)
             case .leftMouseUp:
+                suppressEvent = handler.isCapturedInteraction(.left)
                 handler.receiveTapMouseUp(at: screenLocation)
             case .rightMouseDown:
                 suppressEvent = handler.receiveTapMouseDown(
@@ -2025,10 +2039,10 @@ final class MouseEventHandler {
                     button: .right
                 )
             case .rightMouseDragged:
-                suppressEvent = handler.shouldSuppressRightMouseEvent(type: type)
+                suppressEvent = handler.isCapturedInteraction(.right)
                 handler.receiveTapMouseDragged(at: screenLocation, button: .right)
             case .rightMouseUp:
-                suppressEvent = handler.shouldSuppressRightMouseEvent(type: type)
+                suppressEvent = handler.isCapturedInteraction(.right)
                 handler.receiveTapMouseUp(at: screenLocation, button: .right)
             case .scrollWheel:
                 guard let scrollPayload else { return }
