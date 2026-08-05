@@ -1112,7 +1112,8 @@ final class WindowAdmissionRetryTests: XCTestCase {
                     frame: nil
                 ),
                 structuralReplacementMatch: nil,
-                requiresPostCreateLifecycleVerification: false
+                requiresPostCreateLifecycleVerification: false,
+                heuristicReasons: []
             )
         )
         XCTAssertNil(controller.axEventHandler.admissionRetryStateByWindowId[windowId])

@@ -2246,6 +2246,10 @@ final class WorkspaceManager {
         world.admissionHints(for: token)
     }
 
+    func setHeuristicReasons(_ reasons: [AXWindowHeuristicReason], for token: WindowToken) {
+        world.setHeuristicReasons(reasons, for: token)
+    }
+
     func setNiriRestorePlacements(_ placements: [WindowToken: PersistedNiriPlacement]) {
         let changedPlacements = placements.filter { token, placement in
             guard let entry = world.entry(for: token), entry.mode == .tiling else { return false }

@@ -76,7 +76,8 @@ enum SurfaceDerivation {
                   !world.isAppFullscreenActive,
                   !world.isWindowFullscreenInLayout(token),
                   world.isManagedWindowDisplayable(entry.token),
-                  world.isWorkspaceVisible(entry.workspaceId)
+                  world.isWorkspaceVisible(entry.workspaceId),
+                  !(entry.mode == .floating && entry.heuristicReasons.contains(.noButtonsOnNonStandardSubrole))
             else {
                 return nil
             }

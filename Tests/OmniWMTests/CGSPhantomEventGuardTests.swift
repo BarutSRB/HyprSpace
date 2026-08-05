@@ -443,7 +443,8 @@ final class CGSPhantomEventGuardTests: XCTestCase {
                     admissionHints: .none,
                     replacementMetadata: metadata,
                     structuralReplacementMatch: nil,
-                    requiresPostCreateLifecycleVerification: false
+                    requiresPostCreateLifecycleVerification: false,
+                    heuristicReasons: []
                 )
             )
         }

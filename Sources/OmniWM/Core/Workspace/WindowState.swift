@@ -113,6 +113,7 @@ struct WindowState: Equatable {
     var manualLayoutOverride: ManualWindowOverride?
     var ruleEffects: ManagedWindowRuleEffects = .none
     var admissionHints: ManagedWindowAdmissionHints = .none
+    var heuristicReasons: [AXWindowHeuristicReason] = []
     var hiddenState: HiddenState?
     var layoutReason: LayoutReason = .standard
 

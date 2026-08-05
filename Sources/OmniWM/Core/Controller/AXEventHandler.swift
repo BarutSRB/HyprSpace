@@ -185,6 +185,7 @@ final class AXEventHandler {
         let replacementMetadata: ManagedReplacementMetadata
         let structuralReplacementMatch: StructuralReplacementMatch?
         let requiresPostCreateLifecycleVerification: Bool
+        let heuristicReasons: [AXWindowHeuristicReason]
 
         var bundleId: String? {
             replacementMetadata.bundleId
@@ -2709,7 +2710,8 @@ final class AXEventHandler {
             requiresPostCreateLifecycleVerification: requiresPostCreateLifecycleVerification(
                 trackedMode: trackedMode,
                 facts: evaluation.facts
-            )
+            ),
+            heuristicReasons: evaluation.decision.heuristicReasons
         )
         WindowAdmissionTrace.record(
             .init(

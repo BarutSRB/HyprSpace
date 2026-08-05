@@ -433,6 +433,10 @@ final class WindowModel {
         entries[token]?.admissionHints = hints
     }
 
+    func setHeuristicReasons(_ reasons: [AXWindowHeuristicReason], for token: WindowToken) {
+        entries[token]?.heuristicReasons = reasons
+    }
+
     func lifecyclePhase(for token: WindowToken) -> WindowLifecyclePhase? {
         entries[token]?.lifecyclePhase
     }
