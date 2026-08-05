@@ -32,7 +32,8 @@ load_metadata() {
     case "$key" in
       OMNIWM_GHOSTTY_ARCHIVE_RELATIVE_PATH)
         case "$value" in
-          Frameworks/GhosttyKit.xcframework/macos-arm64/libghostty-internal-fat.a)
+          Frameworks/GhosttyKit.xcframework/macos-arm64/libghostty-internal-fat.a|\
+	          Frameworks/GhosttyKit.xcframework/macos-arm64/libghostty-internal.a)
             OMNIWM_GHOSTTY_ARCHIVE_RELATIVE_PATH="$value"
             ;;
           *)
