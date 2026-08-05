@@ -1030,7 +1030,7 @@ class ReleaseManager:
         app_sha = sha256_file(paths["app"])
         ghostty_sha = sha256_file(paths["ghostty"])
         self.tap_cask.write_text(self.canonical_cask_text(version, app_sha), encoding="utf-8")
-        self.runner.run(["brew", "audit", "--cask", str(self.tap_cask)], cwd=self.tap, capture=False)
+        self.runner.run(["brew", "audit", "--cask", "omniwm"], cwd=self.tap, capture=False)
         self.run_git(self.tap, "add", "Casks/omniwm.rb")
         self.run_git(self.tap, "commit", "-m", f"Update OmniWM cask to {version}")
         tap_commit = self.git(self.tap, "rev-parse", "HEAD")
@@ -1091,7 +1091,7 @@ class ReleaseManager:
             embedded_hash=manifest["embedded_git_hash"],
             signing_identity=manifest["signing_identity"],
         )
-        self.runner.run(["brew", "audit", "--cask", str(self.tap_cask)], cwd=self.tap, capture=False)
+        self.runner.run(["brew", "audit", "--cask", "omniwm"], cwd=self.tap, capture=False)
         notes_sha = sha256_file(paths["notes"])
         if seal:
             manifest["notes_sha256"] = notes_sha
