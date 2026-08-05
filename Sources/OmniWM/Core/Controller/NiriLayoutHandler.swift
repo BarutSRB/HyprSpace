@@ -896,7 +896,6 @@ enum StructuralMutationOutcome: Equatable {
         }
 
         if !usesSingleWindowFit,
-           removal.externallyRemovedColumn,
            removal.removalResult.removedColumnIndicesBefore.isEmpty,
            pass.engine.correctViewportAfterColumnRemoval(
                in: pass.wsId,
