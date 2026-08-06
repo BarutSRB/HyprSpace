@@ -39,11 +39,133 @@ final class HotkeyChordTests: XCTestCase {
         XCTAssertEqual(KeySymbolMapper.fromHumanReadable("Hyper+1"), binding)
     }
 
-    func testHyperAliasEqualsLiteralFourModifiers() {
+    func testHyperAliasEqualsLiteralFourModifiersByDefault() {
         XCTAssertEqual(
             KeySymbolMapper.fromHumanReadable("Control+Option+Shift+Command+1"),
             KeySymbolMapper.fromHumanReadable("Hyper+1")
         )
+    }
+
+    func testConfiguredHyperAliasEqualsLiteralThreeModifiers() throws {
+        try withHyperComposition("Control+Option+Command") {
+            XCTAssertEqual(
+                KeySymbolMapper.fromHumanReadable("Control+Option+Command+1"),
+                KeySymbolMapper.fromHumanReadable("Hyper+1")
+            )
+        }
+    }
+
+    func testConfiguredHyperShiftAliasEqualsLiteralFourModifiers() throws {
+        try withHyperComposition("Control+Option+Command") {
+            XCTAssertEqual(
+                KeySymbolMapper.fromHumanReadable("Control+Option+Shift+Command+1"),
+                KeySymbolMapper.fromHumanReadable("Hyper+Shift+1")
+            )
+        }
+    }
+
+    func testConfiguredHyperShiftDisplaySugarRoundTrips() throws {
+        try withHyperComposition("Control+Option+Command") {
+            let binding = KeyBinding(
+                keyCode: UInt32(kVK_ANSI_1),
+                modifiers: KeySymbolMapper.hyperModifiers | UInt32(shiftKey)
+            )
+
+            XCTAssertEqual(binding.humanReadableString, "Hyper+Shift+1")
+            XCTAssertEqual(binding.displayString, "Hyper+⇧1")
+            XCTAssertEqual(KeySymbolMapper.fromHumanReadable("Hyper+Shift+1"), binding)
+        }
+    }
+
+    func testHyperKeyModifiersParsingAndValidation() {
+        XCTAssertEqual(
+            HyperKeyModifiers.fromHumanReadable("Control+Option+Command")?.carbonMask,
+            UInt32(controlKey | optionKey | cmdKey)
+        )
+        XCTAssertEqual(
+            HyperKeyModifiers.fromHumanReadable("command + shift")?.carbonMask,
+            UInt32(cmdKey | shiftKey)
+        )
+        XCTAssertNil(HyperKeyModifiers.fromHumanReadable("Control"))
+        XCTAssertNil(HyperKeyModifiers.fromHumanReadable(""))
+        XCTAssertNil(HyperKeyModifiers.fromHumanReadable("Hyper+Command"))
+        XCTAssertNil(HyperKeyModifiers.fromHumanReadable("Control+Q"))
+        XCTAssertNil(HyperKeyModifiers(carbonMask: UInt32(shiftKey)))
+    }
+
+    func testHyperKeyModifiersCodableRoundTrips() throws {
+        let modifiers = try XCTUnwrap(HyperKeyModifiers.fromHumanReadable("Control+Option+Command"))
+        let data = try JSONEncoder().encode(modifiers)
+
+        XCTAssertEqual(String(decoding: data, as: UTF8.self), "\"Control+Option+Command\"")
+        XCTAssertEqual(try JSONDecoder().decode(HyperKeyModifiers.self, from: data), modifiers)
+        XCTAssertThrowsError(try JSONDecoder().decode(HyperKeyModifiers.self, from: Data(#""Control""#.utf8)))
+    }
+
+    func testRetargetingHyperChordsFollowsComposition() throws {
+        defer { KeySymbolMapper.setHyperKeyModifiers(.default) }
+
+        let threeModifiers = try XCTUnwrap(HyperKeyModifiers.fromHumanReadable("Control+Option+Command"))
+        let hyperBound = try XCTUnwrap(HotkeyBindingRegistry.makeBinding(
+            id: "focus.left",
+            binding: KeyBinding(keyCode: UInt32(kVK_ANSI_H), modifiers: KeySymbolMapper.hyperModifiers)
+        ))
+        let literalBound = try XCTUnwrap(HotkeyBindingRegistry.makeBinding(
+            id: "focus.right",
+            binding: KeyBinding(keyCode: UInt32(kVK_ANSI_L), modifiers: UInt32(optionKey))
+        ))
+
+        let retargeted = HotkeyBindingRegistry.retargetingHyperChords([hyperBound, literalBound], to: threeModifiers)
+
+        XCTAssertEqual(
+            retargeted[0].binding,
+            .chord(KeyBinding(keyCode: UInt32(kVK_ANSI_H), modifiers: UInt32(controlKey | optionKey | cmdKey)))
+        )
+        XCTAssertEqual(retargeted[1].binding, literalBound.binding)
+
+        let restored = HotkeyBindingRegistry.retargetingHyperChords(retargeted, to: .default)
+        XCTAssertEqual(restored[0].binding, hyperBound.binding)
+        XCTAssertEqual(restored[1].binding, literalBound.binding)
+    }
+
+    func testTOMLDecodeAppliesHyperCompositionBeforeHotkeys() throws {
+        defer { KeySymbolMapper.setHyperKeyModifiers(.default) }
+        let toml = """
+        [general]
+        hyperKeyModifiers = "Control+Option+Command"
+
+        [[hotkeys]]
+        binding = "Hyper+H"
+        id = "focus.left"
+
+        [[hotkeys]]
+        binding = "Hyper+Shift+H"
+        id = "focus.right"
+        """
+
+        let export = try SettingsTOMLCodec.decode(Data(toml.utf8))
+
+        XCTAssertEqual(export.hyperKeyModifiers.humanReadableString, "Control+Option+Command")
+        let left = try XCTUnwrap(export.hotkeyBindings.first { $0.id == "focus.left" })
+        XCTAssertEqual(
+            left.binding,
+            .chord(KeyBinding(keyCode: UInt32(kVK_ANSI_H), modifiers: UInt32(controlKey | optionKey | cmdKey)))
+        )
+        let right = try XCTUnwrap(export.hotkeyBindings.first { $0.id == "focus.right" })
+        XCTAssertEqual(
+            right.binding,
+            .chord(KeyBinding(
+                keyCode: UInt32(kVK_ANSI_H),
+                modifiers: UInt32(controlKey | optionKey | shiftKey | cmdKey)
+            ))
+        )
+    }
+
+    private func withHyperComposition(_ composition: String, _ body: () throws -> Void) throws {
+        let modifiers = try XCTUnwrap(HyperKeyModifiers.fromHumanReadable(composition))
+        KeySymbolMapper.setHyperKeyModifiers(modifiers)
+        defer { KeySymbolMapper.setHyperKeyModifiers(.default) }
+        try body()
     }
 
     func testKeyBindingConflictRequiresIdenticalKeyAndModifiers() {

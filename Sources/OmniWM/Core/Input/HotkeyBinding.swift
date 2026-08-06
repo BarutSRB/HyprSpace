@@ -248,6 +248,84 @@ extension SystemHyperTrigger: Codable {
     }
 }
 
+struct HyperKeyModifiers: Equatable, Hashable, Sendable {
+    static let allModifierFlags: [UInt32] = [
+        UInt32(controlKey), UInt32(optionKey), UInt32(shiftKey), UInt32(cmdKey)
+    ]
+    static let minimumModifierCount = 2
+    static let `default` = HyperKeyModifiers(
+        uncheckedCarbonMask: UInt32(controlKey | optionKey | shiftKey | cmdKey)
+    )
+
+    let carbonMask: UInt32
+
+    private init(uncheckedCarbonMask: UInt32) {
+        carbonMask = uncheckedCarbonMask
+    }
+
+    init?(carbonMask: UInt32) {
+        let allowedMask = Self.allModifierFlags.reduce(UInt32(0)) { $0 | $1 }
+        guard carbonMask & ~allowedMask == 0,
+              Self.modifierCount(of: carbonMask) >= Self.minimumModifierCount
+        else { return nil }
+        self.carbonMask = carbonMask
+    }
+
+    var modifierCount: Int {
+        Self.modifierCount(of: carbonMask)
+    }
+
+    func contains(_ flag: UInt32) -> Bool {
+        carbonMask & flag != 0
+    }
+
+    func setting(_ flag: UInt32, included: Bool) -> HyperKeyModifiers? {
+        HyperKeyModifiers(carbonMask: included ? carbonMask | flag : carbonMask & ~flag)
+    }
+
+    var humanReadableString: String {
+        KeySymbolMapper.literalModifierNames(carbonMask).joined(separator: "+")
+    }
+
+    var symbolsString: String {
+        KeySymbolMapper.literalModifierSymbols(carbonMask)
+    }
+
+    static func fromHumanReadable(_ string: String) -> HyperKeyModifiers? {
+        var mask: UInt32 = 0
+        for part in string.components(separatedBy: "+") {
+            let name = part.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty, let flag = KeySymbolMapper.baseModifierFlag(named: name) else { return nil }
+            mask |= flag
+        }
+        return HyperKeyModifiers(carbonMask: mask)
+    }
+
+    private static func modifierCount(of mask: UInt32) -> Int {
+        allModifierFlags.count { mask & $0 != 0 }
+    }
+}
+
+extension HyperKeyModifiers: Codable {
+    init(from decoder: Decoder) throws {
+        if let container = try? decoder.singleValueContainer(),
+           let string = try? container.decode(String.self),
+           let modifiers = HyperKeyModifiers.fromHumanReadable(string)
+        {
+            self = modifiers
+            return
+        }
+        throw DecodingError.dataCorrupted(
+            .init(codingPath: decoder.codingPath, debugDescription: "Invalid Hyper key modifiers")
+        )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(humanReadableString)
+    }
+}
+
 enum HotkeyTrigger: Equatable, Hashable {
     case unassigned
     case chord(KeyBinding)
@@ -450,6 +528,23 @@ enum HotkeyBindingRegistry {
             return .unassigned
         case let .chord(binding):
             return binding.isUnassigned ? .unassigned : .chord(binding)
+        }
+    }
+
+    /// Re-resolves Hyper-aliased chords against a new composition and applies it as the
+    /// active composition. Encoding must happen before the switch so chords recorded as
+    /// "Hyper+..." under the outgoing composition retarget to the incoming one.
+    static func retargetingHyperChords(
+        _ bindings: [HotkeyBinding],
+        to composition: HyperKeyModifiers
+    ) -> [HotkeyBinding] {
+        let encoded = bindings.map { ($0, $0.binding.humanReadableString) }
+        KeySymbolMapper.setHyperKeyModifiers(composition)
+        return encoded.map { binding, string in
+            guard case .chord = binding.binding,
+                  let trigger = HotkeyTrigger.fromHumanReadable(string)
+            else { return binding }
+            return HotkeyBinding(id: binding.id, command: binding.command, trigger: trigger)
         }
     }
 }

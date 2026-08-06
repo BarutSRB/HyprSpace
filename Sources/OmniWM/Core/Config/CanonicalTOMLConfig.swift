@@ -37,6 +37,7 @@ struct CanonicalTOMLConfig: Codable, Equatable {
     struct General: Codable, Equatable {
         var hotkeysEnabled: Bool
         var systemHyperTrigger: SystemHyperTrigger
+        var hyperKeyModifiers: HyperKeyModifiers
         var defaultLayoutType: String
         var preventSleepEnabled: Bool
         var updateChecksEnabled: Bool
@@ -288,6 +289,22 @@ private extension KeyedDecodingContainer {
             return defaultValue
         }
     }
+
+    func decodeHyperKeyModifiers(
+        forKey key: Key,
+        default defaultValue: HyperKeyModifiers,
+        recovering: Bool
+    ) throws -> HyperKeyModifiers {
+        do {
+            return try decode(HyperKeyModifiers.self, forKey: key)
+        } catch DecodingError.dataCorrupted {
+            return defaultValue
+        } catch DecodingError.keyNotFound(_, _) where recovering {
+            return defaultValue
+        } catch DecodingError.valueNotFound(_, _) where recovering {
+            return defaultValue
+        }
+    }
 }
 
 private extension CanonicalTOMLConfig {
@@ -308,6 +325,9 @@ extension CanonicalTOMLConfig {
             default: defaults.general,
             recovering: recovering
         )
+        // "Hyper" aliases in the hotkeys table resolve against the configured composition,
+        // so it must be active before the hotkey bindings decode below.
+        KeySymbolMapper.setHyperKeyModifiers(general.hyperKeyModifiers)
         focus = try container.decode(Focus.self, forKey: .focus, default: defaults.focus, recovering: recovering)
         mouseWarp = try container.decode(
             MouseWarp.self,
@@ -456,6 +476,11 @@ extension CanonicalTOMLConfig.General {
         systemHyperTrigger = try container.decodeSystemHyperTrigger(
             forKey: .systemHyperTrigger,
             default: defaults.systemHyperTrigger,
+            recovering: recovering
+        )
+        hyperKeyModifiers = try container.decodeHyperKeyModifiers(
+            forKey: .hyperKeyModifiers,
+            default: defaults.hyperKeyModifiers,
             recovering: recovering
         )
         defaultLayoutType = try container.decode(
@@ -1130,6 +1155,7 @@ extension CanonicalTOMLConfig {
         general = General(
             hotkeysEnabled: export.hotkeysEnabled,
             systemHyperTrigger: export.systemHyperTrigger,
+            hyperKeyModifiers: export.hyperKeyModifiers,
             defaultLayoutType: export.defaultLayoutType,
             preventSleepEnabled: export.preventSleepEnabled,
             updateChecksEnabled: export.updateChecksEnabled,
@@ -1312,6 +1338,7 @@ extension CanonicalTOMLConfig {
             overviewSelectedBorderColor: overview.windowBorders.selected.settingsColor,
             hotkeyBindings: hotkeys,
             systemHyperTrigger: general.systemHyperTrigger,
+            hyperKeyModifiers: general.hyperKeyModifiers,
             workspaceBarEnabled: workspaceBar.enabled,
             workspaceBarShowLabels: workspaceBar.showLabels,
             workspaceBarShowFloatingWindows: workspaceBar.showFloatingWindows,

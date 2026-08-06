@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Copyright (C) 2026 BarutSRB — https://github.com/BarutSRB/OmniWM
 
+import Carbon
 import SwiftUI
 
 enum HotkeyCaptureResult {
@@ -175,8 +176,25 @@ struct HotkeySettingsView: View {
                     SettingsCaption(systemHyperTriggerFailureMessage(triggerFailure))
                 }
                 SettingsCaption(
-                    "Hold this key or button to act as ⌃⌥⇧⌘ (Hyper). Needs Input Monitoring permission. "
+                    "Hold this key or button to act as \(settings.hyperKeyModifiers.symbolsString) (Hyper). "
+                        + "Needs Input Monitoring permission. "
                         + "Leave as None to use a Hyper key set up elsewhere, such as Karabiner."
+                )
+
+                LabeledContent("Hyper Key Modifiers") {
+                    HStack(spacing: 12) {
+                        hyperModifierToggle("⌃ Control", flag: UInt32(controlKey))
+                        hyperModifierToggle("⌥ Option", flag: UInt32(optionKey))
+                        hyperModifierToggle("⇧ Shift", flag: UInt32(shiftKey))
+                        hyperModifierToggle("⌘ Command", flag: UInt32(cmdKey))
+                    }
+                    .onChange(of: settings.hyperKeyModifiers) { _, _ in
+                        controller.updateHotkeyBindings(settings.hotkeyBindings, force: true)
+                    }
+                }
+                SettingsCaption(
+                    "Modifiers that make up the Hyper chord. Unchecked modifiers stay free to combine "
+                        + "with Hyper in shortcuts, such as Hyper+Shift when Shift is excluded."
                 )
 
                 LabeledContent("Input Monitoring") {
@@ -315,6 +333,21 @@ struct HotkeySettingsView: View {
 
     private func startChordRecording(for actionId: String) {
         recordingTarget = .chord(actionId)
+    }
+
+    private func hyperModifierToggle(_ title: String, flag: UInt32) -> some View {
+        Toggle(title, isOn: Binding(
+            get: { settings.hyperKeyModifiers.contains(flag) },
+            set: { included in
+                guard let updated = settings.hyperKeyModifiers.setting(flag, included: included) else { return }
+                settings.hyperKeyModifiers = updated
+            }
+        ))
+        .disabled(
+            settings.hyperKeyModifiers.contains(flag)
+                && settings.hyperKeyModifiers.modifierCount <= HyperKeyModifiers.minimumModifierCount
+        )
+        .accessibilityLabel("Hyper includes \(title)")
     }
 
     private func systemHyperTriggerFailureMessage(_ failure: SystemHyperTriggerFailure) -> String {

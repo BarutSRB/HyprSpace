@@ -3,6 +3,7 @@
 
 import Carbon
 import Foundation
+import Synchronization
 
 enum KeySymbolMapper {
     private struct KeyDescriptor {
@@ -125,7 +126,17 @@ enum KeySymbolMapper {
         UInt32(kVK_ANSI_KeypadEquals): descriptor("KP=", "Keypad Equals")
     ]
 
-    static let hyperModifiers = UInt32(controlKey | optionKey | shiftKey | cmdKey)
+    private static let hyperModifiersStorage = Atomic<UInt32>(HyperKeyModifiers.default.carbonMask)
+
+    /// The carbon modifier mask the "Hyper" alias currently resolves to. Reads happen from
+    /// nonisolated contexts (Codable, display); writes go through `setHyperKeyModifiers`.
+    static var hyperModifiers: UInt32 {
+        hyperModifiersStorage.load(ordering: .relaxed)
+    }
+
+    static func setHyperKeyModifiers(_ modifiers: HyperKeyModifiers) {
+        hyperModifiersStorage.store(modifiers.carbonMask, ordering: .relaxed)
+    }
 
     private struct ModifierDescriptor {
         let carbon: UInt32
@@ -141,9 +152,10 @@ enum KeySymbolMapper {
     ]
 
     static func modifierSymbols(_ modifiers: UInt32, sides: SidedModifiers = .none) -> String {
-        if sides.isEmpty, modifiers == hyperModifiers { return "Hyper+" }
-        var symbols = ""
-        for modifier in orderedModifiers where modifiers & modifier.carbon != 0 {
+        let useHyperSugar = sides.isEmpty && modifiers & hyperModifiers == hyperModifiers
+        let plainModifiers = useHyperSugar ? modifiers & ~hyperModifiers : modifiers
+        var symbols = useHyperSugar ? "Hyper+" : ""
+        for modifier in orderedModifiers where plainModifiers & modifier.carbon != 0 {
             switch sides.side(for: modifier.carbon) {
             case .either: symbols += modifier.symbol
             case .left: symbols += "L" + modifier.symbol
@@ -174,9 +186,10 @@ enum KeySymbolMapper {
     }
 
     static func modifierNames(_ modifiers: UInt32, sides: SidedModifiers = .none) -> String {
-        if sides.isEmpty, modifiers == hyperModifiers { return "Hyper" }
-        var names: [String] = []
-        for modifier in orderedModifiers where modifiers & modifier.carbon != 0 {
+        let useHyperSugar = sides.isEmpty && modifiers & hyperModifiers == hyperModifiers
+        let plainModifiers = useHyperSugar ? modifiers & ~hyperModifiers : modifiers
+        var names: [String] = useHyperSugar ? ["Hyper"] : []
+        for modifier in orderedModifiers where plainModifiers & modifier.carbon != 0 {
             switch sides.side(for: modifier.carbon) {
             case .either: names.append(modifier.name)
             case .left: names.append("Left " + modifier.name)
@@ -216,8 +229,7 @@ enum KeySymbolMapper {
         "Control": UInt32(controlKey),
         "Option": UInt32(optionKey),
         "Shift": UInt32(shiftKey),
-        "Command": UInt32(cmdKey),
-        "Hyper": hyperModifiers
+        "Command": UInt32(cmdKey)
     ]
 
     private static let normalizedNameToModifier: [String: UInt32] = {
@@ -250,8 +262,23 @@ enum KeySymbolMapper {
         )
     }
 
+    static func baseModifierFlag(named name: String) -> UInt32? {
+        nameToModifier[name] ?? normalizedNameToModifier[normalizeName(name)]
+    }
+
+    static func literalModifierNames(_ modifiers: UInt32) -> [String] {
+        orderedModifiers.filter { modifiers & $0.carbon != 0 }.map(\.name)
+    }
+
+    static func literalModifierSymbols(_ modifiers: UInt32) -> String {
+        orderedModifiers.filter { modifiers & $0.carbon != 0 }.map(\.symbol).joined()
+    }
+
     static func modifierToken(named name: String) -> (flag: UInt32, side: ModifierSide)? {
-        if let flag = nameToModifier[name] ?? normalizedNameToModifier[normalizeName(name)] {
+        if normalizeName(name) == "hyper" {
+            return (hyperModifiers, .either)
+        }
+        if let flag = baseModifierFlag(named: name) {
             return (flag, .either)
         }
         let normalized = normalizeName(name)
