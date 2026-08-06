@@ -119,8 +119,9 @@ final class QuakeTerminalController: NSObject, NSWindowDelegate, QuakeTerminalTa
             switch action.tag {
             case GHOSTTY_ACTION_CONFIG_CHANGE:
                 guard target.tag == GHOSTTY_TARGET_APP,
-                      let config = action.action.config_change.config else { return false }
-                let appearance = QuakeGhosttyAppearance(config: config)
+                      let config = action.action.config_change.config,
+                      let appearance = QuakeGhosttyAppearance(cloning: config)
+                else { return false }
                 return MainActor.assumeIsolated {
                     let controller = Unmanaged<QuakeTerminalController>.fromOpaque(userdata).takeUnretainedValue()
                     controller.receiveGhosttyAppearance(appearance)

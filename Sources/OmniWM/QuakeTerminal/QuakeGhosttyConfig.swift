@@ -43,6 +43,12 @@ struct QuakeGhosttyAppearance: Sendable, Equatable {
         self.opacity = min(max(opacity, 0), 1)
     }
 
+    init?(cloning config: ghostty_config_t) {
+        guard let ownedConfig = ghostty_config_clone(config) else { return nil }
+        defer { ghostty_config_free(ownedConfig) }
+        self.init(config: ownedConfig)
+    }
+
     init(config: ghostty_config_t) {
         var background = ghostty_config_color_s()
         let backgroundKey = "background"

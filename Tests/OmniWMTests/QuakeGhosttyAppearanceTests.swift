@@ -2,6 +2,7 @@
 // Copyright (C) 2026 BarutSRB — https://github.com/BarutSRB/OmniWM
 
 import AppKit
+import GhosttyKit
 @testable import OmniWM
 import XCTest
 
@@ -55,6 +56,22 @@ final class QuakeGhosttyAppearanceTests: XCTestCase {
         XCTAssertEqual(makeAppearance(opacity: -0.25).opacity, 0)
         XCTAssertEqual(makeAppearance(opacity: 0.42).opacity, 0.42)
         XCTAssertEqual(makeAppearance(opacity: 1.25).opacity, 1)
+    }
+
+    func testSnapshotsAppearanceFromOwnedConfigClone() throws {
+        XCTAssertEqual(ghostty_init(0, nil), GHOSTTY_SUCCESS)
+        let temporaryDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("omniwm-quake-ghostty-test-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+        let config = try XCTUnwrap(QuakeGhosttyConfigBuilder(
+            temporaryDirectory: temporaryDirectory
+        ).build(opacity: 0.42, backgroundEffect: .glassClear))
+        defer { ghostty_config_free(config) }
+
+        let appearance = try XCTUnwrap(QuakeGhosttyAppearance(cloning: config))
+
+        XCTAssertEqual(appearance.opacity, 0.42, accuracy: 0.001)
+        XCTAssertEqual(appearance.glassStyle, .clear)
     }
 
     func testQuakeOverrideOwnsEveryBackgroundEffectMode() {
