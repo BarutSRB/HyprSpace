@@ -161,6 +161,21 @@ final class HotkeyChordTests: XCTestCase {
         )
     }
 
+    func testFailedTOMLDecodeRestoresHyperComposition() {
+        defer { KeySymbolMapper.setHyperKeyModifiers(.default) }
+        let toml = """
+        [general]
+        hyperKeyModifiers = "Control+Option+Command"
+
+        [[hotkeys]]
+        binding = "NotAKey+1"
+        id = "focus.left"
+        """
+
+        XCTAssertThrowsError(try SettingsTOMLCodec.decode(Data(toml.utf8)))
+        XCTAssertEqual(KeySymbolMapper.hyperModifiers, HyperKeyModifiers.default.carbonMask)
+    }
+
     private func withHyperComposition(_ composition: String, _ body: () throws -> Void) throws {
         let modifiers = try XCTUnwrap(HyperKeyModifiers.fromHumanReadable(composition))
         KeySymbolMapper.setHyperKeyModifiers(modifiers)
