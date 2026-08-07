@@ -88,7 +88,7 @@ extension WindowInteractionPolicy {
     ) -> WindowInteractionPolicy {
         guard decision.tracksWindow else { return .untracked }
 
-        if decision.layoutDecisionKind == .explicitLayout {
+        if decision.layoutDecisionKind == .explicitLayout, decision.reflectsExplicitUserIntent {
             return .full
         }
 

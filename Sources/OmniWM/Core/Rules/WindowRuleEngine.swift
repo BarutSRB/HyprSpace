@@ -98,6 +98,17 @@ struct WindowDecision: Equatable, Sendable {
         trackedMode != nil
     }
 
+    var reflectsExplicitUserIntent: Bool {
+        switch source {
+        case .manualOverride,
+             .userRule:
+            true
+        case .builtInRule,
+             .heuristic:
+            false
+        }
+    }
+
     var isResolved: Bool {
         disposition != .undecided
     }

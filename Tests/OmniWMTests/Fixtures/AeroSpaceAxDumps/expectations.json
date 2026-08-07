@@ -116,14 +116,12 @@
   "cleanshotx_monitor_1": {
     "aeroSpaceLabel": "popup",
     "expectedDisposition": "floating",
-    "expectedPolicy": "full",
-    "note": "Deliberate cleanShotRecordingOverlay built-in rule. Worth revisiting separately whether a recording overlay should instead be hands-off."
+    "expectedPolicy": "handsOffSurface"
   },
   "cleanshotx_monitor_2": {
     "aeroSpaceLabel": "popup",
     "expectedDisposition": "floating",
-    "expectedPolicy": "full",
-    "note": "Same as cleanshotx_monitor_1."
+    "expectedPolicy": "handsOffSurface"
   },
   "codex": {
     "aeroSpaceLabel": "window",

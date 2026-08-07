@@ -95,6 +95,26 @@ final class WindowInteractionPolicyTests: XCTestCase {
         XCTAssertEqual(policy, .full)
     }
 
+    func testOnlyUserIntentOutranksTheOverlayLevelCheck() {
+        let overlayLevel = CGWindowLevelForKey(.popUpMenuWindow)
+        let intents: [(WindowDecisionSource, WindowInteractionPolicy)] = [
+            (.manualOverride, .full),
+            (.userRule(UUID()), .full),
+            (.builtInRule("cleanShotRecordingOverlay"), .handsOffSurface)
+        ]
+
+        for (source, expected) in intents {
+            XCTAssertEqual(
+                WindowInteractionPolicy.resolve(
+                    decision: decision(source: source, layoutDecisionKind: .explicitLayout),
+                    windowServerLevel: overlayLevel
+                ),
+                expected,
+                "\(source) at overlay level"
+            )
+        }
+    }
+
     func testOrdinaryTiledWindowKeepsFullManagement() {
         let policy = WindowInteractionPolicy.resolve(
             decision: decision(disposition: .managed),
