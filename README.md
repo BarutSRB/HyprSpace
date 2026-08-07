@@ -118,6 +118,23 @@
       <sub>@janhesters</sub>
     </td>
     <td align="center" valign="top">
+      <a href="https://github.com/spotify">
+        <img src="https://avatars.githubusercontent.com/u/251374?v=4" width="72" alt="Spotify">
+      </a>
+      <br>
+      <a href="https://github.com/spotify"><strong>Spotify</strong></a>
+      <br>
+      <sub>━━━━━━━━</sub>
+      <br>
+      <a href="https://github.com/Cy6erBr4in" title="Alexander Dergachev">
+        <img src="https://github.com/Cy6erBr4in.png?size=96" width="72" alt="Alexander Dergachev">
+      </a>
+      <br>
+      <a href="https://github.com/Cy6erBr4in"><strong>Alexander Dergachev</strong></a>
+      <br>
+      <sub>@Cy6erBr4in</sub>
+    </td>
+    <td align="center" valign="top">
       <a href="https://www.vhf.com">
         <img src="https://www.google.com/s2/favicons?domain=www.vhf.com&sz=96" width="72" alt="vhf">
       </a>
@@ -227,6 +244,9 @@
       </a>
       <a href="https://github.com/Guria" title="Aleksei Gurianov">
         <img src="https://github.com/Guria.png?size=96" width="72" alt="Aleksei Gurianov">
+      </a>
+      <a href="https://github.com/Cy6erBr4in" title="Alexander Dergachev">
+        <img src="https://github.com/Cy6erBr4in.png?size=96" width="72" alt="Alexander Dergachev">
       </a>
       <a href="https://github.com/gloomy-breaker" title="Ayaan Sandhu">
         <img src="https://github.com/gloomy-breaker.png?size=96" width="72" alt="Ayaan Sandhu">
