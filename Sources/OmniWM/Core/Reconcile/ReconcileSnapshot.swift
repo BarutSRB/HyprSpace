@@ -337,6 +337,7 @@ struct ReconcileWindowSnapshot: Equatable {
     let observedState: ObservedWindowState
     let desiredState: DesiredWindowState
     let restoreIntent: RestoreIntent?
+    let interactionPolicy: WindowInteractionPolicy
 }
 
 struct ReconcileSnapshot: Equatable {

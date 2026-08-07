@@ -58,33 +58,6 @@ extension WindowServerInfoDTO {
     }
 }
 
-enum WindowInteractionPolicyName {
-    static func string(from policy: WindowInteractionPolicy) -> String {
-        switch policy {
-        case .full: "full"
-        case .handsOffSurface: "handsOffSurface"
-        case .untracked: "untracked"
-        default: custom(policy)
-        }
-    }
-
-    private static func custom(_ policy: WindowInteractionPolicy) -> String {
-        let granted = [
-            ("tracksInModel", policy.tracksInModel),
-            ("mayFocus", policy.mayFocus),
-            ("mayActivateApp", policy.mayActivateApp),
-            ("mayRaise", policy.mayRaise),
-            ("mayOrder", policy.mayOrder),
-            ("mayWriteFrame", policy.mayWriteFrame),
-            ("mayBorder", policy.mayBorder),
-            ("mayPark", policy.mayPark)
-        ]
-        .filter(\.1)
-        .map(\.0)
-        return "custom(\(granted.joined(separator: ",")))"
-    }
-}
-
 struct WindowClassificationOutcome: Equatable {
     var decision: WindowClassificationDecisionDTO
     var policy: String
@@ -117,7 +90,7 @@ enum WindowClassificationReproducer {
         )
         return WindowClassificationOutcome(
             decision: WindowClassificationDecisionDTO(from: final),
-            policy: WindowInteractionPolicyName.string(from: policy)
+            policy: policy.name
         )
     }
 

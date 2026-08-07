@@ -2607,6 +2607,7 @@ final class AXEventHandler {
             windowInfo: matchingWindowInfo,
             windowServerLookupAttempted: true
         )
+        let interactionPolicy = WindowInteractionPolicy.resolve(for: evaluation)
         WindowAdmissionTrace.record(
             .init(
                 action: .classificationObserved,
@@ -2615,21 +2616,11 @@ final class AXEventHandler {
                 bundleId: bundleId ?? evaluation.facts.ax.bundleId,
                 axPid: axPid,
                 observation: WindowClassificationObservation(
-                    tokenPid: token.pid,
-                    tokenWindowId: token.windowId,
-                    appName: evaluation.facts.appName,
-                    bundleId: bundleId ?? evaluation.facts.ax.bundleId,
-                    workspaceName: evaluation.decision.workspaceName,
+                    token: token,
+                    bundleId: bundleId,
                     rulesRevision: controller.settings.appRulesRevision,
-                    input: WindowClassificationInput(
-                        appName: evaluation.facts.appName,
-                        ax: AXWindowFactsDTO(from: evaluation.facts.ax),
-                        sizeConstraints: evaluation.facts.sizeConstraints.map(WindowSizeConstraintsDTO.init(from:)),
-                        windowServer: evaluation.facts.windowServer.map(WindowServerInfoDTO.init(from:)),
-                        appFullscreen: evaluation.appFullscreen,
-                        manualOverride: evaluation.manualOverride
-                    ),
-                    observedDecision: WindowClassificationDecisionDTO(from: evaluation.decision)
+                    evaluation: evaluation,
+                    policy: interactionPolicy
                 ),
                 classificationRulesSnapshot: controller.settings.appRulesDiagnosticSnapshot,
                 axRef: axRef
@@ -2713,7 +2704,7 @@ final class AXEventHandler {
                 trackedMode: trackedMode,
                 facts: evaluation.facts
             ),
-            interactionPolicy: .resolve(for: evaluation)
+            interactionPolicy: interactionPolicy
         )
         WindowAdmissionTrace.record(
             .init(

@@ -141,4 +141,21 @@ final class WindowInteractionPolicyTests: XCTestCase {
         XCTAssertEqual(narrowed, .handsOffSurface)
         XCTAssertEqual(narrowed.narrowed(by: .full), .handsOffSurface)
     }
+
+    func testNameIdentifiesKnownPolicies() {
+        XCTAssertEqual(WindowInteractionPolicy.full.name, "full")
+        XCTAssertEqual(WindowInteractionPolicy.handsOffSurface.name, "handsOffSurface")
+        XCTAssertEqual(WindowInteractionPolicy.untracked.name, "untracked")
+    }
+
+    func testNameEnumeratesCapabilitiesOfComposedPolicy() {
+        var policy = WindowInteractionPolicy.full
+        policy.mayPark = false
+        policy.mayWriteFrame = false
+
+        XCTAssertEqual(
+            policy.name,
+            "custom(tracksInModel,mayFocus,mayActivateApp,mayRaise,mayOrder,mayBorder)"
+        )
+    }
 }

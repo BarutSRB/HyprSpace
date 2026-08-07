@@ -17,7 +17,7 @@ enum ReconcileDebugDump {
 
         for window in snapshot.windows {
             lines.append(
-                "\(window.token) workspace=\(window.workspaceId.uuidString) mode=\(window.mode) phase=\(window.lifecyclePhase.rawValue) observed=\(describe(window.observedState)) desired=\(window.desiredState.summary)"
+                "\(window.token) workspace=\(window.workspaceId.uuidString) mode=\(window.mode) phase=\(window.lifecyclePhase.rawValue) policy=\(window.interactionPolicy.name) observed=\(describe(window.observedState)) desired=\(window.desiredState.summary)"
             )
         }
 

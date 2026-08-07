@@ -51,6 +51,31 @@ struct WindowInteractionPolicy: Equatable, Sendable {
         self == .handsOffSurface
     }
 
+    var name: String {
+        switch self {
+        case .full: "full"
+        case .handsOffSurface: "handsOffSurface"
+        case .untracked: "untracked"
+        default: grantedCapabilityName
+        }
+    }
+
+    private var grantedCapabilityName: String {
+        let granted = [
+            ("tracksInModel", tracksInModel),
+            ("mayFocus", mayFocus),
+            ("mayActivateApp", mayActivateApp),
+            ("mayRaise", mayRaise),
+            ("mayOrder", mayOrder),
+            ("mayWriteFrame", mayWriteFrame),
+            ("mayBorder", mayBorder),
+            ("mayPark", mayPark)
+        ]
+        .filter(\.1)
+        .map(\.0)
+        return "custom(\(granted.joined(separator: ",")))"
+    }
+
     func narrowed(by other: WindowInteractionPolicy) -> WindowInteractionPolicy {
         WindowInteractionPolicy(
             tracksInModel: tracksInModel && other.tracksInModel,

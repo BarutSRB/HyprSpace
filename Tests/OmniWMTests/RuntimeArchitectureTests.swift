@@ -5812,7 +5812,8 @@ final class RuntimeArchitectureTests: XCTestCase {
             lifecyclePhase: lifecyclePhase,
             observedState: .initial(workspaceId: workspaceId, monitorId: nil),
             desiredState: .initial(workspaceId: workspaceId, monitorId: nil, disposition: .tiling),
-            restoreIntent: nil
+            restoreIntent: nil,
+            interactionPolicy: .full
         )
     }
 

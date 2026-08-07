@@ -12,6 +12,7 @@ struct WindowClassificationObservation: Codable, Equatable, Sendable {
     var rulesRevision: UInt64
     var input: WindowClassificationInput
     var observedDecision: WindowClassificationDecisionDTO
+    var observedPolicy: String?
 
     func boundedForDiagnostics() -> WindowClassificationObservation {
         var copy = self
@@ -42,7 +43,38 @@ struct WindowClassificationObservation: Codable, Equatable, Sendable {
         copy.observedDecision.workspaceName = copy.observedDecision.workspaceName.map(
             RuntimeTraceLimits.boundedString
         )
+        copy.observedPolicy = copy.observedPolicy.map(RuntimeTraceLimits.boundedString)
         return copy
+    }
+}
+
+extension WindowClassificationObservation {
+    @MainActor
+    init(
+        token: WindowToken,
+        bundleId: String?,
+        rulesRevision: UInt64,
+        evaluation: WMController.WindowDecisionEvaluation,
+        policy: WindowInteractionPolicy
+    ) {
+        self.init(
+            tokenPid: token.pid,
+            tokenWindowId: token.windowId,
+            appName: evaluation.facts.appName,
+            bundleId: bundleId ?? evaluation.facts.ax.bundleId,
+            workspaceName: evaluation.decision.workspaceName,
+            rulesRevision: rulesRevision,
+            input: WindowClassificationInput(
+                appName: evaluation.facts.appName,
+                ax: AXWindowFactsDTO(from: evaluation.facts.ax),
+                sizeConstraints: evaluation.facts.sizeConstraints.map(WindowSizeConstraintsDTO.init(from:)),
+                windowServer: evaluation.facts.windowServer.map(WindowServerInfoDTO.init(from:)),
+                appFullscreen: evaluation.appFullscreen,
+                manualOverride: evaluation.manualOverride
+            ),
+            observedDecision: WindowClassificationDecisionDTO(from: evaluation.decision),
+            observedPolicy: policy.name
+        )
     }
 }
 
