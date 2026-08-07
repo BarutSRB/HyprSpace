@@ -1,0 +1,143 @@
+{
+  "observation": {
+    "appName": "Droppy",
+    "bundleId": "iordv.Droppy",
+    "input": {
+      "appFullscreen": false,
+      "appName": "Droppy",
+      "ax": {
+        "appPolicy": "accessory",
+        "attributeFetchSucceeded": true,
+        "bundleId": "iordv.Droppy",
+        "hasCloseButton": false,
+        "hasFullscreenButton": false,
+        "hasMinimizeButton": false,
+        "hasZoomButton": false,
+        "role": "AXWindow",
+        "subrole": "AXUnknown"
+      },
+      "sizeConstraints": {
+        "isFixed": false,
+        "maxHeight": 0,
+        "maxWidth": 0,
+        "minHeight": 100,
+        "minWidth": 100
+      },
+      "windowServer": {
+        "attributes": 3,
+        "frameHeight": 214,
+        "frameWidth": 867,
+        "frameX": -865,
+        "frameY": 1109,
+        "id": 4540,
+        "level": -1,
+        "parentId": 0,
+        "pid": 23479,
+        "tags": 35188667851266
+      }
+    },
+    "observedDecision": {
+      "disposition": "floating",
+      "heuristicReasons": [
+        "accessoryWithoutClose"
+      ],
+      "layoutDecisionKind": "fallbackLayout",
+      "source": "heuristic"
+    },
+    "rulesRevision": 1,
+    "tokenPid": 23479,
+    "tokenWindowId": 4540
+  },
+  "rules": [
+    {
+      "assignToWorkspace": "1",
+      "bundleId": "org.chromium.Chromium",
+      "id": "486CEFA6-69AA-4A3C-AF27-BCD38F4F138B",
+      "initialContainerPrimarySpan": 0.85,
+      "minHeight": 375,
+      "minWidth": 500
+    },
+    {
+      "assignToWorkspace": "1",
+      "bundleId": "app.zen-browser.zen",
+      "id": "1CF39647-F30D-4E76-9686-79B551F1B094",
+      "initialContainerPrimarySpan": 0.85,
+      "minHeight": 495,
+      "minWidth": 500
+    },
+    {
+      "assignToWorkspace": "1",
+      "bundleId": "org.mozilla.firefox",
+      "id": "005C00D3-F665-47F8-BDAE-D80790E9E46B",
+      "initialContainerPrimarySpan": 0.85,
+      "minHeight": 120,
+      "minWidth": 500
+    },
+    {
+      "assignToWorkspace": "1",
+      "bundleId": "com.apple.Safari",
+      "id": "81426D13-C1A5-475E-AFBC-00BBA05042D0",
+      "initialContainerPrimarySpan": 0.85,
+      "minHeight": 220,
+      "minWidth": 574
+    },
+    {
+      "assignToWorkspace": "2",
+      "bundleId": "ch.protonmail.desktop",
+      "id": "56F03E3C-6221-4E78-A905-6AEA8220DB6A",
+      "initialContainerPrimarySpan": 0.75,
+      "minHeight": 480,
+      "minWidth": 640
+    },
+    {
+      "appNameSubstring": "Spotify",
+      "assignToWorkspace": "3",
+      "bundleId": "com.spotify.client",
+      "id": "2DE9390B-0DB4-4D0C-9ABA-06F76F1D4EA9",
+      "initialContainerPrimarySpan": 0.8,
+      "minHeight": 600,
+      "minWidth": 800
+    },
+    {
+      "assignToWorkspace": "4",
+      "bundleId": "dev.zed.Zed",
+      "id": "979F05F4-FFA2-4EDD-B23F-08A9944C759F",
+      "initialContainerPrimarySpan": 0.85,
+      "minHeight": 240,
+      "minWidth": 360
+    },
+    {
+      "bundleId": "com.mitchellh.ghostty",
+      "id": "7876C9EF-437E-4D4F-9C27-B1B02F4AABCE",
+      "minHeight": 48,
+      "minWidth": 90
+    },
+    {
+      "assignToWorkspace": "2",
+      "bundleId": "com.apple.MobileSMS",
+      "id": "552FB77D-BF0E-4737-90A6-B5BC6986C579",
+      "minHeight": 320,
+      "minWidth": 660
+    },
+    {
+      "assignToWorkspace": "2",
+      "bundleId": "org.whispersystems.signal-desktop",
+      "id": "4B34BD08-6741-403F-A18D-A6A6E816F9A1",
+      "initialContainerPrimarySpan": 0.5
+    },
+    {
+      "bundleId": "com.apple.systempreferences",
+      "id": "4FBACC73-F1A9-40A5-8CCB-99119C519B72",
+      "layout": "float"
+    }
+  ],
+  "expectedDecision": {
+    "disposition": "floating",
+    "source": "heuristic",
+    "heuristicReasons": [
+      "accessoryWithoutClose"
+    ],
+    "layoutDecisionKind": "fallbackLayout"
+  },
+  "expectedPolicy": "handsOffSurface"
+}
