@@ -128,8 +128,6 @@ enum KeySymbolMapper {
 
     private static let hyperModifiersStorage = Atomic<UInt32>(HyperKeyModifiers.default.carbonMask)
 
-    /// The carbon modifier mask the "Hyper" alias currently resolves to. Reads happen from
-    /// nonisolated contexts (Codable, display); writes go through `setHyperKeyModifiers`.
     static var hyperModifiers: UInt32 {
         hyperModifiersStorage.load(ordering: .relaxed)
     }

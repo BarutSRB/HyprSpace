@@ -531,9 +531,6 @@ enum HotkeyBindingRegistry {
         }
     }
 
-    /// Re-resolves Hyper-aliased chords against a new composition and applies it as the
-    /// active composition. Encoding must happen before the switch so chords recorded as
-    /// "Hyper+..." under the outgoing composition retarget to the incoming one.
     static func retargetingHyperChords(
         _ bindings: [HotkeyBinding],
         to composition: HyperKeyModifiers

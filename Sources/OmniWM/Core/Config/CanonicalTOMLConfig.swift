@@ -310,8 +310,6 @@ extension CanonicalTOMLConfig {
             default: defaults.general,
             recovering: recovering
         )
-        // "Hyper" aliases in the hotkeys table resolve against the configured composition,
-        // so it must be active before the hotkey bindings decode below.
         KeySymbolMapper.setHyperKeyModifiers(general.hyperKeyModifiers)
         focus = try container.decode(Focus.self, forKey: .focus, default: defaults.focus, recovering: recovering)
         mouseWarp = try container.decode(

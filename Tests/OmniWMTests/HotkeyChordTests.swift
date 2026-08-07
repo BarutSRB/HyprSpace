@@ -176,6 +176,48 @@ final class HotkeyChordTests: XCTestCase {
         XCTAssertEqual(KeySymbolMapper.hyperModifiers, HyperKeyModifiers.default.carbonMask)
     }
 
+    func testSuccessfulTOMLDecodeLeavesActiveHyperCompositionUnchanged() throws {
+        defer { KeySymbolMapper.setHyperKeyModifiers(.default) }
+        let threeModifiers = try XCTUnwrap(HyperKeyModifiers.fromHumanReadable("Control+Option+Command"))
+        KeySymbolMapper.setHyperKeyModifiers(threeModifiers)
+
+        let toml = """
+        [general]
+        hyperKeyModifiers = "Control+Option+Shift+Command"
+
+        [[hotkeys]]
+        binding = "Hyper+H"
+        id = "focus.left"
+        """
+
+        let export = try SettingsTOMLCodec.decode(Data(toml.utf8))
+
+        XCTAssertEqual(export.hyperKeyModifiers, .default)
+        let left = try XCTUnwrap(export.hotkeyBindings.first { $0.id == "focus.left" })
+        XCTAssertEqual(
+            left.binding,
+            .chord(KeyBinding(
+                keyCode: UInt32(kVK_ANSI_H),
+                modifiers: UInt32(controlKey | optionKey | shiftKey | cmdKey)
+            ))
+        )
+        XCTAssertEqual(KeySymbolMapper.hyperModifiers, threeModifiers.carbonMask)
+    }
+
+    func testEncodePreservingUnknownKeysLeavesActiveHyperCompositionUnchanged() throws {
+        defer { KeySymbolMapper.setHyperKeyModifiers(.default) }
+        let previous = try SettingsTOMLCodec.encode(SettingsExport.defaults())
+
+        let threeModifiers = try XCTUnwrap(HyperKeyModifiers.fromHumanReadable("Control+Option+Command"))
+        var export = SettingsExport.defaults()
+        export.hyperKeyModifiers = threeModifiers
+        KeySymbolMapper.setHyperKeyModifiers(threeModifiers)
+
+        _ = try SettingsTOMLCodec.encode(export, preservingUnknownKeysFrom: previous)
+
+        XCTAssertEqual(KeySymbolMapper.hyperModifiers, threeModifiers.carbonMask)
+    }
+
     private func withHyperComposition(_ composition: String, _ body: () throws -> Void) throws {
         let modifiers = try XCTUnwrap(HyperKeyModifiers.fromHumanReadable(composition))
         KeySymbolMapper.setHyperKeyModifiers(modifiers)
