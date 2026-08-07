@@ -1,0 +1,117 @@
+{
+  "AXActivationPoint" : "<AXValue 0xca6d24ea0> {value = x:-1.000000 y:1297.000000 type = kAXValueCGPointType}",
+  "AXCancelButton" : null,
+  "AXCloseButton" : null,
+  "AXDefaultButton" : null,
+  "AXDocument" : "",
+  "AXFocused" : 0,
+  "AXFrame" : "<AXValue 0xca5f6c980> {value = x:848.000000 y:114.000000 w:608.000000 h:579.000000 type = kAXValueCGRectType}",
+  "AXFullScreen" : 0,
+  "AXFullScreenButton" : null,
+  "AXGrowArea" : null,
+  "AXMain" : 0,
+  "AXMinimizeButton" : null,
+  "AXMinimized" : 0,
+  "AXModal" : 0,
+  "AXParent" : "<AXUIElement Application 0xca6f72430> {pid=88242}",
+  "AXPosition" : "<AXValue 0xca6f7ccc0> {value = x:848.000000 y:114.000000 type = kAXValueCGPointType}",
+  "AXProxy" : null,
+  "AXRole" : "AXWindow",
+  "AXSections" : [
+    "{\n    SectionDescription = Content;\n    SectionObject = \"<AXUIElement 0xca6f73b70> {pid=88242}\";\n    SectionUniqueID = AXContent;\n}",
+    "{\n    SectionObject = \"<AXUIElement 0xca6f72430> {pid=88242}\";\n    SectionUniqueID = AXContainer;\n}"
+  ],
+  "AXSize" : "<AXValue 0xca6f7d890> {value = w:608.000000 h:579.000000 type = kAXValueCGSizeType}",
+  "AXSubrole" : "AXUnknown",
+  "AXTitle" : "Choose what to share with meet.google.com",
+  "AXTitleUIElement" : null,
+  "AXToolbarButton" : null,
+  "AXZoomButton" : null,
+  "Aero.AXApp" : {
+    "AXExtrasMenuBar" : null,
+    "AXFocusedUIElement" : {
+      "AXAccessKey" : null,
+      "AXBlockQuoteLevel" : 0,
+      "AXColumnHeaderUIElements" : null,
+      "AXCustomContent" : null,
+      "AXDOMClassList" : [
+        "MdTextButton"
+      ],
+      "AXDOMIdentifier" : "",
+      "AXDescription" : "Cancel",
+      "AXElementBusy" : 0,
+      "AXEnabled" : 1,
+      "AXInsertionPointLineNumber" : 0,
+      "AXInvalid" : "false",
+      "AXNumberOfCharacters" : 0,
+      "AXParent" : "AXUIElement(AxWindowId=19097, title=\"\", role=\"AXGroup\", subrole=nil)",
+      "AXPlaceholderValue" : null,
+      "AXRequired" : 0,
+      "AXRole" : "AXButton",
+      "AXRows" : [
+
+      ],
+      "AXSelected" : 0,
+      "AXSelectedRows" : [
+
+      ],
+      "AXSelectedText" : "",
+      "AXSelectedTextRange" : "<AXValue 0xca6f7ccc0> {value = location:0 length:0 type = kAXValueCFRangeType}",
+      "AXSelectedTextRanges" : [
+        "<AXValue 0xca6f7ccc0> {value = location:0 length:0 type = kAXValueCFRangeType}"
+      ],
+      "AXSubrole" : null,
+      "AXTitle" : "",
+      "AXTitleUIElement" : null,
+      "AXTopLevelUIElement" : "AXUIElement(AxWindowId=19097, title=\"Choose what to share with meet.google.com\", role=\"AXWindow\", subrole=\"AXUnknown\")",
+      "AXURL" : null,
+      "AXValue" : "",
+      "AXVisibleCharacterRange" : "<AXValue 0xca6f7ccc0> {value = location:0 length:0 type = kAXValueCFRangeType}",
+      "AXVisited" : 0,
+      "AXWindow" : "AXUIElement(AxWindowId=19097, title=\"Choose what to share with meet.google.com\", role=\"AXWindow\", subrole=\"AXUnknown\")",
+      "Aero.AxFailed" : "get.AXURL(noValue), get.AXPlaceholderValue(noValue), get.AXTitleUIElement(noValue), get.AXAccessKey(noValue), get.AXSubrole(noValue), get.AXColumnHeaderUIElements(noValue), get.AXCustomContent(noValue)",
+      "Aero.AxIgnored" : "AXFocused, AXRoleDescription, AXHelp, AXChildren, AXSize, AXFocusableAncestor, AXPosition, AXFrame",
+      "Aero.AxWritable" : "AXSelectedText, AXSelectedTextRange, AXValue, AXCustomContent",
+      "ChromeAXNodeId" : "2160"
+    },
+    "AXFocusedWindow" : "AXUIElement(AxWindowId=19097, title=\"Choose what to share with meet.google.com\", role=\"AXWindow\", subrole=\"AXUnknown\")",
+    "AXFrame" : null,
+    "AXFrontmost" : 1,
+    "AXFunctionRowTopLevelElements" : [
+
+    ],
+    "AXMainWindow" : "AXUIElement(AxWindowId=19068, title=\"Meet – sqg-eqgf-jjj - Google Chrome\", role=\"AXWindow\", subrole=\"AXStandardWindow\")",
+    "AXMenuBar" : "<AXUIElement 0xca6f73b70> {pid=88242}",
+    "AXPosition" : null,
+    "AXRole" : "AXApplication",
+    "AXSize" : null,
+    "AXTitle" : "Chrome",
+    "AXWindows" : [
+      "AXUIElement(AxWindowId=19097, title=\"Choose what to share with meet.google.com\", role=\"AXWindow\", subrole=\"AXUnknown\")",
+      "AXUIElement(AxWindowId=19068, title=\"Meet – sqg-eqgf-jjj - Google Chrome\", role=\"AXWindow\", subrole=\"AXStandardWindow\")"
+    ],
+    "Aero.AxFailed" : "isWritable.AXFunctionRowTopLevelElements(failure), get.AXFrame(attributeUnsupported), isWritable.AXFrame(failure), get.AXExtrasMenuBar(noValue), isWritable.AXExtrasMenuBar(failure), get.AXSize(attributeUnsupported), isWritable.AXSize(attributeUnsupported), get.AXPosition(attributeUnsupported), isWritable.AXPosition(attributeUnsupported)",
+    "Aero.AxIgnored" : "AXChildren, AXChildrenInNavigationOrder, AXEnhancedUserInterface, AXPreferredLanguage, AXRoleDescription, AXHidden",
+    "Aero.AxWritable" : "AXFrontmost"
+  },
+  "Aero.App.appBundleId" : "com.google.Chrome",
+  "Aero.App.nsApp.activationPolicy" : "regular",
+  "Aero.App.nsApp.appBundlePath" : "file:///Applications/Google%20Chrome.app/",
+  "Aero.App.nsApp.execPath" : "file:///Applications/Google%20Chrome.app/Contents/MacOS/Google%20Chrome",
+  "Aero.App.pid" : 88242,
+  "Aero.App.version" : "7871.47",
+  "Aero.App.versionShort" : "150.0.7871.47",
+  "Aero.AxFailed" : "isWritable.AXFrame(failure), get.AXGrowArea(failure), get.AXMinimizeButton(noValue), get.AXCloseButton(noValue), isWritable.AXActivationPoint(failure), get.AXFullScreenButton(noValue), get.AXProxy(noValue), get.AXDefaultButton(noValue), get.AXTitleUIElement(noValue), get.AXCancelButton(noValue), get.AXZoomButton(noValue), get.AXToolbarButton(noValue)",
+  "Aero.AxIgnored" : "AXChildrenInNavigationOrder, AXChildren, AXRoleDescription",
+  "Aero.AxUiElementWindowType" : "popup",
+  "Aero.AxUiElementWindowType_isDialogHeuristic" : true,
+  "Aero.AxWritable" : "AXPosition, AXSections",
+  "Aero.axWindowId" : 19097,
+  "Aero.macOS.version" : "Version 26.5.1 (Build 25F80)",
+  "Aero.on-window-detected" : [
+
+  ],
+  "Aero.treeNodeParent" : "Optional(AppBundle.MacosPopupWindowsContainer)",
+  "Aero.windowLevel" : "normalWindow",
+  "Aero.workspace" : null
+}
