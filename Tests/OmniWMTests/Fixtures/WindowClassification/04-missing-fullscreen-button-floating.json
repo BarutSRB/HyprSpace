@@ -38,5 +38,6 @@
       "missingFullscreenButton"
     ],
     "layoutDecisionKind": "fallbackLayout"
-  }
+  },
+  "expectedPolicy": "full"
 }

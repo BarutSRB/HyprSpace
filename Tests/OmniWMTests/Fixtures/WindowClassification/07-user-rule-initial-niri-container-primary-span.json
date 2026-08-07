@@ -43,5 +43,6 @@
     "heuristicReasons": [],
     "layoutDecisionKind": "fallbackLayout",
     "initialNiriContainerPrimarySpan": 0.75
-  }
+  },
+  "expectedPolicy": "full"
 }

@@ -38,5 +38,6 @@
       "accessoryWithoutClose"
     ],
     "layoutDecisionKind": "fallbackLayout"
-  }
+  },
+  "expectedPolicy": "handsOffSurface"
 }

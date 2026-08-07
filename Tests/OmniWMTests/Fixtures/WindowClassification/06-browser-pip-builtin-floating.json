@@ -35,5 +35,6 @@
     "source": "builtInRule(browserPictureInPicture)",
     "heuristicReasons": [],
     "layoutDecisionKind": "explicitLayout"
-  }
+  },
+  "expectedPolicy": "full"
 }

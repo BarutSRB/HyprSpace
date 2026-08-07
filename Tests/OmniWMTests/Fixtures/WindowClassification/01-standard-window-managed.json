@@ -35,5 +35,6 @@
     "source": "heuristic",
     "heuristicReasons": [],
     "layoutDecisionKind": "fallbackLayout"
-  }
+  },
+  "expectedPolicy": "full"
 }

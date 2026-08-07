@@ -38,5 +38,6 @@
       "nonStandardSubrole"
     ],
     "layoutDecisionKind": "fallbackLayout"
-  }
+  },
+  "expectedPolicy": "full"
 }

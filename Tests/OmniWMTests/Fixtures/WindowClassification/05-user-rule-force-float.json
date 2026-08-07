@@ -41,5 +41,6 @@
     "source": "userRule(11111111-1111-1111-1111-111111111111)",
     "heuristicReasons": [],
     "layoutDecisionKind": "explicitLayout"
-  }
+  },
+  "expectedPolicy": "full"
 }

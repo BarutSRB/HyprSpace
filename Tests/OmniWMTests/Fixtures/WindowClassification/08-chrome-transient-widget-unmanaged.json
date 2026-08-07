@@ -51,19 +51,86 @@
     }
   },
   "rules": [
-    {"assignToWorkspace": "4", "bundleId": "com.eltima.cmd1.pro.mas", "id": "4BA546DA-2875-4BEF-B13F-1539E833B1A0", "minHeight": 550, "minWidth": 950},
-    {"bundleId": "com.google.Chrome", "id": "486CEFA6-69AA-4A3C-AF27-BCD38F4F138B", "minHeight": 375, "minWidth": 500},
-    {"bundleId": "dev.zed.Zed", "id": "979F05F4-FFA2-4EDD-B23F-08A9944C759F", "minHeight": 240, "minWidth": 360},
-    {"bundleId": "com.apple.Safari", "id": "81426D13-C1A5-475E-AFBC-00BBA05042D0", "minHeight": 220, "minWidth": 574},
-    {"bundleId": "app.zen-browser.zen", "id": "1CF39647-F30D-4E76-9686-79B551F1B094", "minHeight": 495, "minWidth": 500},
-    {"bundleId": "org.mozilla.firefox", "id": "005C00D3-F665-47F8-BDAE-D80790E9E46B", "minHeight": 120, "minWidth": 500},
-    {"bundleId": "company.thebrowser.dia", "id": "C21156B1-0224-4998-97E3-8F4FA65B9F3B", "minHeight": 420, "minWidth": 500},
-    {"bundleId": "com.spotify.client", "id": "2DE9390B-0DB4-4D0C-9ABA-06F76F1D4EA9", "minHeight": 600, "minWidth": 800},
-    {"bundleId": "com.hnc.Discord", "id": "AF752D95-8497-4844-BE20-4C93E73BAEF2", "minHeight": 500, "minWidth": 800},
-    {"bundleId": "com.mitchellh.ghostty", "id": "7876C9EF-437E-4D4F-9C27-B1B02F4AABCE", "minHeight": 48, "minWidth": 90},
-    {"bundleId": "com.microsoft.Outlook", "id": "8ECAB78B-BCDD-4245-BC25-1609A49B1C86", "minHeight": 650, "minWidth": 930},
-    {"bundleId": "com.apple.MobileSMS", "id": "552FB77D-BF0E-4737-90A6-B5BC6986C579", "minHeight": 320, "minWidth": 660},
-    {"axRole": "AXWindow", "axSubrole": "AXStandardWindow", "bundleId": "com.valvesoftware.steam.helper", "id": "902F4D7C-8F14-4D57-884D-7C33EA8DD6DF", "layout": "tile"}
+    {
+      "assignToWorkspace": "4",
+      "bundleId": "com.eltima.cmd1.pro.mas",
+      "id": "4BA546DA-2875-4BEF-B13F-1539E833B1A0",
+      "minHeight": 550,
+      "minWidth": 950
+    },
+    {
+      "bundleId": "com.google.Chrome",
+      "id": "486CEFA6-69AA-4A3C-AF27-BCD38F4F138B",
+      "minHeight": 375,
+      "minWidth": 500
+    },
+    {
+      "bundleId": "dev.zed.Zed",
+      "id": "979F05F4-FFA2-4EDD-B23F-08A9944C759F",
+      "minHeight": 240,
+      "minWidth": 360
+    },
+    {
+      "bundleId": "com.apple.Safari",
+      "id": "81426D13-C1A5-475E-AFBC-00BBA05042D0",
+      "minHeight": 220,
+      "minWidth": 574
+    },
+    {
+      "bundleId": "app.zen-browser.zen",
+      "id": "1CF39647-F30D-4E76-9686-79B551F1B094",
+      "minHeight": 495,
+      "minWidth": 500
+    },
+    {
+      "bundleId": "org.mozilla.firefox",
+      "id": "005C00D3-F665-47F8-BDAE-D80790E9E46B",
+      "minHeight": 120,
+      "minWidth": 500
+    },
+    {
+      "bundleId": "company.thebrowser.dia",
+      "id": "C21156B1-0224-4998-97E3-8F4FA65B9F3B",
+      "minHeight": 420,
+      "minWidth": 500
+    },
+    {
+      "bundleId": "com.spotify.client",
+      "id": "2DE9390B-0DB4-4D0C-9ABA-06F76F1D4EA9",
+      "minHeight": 600,
+      "minWidth": 800
+    },
+    {
+      "bundleId": "com.hnc.Discord",
+      "id": "AF752D95-8497-4844-BE20-4C93E73BAEF2",
+      "minHeight": 500,
+      "minWidth": 800
+    },
+    {
+      "bundleId": "com.mitchellh.ghostty",
+      "id": "7876C9EF-437E-4D4F-9C27-B1B02F4AABCE",
+      "minHeight": 48,
+      "minWidth": 90
+    },
+    {
+      "bundleId": "com.microsoft.Outlook",
+      "id": "8ECAB78B-BCDD-4245-BC25-1609A49B1C86",
+      "minHeight": 650,
+      "minWidth": 930
+    },
+    {
+      "bundleId": "com.apple.MobileSMS",
+      "id": "552FB77D-BF0E-4737-90A6-B5BC6986C579",
+      "minHeight": 320,
+      "minWidth": 660
+    },
+    {
+      "axRole": "AXWindow",
+      "axSubrole": "AXStandardWindow",
+      "bundleId": "com.valvesoftware.steam.helper",
+      "id": "902F4D7C-8F14-4D57-884D-7C33EA8DD6DF",
+      "layout": "tile"
+    }
   ],
   "expectedDecision": {
     "disposition": "unmanaged",
@@ -72,5 +139,6 @@
     "layoutDecisionKind": "fallbackLayout",
     "minHeight": 375,
     "minWidth": 500
-  }
+  },
+  "expectedPolicy": "untracked"
 }

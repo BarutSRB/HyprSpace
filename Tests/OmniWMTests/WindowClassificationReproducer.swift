@@ -58,12 +58,44 @@ extension WindowServerInfoDTO {
     }
 }
 
+enum WindowInteractionPolicyName {
+    static func string(from policy: WindowInteractionPolicy) -> String {
+        switch policy {
+        case .full: "full"
+        case .handsOffSurface: "handsOffSurface"
+        case .untracked: "untracked"
+        default: custom(policy)
+        }
+    }
+
+    private static func custom(_ policy: WindowInteractionPolicy) -> String {
+        let granted = [
+            ("tracksInModel", policy.tracksInModel),
+            ("mayFocus", policy.mayFocus),
+            ("mayActivateApp", policy.mayActivateApp),
+            ("mayRaise", policy.mayRaise),
+            ("mayOrder", policy.mayOrder),
+            ("mayWriteFrame", policy.mayWriteFrame),
+            ("mayBorder", policy.mayBorder),
+            ("mayPark", policy.mayPark)
+        ]
+        .filter(\.1)
+        .map(\.0)
+        return "custom(\(granted.joined(separator: ",")))"
+    }
+}
+
+struct WindowClassificationOutcome: Equatable {
+    var decision: WindowClassificationDecisionDTO
+    var policy: String
+}
+
 @MainActor
 enum WindowClassificationReproducer {
-    static func recompute(
+    static func recomputeOutcome(
         _ observation: WindowClassificationObservation,
         rules: [AppRule]
-    ) -> WindowClassificationDecisionDTO {
+    ) -> WindowClassificationOutcome {
         let input = observation.input
         let engine = WindowRuleEngine()
         engine.rebuild(rules: rules)
@@ -79,6 +111,20 @@ enum WindowClassificationReproducer {
         )
         let base = engine.decision(for: facts, token: token, appFullscreen: input.appFullscreen)
         let final = WindowRuleEngine.applyingManualOverride(base, manualOverride: input.manualOverride)
-        return WindowClassificationDecisionDTO(from: final)
+        let policy = WindowInteractionPolicy.resolve(
+            decision: final,
+            windowServerLevel: input.windowServer?.level
+        )
+        return WindowClassificationOutcome(
+            decision: WindowClassificationDecisionDTO(from: final),
+            policy: WindowInteractionPolicyName.string(from: policy)
+        )
+    }
+
+    static func recompute(
+        _ observation: WindowClassificationObservation,
+        rules: [AppRule]
+    ) -> WindowClassificationDecisionDTO {
+        recomputeOutcome(observation, rules: rules).decision
     }
 }
