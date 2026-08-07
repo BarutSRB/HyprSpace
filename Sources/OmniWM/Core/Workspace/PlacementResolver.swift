@@ -27,9 +27,15 @@ enum WorkspacePlacementOrigin: Equatable, Sendable {
     case discovery
 }
 
+enum WorkspaceRuleSkipReason: String, Sendable {
+    case workspaceNotMaterialized = "workspace_not_materialized"
+    case appAlreadyHasEntries = "app_already_has_entries"
+}
+
 struct WorkspacePlacementResolution: Equatable {
     let workspaceId: WorkspaceDescriptor.ID
     let rung: WorkspacePlacementRung
+    var ruleSkipReason: WorkspaceRuleSkipReason?
 }
 
 @MainActor
@@ -97,15 +103,30 @@ final class PlacementResolver {
             return WorkspacePlacementResolution(workspaceId: parentWorkspaceId, rung: .trackedParent)
         }
 
-        if let workspaceName,
-           let workspaceId = workspaceManager.workspaceId(for: workspaceName, createIfMissing: false),
-           shouldApplyWorkspaceRule(pid: pid, context: context)
-        {
-            return WorkspacePlacementResolution(workspaceId: workspaceId, rung: .workspaceRule)
+        var ruleSkipReason: WorkspaceRuleSkipReason?
+        if let workspaceName {
+            let resolvedRuleWorkspaceId = workspaceManager.workspaceId(
+                for: workspaceName,
+                createIfMissing: false
+            )
+            if !shouldApplyWorkspaceRule(pid: pid, context: context) {
+                ruleSkipReason = .appAlreadyHasEntries
+            } else if let resolvedRuleWorkspaceId {
+                return WorkspacePlacementResolution(
+                    workspaceId: resolvedRuleWorkspaceId,
+                    rung: .workspaceRule
+                )
+            } else {
+                ruleSkipReason = .workspaceNotMaterialized
+            }
         }
 
         if let existingEntry {
-            return WorkspacePlacementResolution(workspaceId: existingEntry.workspaceId, rung: .existingEntry)
+            return WorkspacePlacementResolution(
+                workspaceId: existingEntry.workspaceId,
+                rung: .existingEntry,
+                ruleSkipReason: ruleSkipReason
+            )
         }
 
         let placementTarget = createPlacementTarget(
@@ -119,7 +140,9 @@ final class PlacementResolver {
             fallbackWorkspaceId: fallbackWorkspaceId
         )
 
-        return defaultWorkspacePlacement(placementTarget: placementTarget)
+        var resolution = defaultWorkspacePlacement(placementTarget: placementTarget)
+        resolution.ruleSkipReason = ruleSkipReason
+        return resolution
     }
 
     private func workspaceForTrackedParentWindow(

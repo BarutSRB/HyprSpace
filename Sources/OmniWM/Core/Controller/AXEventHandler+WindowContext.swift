@@ -167,7 +167,8 @@ extension AXEventHandler {
                     nativeSpaceMonitorId: createPlacementContext?.nativeSpaceMonitorId,
                     frameMonitorId: placementTraceMonitorId(for: windowFrame, controller: controller),
                     interactionWorkspaceId: createPlacementContext?.interactionWorkspaceId,
-                    interactionMonitorId: createPlacementContext?.interactionMonitorId
+                    interactionMonitorId: createPlacementContext?.interactionMonitorId,
+                    ruleSkipReason: placement.ruleSkipReason
                 )
             )
         )

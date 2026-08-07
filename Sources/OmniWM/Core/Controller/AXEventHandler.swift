@@ -55,7 +55,8 @@ struct NiriCreateFocusTraceEvent: Equatable {
             nativeSpaceMonitorId: Monitor.ID?,
             frameMonitorId: Monitor.ID?,
             interactionWorkspaceId: WorkspaceDescriptor.ID?,
-            interactionMonitorId: Monitor.ID?
+            interactionMonitorId: Monitor.ID?,
+            ruleSkipReason: WorkspaceRuleSkipReason?
         )
         case candidateTracked(token: WindowToken, axPid: pid_t?, workspaceId: WorkspaceDescriptor.ID)
         case relayoutActivatedWindow(token: WindowToken, workspaceId: WorkspaceDescriptor.ID)
@@ -117,9 +118,10 @@ extension NiriCreateFocusTraceEvent: CustomStringConvertible {
             nativeSpaceMonitorId,
             frameMonitorId,
             interactionWorkspaceId,
-            interactionMonitorId
+            interactionMonitorId,
+            ruleSkipReason
         ):
-            "create_placement_resolved token=\(token) workspace=\(workspaceId.uuidString) rung=\(rung.rawValue) pending_workspace=\(pendingWorkspaceId?.uuidString ?? "nil") pending_monitor=\(String(describing: pendingMonitorId)) focused_workspace=\(focusedWorkspaceId?.uuidString ?? "nil") focused_monitor=\(String(describing: focusedMonitorId)) native_monitor=\(String(describing: nativeSpaceMonitorId)) frame_monitor=\(String(describing: frameMonitorId)) interaction_workspace=\(interactionWorkspaceId?.uuidString ?? "nil") interaction_monitor=\(String(describing: interactionMonitorId))"
+            "create_placement_resolved token=\(token) workspace=\(workspaceId.uuidString) rung=\(rung.rawValue) rule_skip=\(ruleSkipReason?.rawValue ?? "none") pending_workspace=\(pendingWorkspaceId?.uuidString ?? "nil") pending_monitor=\(String(describing: pendingMonitorId)) focused_workspace=\(focusedWorkspaceId?.uuidString ?? "nil") focused_monitor=\(String(describing: focusedMonitorId)) native_monitor=\(String(describing: nativeSpaceMonitorId)) frame_monitor=\(String(describing: frameMonitorId)) interaction_workspace=\(interactionWorkspaceId?.uuidString ?? "nil") interaction_monitor=\(String(describing: interactionMonitorId))"
         case let .candidateTracked(token, axPid, workspaceId):
             "candidate_tracked token=\(token) ax_pid=\(axPid.map(String.init) ?? "nil") workspace=\(workspaceId.uuidString)"
         case let .relayoutActivatedWindow(token, workspaceId):

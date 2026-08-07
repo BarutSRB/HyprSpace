@@ -992,12 +992,14 @@ final class FloatingCreatePlacementTests: XCTestCase {
                 nativeSpaceMonitorId: nil,
                 frameMonitorId: nil,
                 interactionWorkspaceId: workspaceId,
-                interactionMonitorId: nil
+                interactionMonitorId: nil,
+                ruleSkipReason: .appAlreadyHasEntries
             )
         )
 
         XCTAssertTrue(event.description.contains("rung=interaction_workspace"))
         XCTAssertTrue(event.description.contains("interaction_workspace=\(workspaceId.uuidString)"))
+        XCTAssertTrue(event.description.contains("rule_skip=app_already_has_entries"))
     }
 
     func testSynthesizedContextOnAXFirstAdmissionResolvesFocusedWorkspace() throws {
@@ -1173,6 +1175,58 @@ final class FloatingCreatePlacementTests: XCTestCase {
         )
 
         XCTAssertEqual(workspaceId, fixture.secondaryWorkspace)
+    }
+
+    func testSkippedWorkspaceRuleRecordsWhyItWasSkipped() throws {
+        let fixture = try makeTwoMonitorFixture()
+        let manager = fixture.controller.workspaceManager
+        let pid: pid_t = 30_530
+
+        let undeclared = resolvePlacement(
+            fixture,
+            workspaceName: "not-a-configured-workspace",
+            pid: pid,
+            placementMode: .tiling,
+            origin: .liveCreate,
+            createPlacementContext: nil,
+            windowFrame: nil,
+            fallbackWorkspaceId: fixture.primaryWorkspace
+        )
+        XCTAssertNotEqual(undeclared.rung, WorkspacePlacementRung.workspaceRule)
+        XCTAssertEqual(undeclared.ruleSkipReason, .workspaceNotMaterialized)
+
+        _ = manager.addWindow(axRef(pid, 900), pid: pid, windowId: 900, to: fixture.primaryWorkspace)
+        let occupied = resolvePlacement(
+            fixture,
+            workspaceName: "6",
+            pid: pid,
+            placementMode: .tiling,
+            origin: .liveCreate,
+            createPlacementContext: nil,
+            windowFrame: nil,
+            fallbackWorkspaceId: fixture.primaryWorkspace
+        )
+        XCTAssertNotEqual(occupied.rung, WorkspacePlacementRung.workspaceRule)
+        XCTAssertEqual(occupied.ruleSkipReason, .appAlreadyHasEntries)
+    }
+
+    func testHonoredWorkspaceRuleRecordsNoSkipReason() throws {
+        let fixture = try makeTwoMonitorFixture()
+
+        let placement = resolvePlacement(
+            fixture,
+            workspaceName: "6",
+            pid: 30_531,
+            placementMode: .tiling,
+            origin: .liveCreate,
+            createPlacementContext: nil,
+            windowFrame: nil,
+            fallbackWorkspaceId: fixture.primaryWorkspace
+        )
+
+        XCTAssertEqual(placement.rung, WorkspacePlacementRung.workspaceRule)
+        XCTAssertEqual(placement.workspaceId, fixture.secondaryWorkspace)
+        XCTAssertNil(placement.ruleSkipReason)
     }
 
     private func resolvePlacement(
