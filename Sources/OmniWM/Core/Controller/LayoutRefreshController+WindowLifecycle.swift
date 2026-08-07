@@ -56,10 +56,12 @@ extension LayoutRefreshController {
             workspaceId: WorkspaceDescriptor.ID,
             isNewAdmission: Bool,
             mode: TrackedWindowMode,
+            interactionPolicy: WindowInteractionPolicy,
             createPlacementContext: WindowCreatePlacementContext?
         ) {
             guard isNewAdmission,
                   mode == .floating,
+                  interactionPolicy.mayFocus,
                   let createPlacementContext
             else {
                 return nil

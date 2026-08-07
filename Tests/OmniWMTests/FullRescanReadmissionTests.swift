@@ -20,6 +20,7 @@ final class FullRescanReadmissionTests: XCTestCase {
                 workspaceId: workspaceId,
                 isNewAdmission: false,
                 mode: .floating,
+                interactionPolicy: .full,
                 createPlacementContext: context
             )
         )
@@ -29,6 +30,7 @@ final class FullRescanReadmissionTests: XCTestCase {
                 workspaceId: workspaceId,
                 isNewAdmission: true,
                 mode: .tiling,
+                interactionPolicy: .full,
                 createPlacementContext: context
             )
         )
@@ -38,7 +40,35 @@ final class FullRescanReadmissionTests: XCTestCase {
                 workspaceId: workspaceId,
                 isNewAdmission: true,
                 mode: .floating,
+                interactionPolicy: .full,
                 createPlacementContext: nil
+            )
+        )
+    }
+
+    func testFullRescanFloatingFocusCandidateSkipsHandsOffSurfaces() {
+        let token = WindowToken(pid: 9000, windowId: 4)
+        let workspaceId = UUID()
+        let context = createPlacementContext(createdAt: Date())
+
+        XCTAssertNil(
+            LayoutRefreshController.FullRescanFloatingFocusCandidate(
+                token: token,
+                workspaceId: workspaceId,
+                isNewAdmission: true,
+                mode: .floating,
+                interactionPolicy: .handsOffSurface,
+                createPlacementContext: context
+            )
+        )
+        XCTAssertNotNil(
+            LayoutRefreshController.FullRescanFloatingFocusCandidate(
+                token: token,
+                workspaceId: workspaceId,
+                isNewAdmission: true,
+                mode: .floating,
+                interactionPolicy: .full,
+                createPlacementContext: context
             )
         )
     }
@@ -56,6 +86,7 @@ final class FullRescanReadmissionTests: XCTestCase {
                 workspaceId: workspaceId,
                 isNewAdmission: true,
                 mode: .floating,
+                interactionPolicy: .full,
                 createPlacementContext: createPlacementContext(createdAt: olderDate)
             )
         )
@@ -65,6 +96,7 @@ final class FullRescanReadmissionTests: XCTestCase {
                 workspaceId: workspaceId,
                 isNewAdmission: true,
                 mode: .floating,
+                interactionPolicy: .full,
                 createPlacementContext: createPlacementContext(createdAt: olderDate.addingTimeInterval(-1))
             )
         )
@@ -78,6 +110,7 @@ final class FullRescanReadmissionTests: XCTestCase {
                 workspaceId: workspaceId,
                 isNewAdmission: true,
                 mode: .floating,
+                interactionPolicy: .full,
                 createPlacementContext: createPlacementContext(createdAt: newerDate)
             )
         )
@@ -163,6 +196,7 @@ final class FullRescanReadmissionTests: XCTestCase {
                 workspaceId: rightWorkspaceId,
                 isNewAdmission: true,
                 mode: .floating,
+                interactionPolicy: .full,
                 createPlacementContext: createPlacementContext(createdAt: Date())
             )
         )

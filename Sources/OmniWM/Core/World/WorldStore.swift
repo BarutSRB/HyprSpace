@@ -458,8 +458,8 @@ extension WorldStore {
         model.admissionHints(for: token)
     }
 
-    func setHeuristicReasons(_ reasons: [AXWindowHeuristicReason], for token: WindowToken) {
-        model.setHeuristicReasons(reasons, for: token)
+    func setInteractionPolicy(_ policy: WindowInteractionPolicy, for token: WindowToken) {
+        model.setInteractionPolicy(policy, for: token)
     }
 
     func hiddenState(for token: WindowToken) -> HiddenState? {

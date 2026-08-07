@@ -243,12 +243,6 @@ final class WindowRuleEngine {
     nonisolated static let helpTagSurfaceRuleName = "helpTagSurface"
     nonisolated static let transientWidgetSurfaceRuleName = "transientWidgetSurface"
     private static let cleanShotRecordingOverlayRuleName = "cleanShotRecordingOverlay"
-    private static let systemTextInputPanelBundleIds: Set<String> = [
-        "com.apple.characterpaletteim",
-        "com.apple.emojifunctionrowitem-container",
-        "com.apple.textinputmenuagent",
-        "com.apple.textinputswitcher"
-    ]
 
     private enum RuleSource {
         case user
@@ -349,8 +343,10 @@ final class WindowRuleEngine {
     private(set) var invalidRegexMessagesByRuleId: [UUID: String] = [:]
 
     private(set) var hasDynamicReevaluationRules = false
+    private let inputMethodBundleIds: Set<String>
 
-    init() {
+    init(inputMethodBundleIds: Set<String>? = nil) {
+        self.inputMethodBundleIds = inputMethodBundleIds ?? InputMethodBundleRegistry.discover()
         builtInRules = Self.makeBuiltInRules()
         titleRules = builtInRules.filter(\.requiresTitle)
         hasDynamicReevaluationRules = builtInRules.contains { $0.requiresDynamicReevaluation }
@@ -430,7 +426,7 @@ final class WindowRuleEngine {
         }
 
         if let bundleId = facts.ax.bundleId?.lowercased(),
-           Self.systemTextInputPanelBundleIds.contains(bundleId)
+           inputMethodBundleIds.contains(bundleId)
         {
             return WindowDecision(
                 disposition: .unmanaged,

@@ -444,7 +444,7 @@ final class CGSPhantomEventGuardTests: XCTestCase {
                     replacementMetadata: metadata,
                     structuralReplacementMatch: nil,
                     requiresPostCreateLifecycleVerification: false,
-                    heuristicReasons: []
+                    interactionPolicy: .full
                 )
             )
         }

@@ -29,7 +29,7 @@ extension AXEventHandler {
             admissionHints: candidate.admissionHints,
             managedReplacementMetadata: candidate.replacementMetadata
         )
-        controller.workspaceManager.setHeuristicReasons(candidate.heuristicReasons, for: trackedToken)
+        controller.workspaceManager.setInteractionPolicy(candidate.interactionPolicy, for: trackedToken)
         guard let trackedEntry = controller.workspaceManager.entry(for: trackedToken) else {
             WindowAdmissionTrace.record(
                 .init(
@@ -106,7 +106,7 @@ extension AXEventHandler {
         )
         if let floatingTargetFrame,
            shouldApplyFloatingCreateFrameImmediately(for: liveTrackedEntry.workspaceId),
-           !candidate.heuristicReasons.contains(.noButtonsOnNonStandardSubrole)
+           candidate.interactionPolicy.mayWriteFrame
         {
             scheduleFloatingCreateFrameApplication(
                 floatingTargetFrame,
@@ -119,7 +119,7 @@ extension AXEventHandler {
             scheduleAXContextWarmup(for: liveTrackedEntry.pid)
         }
         if liveTrackedEntry.mode == .floating,
-           !candidate.heuristicReasons.contains(.noButtonsOnNonStandardSubrole)
+           candidate.interactionPolicy.mayFocus
         {
             controller.windowActionHandler.focusCreatedFloatingWindow(trackedToken)
         }

@@ -1856,6 +1856,8 @@ import QuartzCore
                 candidate.enumeratedWindow.decisionEvidence.sizeConstraints,
                 for: admittedToken
             )
+            let interactionPolicy = WindowInteractionPolicy.resolve(for: evaluation)
+            controller.workspaceManager.setInteractionPolicy(interactionPolicy, for: admittedToken)
             if refreshedEntry != nil {
                 _ = controller.workspaceManager.updateAdmissionHints(admissionHints, for: admittedToken)
             }
@@ -1865,6 +1867,7 @@ import QuartzCore
                 workspaceId: admittedEntry?.workspaceId ?? wsForWindow,
                 isNewAdmission: existingEntry == nil,
                 mode: admittedEntry?.mode ?? admittedMode,
+                interactionPolicy: interactionPolicy,
                 createPlacementContext: createPlacementContext
             ) {
                 floatingFocusCandidate = Self.newestFullRescanFloatingFocusCandidate(

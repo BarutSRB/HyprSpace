@@ -2246,8 +2246,8 @@ final class WorkspaceManager {
         world.admissionHints(for: token)
     }
 
-    func setHeuristicReasons(_ reasons: [AXWindowHeuristicReason], for token: WindowToken) {
-        world.setHeuristicReasons(reasons, for: token)
+    func setInteractionPolicy(_ policy: WindowInteractionPolicy, for token: WindowToken) {
+        world.setInteractionPolicy(policy, for: token)
     }
 
     func setNiriRestorePlacements(_ placements: [WindowToken: PersistedNiriPlacement]) {

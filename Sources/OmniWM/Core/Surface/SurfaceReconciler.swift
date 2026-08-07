@@ -77,7 +77,7 @@ enum SurfaceDerivation {
                   !world.isWindowFullscreenInLayout(token),
                   world.isManagedWindowDisplayable(entry.token),
                   world.isWorkspaceVisible(entry.workspaceId),
-                  !(entry.mode == .floating && entry.heuristicReasons.contains(.noButtonsOnNonStandardSubrole))
+                  entry.interactionPolicy.mayBorder
             else {
                 return nil
             }

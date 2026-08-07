@@ -171,7 +171,7 @@ final class WindowCloseFocusRecoveryTests: XCTestCase {
                 replacementMetadata: fixture.closingMetadata,
                 structuralReplacementMatch: nil,
                 requiresPostCreateLifecycleVerification: false,
-                heuristicReasons: []
+                interactionPolicy: .full
             )
         )
         fixture.controller.eventIntake.drainNow()
@@ -225,7 +225,7 @@ final class WindowCloseFocusRecoveryTests: XCTestCase {
                 replacementMetadata: fixture.closingMetadata,
                 structuralReplacementMatch: nil,
                 requiresPostCreateLifecycleVerification: false,
-                heuristicReasons: []
+                interactionPolicy: .full
             )
         )
         fixture.controller.eventIntake.drainNow()
@@ -267,7 +267,7 @@ final class WindowCloseFocusRecoveryTests: XCTestCase {
                 replacementMetadata: fixture.closingMetadata,
                 structuralReplacementMatch: nil,
                 requiresPostCreateLifecycleVerification: false,
-                heuristicReasons: []
+                interactionPolicy: .full
             )
         )
         fixture.controller.eventIntake.drainNow()
