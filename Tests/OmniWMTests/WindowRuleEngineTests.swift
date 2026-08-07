@@ -206,11 +206,26 @@ final class WindowRuleEngineTests: XCTestCase {
         let engine = WindowRuleEngine()
         let decision = evaluate(
             engine,
-            facts(appName: "Steam", bundleId: "com.valvesoftware.steam")
+            facts(appName: "Steam", bundleId: "com.valvesoftware.steam.helper")
         )
 
         XCTAssertEqual(decision.disposition, .managed)
         XCTAssertEqual(decision.source, .builtInRule("steamClient"))
+    }
+
+    func testSteamBuiltInDoesNotTileTheNonHelperBundle() {
+        let engine = WindowRuleEngine()
+        let decision = evaluate(
+            engine,
+            facts(
+                appName: "Steam",
+                bundleId: "com.valvesoftware.steam",
+                subrole: kAXUnknownSubrole as String
+            )
+        )
+
+        XCTAssertNotEqual(decision.source, .builtInRule("steamClient"))
+        XCTAssertEqual(decision.disposition, .floating)
     }
 
     func testCleanShotRecordingOverlayStillFloatsWithWindowServerEvidence() {
@@ -518,7 +533,7 @@ final class WindowRuleEngineTests: XCTestCase {
 
         let builtInDecision = evaluate(
             WindowRuleEngine(),
-            transientFacts(bundleId: "com.valvesoftware.steam", windowServer: windowServer),
+            transientFacts(bundleId: "com.valvesoftware.steam.helper", windowServer: windowServer),
             token: token
         )
         XCTAssertEqual(builtInDecision.disposition, .managed)

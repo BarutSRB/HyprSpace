@@ -56,7 +56,6 @@ final class WindowActionHandler {
     }
 
     weak var controller: WMController?
-    private let orderWindow: (UInt32) -> Void
     private let visibleWindowInfoProvider: () -> [WindowServerInfo]
     private let visibleOwnedWindowsProvider: () -> [NSWindow]
     private let frontOwnedWindow: (NSWindow) -> Void
@@ -81,9 +80,6 @@ final class WindowActionHandler {
 
     init(
         controller: WMController,
-        orderWindow: @escaping (UInt32) -> Void = {
-            SkyLight.shared.orderWindow($0, relativeTo: 0, order: .above)
-        },
         visibleWindowInfoProvider: @escaping () -> [WindowServerInfo] = {
             SkyLight.shared.queryAllVisibleWindows()
         },
@@ -96,7 +92,6 @@ final class WindowActionHandler {
         }
     ) {
         self.controller = controller
-        self.orderWindow = orderWindow
         self.visibleWindowInfoProvider = visibleWindowInfoProvider
         self.visibleOwnedWindowsProvider = visibleOwnedWindowsProvider
         self.frontOwnedWindow = frontOwnedWindow
@@ -179,7 +174,7 @@ final class WindowActionHandler {
 
         for batch in plan.batches {
             for surface in batch {
-                orderWindow(UInt32(surface.windowId))
+                controller.performWindowOrdering(windowId: surface.windowId)
             }
             guard let anchor = batch.last else { continue }
             front(surface: anchor)
@@ -216,7 +211,7 @@ final class WindowActionHandler {
             suppressesFocusFollowsMouse: true,
             duration: 0.35
         )
-        orderWindow(UInt32(entry.windowId))
+        controller.performWindowOrdering(windowId: entry.windowId)
         controller.focusWindow(token)
         return true
     }

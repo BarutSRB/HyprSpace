@@ -242,6 +242,7 @@ final class WindowRuleEngine {
     static let ownedWindowRuleName = "ownedWindow"
     nonisolated static let helpTagSurfaceRuleName = "helpTagSurface"
     nonisolated static let transientWidgetSurfaceRuleName = "transientWidgetSurface"
+    nonisolated static let hiddenTitleBarWindowRuleName = "hiddenTitleBarWindow"
     private static let cleanShotRecordingOverlayRuleName = "cleanShotRecordingOverlay"
 
     private enum RuleSource {
@@ -344,8 +345,18 @@ final class WindowRuleEngine {
 
     private(set) var hasDynamicReevaluationRules = false
     private let inputMethodBundleIds: Set<String>
+    private let hiddenTitleBarFullscreenButtonOptionalBundleIds: Set<String>
+    private let hiddenTitleBarNonStandardSubroleBundleIds: Set<String>
 
-    init(inputMethodBundleIds: Set<String>? = nil) {
+    init(
+        inputMethodBundleIds: Set<String>? = nil,
+        hiddenTitleBarFullscreenButtonOptionalBundleIds: Set<String>? = nil,
+        hiddenTitleBarNonStandardSubroleBundleIds: Set<String>? = nil
+    ) {
+        self.hiddenTitleBarFullscreenButtonOptionalBundleIds = hiddenTitleBarFullscreenButtonOptionalBundleIds
+            ?? HiddenTitleBarRegistry.fullscreenButtonOptionalBundleIds
+        self.hiddenTitleBarNonStandardSubroleBundleIds = hiddenTitleBarNonStandardSubroleBundleIds
+            ?? HiddenTitleBarRegistry.nonStandardSubroleBundleIds
         self.inputMethodBundleIds = inputMethodBundleIds ?? InputMethodBundleRegistry.discover()
         builtInRules = Self.makeBuiltInRules()
         titleRules = builtInRules.filter(\.requiresTitle)
@@ -549,6 +560,24 @@ final class WindowRuleEngine {
             admissionHints: admissionHints
         ) {
             return transientWidgetDecision
+        }
+
+        if HiddenTitleBarRegistry.decision(
+            for: facts.ax,
+            windowServer: facts.windowServer,
+            fullscreenButtonOptionalBundleIds: hiddenTitleBarFullscreenButtonOptionalBundleIds,
+            nonStandardSubroleBundleIds: hiddenTitleBarNonStandardSubroleBundleIds
+        ) {
+            return WindowDecision(
+                disposition: .managed,
+                source: .builtInRule(Self.hiddenTitleBarWindowRuleName),
+                layoutDecisionKind: .fallbackLayout,
+                workspaceName: workspaceName,
+                ruleEffects: effects,
+                admissionHints: admissionHints,
+                heuristicReasons: [],
+                deferredReason: nil
+            )
         }
 
         let heuristic = AXWindowService.heuristicDisposition(
@@ -807,7 +836,7 @@ final class WindowRuleEngine {
         rules.append(
             CompiledRule(
                 rule: AppRule(
-                    bundleId: "com.valvesoftware.steam",
+                    bundleId: "com.valvesoftware.steam.helper",
                     layout: .tile
                 ),
                 source: .builtIn("steamClient"),

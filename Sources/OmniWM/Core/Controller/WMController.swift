@@ -221,10 +221,7 @@ final class WMController {
         if let windowActionHandlerStorage {
             return windowActionHandlerStorage
         }
-        let handler = WindowActionHandler(
-            controller: self,
-            orderWindow: windowFocusOperations.orderWindow
-        )
+        let handler = WindowActionHandler(controller: self)
         windowActionHandlerStorage = handler
         return handler
     }
@@ -3184,6 +3181,12 @@ extension WMController {
         if policy.mayRaise {
             windowFocusOperations.raiseWindow(axRef.element)
         }
+    }
+
+    func performWindowOrdering(windowId: Int) {
+        let policy = workspaceManager.entry(forWindowId: windowId)?.interactionPolicy ?? .full
+        guard policy.mayOrder else { return }
+        windowFocusOperations.orderWindow(UInt32(windowId))
     }
 
     func retryManagedFocusFronting(_ request: ManagedFocusRequest) {

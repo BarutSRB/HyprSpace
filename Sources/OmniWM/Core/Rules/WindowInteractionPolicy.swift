@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Copyright (C) 2026 BarutSRB — https://github.com/BarutSRB/OmniWM
 
+import CoreGraphics
 import Foundation
 
 struct WindowInteractionPolicy: Equatable, Sendable {
@@ -70,6 +71,8 @@ extension WindowInteractionPolicy {
         .noButtonsOnNonStandardSubrole
     ]
 
+    static let overlayWindowLevelFloor = CGWindowLevelForKey(.statusWindow)
+
     @MainActor
     static func resolve(for evaluation: WMController.WindowDecisionEvaluation) -> WindowInteractionPolicy {
         resolve(
@@ -93,11 +96,15 @@ extension WindowInteractionPolicy {
             return .full
         }
 
+        if decision.disposition == .managed {
+            return .full
+        }
+
         if decision.heuristicReasons.contains(where: handsOffHeuristicReasons.contains) {
             return .handsOffSurface
         }
 
-        if let windowServerLevel, windowServerLevel != 0 {
+        if let windowServerLevel, windowServerLevel >= overlayWindowLevelFloor {
             return .handsOffSurface
         }
 

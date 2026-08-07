@@ -1224,6 +1224,46 @@ final class FloatingCreatePlacementTests: XCTestCase {
         XCTAssertEqual(recorder.raiseCount, 1)
     }
 
+    func testHandsOffSurfaceIsNeverReordered() throws {
+        final class OrderRecorder: @unchecked Sendable {
+            var orderedWindowIds: [UInt32] = []
+        }
+        let recorder = OrderRecorder()
+        let controller = WMController(
+            settings: makeSettings(),
+            windowFocusOperations: WindowFocusOperations(
+                activateApp: { _ in },
+                focusSpecificWindow: { _, _, _ in },
+                raiseWindow: { _ in },
+                orderWindow: { recorder.orderedWindowIds.append($0) }
+            )
+        )
+        let monitor = makeMonitor(CGMainDisplayID(), "Primary", CGRect(x: 0, y: 0, width: 1800, height: 1169))
+        controller.workspaceManager.applyMonitorConfigurationChange([monitor])
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+
+        let pid: pid_t = 30_640
+        let handsOff = try XCTUnwrap(
+            controller.workspaceManager.addWindow(
+                axRef(pid, 960), pid: pid, windowId: 960, to: workspaceId, mode: .floating
+            )
+        )
+        controller.workspaceManager.setInteractionPolicy(.handsOffSurface, for: handsOff)
+        controller.performWindowOrdering(windowId: 960)
+        XCTAssertTrue(recorder.orderedWindowIds.isEmpty)
+
+        let managed = try XCTUnwrap(
+            controller.workspaceManager.addWindow(
+                axRef(pid, 961), pid: pid, windowId: 961, to: workspaceId
+            )
+        )
+        controller.workspaceManager.setInteractionPolicy(.full, for: managed)
+        controller.performWindowOrdering(windowId: 961)
+        XCTAssertEqual(recorder.orderedWindowIds, [961])
+    }
+
     func testSkippedWorkspaceRuleRecordsWhyItWasSkipped() throws {
         let fixture = try makeTwoMonitorFixture()
         let manager = fixture.controller.workspaceManager

@@ -1003,7 +1003,11 @@ final class CommandPaletteController: NSObject, NSWindowDelegate {
         if let focusedWindow = target.focusedWindow,
            let windowId = getWindowId(from: focusedWindow)
         {
-            SkyLight.shared.orderWindow(UInt32(windowId), relativeTo: 0, order: .above)
+            if let wmController {
+                wmController.performWindowOrdering(windowId: Int(windowId))
+            } else {
+                SkyLight.shared.orderWindow(UInt32(windowId), relativeTo: 0, order: .above)
+            }
 
             var psn = ProcessSerialNumber()
             if GetProcessForPID(target.app.processIdentifier, &psn) == noErr {
