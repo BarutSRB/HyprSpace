@@ -453,7 +453,8 @@ final class DurableParkTests: XCTestCase {
         )] = [
             (.handsOffSurface, .workspaceInactive, nil),
             (.full, .workspaceInactive, .workspaceInactive),
-            (.handsOffSurface, .scratchpad, .scratchpad)
+            (.handsOffSurface, .scratchpad, nil),
+            (.full, .scratchpad, .scratchpad)
         ]
 
         for (index, testCase) in cases.enumerated() {
@@ -490,6 +491,45 @@ final class DurableParkTests: XCTestCase {
                 testCase.expectedHiddenReason != nil
             )
         }
+    }
+
+    func testFrameWritesAreFilteredByInteractionPolicy() throws {
+        let controller = Self.controller()
+        let axManager = controller.axManager
+        let handsOff = AXFrameApplicationTarget(
+            pid: 961_001,
+            window: AXWindowRef(element: AXUIElementCreateApplication(961_001), windowId: 961_101),
+            frame: CGRect(x: 0, y: 0, width: 400, height: 300)
+        )
+        let managed = AXFrameApplicationTarget(
+            pid: 961_002,
+            window: AXWindowRef(element: AXUIElementCreateApplication(961_002), windowId: 961_102),
+            frame: CGRect(x: 0, y: 0, width: 400, height: 300)
+        )
+        axManager.interactionPolicyForWindowId = { windowId in
+            windowId == handsOff.windowId ? .handsOffSurface : .full
+        }
+
+        axManager.applyParkFramesParallel([handsOff])
+        XCTAssertFalse(axManager.pendingParkWindowIds.contains(handsOff.windowId))
+
+        axManager.applyParkFramesParallel([managed])
+        XCTAssertTrue(axManager.pendingParkWindowIds.contains(managed.windowId))
+    }
+
+    func testFrameWritesFailOpenForUntrackedSurfaces() throws {
+        let controller = Self.controller()
+        let resolver = try XCTUnwrap(
+            controller.axManager.interactionPolicyForWindowId,
+            "WMController must install the frame-write policy resolver"
+        )
+
+        XCTAssertEqual(
+            resolver(962_101),
+            .full,
+            "an untracked window must fail open, otherwise OmniWM's own border, bar and Quake "
+                + "surfaces would stop being positioned"
+        )
     }
 
     func testNiriAndDwindleTerminalLayoutTransientHidesCoverTiledAndFloatingWindows() throws {

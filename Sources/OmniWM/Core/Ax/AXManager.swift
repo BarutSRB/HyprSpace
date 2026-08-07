@@ -223,6 +223,8 @@ final class AXManager {
     private var parkPIDByWindowId: [Int: pid_t] = [:]
     private var nextParkFrameRequestId: AXFrameRequestId = 1
 
+    var interactionPolicyForWindowId: ((Int) -> WindowInteractionPolicy)?
+
     init() {
         installWorkspaceObservers()
     }
@@ -1889,11 +1891,22 @@ final class AXManager {
         terminalObserver: FrameApplicationTerminalObserver? = nil,
         verify: Bool = true
     ) {
-        enqueueFrameApplications(frames, isRetry: false, verify: verify, terminalObserver: terminalObserver)
+        let writable = framesAllowedToWrite(frames)
+        guard !writable.isEmpty else { return }
+        enqueueFrameApplications(writable, isRetry: false, verify: verify, terminalObserver: terminalObserver)
     }
 
     func applyParkFramesParallel(_ frames: [AXFrameApplicationTarget]) {
-        dispatchParkFrameApplications(prepareParkFrameApplications(frames))
+        let writable = framesAllowedToWrite(frames)
+        guard !writable.isEmpty else { return }
+        dispatchParkFrameApplications(prepareParkFrameApplications(writable))
+    }
+
+    private func framesAllowedToWrite(
+        _ frames: [AXFrameApplicationTarget]
+    ) -> [AXFrameApplicationTarget] {
+        guard let interactionPolicyForWindowId else { return frames }
+        return frames.filter { interactionPolicyForWindowId($0.windowId).mayWriteFrame }
     }
 
     func pendingParkFrameRequest(for windowId: Int) -> AXFrameApplicationRequest? {
@@ -2327,9 +2340,12 @@ final class AXManager {
         _ positions: [(windowId: Int, frame: CGRect)],
         allowInactive: Bool = false
     ) {
-        let filtered = allowInactive
+        var filtered = allowInactive
             ? positions
             : positions.filter { !inactiveWorkspaceWindowIds.contains($0.windowId) }
+        if let interactionPolicyForWindowId {
+            filtered = filtered.filter { interactionPolicyForWindowId($0.windowId).mayWriteFrame }
+        }
         guard !filtered.isEmpty else { return }
         SkyLight.shared.batchMoveWindows(Self.windowServerPositions(filtered))
     }
