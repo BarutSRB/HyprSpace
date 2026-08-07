@@ -45,6 +45,20 @@ enum SettingsTOMLCodec {
     }
 
     static func decode(_ data: Data) throws -> SettingsExport {
+        let previousHyperKeyModifiers = KeySymbolMapper.hyperModifiers
+        do {
+            return try decodeCanonical(from: data)
+        } catch {
+            // CanonicalTOMLConfig.init applies the decoded Hyper composition before the
+            // hotkeys table parses; a rejected decode must not leave it active.
+            KeySymbolMapper.setHyperKeyModifiers(
+                HyperKeyModifiers(carbonMask: previousHyperKeyModifiers) ?? .default
+            )
+            throw error
+        }
+    }
+
+    private static func decodeCanonical(from data: Data) throws -> SettingsExport {
         do {
             let canonical = try TOMLDecoder().decode(CanonicalTOMLConfig.self, from: data)
             return canonical.toSettingsExport()

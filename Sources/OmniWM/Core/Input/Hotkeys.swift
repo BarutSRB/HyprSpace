@@ -217,11 +217,12 @@ final class HotkeyCenter {
     private(set) var registrationFailures: [HotkeyCommand: HotkeyRegistrationFailureReason] = [:]
     private(set) var systemHyperTriggerFailure: SystemHyperTriggerFailure?
 
-    private static let hyperFlagMask: UInt64 =
-        CGEventFlags.maskCommand.rawValue |
-        CGEventFlags.maskControl.rawValue |
-        CGEventFlags.maskAlternate.rawValue |
-        CGEventFlags.maskShift.rawValue
+    private static var hyperFlagMask: UInt64 {
+        let hyper = KeySymbolMapper.hyperModifiers
+        return ModifierFlagMask.all.reduce(UInt64(0)) { mask, flag in
+            hyper & flag.carbon != 0 ? mask | flag.independent : mask
+        }
+    }
 
     var isHyperTriggerActive: Bool {
         hyperTrigger.isActive

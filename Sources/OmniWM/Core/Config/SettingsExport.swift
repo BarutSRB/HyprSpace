@@ -58,6 +58,7 @@ struct SettingsExport: Equatable {
 
     var hotkeyBindings: [HotkeyBinding]
     var systemHyperTrigger: SystemHyperTrigger
+    var hyperKeyModifiers: HyperKeyModifiers
 
     var workspaceBarEnabled: Bool
     var workspaceBarShowLabels: Bool
@@ -181,6 +182,7 @@ extension SettingsExport {
             overviewSelectedBorderColor: SettingsColor(red: 0.3, green: 0.8, blue: 0.4, alpha: 1.0),
             hotkeyBindings: HotkeyBindingRegistry.defaults(),
             systemHyperTrigger: .default,
+            hyperKeyModifiers: .default,
             workspaceBarEnabled: true,
             workspaceBarShowLabels: true,
             workspaceBarShowFloatingWindows: false,

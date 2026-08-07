@@ -210,6 +210,21 @@ final class SettingsStore {
         didSet { scheduleSave() }
     }
 
+    private var hyperKeyModifiersStorage = SettingsStore.defaultExport.hyperKeyModifiers
+
+    var hyperKeyModifiers: HyperKeyModifiers {
+        get { hyperKeyModifiersStorage }
+        set { applyHyperKeyModifiers(newValue) }
+    }
+
+    private func applyHyperKeyModifiers(_ newValue: HyperKeyModifiers) {
+        guard newValue != hyperKeyModifiersStorage else { return }
+        let retargeted = HotkeyBindingRegistry.retargetingHyperChords(hotkeyBindings, to: newValue)
+        hyperKeyModifiersStorage = newValue
+        hotkeyBindings = retargeted
+        scheduleSave()
+    }
+
     var workspaceBarEnabled = SettingsStore.defaultExport.workspaceBarEnabled {
         didSet { scheduleSave() }
     }
@@ -712,6 +727,7 @@ final class SettingsStore {
             overviewSelectedBorderColor: overviewSelectedBorderColor,
             hotkeyBindings: hotkeyBindings,
             systemHyperTrigger: systemHyperTrigger,
+            hyperKeyModifiers: hyperKeyModifiersStorage,
             workspaceBarEnabled: workspaceBarEnabled,
             workspaceBarShowLabels: workspaceBarShowLabels,
             workspaceBarShowFloatingWindows: workspaceBarShowFloatingWindows,
@@ -849,6 +865,8 @@ final class SettingsStore {
             default: baseline.overviewSelectedBorderColor
         )
 
+        hyperKeyModifiersStorage = export.hyperKeyModifiers
+        KeySymbolMapper.setHyperKeyModifiers(export.hyperKeyModifiers)
         hotkeyBindings = export.hotkeyBindings
         systemHyperTrigger = export.systemHyperTrigger
 
@@ -968,6 +986,7 @@ final class SettingsStore {
     }
 
     func resetHotkeysToDefaults() {
+        hyperKeyModifiers = SettingsStore.defaultExport.hyperKeyModifiers
         hotkeyBindings = HotkeyBindingRegistry.defaults()
         systemHyperTrigger = SettingsStore.defaultExport.systemHyperTrigger
     }
