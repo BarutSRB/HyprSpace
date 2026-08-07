@@ -2858,7 +2858,7 @@ import QuartzCore
         animationTick: Bool = false,
         preserveWorkspaceInactive: Bool = true
     ) -> HideOperationResolution {
-        guard let controller else { return .unavailable }
+        guard let controller, reason == .scratchpad || entry.interactionPolicy.mayPark else { return .unavailable }
         var resolvedFrame = fastFrame(for: entry.token, axRef: entry.axRef)
             ?? controller.axManager.lastAppliedFrame(for: entry.windowId)
         if resolvedFrame == nil, !animationTick {

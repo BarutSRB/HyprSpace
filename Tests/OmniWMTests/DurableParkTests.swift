@@ -440,6 +440,58 @@ final class DurableParkTests: XCTestCase {
         }
     }
 
+    func testHandsOffSurfaceIsNotParkedOnAutomaticHides() throws {
+        let controller = Self.controller()
+        let monitor = Self.monitor()
+        controller.workspaceManager.applyMonitorConfigurationChange([monitor])
+        let workspaceId = try XCTUnwrap(controller.workspaceManager.workspaceId(for: "1", createIfMissing: true))
+        _ = controller.workspaceManager.focusWorkspace(named: "1")
+        let cases: [(
+            policy: WindowInteractionPolicy,
+            reason: LayoutRefreshController.HideReason,
+            expectedHiddenReason: HiddenReason?
+        )] = [
+            (.handsOffSurface, .workspaceInactive, nil),
+            (.full, .workspaceInactive, .workspaceInactive),
+            (.handsOffSurface, .scratchpad, .scratchpad)
+        ]
+
+        for (index, testCase) in cases.enumerated() {
+            let pid = pid_t(959_001 + index)
+            let windowId = 959_101 + index
+            let axRef = AXWindowRef(element: AXUIElementCreateApplication(pid), windowId: windowId)
+            let token = controller.workspaceManager.addWindow(
+                axRef,
+                pid: pid,
+                windowId: windowId,
+                to: workspaceId,
+                mode: .floating
+            )
+            controller.workspaceManager.setInteractionPolicy(testCase.policy, for: token)
+            let frame = CGRect(x: 100 + CGFloat(index * 20), y: 16, width: 800, height: 600)
+            controller.layoutRefreshController.fastFrameProvider = { queriedToken, _ in
+                queriedToken == token ? frame : nil
+            }
+            let entry = try XCTUnwrap(controller.workspaceManager.entry(for: token))
+
+            controller.layoutRefreshController.hideWindow(
+                entry,
+                monitor: monitor,
+                side: .right,
+                reason: testCase.reason
+            )
+
+            XCTAssertEqual(
+                controller.workspaceManager.hiddenState(for: token)?.reason,
+                testCase.expectedHiddenReason
+            )
+            XCTAssertEqual(
+                controller.axManager.pendingParkWindowIds.contains(windowId),
+                testCase.expectedHiddenReason != nil
+            )
+        }
+    }
+
     func testNiriAndDwindleTerminalLayoutTransientHidesCoverTiledAndFloatingWindows() throws {
         let cases: [(usesDwindle: Bool, mode: TrackedWindowMode)] = [
             (false, .tiling),
