@@ -88,10 +88,6 @@ extension WindowInteractionPolicy {
     ) -> WindowInteractionPolicy {
         guard decision.tracksWindow else { return .untracked }
 
-        if decision.isNonRenderableTransientSurfaceDecision {
-            return .handsOffSurface
-        }
-
         if decision.layoutDecisionKind == .explicitLayout {
             return .full
         }

@@ -66,15 +66,20 @@ final class WindowInteractionPolicyTests: XCTestCase {
         XCTAssertEqual(policy, .handsOffSurface)
     }
 
-    func testTransientWidgetSurfaceSourceIsHandsOffEvenWhenFloating() {
-        let policy = WindowInteractionPolicy.resolve(
-            decision: decision(
-                source: .builtInRule(WindowRuleEngine.transientWidgetSurfaceRuleName)
-            ),
-            windowServerLevel: 0
-        )
-
-        XCTAssertEqual(policy, .handsOffSurface)
+    func testTransientWidgetSurfacesAreUntrackedRatherThanHandsOff() {
+        for ruleName in [
+            WindowRuleEngine.transientWidgetSurfaceRuleName,
+            WindowRuleEngine.helpTagSurfaceRuleName
+        ] {
+            XCTAssertEqual(
+                WindowInteractionPolicy.resolve(
+                    decision: decision(disposition: .unmanaged, source: .builtInRule(ruleName)),
+                    windowServerLevel: 0
+                ),
+                .untracked,
+                "\(ruleName) resolves to untracked because every producer of it is unmanaged"
+            )
+        }
     }
 
     func testExplicitUserRuleRestoresFullManagement() {

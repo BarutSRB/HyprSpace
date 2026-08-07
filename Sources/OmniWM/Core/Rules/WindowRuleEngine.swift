@@ -580,10 +580,7 @@ final class WindowRuleEngine {
             )
         }
 
-        let heuristic = AXWindowService.heuristicDisposition(
-            for: facts.ax,
-            sizeConstraints: facts.sizeConstraints
-        )
+        let heuristic = AXWindowService.heuristicDisposition(for: facts.ax)
 
         return WindowDecision(
             disposition: heuristic.disposition,
