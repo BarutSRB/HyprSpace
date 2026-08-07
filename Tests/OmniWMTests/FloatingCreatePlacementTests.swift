@@ -1177,6 +1177,53 @@ final class FloatingCreatePlacementTests: XCTestCase {
         XCTAssertEqual(workspaceId, fixture.secondaryWorkspace)
     }
 
+    func testHandsOffSurfaceIsNeverFronted() throws {
+        final class FrontingRecorder: @unchecked Sendable {
+            var activatedPids: [pid_t] = []
+            var focusedWindowIds: [UInt32] = []
+            var raiseCount = 0
+        }
+        let recorder = FrontingRecorder()
+        let controller = WMController(
+            settings: makeSettings(),
+            windowFocusOperations: WindowFocusOperations(
+                activateApp: { recorder.activatedPids.append($0) },
+                focusSpecificWindow: { _, windowId, _ in recorder.focusedWindowIds.append(windowId) },
+                raiseWindow: { _ in recorder.raiseCount += 1 }
+            )
+        )
+        let monitor = makeMonitor(CGMainDisplayID(), "Primary", CGRect(x: 0, y: 0, width: 1800, height: 1169))
+        controller.workspaceManager.applyMonitorConfigurationChange([monitor])
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+
+        let pid: pid_t = 30_540
+        let handsOff = try XCTUnwrap(
+            controller.workspaceManager.addWindow(
+                axRef(pid, 940), pid: pid, windowId: 940, to: workspaceId, mode: .floating
+            )
+        )
+        controller.workspaceManager.setInteractionPolicy(.handsOffSurface, for: handsOff)
+        controller.performWindowFronting(pid: pid, windowId: 940, axRef: axRef(pid, 940))
+
+        XCTAssertTrue(recorder.activatedPids.isEmpty)
+        XCTAssertTrue(recorder.focusedWindowIds.isEmpty)
+        XCTAssertEqual(recorder.raiseCount, 0)
+
+        let managed = try XCTUnwrap(
+            controller.workspaceManager.addWindow(
+                axRef(pid, 941), pid: pid, windowId: 941, to: workspaceId
+            )
+        )
+        controller.workspaceManager.setInteractionPolicy(.full, for: managed)
+        controller.performWindowFronting(pid: pid, windowId: 941, axRef: axRef(pid, 941))
+
+        XCTAssertEqual(recorder.activatedPids, [pid])
+        XCTAssertEqual(recorder.focusedWindowIds, [941])
+        XCTAssertEqual(recorder.raiseCount, 1)
+    }
+
     func testSkippedWorkspaceRuleRecordsWhyItWasSkipped() throws {
         let fixture = try makeTwoMonitorFixture()
         let manager = fixture.controller.workspaceManager

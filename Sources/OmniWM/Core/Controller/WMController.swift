@@ -3171,9 +3171,19 @@ extension WMController {
         windowId: Int,
         axRef: AXWindowRef
     ) {
-        windowFocusOperations.activateApp(pid)
+        let policy = workspaceManager.entry(forWindowId: windowId)?.interactionPolicy ?? .full
+        guard policy.mayFocus,
+              focusPolicyEngine.evaluate(.windowFronting).allowsFocusChange
+        else {
+            return
+        }
+        if policy.mayActivateApp {
+            windowFocusOperations.activateApp(pid)
+        }
         windowFocusOperations.focusSpecificWindow(pid, UInt32(windowId), axRef.element)
-        windowFocusOperations.raiseWindow(axRef.element)
+        if policy.mayRaise {
+            windowFocusOperations.raiseWindow(axRef.element)
+        }
     }
 
     func retryManagedFocusFronting(_ request: ManagedFocusRequest) {

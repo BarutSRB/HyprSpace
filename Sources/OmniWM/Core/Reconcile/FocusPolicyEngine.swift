@@ -4,6 +4,7 @@
 import Foundation
 
 enum FocusPolicyLeaseOwner: String, Equatable {
+    case foreignTransientUI = "foreign_transient_ui"
     case nativeMenu = "native_menu"
     case windowCloseFocusRecovery = "window_close_focus_recovery"
     case nativeAppSwitch = "native_app_switch"
@@ -20,6 +21,7 @@ struct FocusPolicyLease: Equatable {
 enum FocusPolicyRequest: Equatable {
     case focusFollowsMouse
     case managedAppActivation(source: ActivationEventSource)
+    case windowFronting
 }
 
 struct FocusPolicyDecision: Equatable {
@@ -36,6 +38,7 @@ struct FocusPolicyDecision: Equatable {
 @MainActor
 final class FocusPolicyEngine {
     private static let effectiveLeasePriority: [FocusPolicyLeaseOwner] = [
+        .foreignTransientUI,
         .nativeMenu,
         .windowCloseFocusRecovery,
         .nativeAppSwitch,
@@ -105,6 +108,9 @@ final class FocusPolicyEngine {
                 return .deny(reason: menuLease.reason)
             }
             return .allow
+        case .windowFronting:
+            guard let lease = leasesByOwner[.foreignTransientUI] else { return .allow }
+            return .deny(reason: lease.reason)
         }
     }
 
