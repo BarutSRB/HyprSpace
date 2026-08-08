@@ -172,13 +172,13 @@ struct StatusMenuPrimaryView: View {
                     model.showHiddenIcons()
                 }
             }
-            MenuActionRow(icon: "gearshape", label: "Settings", showChevron: true) {
+            MenuActionRow(icon: "gearshape", label: "Settings") {
                 model.openSettings()
             }
             MenuActionRow(icon: "ladybug", label: "Report a Bug…") {
                 model.openReportIssue()
             }
-            MenuActionRow(icon: "slider.horizontal.3", label: "App Rules", showChevron: true) {
+            MenuActionRow(icon: "slider.horizontal.3", label: "App Rules") {
                 model.openAppRules()
             }
             if model.checkForUpdatesAction != nil {

@@ -204,4 +204,54 @@ extension DwindleLayoutEngine {
         }
         return nil
     }
+
+    @discardableResult
+    func handleExternalFrameChange(
+        for token: WindowToken,
+        in workspaceId: WorkspaceDescriptor.ID,
+        oldFrame: CGRect,
+        newFrame: CGRect,
+        innerGap: CGFloat
+    ) -> Bool {
+        guard let leaf = findNode(for: token, in: workspaceId), leaf.isLeaf, !leaf.isFullscreen else { return false }
+        let deltaMinX = newFrame.minX - oldFrame.minX
+        let deltaMaxX = newFrame.maxX - oldFrame.maxX
+        let deltaMinY = newFrame.minY - oldFrame.minY
+        let deltaMaxY = newFrame.maxY - oldFrame.maxY
+
+        let deltaWidth = newFrame.width - oldFrame.width
+        let deltaHeight = newFrame.height - oldFrame.height
+
+        var changed = false
+
+        if abs(deltaWidth) > 1.0 {
+            let wantFirstChild = abs(deltaMaxX) > abs(deltaMinX)
+            if let match = controllingSplit(from: leaf, orientation: .horizontal, wantFirstChild: wantFirstChild),
+               let frame = match.split.cachedFrame, frame.width > 0 {
+                let ratioDelta = (wantFirstChild ? deltaWidth : -deltaWidth) / frame.width
+                let currentRatio = match.split.splitRatio ?? 0.5
+                let newRatio = clampedRatioRespectingMinimums(currentRatio + ratioDelta, for: match.split, innerGap: innerGap)
+                if newRatio != currentRatio {
+                    match.split.kind = .split(orientation: .horizontal, ratio: newRatio)
+                    changed = true
+                }
+            }
+        }
+
+        if abs(deltaHeight) > 1.0 {
+            let wantFirstChild = abs(deltaMaxY) > abs(deltaMinY)
+            if let match = controllingSplit(from: leaf, orientation: .vertical, wantFirstChild: wantFirstChild),
+               let frame = match.split.cachedFrame, frame.height > 0 {
+                let ratioDelta = (wantFirstChild ? deltaHeight : -deltaHeight) / frame.height
+                let currentRatio = match.split.splitRatio ?? 0.5
+                let newRatio = clampedRatioRespectingMinimums(currentRatio + ratioDelta, for: match.split, innerGap: innerGap)
+                if newRatio != currentRatio {
+                    match.split.kind = .split(orientation: .vertical, ratio: newRatio)
+                    changed = true
+                }
+            }
+        }
+
+        return changed
+    }
 }

@@ -95,6 +95,7 @@ final class MenuAnywhereController: NSObject, NSMenuDelegate {
 
     func menuWillOpen(_ menu: NSMenu) {
         if menu === activeMenu { return }
+        menu.autoenablesItems = false
 
         guard menu.items.isEmpty, let axRoot = menu.axRootElement else { return }
         guard menu.isPopulatingAsynchronously == false else { return }
@@ -109,12 +110,15 @@ final class MenuAnywhereController: NSObject, NSMenuDelegate {
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         if menu === activeMenu { return }
-        guard menu.items.isEmpty, let axRoot = menu.axRootElement else { return }
+        guard let axRoot = menu.axRootElement else { return }
+        menu.autoenablesItems = false
         let items = menuExtractor.buildSubmenu(
             from: axRoot, target: self, action: #selector(menuAction(_:))
         )
-        menu.removeAllItems()
-        items.forEach(menu.addItem)
+        if !items.isEmpty {
+            menu.removeAllItems()
+            items.forEach(menu.addItem)
+        }
     }
 
     private func populateSubmenuAsync(menu: NSMenu, axRoot: AXUIElement) {
