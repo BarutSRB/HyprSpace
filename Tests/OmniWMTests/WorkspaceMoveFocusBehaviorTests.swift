@@ -20,6 +20,16 @@ final class WorkspaceMoveFocusBehaviorTests: XCTestCase {
         let focusRecorder: FocusRecorder
     }
 
+    private struct MonitorMoveFixture {
+        let controller: WMController
+        let sourceMonitor: Monitor
+        let targetMonitor: Monitor
+        let sourceWorkspaceId: WorkspaceDescriptor.ID
+        let inactiveTargetWorkspaceId: WorkspaceDescriptor.ID
+        let activeTargetWorkspaceId: WorkspaceDescriptor.ID
+        let focusRecorder: FocusRecorder
+    }
+
     private struct NiriColumnFixture {
         let fallback: WindowHandle
         let selected: WindowHandle
@@ -408,9 +418,247 @@ final class WorkspaceMoveFocusBehaviorTests: XCTestCase {
         XCTAssertTrue(fixture.focusRecorder.focusedTokens.isEmpty)
         XCTAssertNil(fixture.controller.intentLedger.activeManagedRequest)
     }
+
+    func testDirectMonitorMoveTargetsActiveWorkspaceAndHonorsFollowSetting() throws {
+        for layout in [LayoutType.niri, .dwindle] {
+            for followsFocus in [false, true] {
+                let fixture = try makeMonitorMoveFixture(layout: layout, followsFocus: followsFocus)
+                let idOffset = (layout == .niri ? 0 : 100) + (followsFocus ? 10 : 0)
+                let fallback = try addManagedWindow(
+                    pid: pid_t(488_100 + idOffset),
+                    windowId: 1,
+                    to: fixture.sourceWorkspaceId,
+                    controller: fixture.controller
+                )
+                let moved = try addManagedWindow(
+                    pid: pid_t(488_100 + idOffset),
+                    windowId: 2,
+                    to: fixture.sourceWorkspaceId,
+                    controller: fixture.controller
+                )
+                _ = try addManagedWindow(
+                    pid: pid_t(488_100 + idOffset),
+                    windowId: 3,
+                    to: fixture.activeTargetWorkspaceId,
+                    controller: fixture.controller
+                )
+                try select(
+                    moved,
+                    in: fixture.sourceWorkspaceId,
+                    on: fixture.sourceMonitor,
+                    controller: fixture.controller,
+                    focusRecorder: fixture.focusRecorder
+                )
+
+                try withBlockedLayoutRefreshes(
+                    controller: fixture.controller,
+                    affectedWorkspaceId: fixture.sourceWorkspaceId
+                ) {
+                    XCTAssertFalse(fixture.controller.settings.moveCrossesMonitorAtEdge)
+                    XCTAssertEqual(
+                        fixture.controller.commandHandler.handleHotkeyCommand(.moveWindowToMonitor(.right)),
+                        .executed
+                    )
+
+                    let manager = fixture.controller.workspaceManager
+                    XCTAssertEqual(manager.workspace(for: fallback.id), fixture.sourceWorkspaceId)
+                    XCTAssertEqual(manager.workspace(for: moved.id), fixture.activeTargetWorkspaceId)
+                    XCTAssertNotEqual(manager.workspace(for: moved.id), fixture.inactiveTargetWorkspaceId)
+                    XCTAssertEqual(
+                        manager.activeWorkspace(on: fixture.targetMonitor.id)?.id,
+                        fixture.activeTargetWorkspaceId
+                    )
+                    XCTAssertEqual(
+                        manager.interactionMonitorId,
+                        followsFocus ? fixture.targetMonitor.id : fixture.sourceMonitor.id
+                    )
+                    XCTAssertEqual(
+                        fixture.controller.activeWorkspace()?.id,
+                        followsFocus ? fixture.activeTargetWorkspaceId : fixture.sourceWorkspaceId
+                    )
+                    XCTAssertTrue(fixture.focusRecorder.focusedTokens.isEmpty)
+
+                    let pending = try XCTUnwrap(
+                        fixture.controller.layoutRefreshController.layoutState.pendingRefresh
+                    )
+                    XCTAssertEqual(pending.reason, .workspaceTransition)
+                    XCTAssertEqual(
+                        pending.affectedWorkspaceIds,
+                        [fixture.sourceWorkspaceId, fixture.activeTargetWorkspaceId]
+                    )
+                    XCTAssertEqual(pending.postLayoutActions.count, 1)
+                    let action = try XCTUnwrap(pending.postLayoutActions.first)
+                    XCTAssertTrue(action.isCurrent(using: manager))
+                    action.runIfCurrent(using: manager)
+
+                    let expectedFocusToken = followsFocus ? moved.id : fallback.id
+                    XCTAssertEqual(fixture.focusRecorder.focusedTokens, [expectedFocusToken])
+                    XCTAssertEqual(manager.pendingFocusedToken, expectedFocusToken)
+                    XCTAssertEqual(
+                        fixture.controller.intentLedger.activeManagedRequest?.token,
+                        expectedFocusToken
+                    )
+                }
+            }
+        }
+    }
+
+    func testDirectMonitorMoveNoOpsWithoutFocusOrAdjacentMonitor() throws {
+        let fixture = try makeMonitorMoveFixture(layout: .niri, followsFocus: false)
+        let controller = fixture.controller
+        let manager = controller.workspaceManager
+
+        let noFocusWorldSeq = manager.worldSeq
+        XCTAssertNil(manager.focusedToken)
+        XCTAssertEqual(
+            controller.commandHandler.handleHotkeyCommand(.moveWindowToMonitor(.right)),
+            .executed
+        )
+        XCTAssertEqual(manager.worldSeq, noFocusWorldSeq)
+        XCTAssertNil(controller.layoutRefreshController.layoutState.activeRefresh)
+        XCTAssertNil(controller.layoutRefreshController.layoutState.pendingRefresh)
+
+        let window = try addManagedWindow(
+            pid: 488_200,
+            windowId: 1,
+            to: fixture.sourceWorkspaceId,
+            controller: controller
+        )
+        try select(
+            window,
+            in: fixture.sourceWorkspaceId,
+            on: fixture.sourceMonitor,
+            controller: controller,
+            focusRecorder: fixture.focusRecorder
+        )
+        controller.layoutRefreshController.resetState()
+        let noAdjacentWorldSeq = manager.worldSeq
+
+        XCTAssertEqual(
+            controller.commandHandler.handleHotkeyCommand(.moveWindowToMonitor(.left)),
+            .executed
+        )
+        XCTAssertEqual(manager.workspace(for: window.id), fixture.sourceWorkspaceId)
+        XCTAssertEqual(manager.worldSeq, noAdjacentWorldSeq)
+        XCTAssertEqual(manager.interactionMonitorId, fixture.sourceMonitor.id)
+        XCTAssertTrue(fixture.focusRecorder.focusedTokens.isEmpty)
+        XCTAssertNil(controller.layoutRefreshController.layoutState.activeRefresh)
+        XCTAssertNil(controller.layoutRefreshController.layoutState.pendingRefresh)
+    }
 }
 
 extension WorkspaceMoveFocusBehaviorTests {
+    private func makeMonitorMoveFixture(
+        layout: LayoutType,
+        followsFocus: Bool
+    ) throws -> MonitorMoveFixture {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WorkspaceMonitorMoveFocusBehaviorTests-\(UUID().uuidString)", isDirectory: true)
+        let sourceFrame = CGRect(x: 0, y: 0, width: 1600, height: 900)
+        let targetFrame = CGRect(x: 1600, y: 0, width: 1600, height: 900)
+        let sourceMonitor = Monitor(
+            id: .init(displayId: 488_010),
+            displayId: 488_010,
+            frame: sourceFrame,
+            visibleFrame: sourceFrame,
+            hasNotch: false,
+            name: "Workspace Monitor Move Source"
+        )
+        let targetMonitor = Monitor(
+            id: .init(displayId: 488_011),
+            displayId: 488_011,
+            frame: targetFrame,
+            visibleFrame: targetFrame,
+            hasNotch: false,
+            name: "Workspace Monitor Move Target"
+        )
+        let settings = SettingsStore(
+            persistence: SettingsFilePersistence(
+                directory: root.appendingPathComponent("config", isDirectory: true),
+                startWatching: false,
+                deferSaves: false
+            ),
+            runtimeState: RuntimeStateStore(
+                directory: root.appendingPathComponent("state", isDirectory: true),
+                deferSaves: false
+            ),
+            autosaveEnabled: false
+        )
+        settings.animationsEnabled = false
+        settings.focusFollowsWindowToMonitor = followsFocus
+        settings.moveCrossesMonitorAtEdge = false
+        settings.defaultLayoutType = layout
+        settings.workspaceConfigurations = [
+            WorkspaceConfiguration(
+                name: "1",
+                monitorAssignment: .specificDisplay(OutputId(from: sourceMonitor)),
+                layoutType: layout
+            ),
+            WorkspaceConfiguration(
+                name: "2",
+                monitorAssignment: .specificDisplay(OutputId(from: targetMonitor)),
+                layoutType: layout
+            ),
+            WorkspaceConfiguration(
+                name: "3",
+                monitorAssignment: .specificDisplay(OutputId(from: targetMonitor)),
+                layoutType: layout
+            )
+        ]
+
+        let focusRecorder = FocusRecorder()
+        let controller = WMController(
+            settings: settings,
+            windowFocusOperations: WindowFocusOperations(
+                activateApp: { _ in },
+                focusSpecificWindow: { pid, windowId, _ in
+                    focusRecorder.focusedTokens.append(
+                        WindowToken(pid: pid, windowId: Int(windowId))
+                    )
+                },
+                raiseWindow: { _ in }
+            )
+        )
+        controller.workspaceManager.applyMonitorConfigurationChange([sourceMonitor, targetMonitor])
+        controller.workspaceManager.applySettings()
+        installLayoutEngines(on: controller)
+
+        let sourceWorkspaceId = try XCTUnwrap(controller.workspaceManager.workspaceId(named: "1"))
+        let inactiveTargetWorkspaceId = try XCTUnwrap(controller.workspaceManager.workspaceId(named: "2"))
+        let activeTargetWorkspaceId = try XCTUnwrap(controller.workspaceManager.workspaceId(named: "3"))
+        XCTAssertTrue(
+            controller.workspaceManager.setActiveWorkspace(
+                inactiveTargetWorkspaceId,
+                on: targetMonitor.id,
+                updateInteractionMonitor: false
+            )
+        )
+        XCTAssertTrue(
+            controller.workspaceManager.setActiveWorkspace(
+                activeTargetWorkspaceId,
+                on: targetMonitor.id,
+                updateInteractionMonitor: false
+            )
+        )
+        XCTAssertTrue(
+            controller.workspaceManager.setActiveWorkspace(
+                sourceWorkspaceId,
+                on: sourceMonitor.id
+            )
+        )
+        controller.layoutRefreshController.resetState()
+
+        return MonitorMoveFixture(
+            controller: controller,
+            sourceMonitor: sourceMonitor,
+            targetMonitor: targetMonitor,
+            sourceWorkspaceId: sourceWorkspaceId,
+            inactiveTargetWorkspaceId: inactiveTargetWorkspaceId,
+            activeTargetWorkspaceId: activeTargetWorkspaceId,
+            focusRecorder: focusRecorder
+        )
+    }
+
     private func makeFixture(
         layouts: [LayoutType],
         followsFocus: Bool
@@ -511,7 +759,20 @@ extension WorkspaceMoveFocusBehaviorTests {
         to workspaceId: WorkspaceDescriptor.ID,
         fixture: Fixture
     ) throws -> WindowHandle {
-        let controller = fixture.controller
+        try addManagedWindow(
+            pid: pid,
+            windowId: windowId,
+            to: workspaceId,
+            controller: fixture.controller
+        )
+    }
+
+    private func addManagedWindow(
+        pid: pid_t,
+        windowId: Int,
+        to workspaceId: WorkspaceDescriptor.ID,
+        controller: WMController
+    ) throws -> WindowHandle {
         let token = controller.workspaceManager.addWindow(
             AXWindowRef(element: AXUIElementCreateApplication(pid), windowId: windowId),
             pid: pid,
@@ -538,7 +799,22 @@ extension WorkspaceMoveFocusBehaviorTests {
         in workspaceId: WorkspaceDescriptor.ID,
         fixture: Fixture
     ) throws {
-        let controller = fixture.controller
+        try select(
+            handle,
+            in: workspaceId,
+            on: fixture.monitor,
+            controller: fixture.controller,
+            focusRecorder: fixture.focusRecorder
+        )
+    }
+
+    private func select(
+        _ handle: WindowHandle,
+        in workspaceId: WorkspaceDescriptor.ID,
+        on monitor: Monitor,
+        controller: WMController,
+        focusRecorder: FocusRecorder
+    ) throws {
         switch controller.workspaceManager.activeLayoutKind(for: workspaceId) {
         case .niri:
             let engine = try XCTUnwrap(controller.niriEngine)
@@ -550,7 +826,7 @@ extension WorkspaceMoveFocusBehaviorTests {
                 nodeId: node.id,
                 focusedToken: handle.id,
                 in: workspaceId,
-                onMonitor: fixture.monitor.id
+                onMonitor: monitor.id
             )
         case .dwindle:
             let engine = try XCTUnwrap(controller.dwindleEngine)
@@ -561,15 +837,15 @@ extension WorkspaceMoveFocusBehaviorTests {
                 nodeId: nil,
                 focusedToken: handle.id,
                 in: workspaceId,
-                onMonitor: fixture.monitor.id
+                onMonitor: monitor.id
             )
         }
         _ = controller.workspaceManager.setManagedFocus(
             handle.id,
             in: workspaceId,
-            onMonitor: fixture.monitor.id
+            onMonitor: monitor.id
         )
-        fixture.focusRecorder.focusedTokens.removeAll()
+        focusRecorder.focusedTokens.removeAll()
     }
 }
 
@@ -675,17 +951,29 @@ extension WorkspaceMoveFocusBehaviorTests {
         _ fixture: Fixture,
         _ body: () throws -> T
     ) rethrows -> T {
+        try withBlockedLayoutRefreshes(
+            controller: fixture.controller,
+            affectedWorkspaceId: fixture.workspaceIds[0],
+            body
+        )
+    }
+
+    private func withBlockedLayoutRefreshes<T>(
+        controller: WMController,
+        affectedWorkspaceId: WorkspaceDescriptor.ID,
+        _ body: () throws -> T
+    ) rethrows -> T {
         let blocker = Task { @MainActor in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(1))
             }
         }
-        let refreshController = fixture.controller.layoutRefreshController
+        let refreshController = controller.layoutRefreshController
         refreshController.layoutState.activeRefreshTask = blocker
         refreshController.layoutState.activeRefresh = .init(
             kind: .immediateRelayout,
             reason: .workspaceTransition,
-            affectedWorkspaceIds: [fixture.workspaceIds[0]]
+            affectedWorkspaceIds: [affectedWorkspaceId]
         )
         defer {
             blocker.cancel()

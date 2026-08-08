@@ -105,6 +105,8 @@ final class IPCCommandRouter {
                 to: target,
                 onMonitor: direction(for: ipcDirection)
             )
+        case let .moveToMonitor(ipcDirection):
+            return moveFocusedWindow(using: .moveWindowToMonitor(direction(for: ipcDirection)))
         case .focusMonitorPrevious:
             return focusMonitor(previous: true)
         case .focusMonitorNext:

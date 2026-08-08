@@ -330,6 +330,17 @@ final class WorkspaceNavigationHandler {
     }
 
     func moveWindowToMonitor(direction: Direction) {
+        moveFocusedWindowToMonitor(direction: direction, focusPolicy: .configured)
+    }
+
+    func moveWindowAcrossMonitorAtEdge(direction: Direction) {
+        moveFocusedWindowToMonitor(direction: direction, focusPolicy: .alwaysFollow)
+    }
+
+    private func moveFocusedWindowToMonitor(
+        direction: Direction,
+        focusPolicy: WorkspaceMoveFocusPolicy
+    ) {
         guard let controller else { return }
         guard let token = controller.workspaceManager.focusedToken else { return }
         guard let currentWsId = controller.workspaceManager.workspace(for: token) else { return }
@@ -339,7 +350,7 @@ final class WorkspaceNavigationHandler {
             handle: WindowHandle(id: token),
             direction: direction
         ) else { return }
-        finishWorkspaceMove(mutation, focusPolicy: .alwaysFollow)
+        finishWorkspaceMove(mutation, focusPolicy: focusPolicy)
     }
 
     func moveWindowToMonitor(

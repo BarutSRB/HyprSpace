@@ -419,6 +419,13 @@ enum ActionCatalog {
         ])
 
         let workspaceMonitorMoveKeywords = ["display", "home monitor", "force", "runtime override"]
+        let windowMonitorMoveKeywords = [
+            "display",
+            "adjacent monitor",
+            "send window",
+            "active workspace",
+            "current workspace"
+        ]
         specs.append(contentsOf: [
             action(
                 id: "focusMonitorNext",
@@ -465,6 +472,34 @@ enum ActionCatalog {
                 category: .monitor,
                 binding: .unassigned,
                 keywords: workspaceMonitorMoveKeywords
+            ),
+            action(
+                id: "moveWindowToMonitor.left",
+                command: .moveWindowToMonitor(.left),
+                category: .monitor,
+                binding: .unassigned,
+                keywords: windowMonitorMoveKeywords
+            ),
+            action(
+                id: "moveWindowToMonitor.right",
+                command: .moveWindowToMonitor(.right),
+                category: .monitor,
+                binding: .unassigned,
+                keywords: windowMonitorMoveKeywords
+            ),
+            action(
+                id: "moveWindowToMonitor.up",
+                command: .moveWindowToMonitor(.up),
+                category: .monitor,
+                binding: .unassigned,
+                keywords: windowMonitorMoveKeywords
+            ),
+            action(
+                id: "moveWindowToMonitor.down",
+                command: .moveWindowToMonitor(.down),
+                category: .monitor,
+                binding: .unassigned,
+                keywords: windowMonitorMoveKeywords
             )
         ])
 
@@ -1021,6 +1056,7 @@ enum ActionCatalog {
              .focusMonitorNext,
              .focusMonitorLast,
              .toggleNativeFullscreen,
+             .moveWindowToMonitor,
              .moveWorkspaceToMonitor,
              .swapWorkspaceWithMonitor,
              .workspaceBackAndForth,
@@ -1101,6 +1137,7 @@ enum ActionCatalog {
         case let .setContainerPrimarySpan(change): "Set Container Primary Span \(sizeChangeDisplayName(change))"
         case let .setWindowPrimarySpan(change): "Set Window Primary Span \(sizeChangeDisplayName(change))"
         case let .setWindowSecondarySpan(change): "Set Window Secondary Span \(sizeChangeDisplayName(change))"
+        case let .moveWindowToMonitor(dir): "Move Window to \(dir.displayName) Monitor"
         case let .moveWorkspaceToMonitor(dir): "Move Workspace to \(dir.displayName) Monitor"
         case let .swapWorkspaceWithMonitor(dir): "Swap Workspace with \(dir.displayName) Monitor"
         case .balanceSizes: "Balance Sizes"
@@ -1246,6 +1283,8 @@ enum ActionCatalog {
             .setWindowPrimarySpan
         case .setWindowSecondarySpan:
             .setWindowSecondarySpan
+        case .moveWindowToMonitor:
+            .moveToMonitor
         case .moveWorkspaceToMonitor:
             nil
         case .swapWorkspaceWithMonitor:

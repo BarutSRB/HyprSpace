@@ -70,8 +70,10 @@ final class CommandHandler {
         case let .move(direction):
             let outcome = moveWindow(direction: direction)
             if outcome == .atWorkspaceEdge, controller.settings.moveCrossesMonitorAtEdge {
-                controller.workspaceNavigationHandler.moveWindowToMonitor(direction: direction)
+                controller.workspaceNavigationHandler.moveWindowAcrossMonitorAtEdge(direction: direction)
             }
+        case let .moveWindowToMonitor(direction):
+            controller.workspaceNavigationHandler.moveWindowToMonitor(direction: direction)
         case .moveWindowDown:
             moveWindowWithinContainer(direction: .down)
         case .moveWindowUp:

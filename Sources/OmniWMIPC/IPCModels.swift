@@ -235,6 +235,7 @@ public enum IPCCommandName: String, Codable, CaseIterable, Equatable, Sendable {
     case moveToWorkspaceUp = "move-to-workspace-up"
     case moveToWorkspaceDown = "move-to-workspace-down"
     case moveToWorkspaceOnMonitor = "move-to-workspace-on-monitor"
+    case moveToMonitor = "move-to-monitor"
     case focusMonitorPrevious = "focus-monitor-previous"
     case focusMonitorNext = "focus-monitor-next"
     case focusMonitorLast = "focus-monitor-last"
@@ -366,6 +367,7 @@ public enum IPCCommandRequest: Equatable, Sendable {
     case moveToWorkspaceUp
     case moveToWorkspaceDown
     case moveToWorkspaceOnMonitor(workspaceNumber: Int, direction: IPCDirection)
+    case moveToMonitor(direction: IPCDirection)
     case focusMonitorPrevious
     case focusMonitorNext
     case focusMonitorLast
@@ -485,6 +487,8 @@ public enum IPCCommandRequest: Equatable, Sendable {
             .moveToWorkspaceDown
         case .moveToWorkspaceOnMonitor:
             .moveToWorkspaceOnMonitor
+        case .moveToMonitor:
+            .moveToMonitor
         case .focusMonitorPrevious:
             .focusMonitorPrevious
         case .focusMonitorNext:
@@ -745,6 +749,8 @@ public enum IPCCommandRequest: Equatable, Sendable {
                 workspaceNumber: arguments.workspaceNumber,
                 direction: arguments.direction
             )
+        case .moveToMonitor:
+            self = .moveToMonitor(direction: try requireDirection())
         case .focusMonitorPrevious:
             try requireNoArguments()
             self = .focusMonitorPrevious
@@ -1008,6 +1014,9 @@ extension IPCCommandRequest: Codable {
         case .moveToWorkspaceOnMonitor:
             let arguments = try container.decode(IPCWorkspaceOnMonitorArguments.self, forKey: .arguments)
             self = .moveToWorkspaceOnMonitor(workspaceNumber: arguments.workspaceNumber, direction: arguments.direction)
+        case .moveToMonitor:
+            let arguments = try container.decode(IPCDirectionArguments.self, forKey: .arguments)
+            self = .moveToMonitor(direction: arguments.direction)
         case .focusMonitorPrevious:
             self = .focusMonitorPrevious
         case .focusMonitorNext:
@@ -1194,6 +1203,8 @@ extension IPCCommandRequest: Codable {
                 IPCWorkspaceOnMonitorArguments(workspaceNumber: workspaceNumber, direction: direction),
                 forKey: .arguments
             )
+        case let .moveToMonitor(direction):
+            try container.encode(IPCDirectionArguments(direction: direction), forKey: .arguments)
         case .focusMonitorPrevious:
             break
         case .focusMonitorNext:

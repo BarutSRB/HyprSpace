@@ -626,6 +626,12 @@ public enum IPCAutomationManifest {
             arguments: [workspaceNumberArgument, directionArgument]
         ),
         command(
+            ["move-to-monitor"],
+            name: .moveToMonitor,
+            summary: "Move the focused window to the active workspace on the adjacent monitor.",
+            arguments: [directionArgument]
+        ),
+        command(
             ["focus-monitor", "prev"],
             name: .focusMonitorPrevious,
             summary: "Move interaction focus to the previous monitor."

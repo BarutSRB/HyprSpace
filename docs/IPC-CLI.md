@@ -309,7 +309,10 @@ Workspace IDs are positive numeric strings. Direct hotkeys stay limited to `1-9`
 | `command focus-monitor prev` | — | shared | Move focus to the previous monitor |
 | `command focus-monitor next` | — | shared | Move focus to the next monitor |
 | `command focus-monitor last` | — | shared | Move focus back to the previous monitor |
+| `command move-to-monitor` | `<left\|right\|up\|down>` | shared | Move the focused window to the active workspace on an adjacent monitor |
 | `command swap-workspace-with-monitor` | `<left\|right\|up\|down>` | shared | Swap active workspace with the workspace on an adjacent monitor |
+
+`command move-to-monitor` does not wrap when no monitor exists in the requested direction. It honors **Follow Window to Monitor** and operates independently of **Move Window Across Monitor at Edge**.
 
 ### Container and Column Operations
 

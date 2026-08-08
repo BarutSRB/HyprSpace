@@ -164,6 +164,7 @@ final class DwindleCommandRoutingTests: XCTestCase {
     func testMoveAtSingletonEdgeTransfersToAdjacentMonitor() throws {
         let fixture = try makeFixture(groupedSource: false, includeTargetCandidate: false)
         fixture.controller.settings.moveCrossesMonitorAtEdge = true
+        fixture.controller.settings.focusFollowsWindowToMonitor = false
         let blocker = blockLayoutRefresh(fixture)
         defer { unblockLayoutRefresh(fixture.controller, blocker: blocker) }
 

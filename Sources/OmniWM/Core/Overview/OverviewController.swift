@@ -317,6 +317,11 @@ final class OverviewController {
                 )
             }
             return outcome
+        case let .moveWindowToMonitor(direction):
+            return wmController.workspaceNavigationHandler.moveWindowToMonitor(
+                handle: selectedHandle,
+                direction: direction
+            )
         case .moveWindowDown:
             guard isNiri else { return .unchanged }
             return wmController.niriLayoutHandler.moveWindowWithinContainer(
@@ -424,6 +429,7 @@ final class OverviewController {
     private func isStructuralHotkey(_ command: HotkeyCommand) -> Bool {
         switch command {
         case .move,
+             .moveWindowToMonitor,
              .moveWindowDown,
              .moveWindowUp,
              .moveWindowDownOrToWorkspaceDown,

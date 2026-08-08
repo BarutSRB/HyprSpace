@@ -53,6 +53,110 @@ final class OverviewStructuralCommandTests: XCTestCase {
         XCTAssertEqual(fixture.focusRecorder.callCount, 0)
     }
 
+    func testSelectedOverviewHandleMovesToActiveAdjacentMonitorWorkspaceWithoutAXFocus() throws {
+        let fixture = try makeFixture(layouts: [.niri])
+        let sourceWorkspaceId = fixture.workspaceIds[0]
+        let targetFrame = CGRect(x: 1600, y: 0, width: 1600, height: 900)
+        let targetMonitor = Monitor(
+            id: .init(displayId: 46_101),
+            displayId: 46_101,
+            frame: targetFrame,
+            visibleFrame: targetFrame,
+            hasNotch: false,
+            name: "Overview Structural Target"
+        )
+        fixture.controller.settings.workspaceConfigurations.append(contentsOf: [
+            WorkspaceConfiguration(
+                name: "2",
+                monitorAssignment: .specificDisplay(OutputId(from: targetMonitor)),
+                layoutType: .niri
+            ),
+            WorkspaceConfiguration(
+                name: "3",
+                monitorAssignment: .specificDisplay(OutputId(from: targetMonitor)),
+                layoutType: .niri
+            )
+        ])
+        fixture.controller.workspaceManager.applyMonitorConfigurationChange([fixture.monitor, targetMonitor])
+        fixture.controller.workspaceManager.applySettings()
+        fixture.controller.syncMonitorsToNiriEngine()
+        let inactiveTargetWorkspaceId = try XCTUnwrap(
+            fixture.controller.workspaceManager.workspaceId(named: "2")
+        )
+        let activeTargetWorkspaceId = try XCTUnwrap(
+            fixture.controller.workspaceManager.workspaceId(named: "3")
+        )
+        XCTAssertTrue(
+            fixture.controller.workspaceManager.setActiveWorkspace(
+                inactiveTargetWorkspaceId,
+                on: targetMonitor.id,
+                updateInteractionMonitor: false
+            )
+        )
+        XCTAssertTrue(
+            fixture.controller.workspaceManager.setActiveWorkspace(
+                activeTargetWorkspaceId,
+                on: targetMonitor.id,
+                updateInteractionMonitor: false
+            )
+        )
+        XCTAssertTrue(
+            fixture.controller.workspaceManager.setActiveWorkspace(sourceWorkspaceId, on: fixture.monitor.id)
+        )
+
+        let selected = try addManagedWindow(
+            pid: 461_017,
+            windowId: 20,
+            to: sourceWorkspaceId,
+            fixture: fixture
+        )
+        let liveFocused = try addManagedWindow(
+            pid: 461_017,
+            windowId: 21,
+            to: sourceWorkspaceId,
+            fixture: fixture
+        )
+        XCTAssertTrue(
+            fixture.controller.workspaceManager.setManagedFocus(
+                liveFocused.id,
+                in: sourceWorkspaceId,
+                onMonitor: fixture.monitor.id
+            )
+        )
+        let overview = OverviewController(
+            wmController: fixture.controller,
+            motionPolicy: fixture.controller.motionPolicy
+        )
+
+        let outcome = withBlockedLayoutRefreshes(fixture) {
+            overview.executeStructuralHotkey(
+                .moveWindowToMonitor(.right),
+                selectedHandle: selected
+            )
+        }
+        let mutation = try XCTUnwrap(outcome?.mutation)
+
+        XCTAssertEqual(mutation.sourceWorkspaceId, sourceWorkspaceId)
+        XCTAssertEqual(mutation.destinationWorkspaceId, activeTargetWorkspaceId)
+        XCTAssertEqual(mutation.selectedHandle, selected)
+        XCTAssertEqual(
+            fixture.controller.workspaceManager.workspace(for: selected.id),
+            activeTargetWorkspaceId
+        )
+        XCTAssertNotEqual(
+            fixture.controller.workspaceManager.workspace(for: selected.id),
+            inactiveTargetWorkspaceId
+        )
+        XCTAssertEqual(
+            fixture.controller.workspaceManager.workspace(for: liveFocused.id),
+            sourceWorkspaceId
+        )
+        XCTAssertEqual(fixture.controller.workspaceManager.interactionMonitorId, targetMonitor.id)
+        XCTAssertEqual(overview.selectedWindowHandle, selected)
+        XCTAssertEqual(fixture.controller.workspaceManager.focusedToken, liveFocused.id)
+        XCTAssertEqual(fixture.focusRecorder.callCount, 0)
+    }
+
     func testPhysicalStructuralRoutingBlocksTriggerlessAndUnsupportedCommands() throws {
         let fixture = try makeFixture(layouts: [.niri])
         let workspaceId = fixture.workspaceIds[0]
@@ -99,6 +203,15 @@ final class OverviewStructuralCommandTests: XCTestCase {
                 )
             ),
             .ignoredOverview
+        )
+        XCTAssertEqual(
+            fixture.controller.commandHandler.handleHotkeyInvocation(
+                HotkeyInvocation(
+                    command: .moveWindowToMonitor(.right),
+                    trigger: PhysicalHotkeyTrigger(keyCode: 46, modifiers: 0, isRepeat: false)
+                )
+            ),
+            .executed
         )
         XCTAssertEqual(
             fixture.controller.commandHandler.handleHotkeyInvocation(
