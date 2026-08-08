@@ -997,11 +997,11 @@ final class AXEventHandler {
         guard isWindowDisplayable(token: token) else { return }
 
         if entry.mode == .floating {
-            if let frame = focusedObservedFrame ?? observedFrame(for: entry) {
-                if shouldSuppressFrameChangedRelayout(for: entry, observedFrame: frame) {
-                    return
-                }
+            if let frame = focusedObservedFrame ?? observedFrame(for: entry),
+               !shouldSuppressFrameChangedRelayout(for: entry, observedFrame: frame)
+            {
                 controller.workspaceManager.updateFloatingGeometry(frame: frame, for: token)
+                reassignFloatingWindowToContainingMonitor(entry: entry, frame: frame)
             }
             return
         }
