@@ -44,6 +44,44 @@ final class FloatingFocusMRUTests: XCTestCase {
         XCTAssertEqual(manager.resolveWorkspaceFocusToken(in: workspaceId), tiled)
     }
 
+    func testRefocusingTheSameTiledWindowAfterAFloatingWindowWins() {
+        let manager = makeManager()
+        let workspaceId = manager.workspaces[0].id
+        let tiled = manager.addWindow(axRef(4005, 51), pid: 4005, windowId: 51, to: workspaceId)
+        let floating = manager.addWindow(
+            axRef(4005, 52),
+            pid: 4005,
+            windowId: 52,
+            to: workspaceId,
+            mode: .floating
+        )
+
+        _ = manager.rememberFocus(tiled, in: workspaceId)
+        _ = manager.rememberFocus(floating, in: workspaceId)
+        _ = manager.rememberFocus(tiled, in: workspaceId)
+
+        XCTAssertEqual(manager.resolveWorkspaceFocusToken(in: workspaceId), tiled)
+    }
+
+    func testRefocusingTheSameFloatingWindowAfterATiledWindowWins() {
+        let manager = makeManager()
+        let workspaceId = manager.workspaces[0].id
+        let tiled = manager.addWindow(axRef(4006, 61), pid: 4006, windowId: 61, to: workspaceId)
+        let floating = manager.addWindow(
+            axRef(4006, 62),
+            pid: 4006,
+            windowId: 62,
+            to: workspaceId,
+            mode: .floating
+        )
+
+        _ = manager.rememberFocus(floating, in: workspaceId)
+        _ = manager.rememberFocus(tiled, in: workspaceId)
+        _ = manager.rememberFocus(floating, in: workspaceId)
+
+        XCTAssertEqual(manager.resolveWorkspaceFocusToken(in: workspaceId), floating)
+    }
+
     func testRemovingTheMostRecentFloatingWindowFallsBackToTheTiledWindow() {
         let manager = makeManager()
         let workspaceId = manager.workspaces[0].id

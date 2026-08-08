@@ -1344,12 +1344,14 @@ final class WorkspaceManager {
     @discardableResult
     func rememberFocus(_ token: WindowToken, in workspaceId: WorkspaceDescriptor.ID) -> Bool {
         let mode = windowMode(for: token) ?? .tiling
-        let changed = switch mode {
+        let modeSpecificChanged = switch mode {
         case .tiling:
             world.focus.lastTiledFocusedByWorkspace[workspaceId] != token
         case .floating:
             world.focus.lastFloatingFocusedByWorkspace[workspaceId] != token
         }
+        let changed = world.focus.lastFocusedByWorkspace[workspaceId] != token
+            || modeSpecificChanged
         guard changed else { return false }
         recordReconcileEvent(
             .focusRemembered(
