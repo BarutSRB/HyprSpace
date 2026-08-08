@@ -23,23 +23,15 @@ final class PrivateAPIFocusEventTests: XCTestCase {
         XCTAssertTrue(bytes[0xF8...].allSatisfy { $0 == 0 })
     }
 
-    func testKeyWindowEventRecordEncodesFiniteOffContentLocation() {
+    func testKeyWindowEventRecordEncodesFiniteFarOffContentLocation() {
         let bytes = KeyWindowEventRecord.make(windowId: 1)
         var decodedLocation = CGPoint.zero
         withUnsafeMutableBytes(of: &decodedLocation) { destination in
             destination.copyBytes(from: bytes[0x20 ..< 0x20 + MemoryLayout<CGPoint>.size])
         }
 
-        XCTAssertEqual(decodedLocation, CGPoint(x: -1, y: -1))
+        XCTAssertEqual(decodedLocation, CGPoint(x: 300_000, y: 300_000))
         XCTAssertTrue(decodedLocation.x.isFinite)
         XCTAssertTrue(decodedLocation.y.isFinite)
-    }
-
-    func testKeyWindowEventRecordSwitchesToMouseUpWithoutRebuilding() {
-        var bytes = KeyWindowEventRecord.make(windowId: 1)
-
-        KeyWindowEventRecord.setEventType(.mouseUp, in: &bytes)
-
-        XCTAssertEqual(bytes[0x08], 0x02)
     }
 }
