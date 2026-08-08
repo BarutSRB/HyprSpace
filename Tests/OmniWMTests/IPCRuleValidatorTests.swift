@@ -211,6 +211,10 @@ final class IPCRuleValidatorTests: XCTestCase {
         XCTAssertNil(IPCRuleValidator.invalidRegexMessage(for: "   "))
     }
 
+    func testInvalidRegexReturnsMessage() {
+        XCTAssertNotNil(IPCRuleValidator.invalidRegexMessage(for: "["))
+    }
+
     func testMinSizeRejectsNonFiniteAndNegativeZero() {
         for value in [Double.infinity, -Double.infinity, -0.0] {
             let report = IPCRuleValidator.validate(
@@ -231,9 +235,9 @@ final class IPCRuleValidatorTests: XCTestCase {
         )
         XCTAssertNil(one.minSizeError)
 
-        let ulp = IPCRuleValidator.validate(
-            IPCRuleDefinition(bundleId: "com.test.app", minWidth: Double.ulpOfOne)
+        let smallestPositive = IPCRuleValidator.validate(
+            IPCRuleDefinition(bundleId: "com.test.app", minWidth: Double.leastNonzeroMagnitude)
         )
-        XCTAssertNil(ulp.minSizeError)
+        XCTAssertNil(smallestPositive.minSizeError)
     }
 }
