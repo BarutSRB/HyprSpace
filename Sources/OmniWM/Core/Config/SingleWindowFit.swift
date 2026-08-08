@@ -44,6 +44,15 @@ struct SingleWindowFit: Equatable {
     static let dwindleModes: [Mode] = [.fill, .custom]
     static let niriModes: [Mode] = [.fill, .custom, .containerPrimarySpan]
 
+    /// Upper bound (px) for a custom single-window-fit dimension parsed from config.
+    ///
+    /// Generous over any real display (8K ≈ 7680 px) yet far inside `Int`'s
+    /// representable range, so re-serializing via `Int(value)` can never trap.
+    /// Larger, or any non-finite, values are rejected at the parse gate and fall
+    /// back to full screen like any other invalid config — instead of being
+    /// accepted here and aborting the process on the next settings save.
+    static let maximumCustomDimension: Double = 1_000_000
+
     var hasValidCustomSize: Bool {
         width > 0 && height > 0 && width.isFinite && height.isFinite
     }
@@ -97,12 +106,20 @@ extension SingleWindowFit {
         let parts = token.split(separator: "x", maxSplits: 1)
         guard parts.count == 2,
               let w = Double(parts[0]), let h = Double(parts[1]),
-              w > 0, h > 0
+              w > 0, h > 0,
+              w.isFinite, h.isFinite,
+              w <= maximumCustomDimension, h <= maximumCustomDimension
         else { return nil }
         return SingleWindowFit(mode: .custom, width: w, height: h)
     }
 
     private static func format(_ value: Double) -> String {
-        value == value.rounded() ? String(Int(value)) : String(value)
+        // Guard the Int conversion: inf/NaN and finite values beyond Int.max all
+        // satisfy value == value.rounded(), yet String(Int(value)) traps on them.
+        // The TOML parse path rejects these upstream, but the custom-dimension UI
+        // fields feed .custom directly via the memberwise init, bypassing parsing,
+        // so the trap site itself must be defensive.
+        value.isFinite && abs(value) <= Double(Int.max) && value == value.rounded()
+            ? String(Int(value)) : String(value)
     }
 }
