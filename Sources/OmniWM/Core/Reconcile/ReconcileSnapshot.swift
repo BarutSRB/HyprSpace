@@ -201,19 +201,35 @@ extension FocusSessionSnapshot {
             lastFocusedByWorkspace[workspaceId] = token
             changed = true
         }
+        return rememberFocusFallback(token, in: workspaceId, mode: mode) || changed
+    }
+
+    @discardableResult
+    mutating func rememberFocusFallback(
+        _ token: WindowToken,
+        in workspaceId: WorkspaceDescriptor.ID,
+        mode: TrackedWindowMode
+    ) -> Bool {
+        guard focusFallbackToken(in: workspaceId, mode: mode) != token else { return false }
         switch mode {
         case .tiling:
-            if lastTiledFocusedByWorkspace[workspaceId] != token {
-                lastTiledFocusedByWorkspace[workspaceId] = token
-                changed = true
-            }
+            lastTiledFocusedByWorkspace[workspaceId] = token
         case .floating:
-            if lastFloatingFocusedByWorkspace[workspaceId] != token {
-                lastFloatingFocusedByWorkspace[workspaceId] = token
-                changed = true
-            }
+            lastFloatingFocusedByWorkspace[workspaceId] = token
         }
-        return changed
+        return true
+    }
+
+    func focusFallbackToken(
+        in workspaceId: WorkspaceDescriptor.ID,
+        mode: TrackedWindowMode
+    ) -> WindowToken? {
+        switch mode {
+        case .tiling:
+            lastTiledFocusedByWorkspace[workspaceId]
+        case .floating:
+            lastFloatingFocusedByWorkspace[workspaceId]
+        }
     }
 
     @discardableResult

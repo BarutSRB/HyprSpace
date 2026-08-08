@@ -4460,6 +4460,44 @@ final class RuntimeArchitectureTests: XCTestCase {
     }
 
     @MainActor
+    func testNiriRelayoutDoesNotReplaceFloatingWorkspaceMRUWithTiledSelection() throws {
+        let controller = Self.controller()
+        let workspaceId = try XCTUnwrap(controller.workspaceManager.workspaceId(for: "1", createIfMissing: true))
+        _ = controller.workspaceManager.focusWorkspace(named: "1")
+        controller.niriLayoutHandler.enableNiriLayout()
+        let engine = try XCTUnwrap(controller.niriEngine)
+        let tiled = controller.workspaceManager.addWindow(
+            AXWindowRef(element: AXUIElementCreateApplication(766_020), windowId: 766_120),
+            pid: 766_020,
+            windowId: 766_120,
+            to: workspaceId
+        )
+        let floating = controller.workspaceManager.addWindow(
+            AXWindowRef(element: AXUIElementCreateApplication(766_021), windowId: 766_121),
+            pid: 766_021,
+            windowId: 766_121,
+            to: workspaceId,
+            mode: .floating
+        )
+        _ = controller.workspaceManager.withEngineMutationScope(in: workspaceId) {
+            engine.addWindow(token: tiled, to: workspaceId, afterSelection: nil)
+        }
+        _ = controller.workspaceManager.rememberFocus(tiled, in: workspaceId)
+        _ = controller.workspaceManager.rememberFocus(floating, in: workspaceId)
+
+        let plans = controller.workspaceManager.withBatchedLayoutBuild {
+            controller.niriLayoutHandler.layoutWithNiriEngine(activeWorkspaces: [workspaceId])
+        }
+        let plan = try XCTUnwrap(plans.first { $0.workspaceId == workspaceId })
+
+        XCTAssertEqual(plan.sessionPatch.rememberedFocusToken, tiled)
+        XCTAssertNotNil(controller.layoutRefreshController.executeLayoutPlanReturningAcceptedSeq(plan))
+        XCTAssertEqual(controller.workspaceManager.lastFocusedToken(in: workspaceId), tiled)
+        XCTAssertEqual(controller.workspaceManager.lastFloatingFocusedToken(in: workspaceId), floating)
+        XCTAssertEqual(controller.workspaceManager.resolveWorkspaceFocusToken(in: workspaceId), floating)
+    }
+
+    @MainActor
     func testNiriViewportOperationNormalizesDisplayRefreshRateFromEngineMonitor() throws {
         let fixture = try Self.niriRefreshRateFixture(displayId: 98_765)
         let controller = fixture.controller
@@ -4556,6 +4594,56 @@ final class RuntimeArchitectureTests: XCTestCase {
             XCTAssertNil(plan.sessionPatch.viewportState)
             XCTAssertEqual(plan.sessionPatch.plannedSeq, committedSeq)
         }
+    }
+
+    @MainActor
+    func testDwindleRelayoutDoesNotReplaceFloatingWorkspaceMRUWithTiledSelection() throws {
+        let settings = Self.settingsStore()
+        settings.workspaceConfigurations = settings.workspaceConfigurations.map {
+            $0.name == "1" ? $0.with(layoutType: .dwindle) : $0
+        }
+        let controller = WMController(
+            settings: settings,
+            windowFocusOperations: WindowFocusOperations(
+                activateApp: { _ in },
+                focusSpecificWindow: { _, _, _ in },
+                raiseWindow: { _ in }
+            )
+        )
+        let workspaceId = try XCTUnwrap(controller.workspaceManager.workspaceId(for: "1", createIfMissing: true))
+        _ = controller.workspaceManager.focusWorkspace(named: "1")
+        let engine = DwindleLayoutEngine()
+        engine.animationClock = controller.animationClock
+        controller.dwindleEngine = engine
+        let tiled = controller.workspaceManager.addWindow(
+            AXWindowRef(element: AXUIElementCreateApplication(766_030), windowId: 766_130),
+            pid: 766_030,
+            windowId: 766_130,
+            to: workspaceId
+        )
+        let floating = controller.workspaceManager.addWindow(
+            AXWindowRef(element: AXUIElementCreateApplication(766_031), windowId: 766_131),
+            pid: 766_031,
+            windowId: 766_131,
+            to: workspaceId,
+            mode: .floating
+        )
+        _ = controller.workspaceManager.withEngineMutationScope(in: workspaceId) {
+            engine.addWindow(token: tiled, to: workspaceId, activeWindowFrame: nil)
+        }
+        _ = controller.workspaceManager.rememberFocus(tiled, in: workspaceId)
+        _ = controller.workspaceManager.rememberFocus(floating, in: workspaceId)
+
+        let plans = controller.workspaceManager.withBatchedLayoutBuild {
+            controller.dwindleLayoutHandler.layoutWithDwindleEngine(activeWorkspaces: [workspaceId])
+        }
+        let plan = try XCTUnwrap(plans.first { $0.workspaceId == workspaceId })
+
+        XCTAssertEqual(plan.sessionPatch.rememberedFocusToken, tiled)
+        XCTAssertNotNil(controller.layoutRefreshController.executeLayoutPlanReturningAcceptedSeq(plan))
+        XCTAssertEqual(controller.workspaceManager.lastFocusedToken(in: workspaceId), tiled)
+        XCTAssertEqual(controller.workspaceManager.lastFloatingFocusedToken(in: workspaceId), floating)
+        XCTAssertEqual(controller.workspaceManager.resolveWorkspaceFocusToken(in: workspaceId), floating)
     }
 
     @MainActor

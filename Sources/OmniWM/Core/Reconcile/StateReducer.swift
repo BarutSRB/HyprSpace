@@ -261,6 +261,12 @@ enum StateReducer {
                 plan.focusSession = focusSession
             }
 
+        case let .focusFallbackRemembered(token, workspaceId, mode, _):
+            var focusSession = currentSnapshot.focusSession
+            if focusSession.rememberFocusFallback(token, in: workspaceId, mode: mode) {
+                plan.focusSession = focusSession
+            }
+
         case let .focusForgotten(workspaceIds, _):
             var focusSession = currentSnapshot.focusSession
             for workspaceId in workspaceIds {

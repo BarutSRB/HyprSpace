@@ -328,6 +328,7 @@ final class WorldStore {
             spaceTopology = topology
 
         case .activeSpaceChanged,
+             .focusFallbackRemembered,
              .focusForgotten,
              .focusLeaseChanged,
              .focusRemembered,

@@ -133,6 +133,7 @@ enum EventNormalizer {
 
         case .activeSpaceChanged,
              .floatingStateChanged,
+             .focusFallbackRemembered,
              .focusForgotten,
              .focusRemembered,
              .interactionMonitorChanged,

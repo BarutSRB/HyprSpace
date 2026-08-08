@@ -82,6 +82,67 @@ final class FloatingFocusMRUTests: XCTestCase {
         XCTAssertEqual(manager.resolveWorkspaceFocusToken(in: workspaceId), floating)
     }
 
+    func testSessionPatchRestatingTiledFallbackDoesNotReplaceFloatingMRU() {
+        let manager = makeManager()
+        let workspaceId = manager.workspaces[0].id
+        let tiled = manager.addWindow(axRef(4007, 71), pid: 4007, windowId: 71, to: workspaceId)
+        let floating = manager.addWindow(
+            axRef(4007, 72),
+            pid: 4007,
+            windowId: 72,
+            to: workspaceId,
+            mode: .floating
+        )
+
+        _ = manager.rememberFocus(tiled, in: workspaceId)
+        _ = manager.rememberFocus(floating, in: workspaceId)
+        let seq = manager.worldSeq
+
+        let changed = manager.applySessionPatch(
+            WorkspaceSessionPatch(
+                workspaceId: workspaceId,
+                rememberedFocusToken: tiled,
+                plannedSeq: seq
+            )
+        )
+
+        XCTAssertFalse(changed)
+        XCTAssertEqual(manager.worldSeq, seq)
+        XCTAssertEqual(manager.lastFocusedToken(in: workspaceId), tiled)
+        XCTAssertEqual(manager.lastFloatingFocusedToken(in: workspaceId), floating)
+        XCTAssertEqual(manager.resolveWorkspaceFocusToken(in: workspaceId), floating)
+    }
+
+    func testSessionPatchChangesTiledFallbackWithoutReplacingFloatingMRU() {
+        let manager = makeManager()
+        let workspaceId = manager.workspaces[0].id
+        let firstTiled = manager.addWindow(axRef(4008, 81), pid: 4008, windowId: 81, to: workspaceId)
+        let secondTiled = manager.addWindow(axRef(4008, 82), pid: 4008, windowId: 82, to: workspaceId)
+        let floating = manager.addWindow(
+            axRef(4008, 83),
+            pid: 4008,
+            windowId: 83,
+            to: workspaceId,
+            mode: .floating
+        )
+
+        _ = manager.rememberFocus(firstTiled, in: workspaceId)
+        _ = manager.rememberFocus(floating, in: workspaceId)
+
+        let changed = manager.applySessionPatch(
+            WorkspaceSessionPatch(
+                workspaceId: workspaceId,
+                rememberedFocusToken: secondTiled,
+                plannedSeq: manager.worldSeq
+            )
+        )
+
+        XCTAssertTrue(changed)
+        XCTAssertEqual(manager.lastFocusedToken(in: workspaceId), secondTiled)
+        XCTAssertEqual(manager.lastFloatingFocusedToken(in: workspaceId), floating)
+        XCTAssertEqual(manager.resolveWorkspaceFocusToken(in: workspaceId), floating)
+    }
+
     func testRemovingTheMostRecentFloatingWindowFallsBackToTheTiledWindow() {
         let manager = makeManager()
         let workspaceId = manager.workspaces[0].id
@@ -104,18 +165,21 @@ final class FloatingFocusMRUTests: XCTestCase {
     func testUnifiedSlotSurvivesAModeChangeOfTheRememberedWindow() {
         let manager = makeManager()
         let workspaceId = manager.workspaces[0].id
-        let token = manager.addWindow(
-            axRef(4004, 41),
+        let tiled = manager.addWindow(axRef(4004, 41), pid: 4004, windowId: 41, to: workspaceId)
+        let floating = manager.addWindow(
+            axRef(4004, 42),
             pid: 4004,
-            windowId: 41,
+            windowId: 42,
             to: workspaceId,
             mode: .floating
         )
 
-        _ = manager.rememberFocus(token, in: workspaceId)
-        _ = manager.setWindowMode(.tiling, for: token)
+        _ = manager.rememberFocus(tiled, in: workspaceId)
+        _ = manager.rememberFocus(floating, in: workspaceId)
+        _ = manager.setWindowMode(.tiling, for: floating)
 
-        XCTAssertEqual(manager.resolveWorkspaceFocusToken(in: workspaceId), token)
+        XCTAssertEqual(manager.lastFocusedToken(in: workspaceId), tiled)
+        XCTAssertEqual(manager.resolveWorkspaceFocusToken(in: workspaceId), floating)
     }
 
     private func makeManager() -> WorkspaceManager {

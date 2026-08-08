@@ -387,6 +387,7 @@ final class WorkspaceManager {
              .topologyChanged:
             return true
         case .floatingGeometryUpdated,
+             .focusFallbackRemembered,
              .focusForgotten,
              .focusLeaseChanged,
              .focusRemembered,
@@ -1344,14 +1345,8 @@ final class WorkspaceManager {
     @discardableResult
     func rememberFocus(_ token: WindowToken, in workspaceId: WorkspaceDescriptor.ID) -> Bool {
         let mode = windowMode(for: token) ?? .tiling
-        let modeSpecificChanged = switch mode {
-        case .tiling:
-            world.focus.lastTiledFocusedByWorkspace[workspaceId] != token
-        case .floating:
-            world.focus.lastFloatingFocusedByWorkspace[workspaceId] != token
-        }
         let changed = world.focus.lastFocusedByWorkspace[workspaceId] != token
-            || modeSpecificChanged
+            || world.focus.focusFallbackToken(in: workspaceId, mode: mode) != token
         guard changed else { return false }
         recordReconcileEvent(
             .focusRemembered(
@@ -1365,12 +1360,18 @@ final class WorkspaceManager {
     }
 
     @discardableResult
-    func syncWorkspaceFocus(
-        _ token: WindowToken,
-        in workspaceId: WorkspaceDescriptor.ID,
-        onMonitor _: Monitor.ID? = nil
-    ) -> Bool {
-        rememberFocus(token, in: workspaceId)
+    private func rememberFocusFallback(_ token: WindowToken, in workspaceId: WorkspaceDescriptor.ID) -> Bool {
+        let mode = windowMode(for: token) ?? .tiling
+        guard world.focus.focusFallbackToken(in: workspaceId, mode: mode) != token else { return false }
+        recordReconcileEvent(
+            .focusFallbackRemembered(
+                token: token,
+                workspaceId: workspaceId,
+                mode: mode,
+                source: .workspaceManager
+            )
+        )
+        return true
     }
 
     @discardableResult
@@ -1378,7 +1379,7 @@ final class WorkspaceManager {
         nodeId: NodeId?,
         focusedToken: WindowToken?,
         in workspaceId: WorkspaceDescriptor.ID,
-        onMonitor monitorId: Monitor.ID? = nil
+        onMonitor _: Monitor.ID? = nil
     ) -> Bool {
         var changed = false
 
@@ -1397,11 +1398,7 @@ final class WorkspaceManager {
         }
 
         if let focusedToken {
-            changed = syncWorkspaceFocus(
-                focusedToken,
-                in: workspaceId,
-                onMonitor: monitorId
-            ) || changed
+            changed = rememberFocus(focusedToken, in: workspaceId) || changed
         }
 
         return changed
@@ -1437,7 +1434,7 @@ final class WorkspaceManager {
                 for: patch.workspaceId,
                 domains: .focusCommit
             ) {
-                changed = rememberFocus(rememberedFocusToken, in: patch.workspaceId) || changed
+                changed = rememberFocusFallback(rememberedFocusToken, in: patch.workspaceId) || changed
             }
         }
 
@@ -3930,7 +3927,8 @@ extension WorkspaceManager {
                 domains: .focus
             )
 
-        case let .focusRemembered(_, workspaceId, _, _):
+        case let .focusRemembered(_, workspaceId, _, _),
+             let .focusFallbackRemembered(_, workspaceId, _, _):
             noteInvalidation(workspaceId: workspaceId, domains: .focus)
 
         case .focusForgotten,

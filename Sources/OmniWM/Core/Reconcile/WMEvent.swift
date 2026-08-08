@@ -232,6 +232,12 @@ enum WMEvent: Equatable {
         mode: TrackedWindowMode,
         source: WMEventSource
     )
+    case focusFallbackRemembered(
+        token: WindowToken,
+        workspaceId: WorkspaceDescriptor.ID,
+        mode: TrackedWindowMode,
+        source: WMEventSource
+    )
     case focusForgotten(
         workspaceIds: Set<WorkspaceDescriptor.ID>,
         source: WMEventSource
@@ -371,6 +377,7 @@ enum WMEvent: Equatable {
         case let .managedFocusCancelled(token, _, _, _):
             token
         case .activeSpaceChanged,
+             .focusFallbackRemembered,
              .focusForgotten,
              .focusLeaseChanged,
              .focusRemembered,
@@ -421,6 +428,7 @@ enum WMEvent: Equatable {
              let .managedFocusCancelled(_, _, _, source),
              let .nonManagedFocusChanged(_, _, _, source),
              let .focusRemembered(_, _, _, source),
+             let .focusFallbackRemembered(_, _, _, source),
              let .focusForgotten(_, source),
              let .nonManagedFocusTargetChanged(_, source),
              let .suppressedFocusChanged(_, source),
@@ -487,6 +495,8 @@ enum WMEvent: Equatable {
             "non_managed_focus_changed active=\(active) preserve=\(preserveFocusedToken) preserve_pending=\(preservePendingManagedFocus)"
         case let .focusRemembered(token, workspaceId, mode, _):
             "focus_remembered token=\(token) workspace=\(workspaceId.uuidString) mode=\(mode)"
+        case let .focusFallbackRemembered(token, workspaceId, mode, _):
+            "focus_fallback_remembered token=\(token) workspace=\(workspaceId.uuidString) mode=\(mode)"
         case let .focusForgotten(workspaceIds, _):
             "focus_forgotten workspaces=\(workspaceIds.count)"
         case let .nonManagedFocusTargetChanged(target, _):
