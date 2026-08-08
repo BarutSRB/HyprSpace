@@ -4,6 +4,8 @@
 import CoreGraphics
 
 enum MouseWarpGeometry {
+    static let cornerSafetyInset: CGFloat = 16
+
     enum Edge: Equatable {
         case left
         case right
@@ -35,19 +37,55 @@ enum MouseWarpGeometry {
 
     static func destinationPoint(on frame: CGRect, entryEdge: Edge, ratio: CGFloat, margin: CGFloat) -> CGPoint {
         let clampedRatio = min(max(ratio, 0), 1)
+        let edgeInset = max(1, margin + 1)
+        let tangentInset = max(edgeInset, cornerSafetyInset)
 
         switch entryEdge {
         case .left,
              .right:
-            let x = entryEdge == .left ? frame.minX + margin + 1 : frame.maxX - margin - 1
-            let y = clampMapped(frame.maxY - (clampedRatio * frame.height), frame.minY, frame.maxY)
+            let x = clampedCoordinate(
+                entryEdge == .left ? frame.minX + edgeInset : frame.maxX - edgeInset,
+                min: frame.minX,
+                max: frame.maxX,
+                inset: edgeInset
+            )
+            let y = clampedCoordinate(
+                frame.maxY - (clampedRatio * frame.height),
+                min: frame.minY,
+                max: frame.maxY,
+                inset: tangentInset
+            )
             return CGPoint(x: x, y: y)
         case .top,
              .bottom:
-            let y = entryEdge == .top ? frame.maxY - margin - 1 : frame.minY + margin + 1
-            let x = clampMapped(frame.minX + (clampedRatio * frame.width), frame.minX, frame.maxX)
+            let x = clampedCoordinate(
+                frame.minX + (clampedRatio * frame.width),
+                min: frame.minX,
+                max: frame.maxX,
+                inset: tangentInset
+            )
+            let y = clampedCoordinate(
+                entryEdge == .top ? frame.maxY - edgeInset : frame.minY + edgeInset,
+                min: frame.minY,
+                max: frame.maxY,
+                inset: edgeInset
+            )
             return CGPoint(x: x, y: y)
         }
+    }
+
+    static func clampedCoordinate(
+        _ value: CGFloat,
+        min minValue: CGFloat,
+        max maxValue: CGFloat,
+        inset: CGFloat
+    ) -> CGFloat {
+        let lower = minValue + inset
+        let upper = maxValue - inset
+        guard minValue < maxValue, lower <= upper else {
+            return (minValue + maxValue) / 2
+        }
+        return min(max(value, lower), upper)
     }
 
     private static func yRatio(_ point: CGPoint, _ frame: CGRect) -> CGFloat {
@@ -58,10 +96,5 @@ enum MouseWarpGeometry {
     private static func xRatio(_ point: CGPoint, _ frame: CGRect) -> CGFloat {
         guard frame.width > 0 else { return 0.5 }
         return (point.x - frame.minX) / frame.width
-    }
-
-    private static func clampMapped(_ value: CGFloat, _ minCoordinate: CGFloat, _ maxCoordinate: CGFloat) -> CGFloat {
-        guard minCoordinate < maxCoordinate else { return minCoordinate }
-        return min(max(value, minCoordinate), maxCoordinate.nextDown)
     }
 }

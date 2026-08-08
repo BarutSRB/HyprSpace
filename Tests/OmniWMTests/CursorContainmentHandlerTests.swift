@@ -16,6 +16,13 @@ final class CursorContainmentHandlerTests: XCTestCase {
         let top: Monitor
     }
 
+    private struct ReporterFixture {
+        let controller: WMController
+        let handler: MouseWarpHandler
+        let source: Monitor
+        let target: Monitor
+    }
+
     private func makeSettings() -> SettingsStore {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("OmniWMCursorContainmentTests-\(UUID().uuidString)", isDirectory: true)
@@ -69,13 +76,39 @@ final class CursorContainmentHandlerTests: XCTestCase {
         let controller = WMController(settings: settings)
         controller.workspaceManager.applyMonitorConfigurationChange([bottom, top])
         let handler = controller.mouseWarpHandler
+        handler.activeDisplayBounds = { _ in .infinite }
         return Fixture(settings: settings, controller: controller, handler: handler, bottom: bottom, top: top)
+    }
+
+    private func makeReporterFixture() -> ReporterFixture {
+        let settings = makeSettings()
+        settings.mouseWarpEnabled = true
+        settings.cursorContainmentEnabled = false
+        settings.monitorRoutingMode = .custom
+        settings.mouseWarpMargin = 1
+
+        let source = makeMonitor(2, "Dell", CGRect(x: 0, y: 0, width: 3360, height: 1418))
+        let target = makeMonitor(3, "espresso", CGRect(x: 3360, y: 1418, width: 1080, height: 1920))
+        settings.monitorRoutingSettings = [
+            routing(3, "espresso", 0, 0),
+            routing(2, "Dell", 1, 0)
+        ]
+
+        let controller = WMController(settings: settings)
+        controller.workspaceManager.applyMonitorConfigurationChange([source, target])
+        _ = controller.workspaceManager.setInteractionMonitor(source.id)
+        let handler = controller.mouseWarpHandler
+        handler.activeDisplayBounds = { _ in .infinite }
+        return ReporterFixture(controller: controller, handler: handler, source: source, target: target)
     }
 
     func testWallFiresAfterFreshSourceSampleInsideForbiddenMonitor() {
         let fixture = makeFixture()
         var warped: [CGPoint] = []
-        fixture.handler.warpCursor = { warped.append($0) }
+        fixture.handler.warpCursor = {
+            warped.append($0)
+            return .success
+        }
         fixture.handler.postMouseMovedEvent = { _ in }
         defer { fixture.handler.resetTransientState() }
 
@@ -93,7 +126,10 @@ final class CursorContainmentHandlerTests: XCTestCase {
     func testAllowedPhysicalCrossingInDestinationEntryBandConsumesSample() {
         let fixture = makeFixture(verticalRouting: true, margin: 4)
         var warped: [CGPoint] = []
-        fixture.handler.warpCursor = { warped.append($0) }
+        fixture.handler.warpCursor = {
+            warped.append($0)
+            return .success
+        }
         fixture.handler.postMouseMovedEvent = { _ in }
         defer { fixture.handler.resetTransientState() }
 
@@ -107,7 +143,10 @@ final class CursorContainmentHandlerTests: XCTestCase {
     func testRoutedSameMonitorEdgeTeleportStillWorksWithContainmentEnabled() {
         let fixture = makeFixture(margin: 2)
         var warped: [CGPoint] = []
-        fixture.handler.warpCursor = { warped.append($0) }
+        fixture.handler.warpCursor = {
+            warped.append($0)
+            return .success
+        }
         fixture.handler.postMouseMovedEvent = { _ in }
         defer { fixture.handler.resetTransientState() }
 
@@ -126,11 +165,124 @@ final class CursorContainmentHandlerTests: XCTestCase {
         assertPoint(warped[0], ScreenCoordinateSpace.toWindowServer(point: destination))
         XCTAssertEqual(fixture.handler.state.lastMonitorId, fixture.top.id)
     }
+}
 
+extension CursorContainmentHandlerTests {
+    func testReporterCornerWarpCommitsOnlyTargetInteractionState() {
+        let fixture = makeReporterFixture()
+        var warped: [CGPoint] = []
+        var posted: [CGPoint] = []
+        fixture.handler.warpCursor = {
+            warped.append($0)
+            return .success
+        }
+        fixture.handler.postMouseMovedEvent = { posted.append($0) }
+        fixture.handler.activeDisplayBounds = { displayId in
+            XCTAssertEqual(displayId, fixture.target.displayId)
+            return .infinite
+        }
+        defer { fixture.handler.resetTransientState() }
+
+        fixture.handler.handleMouseWarpMoved(at: fixture.source.frame.center)
+        XCTAssertEqual(fixture.handler.state.lastMonitorId, fixture.source.id)
+        XCTAssertFalse(fixture.handler.state.isWarping)
+        XCTAssertNil(fixture.handler.state.cooldownTimer)
+
+        let visibleWorkspaces = fixture.controller.workspaceManager.activeVisibleWorkspaceMap()
+        let expectedDestination = CGPoint(x: 4438, y: 1434)
+        let expectedWarpPoint = ScreenCoordinateSpace.toWindowServer(point: expectedDestination)
+
+        fixture.handler.handleMouseWarpMoved(at: CGPoint(x: -1, y: -1))
+
+        XCTAssertEqual(warped.count, 1)
+        XCTAssertEqual(posted.count, 1)
+        assertPoint(warped[0], expectedWarpPoint)
+        assertPoint(posted[0], expectedWarpPoint)
+        XCTAssertTrue(fixture.handler.state.isWarping)
+        XCTAssertEqual(fixture.handler.state.lastMonitorId, fixture.target.id)
+        XCTAssertNotNil(fixture.handler.state.cooldownTimer)
+        XCTAssertEqual(fixture.controller.workspaceManager.interactionMonitorId, fixture.target.id)
+        XCTAssertEqual(fixture.controller.workspaceManager.activeVisibleWorkspaceMap(), visibleWorkspaces)
+    }
+
+    func testReporterCornerWarpRejectsMissingAndExcludingTargetBounds() {
+        let rejectedBounds: [CGRect?] = [nil, CGRect(x: -1, y: -1, width: 1, height: 1)]
+
+        for bounds in rejectedBounds {
+            let fixture = makeReporterFixture()
+            var warpCalls = 0
+            var postCalls = 0
+            fixture.handler.activeDisplayBounds = { _ in bounds }
+            fixture.handler.warpCursor = { _ in
+                warpCalls += 1
+                return .success
+            }
+            fixture.handler.postMouseMovedEvent = { _ in postCalls += 1 }
+            defer { fixture.handler.resetTransientState() }
+
+            fixture.handler.handleMouseWarpMoved(at: fixture.source.frame.center)
+            XCTAssertEqual(fixture.handler.state.lastMonitorId, fixture.source.id)
+            XCTAssertFalse(fixture.handler.state.isWarping)
+            XCTAssertNil(fixture.handler.state.cooldownTimer)
+
+            let interactionMonitorId = fixture.controller.workspaceManager.interactionMonitorId
+            let sourceSampleAt = fixture.handler.state.lastSampleAt
+            let visibleWorkspaces = fixture.controller.workspaceManager.activeVisibleWorkspaceMap()
+
+            fixture.handler.handleMouseWarpMoved(at: CGPoint(x: -1, y: -1))
+
+            XCTAssertEqual(warpCalls, 0)
+            XCTAssertEqual(postCalls, 0)
+            XCTAssertFalse(fixture.handler.state.isWarping)
+            XCTAssertEqual(fixture.handler.state.lastMonitorId, fixture.source.id)
+            XCTAssertEqual(fixture.handler.state.lastSampleAt, sourceSampleAt)
+            XCTAssertNil(fixture.handler.state.cooldownTimer)
+            XCTAssertEqual(fixture.controller.workspaceManager.interactionMonitorId, interactionMonitorId)
+            XCTAssertEqual(fixture.controller.workspaceManager.activeVisibleWorkspaceMap(), visibleWorkspaces)
+        }
+    }
+
+    func testReporterCornerWarpErrorDoesNotCommitTargetState() {
+        let fixture = makeReporterFixture()
+        var warpCalls = 0
+        var postCalls = 0
+        fixture.handler.warpCursor = { _ in
+            warpCalls += 1
+            return .failure
+        }
+        fixture.handler.postMouseMovedEvent = { _ in postCalls += 1 }
+        defer { fixture.handler.resetTransientState() }
+
+        fixture.handler.handleMouseWarpMoved(at: fixture.source.frame.center)
+        XCTAssertEqual(fixture.handler.state.lastMonitorId, fixture.source.id)
+        XCTAssertFalse(fixture.handler.state.isWarping)
+        XCTAssertNil(fixture.handler.state.cooldownTimer)
+
+        let interactionMonitorId = fixture.controller.workspaceManager.interactionMonitorId
+        let sourceSampleAt = fixture.handler.state.lastSampleAt
+        let visibleWorkspaces = fixture.controller.workspaceManager.activeVisibleWorkspaceMap()
+
+        fixture.handler.handleMouseWarpMoved(at: CGPoint(x: -1, y: -1))
+
+        XCTAssertEqual(warpCalls, 1)
+        XCTAssertEqual(postCalls, 0)
+        XCTAssertFalse(fixture.handler.state.isWarping)
+        XCTAssertEqual(fixture.handler.state.lastMonitorId, fixture.source.id)
+        XCTAssertEqual(fixture.handler.state.lastSampleAt, sourceSampleAt)
+        XCTAssertNil(fixture.handler.state.cooldownTimer)
+        XCTAssertEqual(fixture.controller.workspaceManager.interactionMonitorId, interactionMonitorId)
+        XCTAssertEqual(fixture.controller.workspaceManager.activeVisibleWorkspaceMap(), visibleWorkspaces)
+    }
+}
+
+extension CursorContainmentHandlerTests {
     func testCooldownExpiryRecheckWallsParkedForbiddenCursor() {
         let fixture = makeFixture()
         var warped: [CGPoint] = []
-        fixture.handler.warpCursor = { warped.append($0) }
+        fixture.handler.warpCursor = {
+            warped.append($0)
+            return .success
+        }
         fixture.handler.postMouseMovedEvent = { _ in }
         fixture.controller.currentMouseLocation = { fixture.top.frame.center }
         defer { fixture.handler.resetTransientState() }
@@ -146,10 +298,77 @@ final class CursorContainmentHandlerTests: XCTestCase {
         XCTAssertEqual(fixture.handler.state.lastMonitorId, fixture.bottom.id)
     }
 
+    func testContainmentBoundsFailureAdvancesSampleWithoutWarpState() throws {
+        let fixture = makeFixture()
+        var warpCalls = 0
+        var postCalls = 0
+        fixture.handler.warpCursor = { _ in
+            warpCalls += 1
+            return .success
+        }
+        fixture.handler.postMouseMovedEvent = { _ in postCalls += 1 }
+        defer { fixture.handler.resetTransientState() }
+
+        fixture.handler.handleMouseWarpMoved(at: fixture.bottom.frame.center)
+        let sourceSampleAt = Date(timeIntervalSinceNow: -0.5)
+        fixture.handler.state.lastSampleAt = sourceSampleAt
+        let sourceMonitorId = fixture.handler.state.lastMonitorId
+        let interactionMonitorId = fixture.controller.workspaceManager.interactionMonitorId
+        var validatedDisplayId: CGDirectDisplayID?
+        fixture.handler.activeDisplayBounds = { displayId in
+            validatedDisplayId = displayId
+            return nil
+        }
+
+        fixture.handler.handleMouseWarpMoved(at: fixture.top.frame.center)
+
+        let failedSampleAt = try XCTUnwrap(fixture.handler.state.lastSampleAt)
+        XCTAssertEqual(warpCalls, 0)
+        XCTAssertEqual(postCalls, 0)
+        XCTAssertEqual(validatedDisplayId, fixture.bottom.displayId)
+        XCTAssertGreaterThan(failedSampleAt, sourceSampleAt)
+        XCTAssertEqual(fixture.handler.state.lastMonitorId, sourceMonitorId)
+        XCTAssertEqual(fixture.controller.workspaceManager.interactionMonitorId, interactionMonitorId)
+        XCTAssertFalse(fixture.handler.state.isWarping)
+        XCTAssertNil(fixture.handler.state.cooldownTimer)
+    }
+
+    func testContainmentWarpErrorAdvancesSampleWithoutWarpState() throws {
+        let fixture = makeFixture()
+        var warpCalls = 0
+        var postCalls = 0
+        fixture.handler.warpCursor = { _ in
+            warpCalls += 1
+            return .failure
+        }
+        fixture.handler.postMouseMovedEvent = { _ in postCalls += 1 }
+        defer { fixture.handler.resetTransientState() }
+
+        fixture.handler.handleMouseWarpMoved(at: fixture.bottom.frame.center)
+        let sourceSampleAt = Date(timeIntervalSinceNow: -0.5)
+        fixture.handler.state.lastSampleAt = sourceSampleAt
+        let sourceMonitorId = fixture.handler.state.lastMonitorId
+        let interactionMonitorId = fixture.controller.workspaceManager.interactionMonitorId
+
+        fixture.handler.handleMouseWarpMoved(at: fixture.top.frame.center)
+
+        let failedSampleAt = try XCTUnwrap(fixture.handler.state.lastSampleAt)
+        XCTAssertEqual(warpCalls, 1)
+        XCTAssertEqual(postCalls, 0)
+        XCTAssertGreaterThan(failedSampleAt, sourceSampleAt)
+        XCTAssertEqual(fixture.handler.state.lastMonitorId, sourceMonitorId)
+        XCTAssertEqual(fixture.controller.workspaceManager.interactionMonitorId, interactionMonitorId)
+        XCTAssertFalse(fixture.handler.state.isWarping)
+        XCTAssertNil(fixture.handler.state.cooldownTimer)
+    }
+
     func testProgrammaticCursorMoveWhitelistsStalePreWarpSample() {
         let fixture = makeFixture()
         var warped: [CGPoint] = []
-        fixture.handler.warpCursor = { warped.append($0) }
+        fixture.handler.warpCursor = {
+            warped.append($0)
+            return .success
+        }
         fixture.handler.postMouseMovedEvent = { _ in }
         defer { fixture.handler.resetTransientState() }
 
@@ -164,7 +383,10 @@ final class CursorContainmentHandlerTests: XCTestCase {
     func testStaleBaselineAdoptsDestinationWithoutWalling() {
         let fixture = makeFixture()
         var warped: [CGPoint] = []
-        fixture.handler.warpCursor = { warped.append($0) }
+        fixture.handler.warpCursor = {
+            warped.append($0)
+            return .success
+        }
         fixture.handler.postMouseMovedEvent = { _ in }
         defer { fixture.handler.resetTransientState() }
 
@@ -179,7 +401,10 @@ final class CursorContainmentHandlerTests: XCTestCase {
     func testContainmentGatesDoNotWall() {
         let fixture = makeFixture()
         var warped: [CGPoint] = []
-        fixture.handler.warpCursor = { warped.append($0) }
+        fixture.handler.warpCursor = {
+            warped.append($0)
+            return .success
+        }
         fixture.handler.postMouseMovedEvent = { _ in }
         defer { fixture.handler.resetTransientState() }
 
@@ -204,7 +429,10 @@ final class CursorContainmentHandlerTests: XCTestCase {
     func testOuterBoundaryLocationOnNoMonitorDoesNotWall() {
         let fixture = makeFixture()
         var warped: [CGPoint] = []
-        fixture.handler.warpCursor = { warped.append($0) }
+        fixture.handler.warpCursor = {
+            warped.append($0)
+            return .success
+        }
         fixture.handler.postMouseMovedEvent = { _ in }
         defer { fixture.handler.resetTransientState() }
 

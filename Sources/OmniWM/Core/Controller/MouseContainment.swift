@@ -97,22 +97,18 @@ enum MouseContainment {
     private static func clamped(_ point: CGPoint, inside frame: CGRect, margin: CGFloat) -> CGPoint {
         let inset = margin + 1
         return CGPoint(
-            x: clamped(point.x, min: frame.minX, max: frame.maxX, inset: inset),
-            y: clamped(point.y, min: frame.minY, max: frame.maxY, inset: inset)
+            x: MouseWarpGeometry.clampedCoordinate(
+                point.x,
+                min: frame.minX,
+                max: frame.maxX,
+                inset: inset
+            ),
+            y: MouseWarpGeometry.clampedCoordinate(
+                point.y,
+                min: frame.minY,
+                max: frame.maxY,
+                inset: inset
+            )
         )
-    }
-
-    private static func clamped(
-        _ value: CGFloat,
-        min minValue: CGFloat,
-        max maxValue: CGFloat,
-        inset: CGFloat
-    ) -> CGFloat {
-        let lower = minValue + inset
-        let upper = maxValue - inset
-        guard minValue < maxValue, lower <= upper else {
-            return (minValue + maxValue) / 2
-        }
-        return min(max(value, lower), upper)
     }
 }

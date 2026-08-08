@@ -54,4 +54,98 @@ final class MouseWarpGeometryTests: XCTestCase {
         XCTAssertEqual(destination.x, 3, accuracy: 0.5)
         XCTAssertEqual(destination.y, -300, accuracy: 0.5)
     }
+
+    func testEndpointAndOutOfRangeRatiosStayClearOfEveryCrossingBand() {
+        let target = CGRect(x: -500, y: -300, width: 1000, height: 800)
+        let cases: [(MouseWarpGeometry.Edge, CGPoint, CGPoint)] = [
+            (.left, CGPoint(x: -497, y: 484), CGPoint(x: -497, y: -284)),
+            (.right, CGPoint(x: 497, y: 484), CGPoint(x: 497, y: -284)),
+            (.top, CGPoint(x: -484, y: 497), CGPoint(x: 484, y: 497)),
+            (.bottom, CGPoint(x: -484, y: -297), CGPoint(x: 484, y: -297))
+        ]
+
+        for (entryEdge, lowExpected, highExpected) in cases {
+            for ratio in [CGFloat(-0.5), 0] {
+                let destination = MouseWarpGeometry.destinationPoint(
+                    on: target,
+                    entryEdge: entryEdge,
+                    ratio: ratio,
+                    margin: 2
+                )
+                XCTAssertEqual(destination, lowExpected, "\(entryEdge) ratio \(ratio)")
+                XCTAssertNil(MouseWarpGeometry.crossing(location: destination, frame: target, margin: 2))
+            }
+            for ratio in [CGFloat(1), 1.5] {
+                let destination = MouseWarpGeometry.destinationPoint(
+                    on: target,
+                    entryEdge: entryEdge,
+                    ratio: ratio,
+                    margin: 2
+                )
+                XCTAssertEqual(destination, highExpected, "\(entryEdge) ratio \(ratio)")
+                XCTAssertNil(MouseWarpGeometry.crossing(location: destination, frame: target, margin: 2))
+            }
+        }
+    }
+
+    func testIssue541DestinationIsCornerSafeAndDoesNotRearm() {
+        let target = CGRect(x: 3360, y: 1418, width: 1080, height: 1920)
+        let destination = MouseWarpGeometry.destinationPoint(
+            on: target,
+            entryEdge: .right,
+            ratio: 1,
+            margin: 1
+        )
+
+        XCTAssertEqual(destination, CGPoint(x: 4438, y: 1434))
+        XCTAssertTrue(target.contains(destination))
+        XCTAssertNil(MouseWarpGeometry.crossing(location: destination, frame: target, margin: 1))
+    }
+
+    func testTinyNegativeOriginFramesUseMidpointOnTheTangentAxis() {
+        let target = CGRect(x: -20, y: -10, width: 20, height: 20)
+
+        XCTAssertEqual(
+            MouseWarpGeometry.destinationPoint(on: target, entryEdge: .left, ratio: 0, margin: 1),
+            CGPoint(x: -18, y: 0)
+        )
+        XCTAssertEqual(
+            MouseWarpGeometry.destinationPoint(on: target, entryEdge: .top, ratio: 0, margin: 1),
+            CGPoint(x: -10, y: 8)
+        )
+    }
+
+    func testZeroSizedFramesUseMidpointOnBothAxes() {
+        let target = CGRect(x: -40, y: -30, width: 0, height: 0)
+
+        for entryEdge in [
+            MouseWarpGeometry.Edge.left,
+            .right,
+            .top,
+            .bottom
+        ] {
+            for ratio in [CGFloat(-1), 0, 1, 2] {
+                XCTAssertEqual(
+                    MouseWarpGeometry.destinationPoint(
+                        on: target,
+                        entryEdge: entryEdge,
+                        ratio: ratio,
+                        margin: 1
+                    ),
+                    target.origin
+                )
+            }
+        }
+    }
+
+    func testNegativeMarginKeepsEntryAxisInsideFrame() {
+        let destination = MouseWarpGeometry.destinationPoint(
+            on: frame,
+            entryEdge: .left,
+            ratio: 0.5,
+            margin: -10
+        )
+
+        XCTAssertEqual(destination, CGPoint(x: 1, y: 500))
+    }
 }

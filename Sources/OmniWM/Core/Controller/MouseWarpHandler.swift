@@ -43,7 +43,20 @@ final class MouseWarpHandler: NSObject {
 
     weak var controller: WMController?
     var state = State()
-    var warpCursor: (CGPoint) -> Void = { CGWarpMouseCursorPosition($0) }
+    var activeDisplayBounds: (CGDirectDisplayID) -> CGRect? = { displayId in
+        guard CGDisplayIsActive(displayId) == 1 else { return nil }
+        let bounds = CGDisplayBounds(displayId)
+        guard !bounds.isNull,
+              !bounds.isEmpty,
+              bounds.origin.x.isFinite,
+              bounds.origin.y.isFinite,
+              bounds.width.isFinite,
+              bounds.height.isFinite
+        else { return nil }
+        return bounds
+    }
+
+    var warpCursor: (CGPoint) -> CGError = { CGWarpMouseCursorPosition($0) }
     var postMouseMovedEvent: (CGPoint) -> Void = { point in
         if let moveEvent = CGEvent(
             mouseEventSource: nil,
@@ -207,15 +220,31 @@ final class MouseWarpHandler: NSObject {
             ratio: crossing.ratio,
             margin: margin
         )
+        let warpPoint = ScreenCoordinateSpace.toWindowServer(point: destination)
+
+        guard let targetBounds = activeDisplayBounds(target.displayId),
+              targetBounds.contains(warpPoint)
+        else {
+            MouseTrace.record(
+                "edge-warp suppressed (invalid-target-bounds) from=\(sourceMonitor.id) to=\(target.id) dir=\(crossing.direction) dest=\(TraceFormat.point(destination)) warp=\(TraceFormat.point(warpPoint))"
+            )
+            return false
+        }
+
+        let error = warpCursor(warpPoint)
+        guard error == .success else {
+            MouseTrace.record(
+                "edge-warp failed (cursor-warp raw=\(error.rawValue)) from=\(sourceMonitor.id) to=\(target.id) dir=\(crossing.direction) dest=\(TraceFormat.point(destination)) warp=\(TraceFormat.point(warpPoint))"
+            )
+            return false
+        }
 
         state.isWarping = true
         state.lastMonitorId = target.id
-        MouseTrace.record(
-            "edge-warp from=\(sourceMonitor.id) to=\(target.id) dir=\(crossing.direction) dest=\(TraceFormat.point(destination))"
-        )
-        let warpPoint = ScreenCoordinateSpace.toWindowServer(point: destination)
-        warpCursor(warpPoint)
         _ = controller.workspaceManager.setInteractionMonitor(target.id)
+        MouseTrace.record(
+            "edge-warp from=\(sourceMonitor.id) to=\(target.id) dir=\(crossing.direction) dest=\(TraceFormat.point(destination)) warp=\(TraceFormat.point(warpPoint))"
+        )
         postMouseMovedEvent(warpPoint)
         scheduleWarpCooldownReset()
         return true
@@ -252,17 +281,43 @@ final class MouseWarpHandler: NSObject {
         case .allow:
             adoptContainmentDestination(destination, sampledAt: now)
         case let .wall(clamped):
-            state.lastSampleAt = now
-            state.isWarping = true
-            MouseTrace.record(
-                "containment-wall from=\(source.id) blocked=\(destination.id) dest=\(TraceFormat.point(clamped))"
-            )
-            let warpPoint = ScreenCoordinateSpace.toWindowServer(point: clamped)
-            warpCursor(warpPoint)
-            postMouseMovedEvent(warpPoint)
-            scheduleWarpCooldownReset()
+            applyContainmentWall(clamped, source: source, destination: destination, sampledAt: now)
         }
         return true
+    }
+
+    private func applyContainmentWall(
+        _ clamped: CGPoint,
+        source: Monitor,
+        destination: Monitor,
+        sampledAt: Date
+    ) {
+        state.lastSampleAt = sampledAt
+        let warpPoint = ScreenCoordinateSpace.toWindowServer(point: clamped)
+
+        guard let sourceBounds = activeDisplayBounds(source.displayId),
+              sourceBounds.contains(warpPoint)
+        else {
+            MouseTrace.record(
+                "containment-wall suppressed (invalid-source-bounds) from=\(source.id) blocked=\(destination.id) dest=\(TraceFormat.point(clamped)) warp=\(TraceFormat.point(warpPoint))"
+            )
+            return
+        }
+
+        let error = warpCursor(warpPoint)
+        guard error == .success else {
+            MouseTrace.record(
+                "containment-wall failed (cursor-warp raw=\(error.rawValue)) from=\(source.id) blocked=\(destination.id) dest=\(TraceFormat.point(clamped)) warp=\(TraceFormat.point(warpPoint))"
+            )
+            return
+        }
+
+        state.isWarping = true
+        MouseTrace.record(
+            "containment-wall from=\(source.id) blocked=\(destination.id) dest=\(TraceFormat.point(clamped)) warp=\(TraceFormat.point(warpPoint))"
+        )
+        postMouseMovedEvent(warpPoint)
+        scheduleWarpCooldownReset()
     }
 
     private func adoptContainmentDestination(_ destination: Monitor, sampledAt: Date) {
