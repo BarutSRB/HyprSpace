@@ -3,6 +3,25 @@
 > [!NOTE]
 > **Personal Fork**: This repository is a custom fork of [OmniWM](https://github.com/BarutSRB/OmniWM) modified and maintained for personal use.
 
+## Personal Fork Changes & Improvements
+
+This fork includes several custom enhancements, bug fixes, and stability improvements:
+
+### 🖱️ Mouse Interaction & Window Dragging
+- **Title Bar Hold-and-Drag**: Instant native click pass-through for window titlebars, traffic light buttons (close/minimize/zoom), and app tabs. Holding down on a titlebar (>180ms or 5pt distance) automatically promotes to active window movement.
+- **Hover Mode Drop Target Preview**: Moving windows interactively or via titlebar hold-and-drag activates window placement preview overlays ("hover mode"), showing precise split and placement regions before release.
+- **Raycast / External Hyper Key Drag Support**: Seamless integration for Raycast and 3rd-party remapped Hyper keys (`Control + Option + Command + Shift`). Holding Hyper key + Left Drag instantly moves windows while strictly suppressing click bleed-through into underlying applications.
+
+### 📐 Window Resizing & Layout Persistence
+- **Fixed Window Resize Snap-Back**: Updated `DwindleLayoutEngine+InteractiveResize` and `AXEventHandler` frame change processing to calculate split ratios directly from width and height deltas. Resized windows permanently retain their dimensions across accessibility events, layout refreshes, and display reconciliations.
+
+### 📋 Menu & Dropdown UI Enhancements
+- **Synchronous Submenu Loading**: Updated `MenuAnywhereController` to populate submenus synchronously on mouse hover, eliminating truncated or misaligned menu dropdown windows.
+- **Status Menu Clarity**: Cleaned up `StatusMenuView` action rows (e.g. "Settings", "App Rules") by removing misleading submenu chevron arrows (`>`) for items that open standalone windows.
+
+### 🛡️ System Robustness & Window Reconciler
+- **Automatic Window Frame Reconciler (`WindowFrameReconciler`)**: Periodic background monitor that detects off-screen glitched windows (e.g. left offscreen post-drag) or overlapping tiled windows, automatically re-seating them into proper layout frames.
+
 ## Demo Video
 
 [![Watch the demo](https://img.youtube.com/vi/WcHjGkuD2Fc/maxresdefault.jpg)](https://youtu.be/WcHjGkuD2Fc)
