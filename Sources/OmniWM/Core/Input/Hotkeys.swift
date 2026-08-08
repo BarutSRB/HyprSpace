@@ -698,6 +698,49 @@ final class HotkeyCenter {
         for binding in bindings {
             guard case let .chord(keyBinding) = binding.binding, !keyBinding.isUnassigned else { continue }
             candidates.append((binding.command, keyBinding))
+
+            let aliasKeyBinding: KeyBinding? = switch (binding.command, keyBinding.keyCode) {
+            case (.focus(.left), UInt32(kVK_LeftArrow)):
+                KeyBinding(keyCode: UInt32(kVK_ANSI_H), modifiers: keyBinding.modifiers, sidedModifiers: keyBinding.sidedModifiers)
+            case (.focus(.left), UInt32(kVK_ANSI_H)):
+                KeyBinding(keyCode: UInt32(kVK_LeftArrow), modifiers: keyBinding.modifiers, sidedModifiers: keyBinding.sidedModifiers)
+            case (.focus(.down), UInt32(kVK_DownArrow)):
+                KeyBinding(keyCode: UInt32(kVK_ANSI_J), modifiers: keyBinding.modifiers, sidedModifiers: keyBinding.sidedModifiers)
+            case (.focus(.down), UInt32(kVK_ANSI_J)):
+                KeyBinding(keyCode: UInt32(kVK_DownArrow), modifiers: keyBinding.modifiers, sidedModifiers: keyBinding.sidedModifiers)
+            case (.focus(.up), UInt32(kVK_UpArrow)):
+                KeyBinding(keyCode: UInt32(kVK_ANSI_K), modifiers: keyBinding.modifiers, sidedModifiers: keyBinding.sidedModifiers)
+            case (.focus(.up), UInt32(kVK_ANSI_K)):
+                KeyBinding(keyCode: UInt32(kVK_UpArrow), modifiers: keyBinding.modifiers, sidedModifiers: keyBinding.sidedModifiers)
+            case (.focus(.right), UInt32(kVK_RightArrow)):
+                KeyBinding(keyCode: UInt32(kVK_ANSI_L), modifiers: keyBinding.modifiers, sidedModifiers: keyBinding.sidedModifiers)
+            case (.focus(.right), UInt32(kVK_ANSI_L)):
+                KeyBinding(keyCode: UInt32(kVK_RightArrow), modifiers: keyBinding.modifiers, sidedModifiers: keyBinding.sidedModifiers)
+
+            case (.move(.left), UInt32(kVK_LeftArrow)):
+                KeyBinding(keyCode: UInt32(kVK_ANSI_H), modifiers: keyBinding.modifiers, sidedModifiers: keyBinding.sidedModifiers)
+            case (.move(.left), UInt32(kVK_ANSI_H)):
+                KeyBinding(keyCode: UInt32(kVK_LeftArrow), modifiers: keyBinding.modifiers, sidedModifiers: keyBinding.sidedModifiers)
+            case (.move(.down), UInt32(kVK_DownArrow)):
+                KeyBinding(keyCode: UInt32(kVK_ANSI_J), modifiers: keyBinding.modifiers, sidedModifiers: keyBinding.sidedModifiers)
+            case (.move(.down), UInt32(kVK_ANSI_J)):
+                KeyBinding(keyCode: UInt32(kVK_DownArrow), modifiers: keyBinding.modifiers, sidedModifiers: keyBinding.sidedModifiers)
+            case (.move(.up), UInt32(kVK_UpArrow)):
+                KeyBinding(keyCode: UInt32(kVK_ANSI_K), modifiers: keyBinding.modifiers, sidedModifiers: keyBinding.sidedModifiers)
+            case (.move(.up), UInt32(kVK_ANSI_K)):
+                KeyBinding(keyCode: UInt32(kVK_UpArrow), modifiers: keyBinding.modifiers, sidedModifiers: keyBinding.sidedModifiers)
+            case (.move(.right), UInt32(kVK_RightArrow)):
+                KeyBinding(keyCode: UInt32(kVK_ANSI_L), modifiers: keyBinding.modifiers, sidedModifiers: keyBinding.sidedModifiers)
+            case (.move(.right), UInt32(kVK_ANSI_L)):
+                KeyBinding(keyCode: UInt32(kVK_RightArrow), modifiers: keyBinding.modifiers, sidedModifiers: keyBinding.sidedModifiers)
+
+            default:
+                nil
+            }
+
+            if let alias = aliasKeyBinding, !candidates.contains(where: { $0.binding == alias }) {
+                candidates.append((binding.command, alias))
+            }
         }
 
         var failures: [HotkeyCommand: HotkeyRegistrationFailureReason] = [:]

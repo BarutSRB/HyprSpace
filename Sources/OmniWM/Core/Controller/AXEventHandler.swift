@@ -387,6 +387,7 @@ final class AXEventHandler {
     var createPlacementContextsByWindowId: [UInt32: WindowCreatePlacementContext] = [:]
     private var pendingManagedReplacementBursts: [ManagedReplacementKey: PendingManagedReplacementBurst] = [:]
     private var pendingManagedReplacementTasks: [ManagedReplacementKey: Task<Void, Never>] = [:]
+    private var activeDragSettlementTasks: [UInt32: Task<Void, Never>] = [:]
     private var pendingWindowRuleReevaluationTask: Task<Void, Never>?
     private var pendingWindowRuleReevaluationTargets: Set<WindowRuleReevaluationTarget> = []
     private var pendingWindowRuleReevaluationGeneration: UInt64 = 0
@@ -418,16 +419,12 @@ final class AXEventHandler {
 
     init(
         controller: WMController,
-        visibleWindowInfoProvider: @escaping () -> [WindowServerInfo] = {
-            SkyLight.shared.queryAllVisibleWindows()
-        },
-        windowInfoProvider: @escaping (UInt32) -> WindowServerInfo? = {
-            SkyLight.shared.queryWindowInfo($0)
-        }
+        visibleWindowInfoProvider: (() -> [WindowServerInfo])? = nil,
+        windowInfoProvider: ((UInt32) -> WindowServerInfo?)? = nil
     ) {
         self.controller = controller
-        self.visibleWindowInfoProvider = visibleWindowInfoProvider
-        self.windowInfoProvider = windowInfoProvider
+        self.visibleWindowInfoProvider = visibleWindowInfoProvider ?? { SkyLight.shared.queryAllVisibleWindows() }
+        self.windowInfoProvider = windowInfoProvider ?? { SkyLight.shared.queryWindowInfo($0) }
     }
 
     func setup() {
@@ -1012,6 +1009,47 @@ final class AXEventHandler {
             return
         }
 
+        let isLeftMouseDown = (NSEvent.pressedMouseButtons & 1) != 0
+
+        if isLeftMouseDown {
+            // User is actively dragging (resizing or moving/relocating).
+            // Do NOT apply layout frames back to the window while mouse button is held down (avoids mouse fighting).
+            activeDragSettlementTasks[windowId]?.cancel()
+            activeDragSettlementTasks[windowId] = Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 120_000_000)
+                guard !Task.isCancelled, let self else { return }
+                while (NSEvent.pressedMouseButtons & 1) != 0 {
+                    try? await Task.sleep(nanoseconds: 40_000_000)
+                    if Task.isCancelled { return }
+                }
+                self.activeDragSettlementTasks.removeValue(forKey: windowId)
+                self.processSettledFrameChange(windowId: windowId)
+            }
+            return
+        }
+
+        activeDragSettlementTasks.removeValue(forKey: windowId)?.cancel()
+        processSettledFrameChange(windowId: windowId)
+    }
+
+    private func processSettledFrameChange(windowId: UInt32) {
+        guard let controller else { return }
+        guard controller.workspaceManager.entry(forWindowId: Int(windowId)) != nil else { return }
+        let windowServerToken = resolveWindowToken(windowId)
+        let resolvedToken = resolveTrackedToken(
+            windowId,
+            resolvedWindowToken: windowServerToken
+        )
+        guard let token = resolvedToken else { return }
+        guard let entry = controller.workspaceManager.entry(for: token) else { return }
+        guard isWindowDisplayable(token: token) else { return }
+
+        let focusedObservedFrame = observedFrameForFocusedFrameChange(
+            windowId: windowId,
+            windowServerToken: windowServerToken,
+            resolvedToken: resolvedToken
+        )
+
         if shouldSuppressFrameChangedRelayout(
             for: entry,
             observedFrame: focusedObservedFrame
@@ -1030,10 +1068,48 @@ final class AXEventHandler {
             return
         }
 
-        controller.layoutRefreshController.requestRelayout(
-            reason: .axWindowChanged,
-            affectedWorkspaceIds: [entry.workspaceId]
-        )
+        if let newFrame = focusedObservedFrame ?? observedFrame(for: entry) {
+            var updated = false
+
+            if let dwindleEngine = controller.workspaceManager.dwindleEngine,
+               let leaf = dwindleEngine.findNode(for: token, in: entry.workspaceId),
+               let oldFrame = leaf.cachedFrame
+            {
+                updated = dwindleEngine.handleExternalFrameChange(
+                    for: token,
+                    in: entry.workspaceId,
+                    oldFrame: oldFrame,
+                    newFrame: newFrame,
+                    innerGap: dwindleEngine.settings.innerGap
+                )
+            }
+
+            if let niriEngine = controller.workspaceManager.niriEngine,
+               let windowNode = niriEngine.findNode(for: token, in: entry.workspaceId),
+               let oldFrame = windowNode.renderedFrame ?? windowNode.frame
+            {
+                updated = niriEngine.handleExternalFrameChange(
+                    for: token,
+                    in: entry.workspaceId,
+                    oldFrame: oldFrame,
+                    newFrame: newFrame
+                )
+            }
+
+            if updated {
+                controller.axManager.confirmFrameWrite(for: entry.windowId, frame: newFrame)
+                controller.layoutRefreshController.requestImmediateRelayout(
+                    reason: .interactiveGesture,
+                    affectedWorkspaceIds: [entry.workspaceId]
+                )
+                controller.windowFrameReconciler.triggerHighFrequencyBurst(durationSeconds: 10.0)
+            } else {
+                controller.layoutRefreshController.requestRelayout(
+                    reason: .axWindowChanged,
+                    affectedWorkspaceIds: [entry.workspaceId]
+                )
+            }
+        }
     }
 
     private func shouldSuppressFrameChangedRelayout(
@@ -1109,8 +1185,9 @@ final class AXEventHandler {
     }
 
     func drainDeferredCreatedWindows(
-        spaceIdsForWindow: (UInt32) -> [UInt64] = { SkyLight.shared.spacesForWindow($0) }
+        spaceIdsForWindow: ((UInt32) -> [UInt64])? = nil
     ) async {
+        let spaceIdsForWindow = spaceIdsForWindow ?? { SkyLight.shared.spacesForWindow($0) }
         guard !deferredCreatedWindowOrder.isEmpty else { return }
 
         let deferredWindowIds = deferredCreatedWindowOrder
@@ -3944,8 +4021,9 @@ final class AXEventHandler {
 extension AXEventHandler {
     private func liveCreateSpace(
         for windowId: UInt32,
-        spaceIdsForWindow: (UInt32) -> [UInt64] = { SkyLight.shared.spacesForWindow($0) }
+        spaceIdsForWindow: ((UInt32) -> [UInt64])? = nil
     ) -> UInt64 {
+        let spaceIdsForWindow = spaceIdsForWindow ?? { SkyLight.shared.spacesForWindow($0) }
         guard let controller else { return 0 }
         return controller.workspaceManager.spaceTopology
             .selectWindowSpace(from: spaceIdsForWindow(windowId)) ?? 0

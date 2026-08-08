@@ -451,4 +451,53 @@ extension NiriLayoutEngine {
 
         NiriLayoutTrace.record(.resize, workspaceId: resize.workspaceId, "end win=\(resize.windowId)")
     }
+
+    func handleExternalFrameChange(
+        for token: WindowToken,
+        in workspaceId: WorkspaceDescriptor.ID,
+        oldFrame: CGRect,
+        newFrame: CGRect
+    ) -> Bool {
+        guard let windowNode = findNode(for: token, in: workspaceId) else { return false }
+        guard let column = findColumn(containing: windowNode, in: workspaceId) else { return false }
+
+        var changed = false
+
+        // 1. Horizontal frame change (width)
+        let deltaWidth = newFrame.width - oldFrame.width
+        if abs(deltaWidth) > 0.01 {
+            column.widthAnimation = nil
+            column.targetWidth = nil
+            column.cachedWidth = newFrame.width
+            column.width = .fixed(newFrame.width)
+            column.presetWidthIdx = nil
+            column.isFullWidth = false
+            column.savedWidth = nil
+            column.hasManualSingleWindowWidthOverride = true
+            changed = true
+        }
+
+        // 2. Vertical frame change (height)
+        let deltaHeight = newFrame.height - oldFrame.height
+        if abs(deltaHeight) > 0.01 {
+            let currentHeight = oldFrame.height
+            if currentHeight > 0 {
+                let currentWeight: CGFloat
+                switch windowNode.height {
+                case let .auto(w): currentWeight = w
+                default: currentWeight = 1.0
+                }
+
+                let pixelsPerWeight = currentHeight / currentWeight
+                if pixelsPerWeight > 0 {
+                    let weightDelta = deltaHeight / pixelsPerWeight
+                    let newWeight = min(max(currentWeight + weightDelta, 0.1), 10.0)
+                    windowNode.height = .auto(weight: newWeight)
+                    changed = true
+                }
+            }
+        }
+
+        return changed
+    }
 }

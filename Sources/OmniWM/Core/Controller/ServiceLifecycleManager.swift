@@ -244,6 +244,7 @@ final class ServiceLifecycleManager {
         }
 
         controller.spaceTracker.start()
+        controller.windowFrameReconciler.start()
         performStartupRefresh()
         startSecureInputMonitor()
         startLockScreenObserver()
@@ -716,6 +717,7 @@ final class ServiceLifecycleManager {
         isSecureInputActive = false
         SecureInputIndicatorController.shared.hide()
         controller.lockScreenObserver.stop()
+        controller.windowFrameReconciler.stop()
         permissionCheckerTask?.cancel()
         permissionCheckerTask = nil
         controller.reconcileEnabledAndHotkeysState()

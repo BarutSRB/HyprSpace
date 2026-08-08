@@ -235,6 +235,22 @@ final class WindowRuleEngineTests: XCTestCase {
         XCTAssertEqual(decision.source, .builtInRule("cleanShotRecordingOverlay"))
     }
 
+    func testNonStandardWindowLevelIsUnmanagedBeforeWindowAdmission() {
+        let engine = WindowRuleEngine()
+        let decision = evaluate(
+            engine,
+            facts(
+                appName: "Raycast",
+                bundleId: "com.raycast.macos",
+                windowServer: WindowServerInfo(id: 1, pid: 2, level: 3, frame: .zero)
+            )
+        )
+
+        XCTAssertEqual(decision.disposition, .unmanaged)
+        XCTAssertEqual(decision.source, .builtInRule("Non-Standard Window Level"))
+        XCTAssertEqual(decision.admissionOutcome, .ignored)
+    }
+
     func testMoreSpecificRuleWithoutInitialWidthShadowsGenericWidthRule() {
         let engine = WindowRuleEngine()
         let generic = AppRule(bundleId: "com.test.app", initialContainerPrimarySpan: 0.5)

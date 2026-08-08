@@ -214,4 +214,76 @@ final class DwindleInteractiveResizeTests: XCTestCase {
         XCTAssertEqual(collapsedRoot?.splitRatio ?? 0, 1.0, accuracy: 1e-6)
         XCTAssertNotNil(engine.findNode(for: leaf1, in: ws))
     }
+
+    func testExternalFrameChangeUpdatesControllingSplitForEitherSibling() throws {
+        let (engine, ws) = makeEngine()
+        let left = WindowToken(pid: 1, windowId: 1)
+        let right = WindowToken(pid: 2, windowId: 2)
+        _ = engine.addWindow(token: left, to: ws, activeWindowFrame: nil)
+        _ = engine.addWindow(token: right, to: ws, activeWindowFrame: nil)
+        let frames = engine.calculateLayout(for: ws, screen: screen)
+        let leftFrame = try XCTUnwrap(frames[left])
+        let rightFrame = try XCTUnwrap(frames[right])
+
+        XCTAssertTrue(
+            engine.handleExternalFrameChange(
+                for: left,
+                in: ws,
+                oldFrame: leftFrame,
+                newFrame: CGRect(
+                    origin: leftFrame.origin,
+                    size: CGSize(width: leftFrame.width + 100, height: leftFrame.height)
+                ),
+                innerGap: engine.settings.innerGap
+            )
+        )
+        XCTAssertEqual(engine.root(for: ws)?.splitRatio ?? 0, 1.2, accuracy: 1e-6)
+
+        XCTAssertTrue(
+            engine.handleExternalFrameChange(
+                for: right,
+                in: ws,
+                oldFrame: rightFrame,
+                newFrame: CGRect(
+                    origin: CGPoint(x: rightFrame.origin.x + 100, y: rightFrame.origin.y),
+                    size: CGSize(width: rightFrame.width - 100, height: rightFrame.height)
+                ),
+                innerGap: engine.settings.innerGap
+            )
+        )
+        XCTAssertEqual(engine.root(for: ws)?.splitRatio ?? 0, 1.4, accuracy: 1e-6)
+    }
+
+    func testExternalCornerFrameChangeUpdatesBothAxes() throws {
+        let (engine, ws) = makeEngine()
+        let leaf = WindowToken(pid: 1, windowId: 1)
+        let other = WindowToken(pid: 2, windowId: 2)
+        let top = WindowToken(pid: 3, windowId: 3)
+        _ = engine.addWindow(token: leaf, to: ws, activeWindowFrame: nil)
+        _ = engine.addWindow(token: other, to: ws, activeWindowFrame: nil)
+        engine.setSelectedNode(engine.findNode(for: leaf, in: ws), in: ws)
+        engine.setPreselection(.up, in: ws)
+        _ = engine.addWindow(token: top, to: ws, activeWindowFrame: nil)
+        let frames = engine.calculateLayout(for: ws, screen: screen)
+        let oldFrame = try XCTUnwrap(frames[leaf])
+
+        XCTAssertTrue(
+            engine.handleExternalFrameChange(
+                for: leaf,
+                in: ws,
+                oldFrame: oldFrame,
+                newFrame: CGRect(
+                    origin: oldFrame.origin,
+                    size: CGSize(width: oldFrame.width + 100, height: oldFrame.height + 80)
+                ),
+                innerGap: engine.settings.innerGap
+            )
+        )
+        XCTAssertEqual(engine.root(for: ws)?.splitRatio ?? 0, 1.2, accuracy: 1e-6)
+        XCTAssertEqual(
+            engine.findNode(for: leaf, in: ws)?.parent?.splitRatio ?? 0,
+            1.2,
+            accuracy: 1e-6
+        )
+    }
 }

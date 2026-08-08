@@ -33,13 +33,15 @@ final class MouseMoveModifierTests: NiriInteractionTestCase {
                 MouseEventHandler.mouseMoveMode(modifiers: required, required: required),
                 .swap
             )
-            XCTAssertEqual(
-                MouseEventHandler.mouseMoveMode(
-                    modifiers: required.union(.maskShift),
-                    required: required
-                ),
-                .insert
-            )
+            if !required.contains(.maskShift) {
+                XCTAssertEqual(
+                    MouseEventHandler.mouseMoveMode(
+                        modifiers: required.union(.maskShift),
+                        required: required
+                    ),
+                    .insert
+                )
+            }
             XCTAssertEqual(
                 MouseEventHandler.mouseMoveMode(
                     modifiers: required.union(.maskAlphaShift),
@@ -63,6 +65,22 @@ final class MouseMoveModifierTests: NiriInteractionTestCase {
                 modifiers: [.maskAlternate, .maskCommand],
                 required: .maskAlternate
             )
+        )
+    }
+
+    func testHyperKeyAlwaysTriggersMouseMove() {
+        let hyperFlags: CGEventFlags = [.maskControl, .maskAlternate, .maskCommand, .maskShift]
+
+        XCTAssertEqual(
+            MouseEventHandler.mouseMoveMode(modifiers: hyperFlags, required: .maskAlternate),
+            .swap
+        )
+        XCTAssertEqual(
+            MouseEventHandler.mouseMoveMode(modifiers: hyperFlags, required: nil),
+            .swap
+        )
+        XCTAssertTrue(
+            MouseEventHandler.modifierFlagsMatch(hyperFlags, required: .maskAlternate)
         )
     }
 
@@ -100,7 +118,7 @@ final class MouseMoveModifierTests: NiriInteractionTestCase {
         XCTAssertFalse(fixture.handler.state.isMoving)
         XCTAssertNil(fixture.engine.interactiveMove)
 
-        XCTAssertFalse(
+        XCTAssertTrue(
             fixture.handler.dispatchMouseDown(
                 at: fixture.windowFrame.center,
                 modifiers: [.maskControl, .maskShift]
@@ -119,8 +137,9 @@ final class MouseMoveModifierTests: NiriInteractionTestCase {
     @MainActor
     func testDefaultOptionStartsSwapAndSettingChangeDoesNotCancelActiveMove() throws {
         let fixture = try makeFixture(pid: 1_103)
+        fixture.controller.settings.mouseMoveModifierKey = .option
 
-        XCTAssertFalse(
+        XCTAssertTrue(
             fixture.handler.dispatchMouseDown(
                 at: fixture.windowFrame.center,
                 modifiers: .maskAlternate
@@ -144,6 +163,7 @@ final class MouseMoveModifierTests: NiriInteractionTestCase {
     func testMouseMoveSettingDoesNotChangeRightMouseResize() throws {
         let fixture = try makeFixture(pid: 1_104)
         fixture.controller.settings.mouseMoveModifierKey = .off
+        fixture.controller.settings.mouseResizeModifierKey = .option
         let resizePoint = CGPoint(x: fixture.windowFrame.maxX - 1, y: fixture.windowFrame.midY)
 
         XCTAssertTrue(

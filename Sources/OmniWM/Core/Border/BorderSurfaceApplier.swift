@@ -42,7 +42,7 @@ final class BorderSurfaceApplier {
     private let cornerSampleProvider: @MainActor (Int) -> WindowCornerSample?
     private let surfaceCoordinator = SurfaceCoordinator.shared
     private var registeredSurfaceWindowNumber: Int?
-    private let defaultCornerRadii = WindowCornerRadii(uniform: 9.0)
+    private let defaultCornerRadii = WindowCornerRadii(uniform: 12.0)
     private let surfaceID = "border-surface"
     private var screenParametersObserver: NSObjectProtocol?
 

@@ -18,6 +18,13 @@ private let mouseRelevantModifierFlags: CGEventFlags = [
     .maskCommand
 ]
 
+private let hyperModifierFlags: CGEventFlags = [
+    .maskControl,
+    .maskAlternate,
+    .maskCommand,
+    .maskShift
+]
+
 @MainActor
 final class MouseEventHandler {
     enum MouseButton: Hashable {
@@ -103,6 +110,22 @@ final class MouseEventHandler {
         var activeInteractionButton: MouseButton?
         var capturedInteractionButton: MouseButton?
         var resizeLayout: LayoutType?
+        var moveLayout: LayoutType?
+
+        struct PendingTitlebarMove {
+            let token: WindowToken?
+            let windowId: Int
+            let niriNodeId: NodeId?
+            let startLocation: CGPoint
+            let startTime: TimeInterval
+            let wsId: WorkspaceDescriptor.ID
+            let layoutType: LayoutType
+            let button: MouseButton
+            let winFrame: CGRect
+            let frame: CGRect
+            let niriHandle: WindowHandle?
+        }
+        var pendingTitlebarMove: PendingTitlebarMove?
 
         var lastFocusFollowsMouseTime: Date = .distantPast
         let focusFollowsMouseDebounce: TimeInterval = 0.1
@@ -607,13 +630,16 @@ final class MouseEventHandler {
     }
 
     private func cancelActiveMouseInteraction() {
+        state.pendingTitlebarMove = nil
         guard let controller else { return }
         let wasActive = state.isMoving || state.isResizing
 
         if state.isMoving {
+            controller.dwindleEngine?.interactiveMoveCancel()
             controller.niriEngine?.interactiveMoveCancel()
             state.dragGhostController?.endDrag()
             state.isMoving = false
+            state.moveLayout = nil
             state.activeInteractionButton = nil
         }
 
@@ -812,73 +838,183 @@ final class MouseEventHandler {
 
         let layoutType = controller.workspaceManager.descriptor(for: wsId)
             .map { controller.settings.layoutType(for: $0.name) }
+
+        if button == .left {
+            let isHyperActive = controller.isHyperTriggerActive
+            let isMoveModifier = Self.mouseMoveMode(
+                modifiers: modifiers,
+                required: controller.settings.mouseMoveModifierKey.cgEventFlags,
+                isHyperActive: isHyperActive
+            ) != nil
+
+            if isMoveModifier {
+                if layoutType == .dwindle {
+                    if let engine = controller.dwindleEngine {
+                        let now = controller.animationClock.now()
+                        if let token = engine.hitTestFocusableWindow(point: location, in: wsId, at: now),
+                           let node = engine.findNode(for: token, in: wsId),
+                           let frame = node.presentedFrame(at: now) ?? node.cachedFrame
+                        {
+                            if engine.interactiveMoveBegin(token: token, startLocation: location, in: wsId) {
+                                state.isMoving = true
+                                state.moveLayout = .dwindle
+                                state.activeInteractionButton = button
+                                state.capturedInteractionButton = button
+                                NSCursor.closedHand.set()
+
+                                controller.layoutRefreshController.requestImmediateRelayout(reason: .interactiveGesture)
+                                if let entry = controller.workspaceManager.entry(for: token),
+                                   let winFrame = AXWindowService.framePreferFast(entry.axRef) ?? Optional(frame)
+                                {
+                                    let offscreenFrame = CGRect(x: -20000, y: -20000, width: winFrame.width, height: winFrame.height)
+                                    _ = AXWindowService.setFrame(entry.axRef, frame: offscreenFrame, verify: false)
+                                    SkyLight.shared.transactionHide(UInt32(entry.windowId))
+
+                                    if state.dragGhostController == nil {
+                                        state.dragGhostController = DragGhostController()
+                                    }
+                                    state.dragGhostController?.beginDrag(
+                                        windowId: entry.windowId,
+                                        originalFrame: winFrame,
+                                        cursorLocation: location
+                                    )
+                                }
+                            }
+                            return true
+                        }
+                    }
+                    return false
+                } else if let engine = controller.niriEngine {
+                    let targetWindow = engine.hitTestTiled(point: location, in: wsId)
+                    if let tiledWindow = targetWindow,
+                       let monitor = controller.workspaceManager.monitor(for: wsId)
+                    {
+                        let workingFrame = controller.insetWorkingFrame(for: monitor)
+                        let gaps = controller.innerGap(for: monitor)
+                        let orientation = resolvedNiriOrientation(
+                            engine: engine,
+                            workspaceId: wsId,
+                            monitor: monitor
+                        )
+
+                        let moveMode = Self.mouseMoveMode(
+                            modifiers: modifiers,
+                            required: controller.settings.mouseMoveModifierKey.cgEventFlags,
+                            isHyperActive: isHyperActive
+                        )
+                        let isInsertMode = moveMode == .insert
+                        var moveStarted = false
+                        controller.workspaceManager.withNiriViewportState(for: wsId) { vstate in
+                            if engine.interactiveMoveBegin(
+                                windowId: tiledWindow.id,
+                                windowHandle: tiledWindow.handle,
+                                startLocation: location,
+                                isInsertMode: isInsertMode,
+                                in: wsId,
+                                motion: controller.motionPolicy.snapshot(),
+                                state: &vstate,
+                                workingFrame: workingFrame,
+                                gaps: gaps,
+                                orientation: orientation
+                            ) {
+                                moveStarted = true
+                            }
+                        }
+                        if moveStarted {
+                            state.isMoving = true
+                            state.moveLayout = .niri
+                            state.activeInteractionButton = button
+                            state.capturedInteractionButton = button
+                            NSCursor.closedHand.set()
+
+                            if let entry = controller.workspaceManager.entry(for: tiledWindow.handle),
+                               let winFrame = AXWindowService.framePreferFast(entry.axRef)
+                            {
+                                if state.dragGhostController == nil {
+                                    state.dragGhostController = DragGhostController()
+                                }
+                                state.dragGhostController?.beginDrag(
+                                    windowId: entry.windowId,
+                                    originalFrame: winFrame,
+                                    cursorLocation: location
+                                )
+                            }
+                        }
+                        return true
+                    }
+                    return false
+                }
+            }
+
+            if layoutType == .dwindle {
+                if let engine = controller.dwindleEngine {
+                    let now = controller.animationClock.now()
+                    if let token = engine.hitTestFocusableWindow(point: location, in: wsId, at: now),
+                       let node = engine.findNode(for: token, in: wsId),
+                       let frame = node.presentedFrame(at: now) ?? node.cachedFrame
+                    {
+                        let isTrafficLights = location.x >= frame.minX && location.x <= frame.minX + 90.0 && location.y >= frame.maxY - 36.0 && location.y <= frame.maxY
+                        let isTitlebarDrag = !isTrafficLights && location.y >= frame.maxY - 36.0 && location.y <= frame.maxY
+                        if isTitlebarDrag {
+                            let winFrame = controller.workspaceManager.entry(for: token).flatMap { AXWindowService.framePreferFast($0.axRef) } ?? frame
+                            let windowId = controller.workspaceManager.entry(for: token)?.windowId ?? 0
+                            state.pendingTitlebarMove = State.PendingTitlebarMove(
+                                token: token,
+                                windowId: windowId,
+                                niriNodeId: nil,
+                                startLocation: location,
+                                startTime: now,
+                                wsId: wsId,
+                                layoutType: .dwindle,
+                                button: button,
+                                winFrame: winFrame,
+                                frame: frame,
+                                niriHandle: nil
+                            )
+                            return false
+                        }
+                    }
+                }
+            } else if let engine = controller.niriEngine {
+                if let tiledWindow = engine.hitTestTiled(point: location, in: wsId),
+                   let frame = tiledWindow.renderedFrame ?? tiledWindow.frame
+                {
+                    let isTrafficLights = location.x >= frame.minX && location.x <= frame.minX + 90.0 && location.y >= frame.maxY - 36.0 && location.y <= frame.maxY
+                    let isTitlebarDrag = !isTrafficLights && location.y >= frame.maxY - 36.0 && location.y <= frame.maxY
+                    if isTitlebarDrag {
+                        let winFrame = controller.workspaceManager.entry(for: tiledWindow.handle).flatMap { AXWindowService.framePreferFast($0.axRef) } ?? frame
+                        let now = controller.animationClock.now()
+                        let entryWindowId = controller.workspaceManager.entry(for: tiledWindow.handle)?.windowId ?? 0
+                        state.pendingTitlebarMove = State.PendingTitlebarMove(
+                            token: nil,
+                            windowId: entryWindowId,
+                            niriNodeId: tiledWindow.id,
+                            startLocation: location,
+                            startTime: now,
+                            wsId: wsId,
+                            layoutType: .niri,
+                            button: button,
+                            winFrame: winFrame,
+                            frame: frame,
+                            niriHandle: tiledWindow.handle
+                        )
+                        return false
+                    }
+                }
+            }
+
+            return false
+        }
+
         if layoutType == .dwindle {
             return handleDwindleMouseDown(at: location, modifiers: modifiers, button: button, wsId: wsId)
         }
 
         guard let engine = controller.niriEngine else { return false }
 
-        if button == .left,
-           let moveMode = Self.mouseMoveMode(
-               modifiers: modifiers,
-               required: controller.settings.mouseMoveModifierKey.cgEventFlags
-           )
-        {
-            if let tiledWindow = engine.hitTestTiled(point: location, in: wsId),
-               let monitor = controller.workspaceManager.monitor(for: wsId)
-            {
-                let workingFrame = controller.insetWorkingFrame(for: monitor)
-                let gaps = controller.innerGap(for: monitor)
-                let orientation = resolvedNiriOrientation(
-                    engine: engine,
-                    workspaceId: wsId,
-                    monitor: monitor
-                )
-
-                let isInsertMode = moveMode == .insert
-                var moveStarted = false
-                controller.workspaceManager.withNiriViewportState(for: wsId) { vstate in
-                    if engine.interactiveMoveBegin(
-                        windowId: tiledWindow.id,
-                        windowHandle: tiledWindow.handle,
-                        startLocation: location,
-                        isInsertMode: isInsertMode,
-                        in: wsId,
-                        motion: controller.motionPolicy.snapshot(),
-                        state: &vstate,
-                        workingFrame: workingFrame,
-                        gaps: gaps,
-                        orientation: orientation
-                    ) {
-                        moveStarted = true
-                    }
-                }
-                if moveStarted {
-                    state.isMoving = true
-                    state.activeInteractionButton = button
-                    state.capturedInteractionButton = button
-                    NSCursor.closedHand.set()
-
-                    if let entry = controller.workspaceManager.entry(for: tiledWindow.handle),
-                       let frame = AXWindowService.framePreferFast(entry.axRef)
-                    {
-                        if state.dragGhostController == nil {
-                            state.dragGhostController = DragGhostController()
-                        }
-                        state.dragGhostController?.beginDrag(
-                            windowId: entry.windowId,
-                            originalFrame: frame,
-                            cursorLocation: location
-                        )
-                    }
-                    return false
-                }
-            }
-            return false
-        }
-
+        let isHyperActive = controller.isHyperTriggerActive
         guard button == .right,
-              Self.modifierFlagsMatch(modifiers, required: controller.settings.mouseResizeModifierKey.cgEventFlag)
+              Self.modifierFlagsMatch(modifiers, required: controller.settings.mouseResizeModifierKey.cgEventFlag, isHyperActive: isHyperActive)
         else { return false }
 
         guard let tiledWindow = engine.hitTestTiled(point: location, in: wsId),
@@ -919,8 +1055,9 @@ final class MouseEventHandler {
         wsId: WorkspaceDescriptor.ID
     ) -> Bool {
         guard let controller, let engine = controller.dwindleEngine else { return false }
+        let isHyperActive = controller.isHyperTriggerActive
         guard button == .right,
-              Self.modifierFlagsMatch(modifiers, required: controller.settings.mouseResizeModifierKey.cgEventFlag)
+              Self.modifierFlagsMatch(modifiers, required: controller.settings.mouseResizeModifierKey.cgEventFlag, isHyperActive: isHyperActive)
         else { return false }
 
         let now = controller.animationClock.now()
@@ -968,6 +1105,91 @@ final class MouseEventHandler {
         state.capturedInteractionButton == button
     }
 
+    private func promotePendingTitlebarMove(
+        _ pending: State.PendingTitlebarMove,
+        currentLocation: CGPoint
+    ) {
+        guard let controller else {
+            state.pendingTitlebarMove = nil
+            return
+        }
+        state.pendingTitlebarMove = nil
+
+        if pending.layoutType == .dwindle {
+            guard let engine = controller.dwindleEngine, let token = pending.token else { return }
+            if engine.interactiveMoveBegin(token: token, startLocation: pending.startLocation, in: pending.wsId) {
+                state.isMoving = true
+                state.moveLayout = .dwindle
+                state.activeInteractionButton = pending.button
+                state.capturedInteractionButton = pending.button
+                NSCursor.closedHand.set()
+
+                controller.layoutRefreshController.requestImmediateRelayout(reason: .interactiveGesture)
+                if let entry = controller.workspaceManager.entry(for: token) {
+                    let winFrame = AXWindowService.framePreferFast(entry.axRef) ?? pending.winFrame
+                    let offscreenFrame = CGRect(x: -20000, y: -20000, width: winFrame.width, height: winFrame.height)
+                    _ = AXWindowService.setFrame(entry.axRef, frame: offscreenFrame, verify: false)
+                    SkyLight.shared.transactionHide(UInt32(entry.windowId))
+
+                    if state.dragGhostController == nil {
+                        state.dragGhostController = DragGhostController()
+                    }
+                    state.dragGhostController?.beginDrag(
+                        windowId: entry.windowId,
+                        originalFrame: winFrame,
+                        cursorLocation: currentLocation
+                    )
+                }
+            }
+        } else if let engine = controller.niriEngine, let handle = pending.niriHandle, let nodeId = pending.niriNodeId {
+            guard let monitor = controller.workspaceManager.monitor(for: pending.wsId) else { return }
+            let workingFrame = controller.insetWorkingFrame(for: monitor)
+            let gaps = controller.innerGap(for: monitor)
+            let orientation = resolvedNiriOrientation(
+                engine: engine,
+                workspaceId: pending.wsId,
+                monitor: monitor
+            )
+            var moveStarted = false
+            controller.workspaceManager.withNiriViewportState(for: pending.wsId) { vstate in
+                if engine.interactiveMoveBegin(
+                    windowId: nodeId,
+                    windowHandle: handle,
+                    startLocation: pending.startLocation,
+                    isInsertMode: false,
+                    in: pending.wsId,
+                    motion: controller.motionPolicy.snapshot(),
+                    state: &vstate,
+                    workingFrame: workingFrame,
+                    gaps: gaps,
+                    orientation: orientation
+                ) {
+                    moveStarted = true
+                }
+            }
+            if moveStarted {
+                state.isMoving = true
+                state.moveLayout = .niri
+                state.activeInteractionButton = pending.button
+                state.capturedInteractionButton = pending.button
+                NSCursor.closedHand.set()
+
+                if let entry = controller.workspaceManager.entry(for: handle),
+                   let winFrame = AXWindowService.framePreferFast(entry.axRef)
+                {
+                    if state.dragGhostController == nil {
+                        state.dragGhostController = DragGhostController()
+                    }
+                    state.dragGhostController?.beginDrag(
+                        windowId: entry.windowId,
+                        originalFrame: winFrame,
+                        cursorLocation: currentLocation
+                    )
+                }
+            }
+        }
+    }
+
     private func handleMouseDraggedFromTap(
         at location: CGPoint,
         button: MouseButton,
@@ -989,8 +1211,35 @@ final class MouseEventHandler {
             }
         }
 
+        if !state.isMoving, let pending = state.pendingTitlebarMove {
+            let now = controller.animationClock.now()
+            let elapsed = now - pending.startTime
+            let dist = hypot(location.x - pending.startLocation.x, location.y - pending.startLocation.y)
+            if elapsed >= 0.18 || dist >= 5.0 {
+                promotePendingTitlebarMove(pending, currentLocation: location)
+            }
+        }
+
         if state.isMoving {
             guard shouldAcceptInteractionButton(button) else { return }
+            if state.moveLayout == .dwindle {
+                guard let engine = controller.dwindleEngine,
+                      engine.interactiveMove != nil
+                else {
+                    cancelActiveMouseInteraction()
+                    return
+                }
+                let dropAction = engine.interactiveMoveUpdate(currentLocation: location)
+                state.dragGhostController?.updatePosition(cursorLocation: location)
+
+                if let dropAction {
+                    state.dragGhostController?.showSwapTarget(frame: dropAction.highlightFrame)
+                } else {
+                    state.dragGhostController?.hideSwapTarget()
+                }
+                return
+            }
+
             guard let engine = controller.niriEngine,
                   let move = engine.interactiveMove
             else {
@@ -1074,6 +1323,7 @@ final class MouseEventHandler {
     }
 
     private func handleMouseUpFromTap(at location: CGPoint, button: MouseButton) {
+        state.pendingTitlebarMove = nil
         guard let controller else { return }
         if controller.isOverviewOpen() {
             cancelActiveMouseInteraction()
@@ -1082,6 +1332,44 @@ final class MouseEventHandler {
 
         if state.isMoving {
             guard shouldAcceptInteractionButton(button) else { return }
+            if state.moveLayout == .dwindle {
+                if let engine = controller.dwindleEngine,
+                   let move = engine.interactiveMove
+                {
+                    let wsId = move.workspaceId
+                    var movedToken: WindowToken?
+                    controller.workspaceManager.withEngineMutationScope {
+                        movedToken = engine.interactiveMoveEnd(at: location)?.movedToken
+                    }
+                    if let movedToken {
+                        controller.workspaceManager.recordLayoutOperation(
+                            .interactiveMoveEnded(token: movedToken),
+                            in: wsId,
+                            source: .mouse
+                        )
+                        controller.layoutRefreshController.requestImmediateRelayout(reason: .interactiveGesture)
+
+                        let entries = controller.workspaceManager.entries(in: wsId).filter { $0.mode == .tiling }
+                        for entry in entries {
+                            if let targetFrame = controller.dwindleEngine?.findNode(for: entry.token, in: wsId)?.cachedFrame {
+                                _ = AXWindowService.setFrame(entry.axRef, frame: targetFrame, currentFrameHint: nil, verify: false)
+                                SkyLight.shared.transactionMove(UInt32(entry.windowId), origin: targetFrame.origin)
+                                controller.axManager.confirmFrameWrite(for: entry.windowId, frame: targetFrame)
+                            }
+                        }
+                        controller.windowFrameReconciler.triggerHighFrequencyBurst(durationSeconds: 10.0)
+                    }
+                } else {
+                    controller.dwindleEngine?.interactiveMoveCancel()
+                }
+                state.dragGhostController?.endDrag()
+                state.isMoving = false
+                state.activeInteractionButton = nil
+                state.moveLayout = nil
+                NSCursor.arrow.set()
+                return
+            }
+
             if let engine = controller.niriEngine,
                let move = engine.interactiveMove
             {
@@ -1107,6 +1395,7 @@ final class MouseEventHandler {
                             source: .mouse
                         )
                         controller.layoutRefreshController.requestImmediateRelayout(reason: .interactiveGesture)
+                        controller.windowFrameReconciler.triggerHighFrequencyBurst(durationSeconds: 10.0)
                     }
                 } else {
                     engine.interactiveMoveCancel()
@@ -2025,7 +2314,7 @@ final class MouseEventHandler {
                     windowIdUnderPointer: windowIdUnderPointer
                 )
             case .leftMouseDown:
-                _ = handler.receiveTapMouseDown(at: screenLocation, modifiers: modifiers)
+                suppressEvent = handler.receiveTapMouseDown(at: screenLocation, modifiers: modifiers)
             case .leftMouseDragged:
                 suppressEvent = handler.isCapturedInteraction(.left)
                 handler.receiveTapMouseDragged(at: screenLocation)
@@ -2092,21 +2381,41 @@ final class MouseEventHandler {
 
     nonisolated static func mouseMoveMode(
         modifiers: CGEventFlags,
-        required: CGEventFlags?
+        required: CGEventFlags?,
+        isHyperActive: Bool = false
     ) -> MouseMoveMode? {
-        guard let required, !required.isEmpty else { return nil }
         let relevantModifiers = modifiers.intersection(mouseRelevantModifierFlags)
+        if isHyperActive {
+            return modifiers.contains(.maskShift) ? .insert : .swap
+        }
+        guard let required, !required.isEmpty else {
+            if relevantModifiers.contains(hyperModifierFlags) {
+                return .swap
+            }
+            return nil
+        }
         if relevantModifiers == required {
             return .swap
         }
         if relevantModifiers == required.union(.maskShift) {
             return .insert
         }
+        if relevantModifiers.contains(hyperModifierFlags) {
+            return .swap
+        }
         return nil
     }
 
-    nonisolated static func modifierFlagsMatch(_ modifiers: CGEventFlags, required: CGEventFlags) -> Bool {
-        modifiers.intersection(mouseRelevantModifierFlags) == required
+    nonisolated static func modifierFlagsMatch(
+        _ modifiers: CGEventFlags,
+        required: CGEventFlags,
+        isHyperActive: Bool = false
+    ) -> Bool {
+        let relevantModifiers = modifiers.intersection(mouseRelevantModifierFlags)
+        if isHyperActive || relevantModifiers.contains(hyperModifierFlags) {
+            return true
+        }
+        return relevantModifiers == required
     }
 
     nonisolated static func resolvedMouseWheelColumnDeltaValue(

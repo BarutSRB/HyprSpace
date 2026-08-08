@@ -351,8 +351,8 @@ final class BorderSurfaceTests: XCTestCase {
         let recorder = BorderOperationsRecorder()
         let desiredFrame = CGRect(x: 10, y: 10, width: 280, height: 190)
         var samples = [
-            sample(WindowCornerRadii(uniform: 12), size: frame.size),
-            sample(WindowCornerRadii(uniform: 12), size: desiredFrame.size)
+            sample(WindowCornerRadii(uniform: 14), size: frame.size),
+            sample(WindowCornerRadii(uniform: 14), size: desiredFrame.size)
         ]
         let applier = makeApplier(recorder) { _ in samples.removeFirst() }
         defer { applier.cleanup() }

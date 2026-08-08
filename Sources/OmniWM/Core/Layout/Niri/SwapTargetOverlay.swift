@@ -45,7 +45,8 @@ final class SwapTargetOverlay {
 
         let contentView = NSView(frame: .zero)
         contentView.wantsLayer = true
-        contentView.layer?.cornerRadius = 9
+        contentView.layer?.cornerRadius = 12
+        contentView.layer?.cornerCurve = .continuous
         contentView.layer?.masksToBounds = true
         contentView.layer?.backgroundColor = NSColor(red: 0, green: 120.0 / 255.0, blue: 1.0, alpha: 0.25).cgColor
         panel.contentView = contentView

@@ -211,8 +211,9 @@ final class SpaceTracker {
             preservesKnownOnMissing: false
         ),
         reconcilesNativeFullscreen: Bool = true,
-        spaceIdsForWindow: (UInt32) -> [UInt64] = { SkyLight.shared.spacesForWindow($0) }
+        spaceIdsForWindow: ((UInt32) -> [UInt64])? = nil
     ) {
+        let spaceIdsForWindow = spaceIdsForWindow ?? { SkyLight.shared.spacesForWindow($0) }
         guard let controller else { return }
         var topology = sample.topology
         let previousWindowSpace = controller.workspaceManager.spaceTopology.windowSpace

@@ -416,6 +416,23 @@ final class WindowRuleEngine {
         token: WindowToken?,
         appFullscreen: Bool
     ) -> WindowDecision {
+        if let windowServer = facts.windowServer,
+           windowServer.level != 0,
+           windowServer.level != 103,
+           windowServer.parentId == 0
+        {
+            return WindowDecision(
+                disposition: .unmanaged,
+                source: .builtInRule("Non-Standard Window Level"),
+                layoutDecisionKind: .explicitLayout,
+                workspaceName: nil,
+                ruleEffects: .none,
+                admissionHints: .none,
+                heuristicReasons: [],
+                deferredReason: nil
+            )
+        }
+
         if facts.ax.role == (kAXHelpTagRole as String) {
             return WindowDecision(
                 disposition: .unmanaged,

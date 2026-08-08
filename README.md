@@ -1,3 +1,8 @@
+# OmniWM (Personal Fork)
+
+> [!NOTE]
+> **Personal Fork**: This repository is a custom fork of [OmniWM](https://github.com/BarutSRB/OmniWM) modified and maintained for personal use.
+
 ## Demo Video
 
 [![Watch the demo](https://img.youtube.com/vi/WcHjGkuD2Fc/maxresdefault.jpg)](https://youtu.be/WcHjGkuD2Fc)

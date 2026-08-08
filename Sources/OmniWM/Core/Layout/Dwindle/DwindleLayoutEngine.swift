@@ -5,7 +5,7 @@ import CoreGraphics
 import Foundation
 import QuartzCore
 
-private final class DwindleWorkspaceState {
+final class DwindleWorkspaceState {
     let root = DwindleNode(kind: .leaf(tile: nil))
     var leafByToken: [WindowToken: DwindleNode] = [:]
     var tileCount = 0
@@ -15,7 +15,7 @@ private final class DwindleWorkspaceState {
 }
 
 final class DwindleLayoutEngine {
-    private var states: [WorkspaceDescriptor.ID: DwindleWorkspaceState] = [:]
+    var states: [WorkspaceDescriptor.ID: DwindleWorkspaceState] = [:]
     private var windowConstraints: [WindowToken: WindowSizeConstraints] = [:]
 
     var settings: DwindleSettings = DwindleSettings()
@@ -25,6 +25,7 @@ final class DwindleLayoutEngine {
     var isMutationSanctioned = true
 
     var interactiveResize: DwindleInteractiveResize?
+    var interactiveMove: DwindleInteractiveMove?
 
     func assertSanctionedMutation(_ operation: StaticString = #function) {
         assert(
@@ -646,7 +647,7 @@ final class DwindleLayoutEngine {
         return member
     }
 
-    private func cleanupAfterRemoval(_ node: DwindleNode, state: DwindleWorkspaceState) {
+    func cleanupAfterRemoval(_ node: DwindleNode, state: DwindleWorkspaceState) {
         guard let parent = node.parent, let sibling = node.sibling() else { return }
 
         node.detach()
@@ -657,11 +658,18 @@ final class DwindleLayoutEngine {
             child.parent = parent
         }
 
-        if let tile = parent.tile {
-            for member in tile.members {
-                state.leafByToken[member.token] = parent
+        func reindexLeaves(_ n: DwindleNode) {
+            if let tile = n.tile {
+                for member in tile.members {
+                    state.leafByToken[member.token] = n
+                }
+            } else {
+                for child in n.children {
+                    reindexLeaves(child)
+                }
             }
         }
+        reindexLeaves(parent)
 
         if state.selectedNodeId == node.id {
             state.selectedNodeId = parent.descendToFirstLeaf().id
@@ -737,6 +745,34 @@ final class DwindleLayoutEngine {
         return toRemove
     }
 
+    private func cloneWorkspaceState(_ state: DwindleWorkspaceState) -> DwindleWorkspaceState {
+        let newState = DwindleWorkspaceState()
+        newState.tileCount = state.tileCount
+        newState.selectedNodeId = state.selectedNodeId
+        newState.preselection = state.preselection
+
+        let newRoot = state.root.clone()
+        newState.root.kind = newRoot.kind
+        newState.root.children = newRoot.children
+        for child in newState.root.children {
+            child.parent = newState.root
+        }
+
+        func populateLeafByToken(_ node: DwindleNode) {
+            if let tile = node.tile {
+                for member in tile.members {
+                    newState.leafByToken[member.token] = node
+                }
+            } else {
+                for child in node.children {
+                    populateLeafByToken(child)
+                }
+            }
+        }
+        populateLeafByToken(newState.root)
+        return newState
+    }
+
     func calculateLayout(
         for workspaceId: WorkspaceDescriptor.ID,
         screen: CGRect,
@@ -744,6 +780,33 @@ final class DwindleLayoutEngine {
     ) -> [WindowToken: CGRect] {
         guard let state = states[workspaceId] else { return [:] }
 
+        if let move = interactiveMove, move.workspaceId == workspaceId, state.tileCount > 1 {
+            let tempState = cloneWorkspaceState(state)
+            if let movingLeaf = tempState.leafByToken[move.token] {
+                cleanupAfterRemoval(movingLeaf, state: tempState)
+            }
+            let frames = calculateLayoutForState(tempState, in: workspaceId, screen: screen, fullscreenScreen: fullscreenScreen)
+
+            // Snapshot tiling frames (cachedFrame, not gap-inset content frame) from the tempState
+            // nodes so interactiveMoveUpdate can base hover zones on current displayed positions.
+            var tilingFrames: [WindowToken: CGRect] = [:]
+            for (token, node) in tempState.leafByToken {
+                if let f = node.cachedFrame { tilingFrames[token] = f }
+            }
+            interactiveMove?.dragTimeTilingFrames = tilingFrames
+
+            return frames
+        }
+
+        return calculateLayoutForState(state, in: workspaceId, screen: screen, fullscreenScreen: fullscreenScreen)
+    }
+
+    private func calculateLayoutForState(
+        _ state: DwindleWorkspaceState,
+        in workspaceId: WorkspaceDescriptor.ID,
+        screen: CGRect,
+        fullscreenScreen: CGRect? = nil
+    ) -> [WindowToken: CGRect] {
         let tileCount = state.tileCount
         if tileCount == 0 {
             return [:]

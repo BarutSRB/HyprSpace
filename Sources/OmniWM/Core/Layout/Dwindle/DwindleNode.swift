@@ -275,6 +275,23 @@ final class DwindleNode {
         parent.firstChild()?.id == id
     }
 
+    func isSecondChild(of parent: DwindleNode) -> Bool {
+        parent.secondChild()?.id == id
+    }
+
+    func clone() -> DwindleNode {
+        let newNode = DwindleNode(kind: kind)
+        newNode.cachedFrame = cachedFrame
+        newNode.cachedContentFrame = cachedContentFrame
+        newNode.cachedMinSize = cachedMinSize
+        newNode.children = children.map { child in
+            let childClone = child.clone()
+            childClone.parent = newNode
+            return childClone
+        }
+        return newNode
+    }
+
     func sibling() -> DwindleNode? {
         guard let parent else { return nil }
         if isFirstChild(of: parent) {

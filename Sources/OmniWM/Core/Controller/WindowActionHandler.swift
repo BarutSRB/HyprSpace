@@ -81,25 +81,19 @@ final class WindowActionHandler {
 
     init(
         controller: WMController,
-        orderWindow: @escaping (UInt32) -> Void = {
-            SkyLight.shared.orderWindow($0, relativeTo: 0, order: .above)
-        },
-        visibleWindowInfoProvider: @escaping () -> [WindowServerInfo] = {
-            SkyLight.shared.queryAllVisibleWindows()
-        },
-        visibleOwnedWindowsProvider: @escaping () -> [NSWindow] = {
-            OwnedWindowRegistry.shared.visibleWindows(kind: .utility)
-        },
-        frontOwnedWindow: @escaping (NSWindow) -> Void = { window in
+        orderWindow: ((UInt32) -> Void)? = nil,
+        visibleWindowInfoProvider: (() -> [WindowServerInfo])? = nil,
+        visibleOwnedWindowsProvider: (() -> [NSWindow])? = nil,
+        frontOwnedWindow: ((NSWindow) -> Void)? = nil
+    ) {
+        self.controller = controller
+        self.orderWindow = orderWindow ?? { SkyLight.shared.orderWindow($0, relativeTo: 0, order: .above) }
+        self.visibleWindowInfoProvider = visibleWindowInfoProvider ?? { SkyLight.shared.queryAllVisibleWindows() }
+        self.visibleOwnedWindowsProvider = visibleOwnedWindowsProvider ?? { OwnedWindowRegistry.shared.visibleWindows(kind: .utility) }
+        self.frontOwnedWindow = frontOwnedWindow ?? { window in
             NSApp.activate(ignoringOtherApps: true)
             window.makeKeyAndOrderFront(nil)
         }
-    ) {
-        self.controller = controller
-        self.orderWindow = orderWindow
-        self.visibleWindowInfoProvider = visibleWindowInfoProvider
-        self.visibleOwnedWindowsProvider = visibleOwnedWindowsProvider
-        self.frontOwnedWindow = frontOwnedWindow
     }
 
     func openMenuAnywhere() {

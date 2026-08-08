@@ -10,8 +10,8 @@ final class SurfaceCoordinator {
 
     private let scene: SurfaceScene
 
-    init(scene: SurfaceScene = SurfaceScene()) {
-        self.scene = scene
+    init(scene: SurfaceScene? = nil) {
+        self.scene = scene ?? SurfaceScene()
     }
 
     func register(

@@ -630,25 +630,27 @@ final class SettingsStore {
     }
 
     init(
-        persistence: SettingsFilePersistence = SettingsFilePersistence(),
-        runtimeState: RuntimeStateStore = RuntimeStateStore(),
+        persistence: SettingsFilePersistence? = nil,
+        runtimeState: RuntimeStateStore? = nil,
         autosaveEnabled: Bool = true
     ) {
-        self.persistence = persistence
-        self.runtimeState = runtimeState
+        let resolvedPersistence = persistence ?? SettingsFilePersistence()
+        let resolvedRuntimeState = runtimeState ?? RuntimeStateStore()
+        self.persistence = resolvedPersistence
+        self.runtimeState = resolvedRuntimeState
         self.autosaveEnabled = autosaveEnabled
-        commandPaletteLastMode = runtimeState.commandPaletteLastMode
-        monitorSetupStatus = runtimeState.monitorSetupStatus
+        commandPaletteLastMode = resolvedRuntimeState.commandPaletteLastMode
+        monitorSetupStatus = resolvedRuntimeState.monitorSetupStatus
         isApplyingRuntimeState = true
         quakeTerminalCustomFrameStorage = QuakeTerminalGeometryPolicy.normalizedCustomFrame(
-            runtimeState.quakeTerminalCustomFrame
+            resolvedRuntimeState.quakeTerminalCustomFrame
         )
-        quakeTerminalUseCustomFrame = runtimeState.quakeTerminalUseCustomFrame && quakeTerminalCustomFrameStorage != nil
+        quakeTerminalUseCustomFrame = resolvedRuntimeState.quakeTerminalUseCustomFrame && quakeTerminalCustomFrameStorage != nil
         isApplyingRuntimeState = false
         syncQuakeTerminalCustomFrameToRuntimeState()
 
-        applyExport(persistence.load())
-        persistence.setExternalChangeHandler { [weak self] export in
+        applyExport(resolvedPersistence.load())
+        resolvedPersistence.setExternalChangeHandler { [weak self] export in
             self?.handleExternalReload(export)
         }
     }
@@ -900,8 +902,8 @@ final class SettingsStore {
         scrollGestureEnabled = export.scrollGestureEnabled
         scrollSensitivity = export.scrollSensitivity
         scrollModifierKey = ScrollModifierKey(rawValue: export.scrollModifierKey) ?? .optionShift
-        mouseMoveModifierKey = MouseMoveModifierKey(rawValue: export.mouseMoveModifierKey) ?? .option
-        mouseResizeModifierKey = MouseResizeModifierKey(rawValue: export.mouseResizeModifierKey) ?? .option
+        mouseMoveModifierKey = MouseMoveModifierKey(rawValue: export.mouseMoveModifierKey) ?? .controlOptionCommandShift
+        mouseResizeModifierKey = MouseResizeModifierKey(rawValue: export.mouseResizeModifierKey) ?? .controlOptionCommandShift
         gestureFingerCount = GestureFingerCount(rawValue: export.gestureFingerCount) ?? .three
         gestureInvertDirection = export.gestureInvertDirection
         trackpadScrollStyle = TrackpadScrollStyle(rawValue: export.trackpadScrollStyle) ?? .snap
