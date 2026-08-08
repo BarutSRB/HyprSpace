@@ -12,6 +12,8 @@ final class WindowFrameReconcilerTests: XCTestCase {
         let reconciler = WindowFrameReconciler(controller: controller)
 
         reconciler.triggerHighFrequencyBurst(durationSeconds: 1.0)
-        XCTAssertNoThrow(reconciler.reconcileManagedFrames())
+        reconciler.reconcileManagedFrames()
+
+        XCTAssertNotNil(reconciler)
     }
 }

@@ -228,7 +228,7 @@ extension DwindleLayoutEngine {
             let wantFirstChild = abs(deltaMaxX) > abs(deltaMinX)
             if let match = controllingSplit(from: leaf, orientation: .horizontal, wantFirstChild: wantFirstChild),
                let frame = match.split.cachedFrame, frame.width > 0 {
-                let ratioDelta = (wantFirstChild ? deltaWidth : -deltaWidth) / frame.width
+                let ratioDelta = 2 * (wantFirstChild ? deltaWidth : -deltaWidth) / frame.width
                 let currentRatio = match.split.splitRatio ?? 0.5
                 let newRatio = clampedRatioRespectingMinimums(currentRatio + ratioDelta, for: match.split, innerGap: innerGap)
                 if newRatio != currentRatio {
@@ -242,7 +242,7 @@ extension DwindleLayoutEngine {
             let wantFirstChild = abs(deltaMaxY) > abs(deltaMinY)
             if let match = controllingSplit(from: leaf, orientation: .vertical, wantFirstChild: wantFirstChild),
                let frame = match.split.cachedFrame, frame.height > 0 {
-                let ratioDelta = (wantFirstChild ? deltaHeight : -deltaHeight) / frame.height
+                let ratioDelta = 2 * (wantFirstChild ? deltaHeight : -deltaHeight) / frame.height
                 let currentRatio = match.split.splitRatio ?? 0.5
                 let newRatio = clampedRatioRespectingMinimums(currentRatio + ratioDelta, for: match.split, innerGap: innerGap)
                 if newRatio != currentRatio {

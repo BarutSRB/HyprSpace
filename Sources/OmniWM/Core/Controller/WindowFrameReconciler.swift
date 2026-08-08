@@ -14,6 +14,12 @@ final class WindowFrameReconciler {
         self.controller = controller
     }
 
+    isolated deinit {
+        highFrequencyTimer?.invalidate()
+        highFrequencyTimer = nil
+        highFrequencyUntil = nil
+    }
+
     func triggerHighFrequencyBurst(durationSeconds: TimeInterval = 5.0) {
         let deadline = Date().addingTimeInterval(durationSeconds)
         if let current = highFrequencyUntil, current > deadline {
