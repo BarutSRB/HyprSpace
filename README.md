@@ -10,7 +10,6 @@ This fork includes several custom enhancements, bug fixes, and stability improve
 ### 🖱️ Mouse Interaction & Window Dragging
 - **Title Bar Hold-and-Drag**: Instant native click pass-through for window titlebars, traffic light buttons (close/minimize/zoom), and app tabs. Holding down on a titlebar (>180ms or 5pt distance) automatically promotes to active window movement.
 - **Hover Mode Drop Target Preview**: Moving windows interactively or via titlebar hold-and-drag activates window placement preview overlays ("hover mode"), showing precise split and placement regions before release.
-- **Raycast / External Hyper Key Drag Support**: Seamless integration for Raycast and 3rd-party remapped Hyper keys (`Control + Option + Command + Shift`). Holding Hyper key + Left Drag instantly moves windows while strictly suppressing click bleed-through into underlying applications.
 
 ### 📐 Window Resizing & Layout Persistence
 - **Fixed Window Resize Snap-Back**: Updated `DwindleLayoutEngine+InteractiveResize` and `AXEventHandler` frame change processing to calculate split ratios directly from width and height deltas. Resized windows permanently retain their dimensions across accessibility events, layout refreshes, and display reconciliations.

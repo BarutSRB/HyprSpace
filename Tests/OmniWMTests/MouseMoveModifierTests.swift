@@ -68,22 +68,6 @@ final class MouseMoveModifierTests: NiriInteractionTestCase {
         )
     }
 
-    func testHyperKeyAlwaysTriggersMouseMove() {
-        let hyperFlags: CGEventFlags = [.maskControl, .maskAlternate, .maskCommand, .maskShift]
-
-        XCTAssertEqual(
-            MouseEventHandler.mouseMoveMode(modifiers: hyperFlags, required: .maskAlternate),
-            .swap
-        )
-        XCTAssertEqual(
-            MouseEventHandler.mouseMoveMode(modifiers: hyperFlags, required: nil),
-            .swap
-        )
-        XCTAssertTrue(
-            MouseEventHandler.modifierFlagsMatch(hyperFlags, required: .maskAlternate)
-        )
-    }
-
     @MainActor
     func testOffDoesNotStartMoveForOptionDrag() throws {
         let fixture = try makeFixture(pid: 1_101)

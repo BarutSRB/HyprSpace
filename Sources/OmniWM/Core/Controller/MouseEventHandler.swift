@@ -18,13 +18,6 @@ private let mouseRelevantModifierFlags: CGEventFlags = [
     .maskCommand
 ]
 
-private let hyperModifierFlags: CGEventFlags = [
-    .maskControl,
-    .maskAlternate,
-    .maskCommand,
-    .maskShift
-]
-
 @MainActor
 final class MouseEventHandler {
     enum MouseButton: Hashable {
@@ -2389,9 +2382,6 @@ final class MouseEventHandler {
             return modifiers.contains(.maskShift) ? .insert : .swap
         }
         guard let required, !required.isEmpty else {
-            if relevantModifiers.contains(hyperModifierFlags) {
-                return .swap
-            }
             return nil
         }
         if relevantModifiers == required {
@@ -2399,9 +2389,6 @@ final class MouseEventHandler {
         }
         if relevantModifiers == required.union(.maskShift) {
             return .insert
-        }
-        if relevantModifiers.contains(hyperModifierFlags) {
-            return .swap
         }
         return nil
     }
@@ -2412,7 +2399,7 @@ final class MouseEventHandler {
         isHyperActive: Bool = false
     ) -> Bool {
         let relevantModifiers = modifiers.intersection(mouseRelevantModifierFlags)
-        if isHyperActive || relevantModifiers.contains(hyperModifierFlags) {
+        if isHyperActive {
             return true
         }
         return relevantModifiers == required
