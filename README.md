@@ -18,6 +18,9 @@ This fork includes several custom enhancements, bug fixes, and stability improve
 - **Synchronous Submenu Loading**: Updated `MenuAnywhereController` to populate submenus synchronously on mouse hover, eliminating truncated or misaligned menu dropdown windows.
 - **Status Menu Clarity**: Cleaned up `StatusMenuView` action rows (e.g. "Settings", "App Rules") by removing misleading submenu chevron arrows (`>`) for items that open standalone windows.
 
+### 🖥️ macOS 27 Compatibility & Bug Fixes
+- **Full macOS 27 Compatibility**: Resolved window server reconciliation, event tap thread isolation, and frame calculation issues that previously caused glitches and difficult window management on macOS 27. Fully tested and verified for seamless operation on macOS 27.
+
 ### 🛡️ System Robustness & Window Reconciler
 - **Automatic Window Frame Reconciler (`WindowFrameReconciler`)**: Periodic background monitor that detects off-screen glitched windows (e.g. left offscreen post-drag) or overlapping tiled windows, automatically re-seating them into proper layout frames.
 

@@ -22,7 +22,7 @@ DerivedData/
 *~
 
 # Build output
-dist/
+# dist/
 
 # External frameworks (downloaded/built separately)
 Frameworks/
