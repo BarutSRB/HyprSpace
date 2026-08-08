@@ -152,6 +152,13 @@ final class SkyLight {
     private typealias SetWindowOpacityFunc = @convention(c) (Int32, UInt32, Int32) -> CGError
     private typealias SetWindowBackgroundBlurRadiusFunc = @convention(c) (Int32, UInt32, Int32) -> CGError
     private typealias SetWindowTagsFunc = @convention(c) (Int32, UInt32, UnsafePointer<UInt64>, Int32) -> CGError
+    private typealias SetWindowPropertyFunc = @convention(c) (Int32, UInt32, CFString, CFTypeRef) -> CGError
+    private typealias CopyWindowPropertyFunc = @convention(c) (
+        Int32,
+        UInt32,
+        CFString,
+        UnsafeMutablePointer<CFTypeRef?>
+    ) -> CGError
     private typealias FlushWindowContentRegionFunc = @convention(c) (Int32, UInt32, CFTypeRef?) -> CGError
     private typealias NewRegionWithRectFunc = @convention(c) (UnsafePointer<CGRect>, UnsafeMutablePointer<CFTypeRef?>)
         -> CGError
@@ -245,6 +252,8 @@ final class SkyLight {
     private let setWindowOpacity: SetWindowOpacityFunc
     private let setWindowBackgroundBlurRadius: SetWindowBackgroundBlurRadiusFunc?
     private let setWindowTags: SetWindowTagsFunc
+    private let setWindowProperty: SetWindowPropertyFunc?
+    private let copyWindowProperty: CopyWindowPropertyFunc?
     private let flushWindowContentRegion: FlushWindowContentRegionFunc
     private let newRegionWithRect: NewRegionWithRectFunc
     private let transactionSetWindowLevel: TransactionSetWindowLevelFunc
@@ -255,6 +264,8 @@ final class SkyLight {
     private let getSpaceManagementMode: GetSpaceManagementModeFunc
 
     private let capabilitySymbols: [String]
+
+    private let screencaptureSelectionExclusionKey = "IgnoreForScreencaptureWindowSelection" as CFString
 
     private static let allSpacesMask: Int32 = 0x7
     private static let nativeSpaceWindowOptions: UInt32 = 0x7
@@ -353,6 +364,8 @@ final class SkyLight {
             as: SetWindowBackgroundBlurRadiusFunc.self
         )
         setWindowTags = resolve("SLSSetWindowTags", as: SetWindowTagsFunc.self)
+        setWindowProperty = resolveOptional("SLSSetWindowProperty", as: SetWindowPropertyFunc.self)
+        copyWindowProperty = resolveOptional("SLSCopyWindowProperty", as: CopyWindowPropertyFunc.self)
         flushWindowContentRegion = resolve("SLSFlushWindowContentRegion", as: FlushWindowContentRegionFunc.self)
         newRegionWithRect = resolve("CGSNewRegionWithRect", as: NewRegionWithRectFunc.self)
         transactionSetWindowLevel = resolve("SLSTransactionSetWindowLevel", as: TransactionSetWindowLevelFunc.self)
@@ -1085,6 +1098,28 @@ final class SkyLight {
         let ok = setWindowTags(cid, wid, &tagsValue, 64) == .success
         if !ok { FallbackFiringRecorder.shared.note(.skylight, "setWindowTagsFailed") }
         return ok
+    }
+
+    @discardableResult
+    func excludeFromScreencaptureWindowSelection(_ wid: UInt32) -> Bool {
+        let cid = getMainConnectionID()
+        guard cid != 0, let setWindowProperty else {
+            FallbackFiringRecorder.shared.note(.skylight, "screencaptureSelectionExclusionUnavailable")
+            return false
+        }
+        let ok = setWindowProperty(cid, wid, screencaptureSelectionExclusionKey, kCFBooleanTrue) == .success
+        if !ok { FallbackFiringRecorder.shared.note(.skylight, "screencaptureSelectionExclusionFailed") }
+        return ok
+    }
+
+    func isExcludedFromScreencaptureWindowSelection(_ wid: UInt32) -> Bool? {
+        let cid = getMainConnectionID()
+        guard cid != 0, let copyWindowProperty else { return nil }
+        var value: CFTypeRef?
+        guard copyWindowProperty(cid, wid, screencaptureSelectionExclusionKey, &value) == .success,
+              let value
+        else { return nil }
+        return (value as AnyObject) === (kCFBooleanTrue as AnyObject)
     }
 
     @discardableResult

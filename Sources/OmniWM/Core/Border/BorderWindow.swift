@@ -11,6 +11,7 @@ final class BorderWindow {
         var releaseBorderWindow: @MainActor (UInt32) -> Void
         var configureWindow: @MainActor (UInt32, Float, Bool) -> Void
         var setWindowTags: @MainActor (UInt32, UInt64) -> Void
+        var excludeFromScreencaptureSelection: @MainActor (UInt32) -> Void
         var createWindowContext: @MainActor (UInt32) -> CGContext?
         var setWindowShape: @MainActor (UInt32, CGRect) -> Void
         var flushWindow: @MainActor (UInt32) -> Void
@@ -24,6 +25,7 @@ final class BorderWindow {
             releaseBorderWindow: { SkyLight.shared.releaseBorderWindow($0) },
             configureWindow: { SkyLight.shared.configureWindow($0, resolution: $1, opaque: $2) },
             setWindowTags: { SkyLight.shared.setWindowTags($0, tags: $1) },
+            excludeFromScreencaptureSelection: { SkyLight.shared.excludeFromScreencaptureWindowSelection($0) },
             createWindowContext: { SkyLight.shared.createWindowContext(for: $0) },
             setWindowShape: { SkyLight.shared.setWindowShape($0, frame: $1) },
             flushWindow: { SkyLight.shared.flushWindow($0) },
@@ -152,6 +154,7 @@ final class BorderWindow {
 
         let tags: UInt64 = (1 << 1) | (1 << 9)
         operations.setWindowTags(wid, tags)
+        operations.excludeFromScreencaptureSelection(wid)
 
         guard let context = operations.createWindowContext(wid) else {
             operations.releaseBorderWindow(wid)

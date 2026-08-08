@@ -168,7 +168,8 @@ enum PrivateAPIHealthDiagnostics {
             test("SLSSetWindowOpacity", configure.opacity ? .works : .failed, "applied=\(configure.opacity)"),
             test("SLSSetWindowResolution", configure.resolution ? .works : .inconclusive, resolutionDetail),
             test("SLSSetWindowTags", tagsOk ? .works : .failed, "applied=\(tagsOk)"),
-            test("SLSFlushWindowContentRegion", flushOk ? .works : .failed, "applied=\(flushOk)")
+            test("SLSFlushWindowContentRegion", flushOk ? .works : .failed, "applied=\(flushOk)"),
+            screencaptureSelectionExclusionTest(wid)
         ]
     }
 
@@ -430,6 +431,19 @@ extension PrivateAPIHealthDiagnostics {
             restored: restored,
             detail: "pid=\(sample.pid) wid=\(sample.id) before=\(TraceFormat.point(before))"
         )
+    }
+
+    private static func screencaptureSelectionExclusionTest(_ wid: UInt32) -> PrivateAPISelfTest {
+        let sky = SkyLight.shared
+        let api = "SLSSetWindowProperty(IgnoreForScreencaptureWindowSelection)"
+        guard sky.excludeFromScreencaptureWindowSelection(wid) else {
+            return test(api, .failed, "applied=false — border stays selectable by the screenshot window picker")
+        }
+        let readback = sky.isExcludedFromScreencaptureWindowSelection(wid)
+        guard readback == true else {
+            return test(api, .inconclusive, "applied=true readback=\(readback.map(String.init) ?? "nil")")
+        }
+        return test(api, .works, "applied=true readback=true")
     }
 
     private static func isEligibleForeignWindow(_ info: WindowServerInfo) -> Bool {

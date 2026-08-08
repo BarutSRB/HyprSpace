@@ -10,6 +10,7 @@ final class BorderSurfaceTests: XCTestCase {
     @MainActor
     private final class BorderOperationsRecorder {
         var createdWindowCount = 0
+        var screencaptureExclusionCount = 0
         var releasedCount = 0
         var shapeCount = 0
         var flushCount = 0
@@ -33,6 +34,7 @@ final class BorderSurfaceTests: XCTestCase {
                 releaseBorderWindow: { [weak self] _ in self?.releasedCount += 1 },
                 configureWindow: { _, _, _ in },
                 setWindowTags: { _, _ in },
+                excludeFromScreencaptureSelection: { [weak self] _ in self?.screencaptureExclusionCount += 1 },
                 createWindowContext: { [weak self] _ in self?.contextProvider() },
                 setWindowShape: { [weak self] _, _ in self?.shapeCount += 1 },
                 flushWindow: { [weak self] _ in self?.flushCount += 1 },
@@ -116,6 +118,22 @@ final class BorderSurfaceTests: XCTestCase {
         XCTAssertTrue(hidden.didApply)
         XCTAssertEqual(recorder.hideCount, 1)
         XCTAssertFalse(SurfaceCoordinator.shared.contains(windowNumber: Int(recorder.nextWindowId)))
+    }
+
+    @MainActor
+    func testBorderWindowOptsOutOfScreencaptureSelectionOncePerWindow() {
+        let recorder = BorderOperationsRecorder()
+        let applier = makeApplier(recorder)
+        defer { applier.cleanup() }
+
+        _ = applier.apply(desired(configRed), forceOrdering: false)
+        XCTAssertEqual(recorder.screencaptureExclusionCount, 1)
+
+        _ = applier.apply(desired(configRed, frame: frame.insetBy(dx: -20, dy: -20)), forceOrdering: true)
+        _ = applier.apply(desired(configBlue), forceOrdering: false)
+
+        XCTAssertEqual(recorder.createdWindowCount, 1)
+        XCTAssertEqual(recorder.screencaptureExclusionCount, 1)
     }
 
     @MainActor
