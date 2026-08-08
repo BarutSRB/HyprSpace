@@ -186,4 +186,54 @@ final class IPCRuleValidatorTests: XCTestCase {
         )
         XCTAssertEqual(roundTripped, snapshot)
     }
+
+    func testBundleIdTrimsSurroundingWhitespace() {
+        XCTAssertNil(IPCRuleValidator.bundleIdError(for: " com.example.app "))
+        XCTAssertNil(IPCRuleValidator.bundleIdError(for: "com.example.app\n"))
+    }
+
+    func testBundleIdRejectsLeadingAndTrailingDots() {
+        XCTAssertNotNil(IPCRuleValidator.bundleIdError(for: "com.app."))
+        XCTAssertNotNil(IPCRuleValidator.bundleIdError(for: ".com.app"))
+    }
+
+    func testBundleIdRegexBoundaries() {
+        XCTAssertNil(IPCRuleValidator.bundleIdError(for: "a"))
+        XCTAssertNil(IPCRuleValidator.bundleIdError(for: "1"))
+        XCTAssertNil(IPCRuleValidator.bundleIdError(for: "com.app-slot"))
+        XCTAssertNotNil(IPCRuleValidator.bundleIdError(for: "com.app-"))
+        XCTAssertNotNil(IPCRuleValidator.bundleIdError(for: "com.app slot"))
+    }
+
+    func testValidRegexReturnsNoMessage() {
+        XCTAssertNil(IPCRuleValidator.invalidRegexMessage(for: "^foo.*bar$"))
+        XCTAssertNil(IPCRuleValidator.invalidRegexMessage(for: nil))
+        XCTAssertNil(IPCRuleValidator.invalidRegexMessage(for: "   "))
+    }
+
+    func testMinSizeRejectsNonFiniteAndNegativeZero() {
+        for value in [Double.infinity, -Double.infinity, -0.0] {
+            let report = IPCRuleValidator.validate(
+                IPCRuleDefinition(bundleId: "com.test.app", minWidth: value)
+            )
+            XCTAssertNotNil(report.minSizeError, "min width \(value) should be rejected")
+        }
+
+        let height = IPCRuleValidator.validate(
+            IPCRuleDefinition(bundleId: "com.test.app", minHeight: .infinity)
+        )
+        XCTAssertNotNil(height.minSizeError)
+    }
+
+    func testMinSizeAcceptsSmallestPositiveFinite() {
+        let one = IPCRuleValidator.validate(
+            IPCRuleDefinition(bundleId: "com.test.app", minWidth: 1)
+        )
+        XCTAssertNil(one.minSizeError)
+
+        let ulp = IPCRuleValidator.validate(
+            IPCRuleDefinition(bundleId: "com.test.app", minWidth: Double.ulpOfOne)
+        )
+        XCTAssertNil(ulp.minSizeError)
+    }
 }
