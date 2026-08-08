@@ -471,6 +471,40 @@ final class RuntimeArchitectureTests: XCTestCase {
     }
 
     @MainActor
+    func testHandsOffSurfaceFocusDoesNotActivateItsWorkspace() throws {
+        let fixture = try Self.inactiveWorkspaceFocusFixture(
+            policy: .handsOffSurface,
+            pid: 765_760,
+            windowId: 765_860
+        )
+
+        fixture.controller.axEventHandler.handleActivationFactsResolved(fixture.facts)
+
+        XCTAssertEqual(
+            fixture.controller.workspaceManager.activeWorkspace(on: fixture.monitorId)?.id,
+            fixture.activeWorkspaceId
+        )
+        XCTAssertEqual(fixture.controller.workspaceManager.nonManagedFocusToken, fixture.token)
+        XCTAssertNotEqual(fixture.controller.workspaceManager.focusedToken, fixture.token)
+    }
+
+    @MainActor
+    func testFullPolicySurfaceFocusStillActivatesItsWorkspace() throws {
+        let fixture = try Self.inactiveWorkspaceFocusFixture(
+            policy: .full,
+            pid: 765_761,
+            windowId: 765_861
+        )
+
+        fixture.controller.axEventHandler.handleActivationFactsResolved(fixture.facts)
+
+        XCTAssertEqual(
+            fixture.controller.workspaceManager.activeWorkspace(on: fixture.monitorId)?.id,
+            fixture.surfaceWorkspaceId
+        )
+    }
+
+    @MainActor
     func testNiriPointerHoverConfirmedFocusDoesNotMoveMouseToFocusedWindowAfterAnimationSettles() throws {
         let fixture = try Self.managedNiriActivationFixture(
             origin: .pointerHover,
@@ -7059,6 +7093,70 @@ final class RuntimeArchitectureTests: XCTestCase {
             ),
             for: monitor
         )
+    }
+
+    @MainActor
+    private static func inactiveWorkspaceFocusFixture(
+        policy: WindowInteractionPolicy,
+        pid: pid_t,
+        windowId: Int,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws -> (
+        controller: WMController,
+        token: WindowToken,
+        facts: ActivationFacts,
+        monitorId: Monitor.ID,
+        activeWorkspaceId: WorkspaceDescriptor.ID,
+        surfaceWorkspaceId: WorkspaceDescriptor.ID
+    ) {
+        let controller = Self.controller(file: file, line: line)
+        let surfaceWorkspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "2", createIfMissing: true),
+            file: file,
+            line: line
+        )
+        let activeWorkspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true),
+            file: file,
+            line: line
+        )
+        let axRef = AXWindowRef(element: AXUIElementCreateApplication(pid), windowId: windowId)
+        let token = controller.workspaceManager.addWindow(
+            axRef,
+            pid: pid,
+            windowId: windowId,
+            to: surfaceWorkspaceId
+        )
+        controller.workspaceManager.setInteractionPolicy(policy, for: token)
+        _ = controller.workspaceManager.focusWorkspace(named: "1")
+        controller.hasStartedServices = true
+
+        let monitorId = try XCTUnwrap(
+            controller.workspaceManager.monitor(for: surfaceWorkspaceId)?.id,
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            controller.workspaceManager.activeWorkspace(on: monitorId)?.id,
+            activeWorkspaceId,
+            file: file,
+            line: line
+        )
+
+        let facts = ActivationFacts(
+            pid: pid,
+            source: .focusedWindowChanged,
+            origin: .external,
+            observationGeneration: 0,
+            requestedAtSeq: 0,
+            focusedWindow: FocusedWindowFact(
+                axRef: axRef,
+                isFullscreen: false,
+                isSystemModalSurface: false
+            )
+        )
+        return (controller, token, facts, monitorId, activeWorkspaceId, surfaceWorkspaceId)
     }
 
     @MainActor

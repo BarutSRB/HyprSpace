@@ -1762,7 +1762,9 @@ final class AXEventHandler {
 
         let appFullscreen = focusedWindow.isFullscreen
 
-        if let entry = controller.workspaceManager.entry(for: token) {
+        if let entry = controller.workspaceManager.entry(for: token),
+           entry.interactionPolicy.mayFocus
+        {
             discardCreatePlacementContext(for: token.windowId)
             if appFullscreen {
                 suspendManagedWindowForNativeFullscreen(entry)
@@ -1964,9 +1966,10 @@ final class AXEventHandler {
         switch outcome {
         case let .prepared(prepared):
             candidate = prepared
-        case .alreadyTracked:
+        case let .alreadyTracked(trackedToken):
             discardCreatePlacementContext(windowId: windowId)
-            return .handled
+            let policy = controller.workspaceManager.entry(for: trackedToken)?.interactionPolicy ?? .full
+            return policy.mayFocus ? .handled : .rejected
         case .identityRebindPending:
             return .handled
         case let .pending(pendingToken, pendingAXRef, reason):
@@ -2108,6 +2111,7 @@ final class AXEventHandler {
         bindCurrentPidRequest: Bool = true
     ) -> Bool {
         guard let controller else { return false }
+        guard entry.interactionPolicy.mayFocus else { return false }
         if shouldSuppressObservedManagedActivation(
             entry: entry,
             requestDisposition: requestDisposition,

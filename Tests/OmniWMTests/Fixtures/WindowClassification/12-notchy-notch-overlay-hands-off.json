@@ -1,0 +1,62 @@
+{
+  "observation": {
+    "appName": "Notchy",
+    "bundleId": "dev.notchy.app",
+    "input": {
+      "appFullscreen": false,
+      "appName": "Notchy",
+      "ax": {
+        "appPolicy": "accessory",
+        "attributeFetchSucceeded": true,
+        "bundleId": "dev.notchy.app",
+        "hasCloseButton": false,
+        "hasFullscreenButton": false,
+        "hasMinimizeButton": false,
+        "hasZoomButton": false,
+        "role": "AXWindow",
+        "subrole": "AXSystemDialog"
+      },
+      "sizeConstraints": {
+        "isFixed": false,
+        "maxHeight": 0,
+        "maxWidth": 0,
+        "minHeight": 100,
+        "minWidth": 100
+      },
+      "windowServer": {
+        "attributes": 3,
+        "frameHeight": 460,
+        "frameWidth": 900,
+        "frameX": 830,
+        "frameY": 0,
+        "id": 264,
+        "level": 25,
+        "parentId": 0,
+        "pid": 15351,
+        "tags": 35189741660706
+      }
+    },
+    "observedDecision": {
+      "disposition": "floating",
+      "heuristicReasons": [
+        "accessoryWithoutClose"
+      ],
+      "layoutDecisionKind": "fallbackLayout",
+      "source": "heuristic"
+    },
+    "observedPolicy": "handsOffSurface",
+    "rulesRevision": 1,
+    "tokenPid": 15351,
+    "tokenWindowId": 264
+  },
+  "rules": [],
+  "expectedDecision": {
+    "disposition": "floating",
+    "source": "heuristic",
+    "heuristicReasons": [
+      "accessoryWithoutClose"
+    ],
+    "layoutDecisionKind": "fallbackLayout"
+  },
+  "expectedPolicy": "handsOffSurface"
+}
