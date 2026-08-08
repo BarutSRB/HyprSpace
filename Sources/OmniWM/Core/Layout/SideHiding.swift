@@ -72,6 +72,11 @@ struct HiddenWindowPlacement {
 }
 
 enum HiddenWindowPlacementResolver {
+    static func effectiveReveal(baseReveal: CGFloat, scale: CGFloat) -> CGFloat {
+        guard baseReveal > 0 else { return 0 }
+        return max(baseReveal / max(1.0, scale), 1.0)
+    }
+
     static func physicalScreenEdgeOrigin(
         for size: CGSize,
         requestedSide: HideSide,
@@ -81,7 +86,7 @@ enum HiddenWindowPlacementResolver {
         monitor: HiddenPlacementMonitorContext,
         monitors: [HiddenPlacementMonitorContext]
     ) -> CGPoint {
-        let reveal = baseReveal / max(1.0, scale)
+        let reveal = effectiveReveal(baseReveal: baseReveal, scale: scale)
 
         func origin(for side: HideSide) -> CGPoint {
             switch side {
@@ -128,7 +133,7 @@ enum HiddenWindowPlacementResolver {
         monitor: HiddenPlacementMonitorContext,
         monitors: [HiddenPlacementMonitorContext]
     ) -> HiddenWindowPlacement {
-        let reveal = baseReveal / max(1.0, scale)
+        let reveal = effectiveReveal(baseReveal: baseReveal, scale: scale)
 
         func origin(for edge: AxisHideEdge) -> CGPoint {
             switch orientation {

@@ -389,7 +389,7 @@ final class NiriSingleWindowFitEngineTests: XCTestCase {
         XCTAssertEqual(frame, CGRect(x: 274, y: 16, width: 700, height: 760))
     }
 
-    func testHiddenPlacementKeepsOnePhysicalPixelReveal() {
+    func testHiddenPlacementKeepsOnePointReveal() {
         let monitor = HiddenPlacementMonitorContext(
             id: Monitor.ID(displayId: 1),
             frame: CGRect(x: 0, y: 0, width: 1280, height: 800),
@@ -409,7 +409,7 @@ final class NiriSingleWindowFitEngineTests: XCTestCase {
         )
         let frame = placement.frame(for: size)
 
-        XCTAssertEqual(frame.minX, monitor.visibleFrame.maxX - 0.5)
+        XCTAssertEqual(frame.minX, monitor.visibleFrame.maxX - 1.0)
         XCTAssertEqual(frame.minY, 40)
         XCTAssertEqual(frame.width, size.width)
         XCTAssertEqual(frame.height, size.height)
