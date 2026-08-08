@@ -266,6 +266,7 @@ enum StateReducer {
             for workspaceId in workspaceIds {
                 focusSession.lastTiledFocusedByWorkspace.removeValue(forKey: workspaceId)
                 focusSession.lastFloatingFocusedByWorkspace.removeValue(forKey: workspaceId)
+                focusSession.lastFocusedByWorkspace.removeValue(forKey: workspaceId)
             }
             setFocusSession(focusSession, current: currentSnapshot.focusSession, plan: &plan)
 

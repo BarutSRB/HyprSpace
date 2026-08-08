@@ -268,6 +268,7 @@ final class WorkspaceManager {
         let current = world.focus
         return current.lastTiledFocusedByWorkspace != previous.lastTiledFocusedByWorkspace
             || current.lastFloatingFocusedByWorkspace != previous.lastFloatingFocusedByWorkspace
+            || current.lastFocusedByWorkspace != previous.lastFocusedByWorkspace
             || current.lastTiledFocusedToken != previous.lastTiledFocusedToken
             || current.nonManagedFocusToken != previous.nonManagedFocusToken
             || current.suppressedFocusToken != previous.suppressedFocusToken
@@ -1343,12 +1344,14 @@ final class WorkspaceManager {
     @discardableResult
     func rememberFocus(_ token: WindowToken, in workspaceId: WorkspaceDescriptor.ID) -> Bool {
         let mode = windowMode(for: token) ?? .tiling
-        let changed = switch mode {
+        let modeSpecificChanged = switch mode {
         case .tiling:
             world.focus.lastTiledFocusedByWorkspace[workspaceId] != token
         case .floating:
             world.focus.lastFloatingFocusedByWorkspace[workspaceId] != token
         }
+        let changed = world.focus.lastFocusedByWorkspace[workspaceId] != token
+            || modeSpecificChanged
         guard changed else { return false }
         recordReconcileEvent(
             .focusRemembered(
@@ -1482,6 +1485,13 @@ final class WorkspaceManager {
     }
 
     func resolveWorkspaceFocusToken(in workspaceId: WorkspaceDescriptor.ID) -> WindowToken? {
+        if let mostRecent = world.focus.lastFocusedByWorkspace[workspaceId],
+           let mode = windowMode(for: mostRecent),
+           let remembered = eligibleFocusCandidate(mostRecent, in: workspaceId, mode: mode)
+        {
+            return remembered
+        }
+
         if let remembered = eligibleFocusCandidate(
             world.focus.lastTiledFocusedByWorkspace[workspaceId],
             in: workspaceId,
@@ -3272,6 +3282,7 @@ final class WorkspaceManager {
         let rememberedIds = toRemove.filter {
             world.focus.lastTiledFocusedByWorkspace[$0] != nil
                 || world.focus.lastFloatingFocusedByWorkspace[$0] != nil
+                || world.focus.lastFocusedByWorkspace[$0] != nil
         }
         if !rememberedIds.isEmpty {
             recordReconcileEvent(.focusForgotten(workspaceIds: rememberedIds, source: .workspaceManager))
