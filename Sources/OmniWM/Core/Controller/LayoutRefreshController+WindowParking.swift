@@ -1,10 +1,39 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Copyright (C) 2026 BarutSRB — https://github.com/BarutSRB/OmniWM
 
+import CoreGraphics
 import Foundation
 
 @MainActor
 extension LayoutRefreshController {
+    /// Only the corner park - inactive workspaces and the scratchpad - runs into the clamp macOS
+    /// puts on leaving the bottom of a display. Layout-transient hides stay on their own axis,
+    /// land exactly where they are told, and have to keep following the target so scrolling
+    /// animations stay in step.
+    func isSettledCornerPark(
+        for entry: WindowState,
+        frame: CGRect,
+        monitor: Monitor,
+        reason: HideReason
+    ) -> Bool {
+        guard let controller else { return false }
+        switch reason {
+        case .workspaceInactive,
+             .scratchpad:
+            break
+        case .layoutTransient:
+            return false
+        }
+
+        return HiddenWindowPlacementResolver.isParked(
+            frame: frame,
+            baseReveal: Self.hiddenEdgeReveal(isZoomApp: isZoomApp(entry.pid)),
+            scale: backingScale(for: monitor),
+            monitor: HiddenPlacementMonitorContext(monitor),
+            monitors: controller.workspaceManager.monitors.map(HiddenPlacementMonitorContext.init)
+        )
+    }
+
     func applyPositionPlans(_ plans: [WindowPositionPlan]) {
         guard let controller, !plans.isEmpty else { return }
 
