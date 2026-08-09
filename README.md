@@ -50,6 +50,23 @@
       <sub>@Guria</sub>
     </td>
     <td align="center" valign="top">
+      <a href="https://github.com/finanzguru">
+        <img src="https://github.com/finanzguru.png?size=96" width="72" alt="Finanzguru">
+      </a>
+      <br>
+      <a href="https://github.com/finanzguru"><strong>Finanzguru</strong></a>
+      <br>
+      <sub>━━━━━━━━</sub>
+      <br>
+      <a href="https://github.com/jthomaschewski" title="Janek Thomaschewski">
+        <img src="https://github.com/jthomaschewski.png?size=96" width="72" alt="Janek Thomaschewski">
+      </a>
+      <br>
+      <a href="https://github.com/jthomaschewski"><strong>Janek Thomaschewski</strong></a>
+      <br>
+      <sub>@jthomaschewski</sub>
+    </td>
+    <td align="center" valign="top">
       <a href="https://github.com/github">
         <img src="https://avatars.githubusercontent.com/u/9919?v=4" width="72" alt="GitHub">
       </a>
@@ -266,6 +283,9 @@
       <a href="https://github.com/janhesters" title="Jan Hesters">
         <img src="https://github.com/janhesters.png?size=96" width="72" alt="Jan Hesters">
       </a>
+      <a href="https://github.com/jthomaschewski" title="Janek Thomaschewski">
+        <img src="https://github.com/jthomaschewski.png?size=96" width="72" alt="Janek Thomaschewski">
+      </a>
       <a href="https://github.com/jcardama" title="Jose Cardama">
         <img src="https://github.com/jcardama.png?size=96" width="72" alt="Jose Cardama">
       </a>
@@ -307,6 +327,9 @@
       </a>
       <a href="https://github.com/Yang-Yiming" title="Yang-Yiming">
         <img src="https://github.com/Yang-Yiming.png?size=96" width="72" alt="Yang-Yiming">
+      </a>
+      <a href="https://github.com/YuriNachos" title="Yuri Chukhlib">
+        <img src="https://github.com/YuriNachos.png?size=96" width="72" alt="Yuri Chukhlib">
       </a>
       <a href="https://github.com/zicochaos" title="Zicochaos">
         <img src="https://github.com/zicochaos.png?size=96" width="72" alt="Zicochaos">
