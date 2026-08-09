@@ -179,6 +179,22 @@ final class IntentLedger {
         return intent.asManagedFocusRequest!
     }
 
+    @discardableResult
+    func retargetManagedRequest(
+        requestId: IntentID,
+        token: WindowToken,
+        to workspaceId: WorkspaceDescriptor.ID
+    ) -> ManagedFocusRequest? {
+        guard let index = entries.firstIndex(where: { $0.id == requestId && $0.phase == .pending }),
+              case let .focusWindow(currentToken, _) = entries[index].kind,
+              currentToken == token
+        else {
+            return nil
+        }
+        entries[index].kind = .focusWindow(token: token, workspaceId: workspaceId)
+        return entries[index].asManagedFocusRequest
+    }
+
     func recordRetry(
         requestId: UInt64,
         source: ActivationEventSource,

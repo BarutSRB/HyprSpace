@@ -532,6 +532,12 @@ extension AXEventHandler {
         return true
     }
 
+    func retryAdmissionAfterFrameChangeRequiresEarlyReturn(windowId: UInt32) -> Bool {
+        guard admissionRetryStateByWindowId[windowId] != nil else { return false }
+        let wasTrackedBeforeRetry = controller?.workspaceManager.entry(forWindowId: Int(windowId)) != nil
+        return retryAdmissionAfterFrameChange(windowId: windowId) && !wasTrackedBeforeRetry
+    }
+
     func finishAdmissionRetryAfterTracking(windowId: UInt32) {
         finishAdmissionRetry(windowId: windowId)
     }

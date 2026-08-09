@@ -930,6 +930,76 @@ final class WorkspaceNavigationHandler {
     }
 
     @discardableResult
+    func rebindFloatingWindow(
+        handle: WindowHandle,
+        toWorkspaceId targetWorkspaceId: WorkspaceDescriptor.ID,
+        onMonitor targetMonitor: Monitor
+    ) -> Bool {
+        guard let controller else { return false }
+        let workspaceManager = controller.workspaceManager
+        let token = handle.id
+        guard let entry = workspaceManager.entry(for: token),
+              workspaceManager.handle(for: token) === handle,
+              entry.mode == .floating,
+              entry.workspaceId != targetWorkspaceId,
+              workspaceManager.descriptor(for: targetWorkspaceId) != nil,
+              workspaceManager.monitor(byId: targetMonitor.id) != nil,
+              workspaceManager.monitorId(for: entry.workspaceId) != targetMonitor.id,
+              workspaceManager.monitorId(for: targetWorkspaceId) == targetMonitor.id,
+              workspaceManager.activeWorkspaceOrFirst(on: targetMonitor.id)?.id == targetWorkspaceId
+        else {
+            return false
+        }
+
+        let sourceWorkspaceId = entry.workspaceId
+        let activeRequest = controller.intentLedger.activeManagedRequest
+        let matchingRequest = activeRequest?.token == token ? activeRequest : nil
+        let hasNewerUnrelatedRequest = activeRequest.map { $0.token != token } ?? false
+        let hasUnrelatedPendingFocus = workspaceManager.pendingFocusedToken.map { $0 != token } ?? false
+        let shouldRehomeFocusedWindow = workspaceManager.focusedToken == token
+            && !hasNewerUnrelatedRequest
+            && !hasUnrelatedPendingFocus
+
+        controller.reassignManagedWindow(token, to: targetWorkspaceId)
+        guard workspaceManager.workspace(for: token) == targetWorkspaceId else { return false }
+
+        _ = workspaceManager.resolveAndSetWorkspaceFocusToken(in: sourceWorkspaceId)
+
+        if let matchingRequest {
+            guard let retargetedRequest = controller.intentLedger.retargetManagedRequest(
+                requestId: matchingRequest.requestId,
+                token: token,
+                to: targetWorkspaceId
+            ) else {
+                return true
+            }
+            if shouldRehomeFocusedWindow {
+                _ = workspaceManager.rehomeManagedFocusRequest(
+                    token,
+                    in: targetWorkspaceId,
+                    onMonitor: targetMonitor.id,
+                    requestId: retargetedRequest.requestId
+                )
+            } else {
+                _ = workspaceManager.beginManagedFocusRequest(
+                    token,
+                    in: targetWorkspaceId,
+                    onMonitor: targetMonitor.id,
+                    requestId: retargetedRequest.requestId
+                )
+            }
+        } else if shouldRehomeFocusedWindow {
+            _ = workspaceManager.setManagedFocus(
+                token,
+                in: targetWorkspaceId,
+                onMonitor: targetMonitor.id
+            )
+        }
+
+        return true
+    }
+
+    @discardableResult
     func moveWindow(
         handle: WindowHandle,
         toWorkspaceId targetWsId: WorkspaceDescriptor.ID

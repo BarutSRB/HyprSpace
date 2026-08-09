@@ -1124,6 +1124,81 @@ final class FloatingCreatePlacementTests: XCTestCase {
         )
     }
 
+    func testFrameChangeRetryKeepsCapturedInactivePlacementWhenAdmissionCompletes() throws {
+        let fixture = try makeTwoMonitorFixture()
+        let sourceFrame = CGRect(x: 120, y: 120, width: 640, height: 480)
+        let windowId: UInt32 = 614
+        let token = WindowToken(pid: 6_140, windowId: Int(windowId))
+        let axRef = axRef(token.pid, token.windowId)
+        let controller = fixture.controller
+        let destinationWorkspace = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "7", createIfMissing: true)
+        )
+        XCTAssertNotEqual(
+            controller.workspaceManager.activeWorkspace(on: fixture.secondary.id)?.id,
+            destinationWorkspace
+        )
+        controller.axEventHandler.createPlacementContextsByWindowId[windowId] = placementContext(
+            interactionWorkspaceId: destinationWorkspace,
+            interactionMonitorId: fixture.secondary.id
+        )
+        controller.axEventHandler.admissionRetryStateByWindowId[windowId] = AdmissionRetryState(
+            expectedToken: token,
+            axRef: axRef,
+            reason: .degenerateGeometry,
+            attempt: 1,
+            generation: 1,
+            trigger: .candidate(token: token, axRef: axRef),
+            exhausted: false,
+            task: nil
+        )
+
+        var admitted = false
+        controller.axEventHandler.windowInfoProvider = { [weak controller] queriedWindowId in
+            guard let controller, queriedWindowId == windowId else { return nil }
+            if !admitted {
+                admitted = true
+                controller.workspaceManager.addWindow(
+                    axRef,
+                    pid: token.pid,
+                    windowId: token.windowId,
+                    to: destinationWorkspace,
+                    mode: .floating
+                )
+            }
+            return WindowServerInfo(
+                id: windowId,
+                pid: token.pid,
+                level: 0,
+                frame: sourceFrame
+            )
+        }
+
+        let requiresEarlyReturn = controller.axEventHandler
+            .retryAdmissionAfterFrameChangeRequiresEarlyReturn(windowId: windowId)
+        let finalWorkspace = controller.workspaceManager.workspace(for: token)
+        let retryFinished = controller.axEventHandler.admissionRetryStateByWindowId[windowId] == nil
+        let admittedEntry = try XCTUnwrap(controller.workspaceManager.entry(for: token))
+        controller.axEventHandler.updateFloatingWindowGeometryAndMonitorMembership(
+            entry: admittedEntry,
+            frame: sourceFrame
+        )
+        let workspaceAfterIndependentFrame = controller.workspaceManager.workspace(for: token)
+        controller.axEventHandler.windowInfoProvider = { _ in nil }
+        _ = controller.workspaceManager.removeWindow(pid: token.pid, windowId: token.windowId)
+        controller.axEventHandler.resetCreatedWindowRetryState()
+        controller.layoutRefreshController.resetState()
+
+        XCTAssertTrue(admitted)
+        XCTAssertTrue(retryFinished)
+        XCTAssertTrue(requiresEarlyReturn)
+        XCTAssertEqual(
+            finalWorkspace,
+            destinationWorkspace
+        )
+        XCTAssertEqual(workspaceAfterIndependentFrame, fixture.primaryWorkspace)
+    }
+
     func testExpiredCreateContextIsNotConsumed() throws {
         let fixture = try makeTwoMonitorFixture()
         let windowId: UInt32 = 602

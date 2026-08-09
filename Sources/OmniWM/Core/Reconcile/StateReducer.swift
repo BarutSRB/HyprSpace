@@ -55,7 +55,7 @@ enum StateReducer {
                 workspaceId: workspaceId
             )
 
-        case let .workspaceAssigned(token, _, workspaceId, monitorId, _):
+        case let .workspaceAssigned(token, sourceWorkspaceId, workspaceId, monitorId, _):
             plan.observedState = baseObservedState(
                 from: existingEntry,
                 workspaceId: workspaceId,
@@ -70,6 +70,7 @@ enum StateReducer {
             if let focusSession = reassigningFocusState(
                 from: currentSnapshot.focusSession,
                 token: token,
+                sourceWorkspaceId: sourceWorkspaceId,
                 workspaceId: workspaceId
             ) {
                 plan.focusSession = focusSession
@@ -604,16 +605,34 @@ enum StateReducer {
     private static func reassigningFocusState(
         from focusSession: FocusSessionSnapshot,
         token: WindowToken,
+        sourceWorkspaceId: WorkspaceDescriptor.ID?,
         workspaceId: WorkspaceDescriptor.ID
     ) -> FocusSessionSnapshot? {
-        guard focusSession.pendingManagedFocus.token == token,
-              let pendingWorkspaceId = focusSession.pendingManagedFocus.workspaceId,
-              pendingWorkspaceId != workspaceId
-        else {
-            return nil
-        }
         var focusSession = focusSession
-        focusSession.clearPendingManagedFocus()
-        return focusSession
+        var changed = false
+
+        if let sourceWorkspaceId, sourceWorkspaceId != workspaceId {
+            if focusSession.lastTiledFocusedByWorkspace[sourceWorkspaceId] == token {
+                focusSession.lastTiledFocusedByWorkspace.removeValue(forKey: sourceWorkspaceId)
+                changed = true
+            }
+            if focusSession.lastFloatingFocusedByWorkspace[sourceWorkspaceId] == token {
+                focusSession.lastFloatingFocusedByWorkspace.removeValue(forKey: sourceWorkspaceId)
+                changed = true
+            }
+            if focusSession.lastFocusedByWorkspace[sourceWorkspaceId] == token {
+                focusSession.lastFocusedByWorkspace.removeValue(forKey: sourceWorkspaceId)
+                changed = true
+            }
+        }
+
+        if focusSession.pendingManagedFocus.token == token,
+           let pendingWorkspaceId = focusSession.pendingManagedFocus.workspaceId,
+           pendingWorkspaceId != workspaceId
+        {
+            changed = focusSession.clearPendingManagedFocus() || changed
+        }
+
+        return changed ? focusSession : nil
     }
 }

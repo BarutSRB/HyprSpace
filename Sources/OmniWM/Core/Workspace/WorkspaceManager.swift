@@ -483,7 +483,7 @@ final class WorkspaceManager {
     }
 
     @discardableResult
-    private func applyFocusReconcileEvent(_ event: WMEvent) -> Bool {
+    func applyFocusReconcileEvent(_ event: WMEvent) -> Bool {
         let previousFocusSession = world.focus
         recordReconcileEvent(event)
         return world.focus != previousFocusSession
@@ -954,30 +954,6 @@ final class WorkspaceManager {
             notifySessionStateChanged()
         }
         drainPendingRuntimeMonitorOverrideClears()
-        return changed
-    }
-
-    @discardableResult
-    func beginManagedFocusRequest(
-        _ token: WindowToken,
-        in workspaceId: WorkspaceDescriptor.ID,
-        onMonitor monitorId: Monitor.ID? = nil,
-        requestId: UInt64
-    ) -> Bool {
-        let normalizedMonitorId = monitorId.flatMap { self.monitor(byId: $0)?.id }
-        var changed = rememberFocus(token, in: workspaceId)
-        changed = applyFocusReconcileEvent(
-            .managedFocusRequested(
-                token: token,
-                workspaceId: workspaceId,
-                monitorId: normalizedMonitorId,
-                requestId: requestId,
-                source: .workspaceManager
-            )
-        ) || changed
-        if changed {
-            notifySessionStateChanged()
-        }
         return changed
     }
 
@@ -3810,10 +3786,11 @@ final class WorkspaceManager {
     }
 
     @discardableResult
-    private func updateInteractionMonitor(
+    func updateInteractionMonitor(
         _ monitorId: Monitor.ID?,
         preservePrevious: Bool,
-        notify: Bool
+        notify: Bool,
+        drainRuntimeOverrides: Bool = true
     ) -> Bool {
         guard world.focus.interactionMonitorId != monitorId else { return false }
         let previousWorkspaceId = world.focus.interactionMonitorId
@@ -3838,7 +3815,9 @@ final class WorkspaceManager {
         if notify {
             notifySessionStateChanged()
         }
-        drainPendingRuntimeMonitorOverrideClears()
+        if drainRuntimeOverrides {
+            drainPendingRuntimeMonitorOverrideClears()
+        }
         return true
     }
 
@@ -3872,7 +3851,7 @@ final class WorkspaceManager {
         }
     }
 
-    private func notifySessionStateChanged() {
+    func notifySessionStateChanged() {
         onSessionStateChanged?()
     }
 }

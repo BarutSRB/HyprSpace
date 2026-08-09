@@ -969,12 +969,7 @@ final class AXEventHandler {
     private func handleFrameChanged(windowId: UInt32) {
         guard let controller else { return }
         guard !controller.isOwnedWindow(windowNumber: Int(windowId)) else { return }
-        let retriedAdmission = retryAdmissionAfterFrameChange(windowId: windowId)
-        if controller.workspaceManager.entry(forWindowId: Int(windowId)) == nil,
-           retriedAdmission
-        {
-            return
-        }
+        if retryAdmissionAfterFrameChangeRequiresEarlyReturn(windowId: windowId) { return }
         if let trackedEntry = controller.workspaceManager.entry(forWindowId: Int(windowId)),
            trackedEntry.mode == .tiling,
            controller.niriLayoutHandler.hasScrollAnimation(for: trackedEntry.workspaceId)
@@ -1000,8 +995,10 @@ final class AXEventHandler {
             if let frame = focusedObservedFrame ?? observedFrame(for: entry),
                !shouldSuppressFrameChangedRelayout(for: entry, observedFrame: frame)
             {
-                controller.workspaceManager.updateFloatingGeometry(frame: frame, for: token)
-                reassignFloatingWindowToContainingMonitor(entry: entry, frame: frame)
+                updateFloatingWindowGeometryAndMonitorMembership(
+                    entry: entry,
+                    frame: frame
+                )
             }
             return
         }
