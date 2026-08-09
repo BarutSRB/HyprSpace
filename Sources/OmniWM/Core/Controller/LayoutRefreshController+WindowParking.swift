@@ -6,13 +6,12 @@ import Foundation
 
 @MainActor
 extension LayoutRefreshController {
-    /// Only the corner park - inactive workspaces and the scratchpad - runs into the clamp macOS
-    /// puts on leaving the bottom of a display. Layout-transient hides stay on their own axis,
-    /// land exactly where they are told, and have to keep following the target so scrolling
-    /// animations stay in step.
+    /// Layout-transient hides are excluded: they stay on their own axis, land exactly, and have to
+    /// keep following the target so scrolling animations stay in step.
     func isSettledCornerPark(
         for entry: WindowState,
         frame: CGRect,
+        target: CGPoint,
         monitor: Monitor,
         reason: HideReason
     ) -> Bool {
@@ -27,6 +26,7 @@ extension LayoutRefreshController {
 
         return HiddenWindowPlacementResolver.isParked(
             frame: frame,
+            target: target,
             baseReveal: Self.hiddenEdgeReveal(isZoomApp: isZoomApp(entry.pid)),
             scale: backingScale(for: monitor),
             monitor: HiddenPlacementMonitorContext(monitor),

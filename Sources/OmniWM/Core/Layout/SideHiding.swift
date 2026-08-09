@@ -86,18 +86,15 @@ enum HiddenWindowPlacementResolver {
         return max(baseReveal / max(1.0, scale), 1.0)
     }
 
-    /// Parks a window that belongs to an inactive workspace, or to the scratchpad.
+    /// Parks a window of an inactive workspace, or of the scratchpad, past a bottom corner.
     ///
-    /// The window leaves the display diagonally, past one of its bottom corners, so both axes
-    /// run off the screen at once. macOS refuses a placement that is entirely off-screen and
-    /// snaps the window back, so a `reveal` of the window has to stay on the display: taking it
-    /// out through a corner makes that residue a `reveal`-sized square in the corner instead of
-    /// a `reveal`-wide line down the full height of the window.
+    /// macOS snaps back a placement that is entirely off-screen, so a `reveal` of the window has
+    /// to stay on the display. Leaving through a corner runs both axes off at once, which makes
+    /// that residue a square rather than a line down the window's full height.
     ///
-    /// The corner has to have empty space behind it, otherwise the parked body lands on a
-    /// neighbouring display. When both corners are occupied - a display directly below catches
-    /// either of them - parking falls back to the side edges, which keep the window's own row
-    /// and never reach the display below.
+    /// A corner needs empty space behind it or the parked body lands on a neighbouring display,
+    /// so candidates are tried in preference order. A display directly below occupies both
+    /// corners, and parking falls back to the side edges, which never reach it.
     static func physicalScreenEdgeOrigin(
         for size: CGSize,
         requestedSide: HideSide,
@@ -129,12 +126,8 @@ enum HiddenWindowPlacementResolver {
         )
     }
 
-    /// Origin that pushes the window past a bottom corner of the display itself.
-    ///
-    /// Both axes are measured against `frame` rather than `visibleFrame`: the placement macOS
-    /// constrains is the one against the physical display, and referencing the full frame keeps
-    /// the residue at the very edge, underneath a Dock that sits on that edge, rather than
-    /// stranding it in the strip the Dock reserves.
+    /// Measured against `frame` rather than `visibleFrame`, which keeps the residue at the very
+    /// edge - underneath a Dock sitting there - instead of in the strip the Dock reserves.
     private static func bottomCornerOrigin(
         for size: CGSize,
         side: HideSide,
@@ -204,27 +197,38 @@ enum HiddenWindowPlacementResolver {
         return bestOrigin
     }
 
-    /// Whether `frame` is already parked as deeply as it is going to get.
+    /// Strip of a corner-parked window macOS holds back on screen, refusing to take the top edge
+    /// past the bottom of a display. Measured at 32pt for Ghostty and 41pt for Chrome, so it
+    /// tracks the title bar; overshooting the bound costs a redundant park write, nothing visible.
+    static let maxClampedParkResidue: CGFloat = 120
+
+    /// Whether `frame` is already parked as deeply as `target` is going to get it.
     ///
-    /// macOS clamps how far a window may leave the bottom of a display - it keeps a strip of the
-    /// top edge on screen, and how deep that strip is differs per window - so a settled park
-    /// usually sits above the origin that was asked for. Comparing against that origin would
-    /// never match, and the park would be rewritten on every refresh, so a park counts as done
-    /// once only a hairline of the window is left on its own display and none of its body has
-    /// landed on another one.
+    /// Only a corner target settles short of its origin, and only it needs this: every other park
+    /// lands exactly and is caught by comparing origins. Anything not in the target's column or
+    /// not pushed past the bottom gets parked again - a side-edge park left over from when a
+    /// display blocked both corners, or a window an app has dragged back up.
     static func isParked(
         frame: CGRect,
+        target: CGPoint,
         baseReveal: CGFloat,
         scale: CGFloat,
         monitor: HiddenPlacementMonitorContext,
         monitors: [HiddenPlacementMonitorContext]
     ) -> Bool {
         let tolerance: CGFloat = 0.01
-        let reveal = effectiveReveal(baseReveal: baseReveal, scale: scale) + tolerance
-        let onScreen = frame.intersection(monitor.frame)
-        let showsHairlineAtMost = onScreen.isNull || onScreen.width <= reveal || onScreen.height <= reveal
+        let reveal = effectiveReveal(baseReveal: baseReveal, scale: scale)
+        let bottom = monitor.frame.minY
 
-        return showsHairlineAtMost && overlapArea(for: frame, monitor: monitor, monitors: monitors) == 0
+        guard abs(target.y - (bottom - frame.height + reveal)) <= tolerance else { return false }
+        // The sideways push is always granted, and which corner is free flips as displays come
+        // and go, so a window outside the target's column is parked against the wrong edge.
+        guard abs(frame.minX - target.x) <= tolerance else { return false }
+        guard frame.maxY >= bottom + reveal - tolerance,
+              frame.maxY <= bottom + maxClampedParkResidue
+        else { return false }
+
+        return overlapArea(for: frame, monitor: monitor, monitors: monitors) == 0
     }
 
     static func placement(

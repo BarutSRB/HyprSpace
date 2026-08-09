@@ -2903,10 +2903,9 @@ import QuartzCore
             )
         }
 
-        // A corner park asks to go deeper than macOS allows, so the window settles above the
-        // origin we asked for. Keep it where it settled instead of re-issuing an origin the
-        // window server will never grant, which no park write could ever verify.
-        if isSettledCornerPark(for: entry, frame: frame, monitor: monitor, reason: reason) {
+        // A corner park settles above the origin it asked for, and re-issuing an origin macOS will
+        // never grant leaves a park write that can never verify.
+        if isSettledCornerPark(for: entry, frame: frame, target: origin, monitor: monitor, reason: reason) {
             return .alreadyHidden(WindowPositionPlan(entry: entry, frame: frame), hiddenState: hiddenState)
         }
 

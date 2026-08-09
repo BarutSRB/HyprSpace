@@ -6,9 +6,8 @@ import Foundation
 @testable import OmniWM
 import XCTest
 
-/// Windows belonging to an inactive workspace are parked past a bottom corner of their display,
-/// so the residue macOS insists on keeping on screen is a single square rather than a hairline
-/// running the whole height of the window.
+/// Inactive-workspace windows park past a bottom corner, so the residue macOS insists on keeping
+/// on screen is a square rather than a hairline down the whole height of the window.
 final class HiddenWindowCornerParkTests: XCTestCase {
     private let reveal: CGFloat = 1.0
 
@@ -55,8 +54,8 @@ final class HiddenWindowCornerParkTests: XCTestCase {
         XCTAssertEqual(origin.y, main.frame.minY - size.height + reveal)
     }
 
-    /// The residue belongs at the physical bottom edge, underneath a Dock parked on that edge,
-    /// not in the strip the Dock reserves - `visibleFrame` would leave it beside the Dock.
+    /// The residue belongs at the physical bottom edge, under a Dock parked there, not beside it
+    /// in the strip the Dock reserves.
     func testParkClearsTheDockStripInsteadOfStoppingAtIt() {
         let docked = HiddenPlacementMonitorContext(
             id: Monitor.ID(displayId: 900_300),
@@ -73,8 +72,8 @@ final class HiddenWindowCornerParkTests: XCTestCase {
         )
     }
 
-    /// Laptop display sitting to the left of, and lower than, an external one. Leaving through
-    /// the right corner would drop the whole body onto the external display.
+    /// Laptop display left of, and lower than, an external one: the right corner would drop the
+    /// whole body onto the external display.
     func testParkAvoidsTheCornerThatSpillsOntoANeighbouringDisplay() {
         let builtIn = HiddenPlacementMonitorContext(
             id: Monitor.ID(displayId: 900_100),
@@ -95,9 +94,8 @@ final class HiddenWindowCornerParkTests: XCTestCase {
         XCTAssertTrue(CGRect(origin: origin, size: size).intersection(main.frame).isNull)
     }
 
-    /// macOS keeps a strip of the window's top edge on screen - 32pt for one app, 41pt for the
-    /// next - so a settled park sits above the origin it was given. It still counts as parked,
-    /// otherwise the unreachable origin is re-requested on every refresh and never verifies.
+    /// macOS keeps a strip of the top edge on screen - 32pt for one app, 41pt for the next - so a
+    /// settled park sits above the origin it was given, and still counts as parked.
     func testClampedParkCountsAsParked() {
         let size = CGSize(width: 3360, height: 1860)
         let clamped = CGRect(
@@ -108,6 +106,7 @@ final class HiddenWindowCornerParkTests: XCTestCase {
         XCTAssertTrue(
             HiddenWindowPlacementResolver.isParked(
                 frame: clamped,
+                target: park(size: size, side: .right, targetY: 0, monitor: main, monitors: [main]),
                 baseReveal: reveal,
                 scale: 2.0,
                 monitor: main,
@@ -122,6 +121,13 @@ final class HiddenWindowCornerParkTests: XCTestCase {
         XCTAssertFalse(
             HiddenWindowPlacementResolver.isParked(
                 frame: onScreen,
+                target: park(
+                    size: onScreen.size,
+                    side: .right,
+                    targetY: 0,
+                    monitor: main,
+                    monitors: [main]
+                ),
                 baseReveal: reveal,
                 scale: 2.0,
                 monitor: main,
@@ -130,8 +136,7 @@ final class HiddenWindowCornerParkTests: XCTestCase {
         )
     }
 
-    /// Parked against an edge that a newly attached display now sits behind: the hairline is
-    /// still a hairline, but the body is on that display, so the park has to be redone.
+    /// A newly attached display now sits behind the parked edge, so the body is on it.
     func testParkSpillingOntoAnotherDisplayDoesNotCountAsParked() {
         let toTheRight = HiddenPlacementMonitorContext(
             id: Monitor.ID(displayId: 900_500),
@@ -147,10 +152,52 @@ final class HiddenWindowCornerParkTests: XCTestCase {
         XCTAssertFalse(
             HiddenWindowPlacementResolver.isParked(
                 frame: parked,
+                target: park(size: size, side: .right, targetY: 0, monitor: main, monitors: [main, toTheRight]),
                 baseReveal: reveal,
                 scale: 2.0,
                 monitor: main,
                 monitors: [main, toTheRight]
+            )
+        )
+    }
+
+    /// A side-edge park is only right while a display blocks both corners. Unplug it and the
+    /// leftover park - a hairline down the whole window - has to be redone, not counted as settled.
+    func testSideEdgeParkIsNotSettledOnceTheBlockingDisplayIsRemoved() {
+        let top = HiddenPlacementMonitorContext(
+            id: Monitor.ID(displayId: 900_400),
+            frame: CGRect(x: 0, y: 0, width: 1000, height: 1000),
+            visibleFrame: CGRect(x: 0, y: 0, width: 1000, height: 1000)
+        )
+        let size = CGSize(width: 400, height: 300)
+        let sideParked = CGRect(origin: CGPoint(x: top.visibleFrame.maxX - reveal, y: 200), size: size)
+        let cornerTarget = park(size: size, side: .right, targetY: 200, monitor: top, monitors: [top])
+
+        XCTAssertFalse(
+            HiddenWindowPlacementResolver.isParked(
+                frame: sideParked,
+                target: cornerTarget,
+                baseReveal: reveal,
+                scale: 2.0,
+                monitor: top,
+                monitors: [top]
+            )
+        )
+    }
+
+    func testFullyOffScreenFrameIsNotSettledWhenARevealIsRequired() {
+        let size = CGSize(width: 800, height: 600)
+        let target = park(size: size, side: .right, targetY: 0, monitor: main, monitors: [main])
+        let belowTheDisplay = CGRect(origin: CGPoint(x: target.x, y: main.frame.minY - size.height - 40), size: size)
+
+        XCTAssertFalse(
+            HiddenWindowPlacementResolver.isParked(
+                frame: belowTheDisplay,
+                target: target,
+                baseReveal: reveal,
+                scale: 2.0,
+                monitor: main,
+                monitors: [main]
             )
         )
     }
@@ -166,6 +213,15 @@ final class HiddenWindowCornerParkTests: XCTestCase {
         XCTAssertTrue(
             HiddenWindowPlacementResolver.isParked(
                 frame: flush,
+                target: HiddenWindowPlacementResolver.physicalScreenEdgeOrigin(
+                    for: size,
+                    requestedSide: .right,
+                    targetY: 0,
+                    baseReveal: 0,
+                    scale: 2.0,
+                    monitor: main,
+                    monitors: [main]
+                ),
                 baseReveal: 0,
                 scale: 2.0,
                 monitor: main,
@@ -174,8 +230,8 @@ final class HiddenWindowCornerParkTests: XCTestCase {
         )
     }
 
-    /// A display directly below catches both bottom corners. Side parking keeps the window's own
-    /// row, which that display never covers, so it beats leaking a column onto it.
+    /// A display directly below catches both corners; side parking keeps the window's own row,
+    /// which that display never covers.
     func testParkFallsBackToTheSideEdgeWhenBothCornersSpill() {
         let top = HiddenPlacementMonitorContext(
             id: Monitor.ID(displayId: 900_400),
