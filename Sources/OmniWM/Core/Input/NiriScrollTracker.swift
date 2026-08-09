@@ -22,7 +22,9 @@ struct NiriScrollTracker {
 
         let clamped = accumulator.clamped(to: (-127 * tick) ... (127 * tick))
         let ticks = Int(clamped / tick)
-        accumulator.formTruncatingRemainder(dividingBy: tick)
+        // Consume exactly the emitted ticks so any surplus beyond the ±127 per-event cap
+        // (and the sub-tick remainder) carries forward to the next event instead of being lost.
+        accumulator -= CGFloat(ticks) * tick
         return ticks
     }
 
