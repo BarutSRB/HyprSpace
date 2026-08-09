@@ -3163,7 +3163,8 @@ extension WMController {
     }
 
     var shouldSuppressManagedFocusRecovery: Bool {
-        workspaceManager.isNonManagedFocusActive && hasFrontmostOwnedWindow
+        workspaceManager.isNonManagedFocusActive
+            && (hasFrontmostOwnedWindow || workspaceManager.nonManagedFocusToken != nil)
     }
 
     func performWindowFronting(

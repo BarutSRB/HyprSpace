@@ -125,6 +125,100 @@ final class FullRescanReadmissionTests: XCTestCase {
         XCTAssertEqual(selected.createdAt, newerDate)
     }
 
+    func testNewerHandsOffSurfaceDoesNotDisplaceFocusableFullRescanCandidate() throws {
+        let workspaceId = UUID()
+        let olderToken = WindowToken(pid: 9000, windowId: 5)
+        let newerToken = WindowToken(pid: 9000, windowId: 6)
+        let olderDate = Date(timeIntervalSince1970: 100)
+        let newerDate = Date(timeIntervalSince1970: 200)
+
+        let older = try XCTUnwrap(
+            LayoutRefreshController.FullRescanFloatingFocusCandidate(
+                token: olderToken,
+                workspaceId: workspaceId,
+                isNewAdmission: true,
+                mode: .floating,
+                interactionPolicy: .full,
+                createPlacementContext: createPlacementContext(createdAt: olderDate)
+            )
+        )
+        let newer = LayoutRefreshController.FullRescanFloatingFocusCandidate(
+            token: newerToken,
+            workspaceId: workspaceId,
+            isNewAdmission: true,
+            mode: .floating,
+            interactionPolicy: .handsOffSurface,
+            createPlacementContext: createPlacementContext(createdAt: newerDate)
+        )
+
+        var selected: LayoutRefreshController.FullRescanFloatingFocusCandidate?
+        selected = LayoutRefreshController.newestFullRescanFloatingFocusCandidate(
+            selected,
+            considering: older
+        )
+        if let newer {
+            selected = LayoutRefreshController.newestFullRescanFloatingFocusCandidate(
+                selected,
+                considering: newer
+            )
+        }
+
+        XCTAssertNil(newer)
+        XCTAssertEqual(selected?.token, olderToken)
+        XCTAssertEqual(selected?.createdAt, olderDate)
+    }
+
+    func testNilFullRescanFloatingFocusCandidateUsesFallbackWorkspace() {
+        let controller = WindowAdmissionTestSupport.controller(
+            prefix: "OmniWMFullRescanNilFallbackTests"
+        )
+        let fallbackWorkspaceId = UUID()
+
+        XCTAssertEqual(
+            controller.layoutRefreshController.focusFullRescanFloatingCandidate(
+                nil,
+                fallbackWorkspaceId: fallbackWorkspaceId
+            ),
+            fallbackWorkspaceId
+        )
+    }
+
+    func testFailedFullRescanFloatingFocusUsesFallbackWorkspace() throws {
+        var operations: [String] = []
+        let controller = WindowAdmissionTestSupport.controller(
+            prefix: "OmniWMFullRescanFailedFocusTests",
+            windowFocusOperations: WindowFocusOperations(
+                activateApp: { _ in operations.append("activate") },
+                focusSpecificWindow: { _, _, _ in operations.append("focus") },
+                raiseWindow: { _ in operations.append("raise") },
+                orderWindow: { _ in operations.append("order") }
+            )
+        )
+        let fallbackWorkspaceId = UUID()
+        let candidateWorkspaceId = UUID()
+        let token = WindowToken(pid: 9000, windowId: 7)
+        let candidate = try XCTUnwrap(
+            LayoutRefreshController.FullRescanFloatingFocusCandidate(
+                token: token,
+                workspaceId: candidateWorkspaceId,
+                isNewAdmission: true,
+                mode: .floating,
+                interactionPolicy: .full,
+                createPlacementContext: createPlacementContext(createdAt: Date())
+            )
+        )
+
+        let result = controller.layoutRefreshController.focusFullRescanFloatingCandidate(
+            candidate,
+            fallbackWorkspaceId: fallbackWorkspaceId
+        )
+
+        XCTAssertEqual(result, fallbackWorkspaceId)
+        XCTAssertTrue(operations.isEmpty)
+        XCTAssertNil(controller.intentLedger.activeManagedRequest)
+        XCTAssertNil(controller.focusPolicyEngine.activeLease)
+    }
+
     func testCrossWorkspaceFloatingFocusValidatesCandidateWorkspaceWithoutRefocusingOldWindow() throws {
         var operations: [String] = []
         let controller = WindowAdmissionTestSupport.controller(

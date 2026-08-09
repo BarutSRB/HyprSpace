@@ -199,6 +199,7 @@ final class WindowActionHandler {
         guard let entry = controller.workspaceManager.entry(for: token),
               entry.mode == .floating,
               entry.layoutReason == .standard,
+              entry.interactionPolicy.mayFocus,
               !controller.workspaceManager.isHiddenInCorner(token),
               controller.workspaceManager.visibleWorkspaceIds().contains(entry.workspaceId)
         else {
