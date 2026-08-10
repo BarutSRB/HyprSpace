@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Copyright (C) 2026 BarutSRB — https://github.com/BarutSRB/OmniWM
 
+import AppKit
 import SwiftUI
 
 struct SettingsView: View {
@@ -36,6 +37,9 @@ struct SettingsView: View {
             selectedSection = newValue
         }
         .task(id: selectedSection) {
+            controller.refreshDiagnosticsIssues()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             controller.refreshDiagnosticsIssues()
         }
     }

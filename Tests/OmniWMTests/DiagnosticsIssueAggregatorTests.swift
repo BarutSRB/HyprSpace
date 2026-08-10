@@ -17,7 +17,10 @@ final class DiagnosticsIssueAggregatorTests: XCTestCase {
         settings.hotkeyBindings = HotkeyBindingRegistry.defaults()
         let controller = WMController(settings: settings, diagnosticsDirectory: directory)
 
-        let atDefaults = DiagnosticsIssueAggregator.applicableIssues(controller: controller)
+        let atDefaults = DiagnosticsIssueAggregator.applicableIssues(
+            controller: controller,
+            systemHotkeyQuery: { _ in true }
+        )
         XCTAssertTrue(atDefaults.contains { $0.id == commandPaletteAdvisoryID })
 
         var reassigned = HotkeyBindingRegistry.defaults()
@@ -26,35 +29,33 @@ final class DiagnosticsIssueAggregatorTests: XCTestCase {
         }
         settings.hotkeyBindings = reassigned
 
-        let afterUnassign = DiagnosticsIssueAggregator.applicableIssues(controller: controller)
+        let afterUnassign = DiagnosticsIssueAggregator.applicableIssues(
+            controller: controller,
+            systemHotkeyQuery: { _ in true }
+        )
         XCTAssertFalse(afterUnassign.contains { $0.id == commandPaletteAdvisoryID })
     }
 
-    func testUpdatingHotkeyBindingsRefreshesStoredAdvisory() throws {
+    func testUpdatingHotkeyBindingsRefreshesStoredSidedHyperAdvisory() throws {
         let directory = try makeDiagnosticsDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let settings = makeSettingsStore()
         settings.hotkeyBindings = HotkeyBindingRegistry.defaults()
+        settings.updateTrigger(for: "openCommandPalette", newTrigger: .unassigned)
         let controller = WMController(settings: settings, diagnosticsDirectory: directory)
-
-        controller.refreshDiagnosticsIssues()
-        XCTAssertTrue(controller.diagnosticsIssues.contains { $0.id == commandPaletteAdvisoryID })
+        let sidedHyperID = "hotkey-sided-hyper:focusPrevious"
+        let chord = KeyBinding(keyCode: UInt32(kVK_ANSI_1), modifiers: KeySymbolMapper.hyperModifiers)
 
         settings.updateTrigger(
-            for: "openCommandPalette",
-            newTrigger: .chord(
-                KeyBinding(
-                    keyCode: UInt32(kVK_ANSI_P),
-                    modifiers: UInt32(controlKey | optionKey)
-                )
-            )
+            for: "focusPrevious",
+            newTrigger: .chord(chord.settingSide(.left))
         )
         controller.updateHotkeyBindings(settings.hotkeyBindings)
-        XCTAssertFalse(controller.diagnosticsIssues.contains { $0.id == commandPaletteAdvisoryID })
+        XCTAssertTrue(controller.diagnosticsIssues.contains { $0.id == sidedHyperID })
 
-        settings.resetBindings(for: "openCommandPalette")
+        settings.updateTrigger(for: "focusPrevious", newTrigger: .chord(chord))
         controller.updateHotkeyBindings(settings.hotkeyBindings)
-        XCTAssertTrue(controller.diagnosticsIssues.contains { $0.id == commandPaletteAdvisoryID })
+        XCTAssertFalse(controller.diagnosticsIssues.contains { $0.id == sidedHyperID })
     }
 
     func testAggregatorIsDeterministicAcrossCalls() throws {
@@ -62,21 +63,35 @@ final class DiagnosticsIssueAggregatorTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
         let controller = WMController(settings: makeSettingsStore(), diagnosticsDirectory: directory)
 
-        let first = DiagnosticsIssueAggregator.applicableIssues(controller: controller)
-        let second = DiagnosticsIssueAggregator.applicableIssues(controller: controller)
+        let first = DiagnosticsIssueAggregator.applicableIssues(
+            controller: controller,
+            systemHotkeyQuery: { _ in false }
+        )
+        let second = DiagnosticsIssueAggregator.applicableIssues(
+            controller: controller,
+            systemHotkeyQuery: { _ in false }
+        )
         XCTAssertEqual(first, second)
     }
 
     func testRefreshDiagnosticsIssuesMatchesAggregator() throws {
         let directory = try makeDiagnosticsDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let controller = WMController(settings: makeSettingsStore(), diagnosticsDirectory: directory)
+        let settings = makeSettingsStore()
+        settings.updateTrigger(for: "openCommandPalette", newTrigger: .unassigned)
+        let controller = WMController(settings: settings, diagnosticsDirectory: directory)
 
         XCTAssertTrue(controller.diagnosticsIssues.isEmpty)
         controller.refreshDiagnosticsIssues()
         XCTAssertEqual(
             controller.diagnosticsIssues,
-            DiagnosticsIssueAggregator.applicableIssues(controller: controller)
+            DiagnosticsIssueAggregator.applicableIssues(
+                controller: controller,
+                systemHotkeyQuery: { _ in
+                    XCTFail("The default-only guard should skip the system query")
+                    return true
+                }
+            )
         )
     }
 

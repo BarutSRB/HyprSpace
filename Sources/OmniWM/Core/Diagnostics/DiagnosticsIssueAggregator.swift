@@ -5,7 +5,10 @@ import Foundation
 
 @MainActor
 enum DiagnosticsIssueAggregator {
-    static func applicableIssues(controller: WMController) -> [DiagnosticsIssue] {
+    static func applicableIssues(
+        controller: WMController,
+        systemHotkeyQuery: HotkeyAdvisoryDetector.SystemHotkeyQuery = HotkeyAdvisoryDetector.liveSystemHotkeyQuery
+    ) -> [DiagnosticsIssue] {
         var issues: [DiagnosticsIssue] = []
 
         if !controller.accessibilityPermissionGranted {
@@ -21,7 +24,8 @@ enum DiagnosticsIssueAggregator {
 
         issues.append(contentsOf: HotkeyAdvisoryDetector.issues(
             currentBindings: controller.settings.hotkeyBindings,
-            defaults: HotkeyBindingRegistry.defaults()
+            defaults: HotkeyBindingRegistry.defaults(),
+            systemHotkeyQuery: systemHotkeyQuery
         ))
 
         issues.append(contentsOf: SidedHyperBindingDetector.issues(
