@@ -168,6 +168,23 @@
       <br>
       <sub>@lgerlinski</sub>
     </td>
+    <td align="center" valign="top">
+      <a href="https://github.com/viber">
+        <img src="https://avatars.githubusercontent.com/u/966410?v=4" width="72" alt="Viber">
+      </a>
+      <br>
+      <a href="https://github.com/viber"><strong>Viber</strong></a>
+      <br>
+      <sub>━━━━━━━━</sub>
+      <br>
+      <a href="https://github.com/YuriNachos" title="Yuri Chukhlib">
+        <img src="https://github.com/YuriNachos.png?size=96" width="72" alt="Yuri Chukhlib">
+      </a>
+      <br>
+      <a href="https://github.com/YuriNachos"><strong>Yuri Chukhlib</strong></a>
+      <br>
+      <sub>@YuriNachos</sub>
+    </td>
   </tr>
 </table>
 
