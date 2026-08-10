@@ -499,7 +499,6 @@ extension NiriLayoutEngine {
                     requestedEdge: edge,
                     orthogonalOrigin: canonicalRect.minY,
                     baseReveal: 1.0,
-                    scale: scale,
                     orientation: .horizontal,
                     monitor: hiddenPlacementMonitor,
                     monitors: hiddenPlacementMonitors
@@ -523,7 +522,6 @@ extension NiriLayoutEngine {
                     requestedEdge: edge,
                     orthogonalOrigin: canonicalRect.minX,
                     baseReveal: 1.0,
-                    scale: scale,
                     orientation: .vertical,
                     monitor: hiddenPlacementMonitor,
                     monitors: hiddenPlacementMonitors

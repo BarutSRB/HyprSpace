@@ -3081,7 +3081,6 @@ import QuartzCore
         hiddenPlacementMonitors: [HiddenPlacementMonitorContext]? = nil
     ) -> CGPoint? {
         guard let controller else { return nil }
-        let scale = backingScale(for: monitor)
         let baseReveal = Self.hiddenEdgeReveal(isZoomApp: isZoomApp(pid))
         let hiddenPlacementMonitor = HiddenPlacementMonitorContext(monitor)
         let resolvedHiddenPlacementMonitors = hiddenPlacementMonitors
@@ -3095,7 +3094,6 @@ import QuartzCore
                 requestedSide: side,
                 targetY: frame.origin.y,
                 baseReveal: baseReveal,
-                scale: scale,
                 monitor: hiddenPlacementMonitor,
                 monitors: resolvedHiddenPlacementMonitors
             )
@@ -3111,7 +3109,6 @@ import QuartzCore
                 requestedEdge: requestedEdge,
                 orthogonalOrigin: orthogonalOrigin,
                 baseReveal: baseReveal,
-                scale: scale,
                 orientation: orientation,
                 monitor: hiddenPlacementMonitor,
                 monitors: resolvedHiddenPlacementMonitors

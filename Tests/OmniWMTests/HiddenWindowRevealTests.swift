@@ -13,28 +13,27 @@ final class HiddenWindowRevealTests: XCTestCase {
         visibleFrame: CGRect(x: 0, y: 0, width: 1800, height: 1130)
     )
 
-    func testRevealSurvivesRetinaScale() {
+    func testPositiveRevealIsOnePoint() {
         XCTAssertEqual(
-            HiddenWindowPlacementResolver.effectiveReveal(baseReveal: 1.0, scale: 2.0),
+            HiddenWindowPlacementResolver.effectiveReveal(baseReveal: 1.0),
             1.0
         )
     }
 
     func testZeroRevealStaysZero() {
         XCTAssertEqual(
-            HiddenWindowPlacementResolver.effectiveReveal(baseReveal: 0, scale: 2.0),
+            HiddenWindowPlacementResolver.effectiveReveal(baseReveal: 0),
             0
         )
     }
 
-    func testHiddenWindowKeepsAtLeastOnePointOnScreenAtRetinaScale() {
+    func testHiddenWindowKeepsAtLeastOnePointOnScreen() {
         let size = CGSize(width: 230, height: 408)
         let origin = HiddenWindowPlacementResolver.physicalScreenEdgeOrigin(
             for: size,
             requestedSide: .left,
             targetY: 268,
             baseReveal: 1.0,
-            scale: 2.0,
             monitor: monitor,
             monitors: [monitor]
         )
@@ -44,14 +43,13 @@ final class HiddenWindowRevealTests: XCTestCase {
         XCTAssertEqual(origin.x.rounded(), origin.x)
     }
 
-    func testTransientPlacementKeepsAtLeastOnePointOnScreenAtRetinaScale() {
+    func testTransientPlacementKeepsAtLeastOnePointOnScreen() {
         let size = CGSize(width: 893, height: 1130)
         let placement = HiddenWindowPlacementResolver.placement(
             for: size,
             requestedEdge: .minimum,
             orthogonalOrigin: 0,
             baseReveal: 1.0,
-            scale: 2.0,
             orientation: .horizontal,
             monitor: monitor,
             monitors: [monitor]
@@ -61,14 +59,13 @@ final class HiddenWindowRevealTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(onScreenWidth, 1.0)
     }
 
-    func testMaximumEdgeKeepsAtLeastOnePointOnScreenAtRetinaScale() {
+    func testMaximumEdgeKeepsAtLeastOnePointOnScreen() {
         let size = CGSize(width: 893, height: 1130)
         let placement = HiddenWindowPlacementResolver.placement(
             for: size,
             requestedEdge: .maximum,
             orthogonalOrigin: 0,
             baseReveal: 1.0,
-            scale: 2.0,
             orientation: .horizontal,
             monitor: monitor,
             monitors: [monitor]

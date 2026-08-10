@@ -402,7 +402,6 @@ final class NiriSingleWindowFitEngineTests: XCTestCase {
             requestedEdge: .maximum,
             orthogonalOrigin: 40,
             baseReveal: 1,
-            scale: 2,
             orientation: .horizontal,
             monitor: monitor,
             monitors: [monitor]
