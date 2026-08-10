@@ -587,7 +587,7 @@ extension NiriLayoutEngine {
         }
         let hasManualSecondaryOverride = orientation == .vertical && context.window.windowWidth != .default
         guard hasManualPrimaryOverride || hasManualSecondaryOverride else {
-            let baseFrame = context.fit.mode == .fill ? fullscreenLayoutFrame ?? workingFrame : workingFrame
+            let baseFrame = context.fit.usesFullscreenLayoutFrame ? fullscreenLayoutFrame ?? workingFrame : workingFrame
             return rectExpandedToMinimum(context.fit.frame(in: baseFrame), minSize: minSize)
                 .roundedToPhysicalPixels(scale: scale)
         }

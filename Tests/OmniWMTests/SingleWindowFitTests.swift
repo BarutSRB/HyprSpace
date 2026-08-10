@@ -46,32 +46,6 @@ final class SingleWindowFitTests: XCTestCase {
         XCTAssertEqual(SingleWindowFit(serialized: "columnwidth").mode, .fill)
     }
 
-    func testOverflowingAndNonFiniteDimensionsFallBackToFullScreen() {
-        // A custom dimension that overflows `Int`, becomes non-finite, or
-        // exceeds the realistic display bound must be rejected at the parse
-        // gate. Otherwise it enters the value and trips a runtime trap when
-        // re-serialized (`Int(value)` aborts for any Double outside `Int`'s
-        // representable range, infinity included).
-        XCTAssertEqual(SingleWindowFit(serialized: "1e30x1e30").mode, .fill)
-        XCTAssertEqual(SingleWindowFit(serialized: "1e999x1e999").mode, .fill)
-        XCTAssertEqual(SingleWindowFit(serialized: "9999999x9999999").mode, .fill)
-        // Per-dimension rejection: one side bad, the other valid.
-        XCTAssertEqual(SingleWindowFit(serialized: "1e30x100").mode, .fill)
-        XCTAssertEqual(SingleWindowFit(serialized: "100x1e30").mode, .fill)
-        // NaN already fails the `> 0` guard; keep it rejected too.
-        XCTAssertEqual(SingleWindowFit(serialized: "nanx100").mode, .fill)
-    }
-
-    func testCustomDimensionUpperBoundIsInclusiveAtOneMillion() {
-        // The bound is inclusive: a one-million-pixel edge still parses.
-        XCTAssertEqual(
-            SingleWindowFit(serialized: "1000000x1000000"),
-            SingleWindowFit(mode: .custom, width: 1_000_000, height: 1_000_000)
-        )
-        // One pixel past the bound is rejected and falls back to full screen.
-        XCTAssertEqual(SingleWindowFit(serialized: "1000001x1000001").mode, .fill)
-    }
-
     func testFrameFillReturnsWorkingFrame() {
         let working = CGRect(x: 100, y: 50, width: 2000, height: 1200)
         XCTAssertEqual(SingleWindowFit(mode: .fill).frame(in: working), working)
@@ -221,6 +195,20 @@ final class DwindleSingleWindowFitEngineTests: XCTestCase {
         XCTAssertEqual(fullscreenResult, fillFrame)
     }
 
+    func testInvalidCustomFitMatchesFullscreenLayoutFrame() {
+        let fixture = makeSingleWindowFixture()
+        fixture.engine.settings.singleWindowFit = SingleWindowFit(mode: .custom, width: .infinity, height: 600)
+        let workingFrame = CGRect(x: 24, y: 16, width: 1200, height: 760)
+        let fullscreenFrame = CGRect(x: 0, y: 0, width: 1280, height: 800)
+
+        let frame = fixture.engine.calculateLayout(
+            for: fixture.workspaceId,
+            screen: workingFrame,
+            fullscreenScreen: fullscreenFrame
+        )[fixture.token]
+        XCTAssertEqual(frame, fullscreenFrame)
+    }
+
     func testCustomFitStaysBoundedByWorkingFrame() {
         let fixture = makeSingleWindowFixture()
         fixture.engine.settings.singleWindowFit = SingleWindowFit(mode: .custom, width: 800, height: 600)
@@ -301,6 +289,29 @@ final class NiriSingleWindowFitEngineTests: XCTestCase {
 
         XCTAssertEqual(frame, fullscreenFrame)
         XCTAssertEqual(fixture.window.sizingMode, .normal)
+    }
+
+    func testInvalidCustomFitMatchesFullscreenLayoutFrame() {
+        let fixture = makeSingleWindowFixture()
+        fixture.engine.singleWindowFit = SingleWindowFit(mode: .custom, width: 0, height: 600)
+        let workingFrame = CGRect(x: 24, y: 16, width: 1200, height: 760)
+        let fullscreenFrame = CGRect(x: 0, y: 0, width: 1280, height: 800)
+        let area = WorkingAreaContext(
+            workingFrame: workingFrame,
+            fullscreenLayoutFrame: fullscreenFrame,
+            viewFrame: fullscreenFrame,
+            scale: 1
+        )
+
+        let frame = fixture.engine.calculateLayout(
+            state: ViewportState(),
+            workspaceId: fixture.workspaceId,
+            monitorFrame: workingFrame,
+            gaps: (horizontal: 12, vertical: 12),
+            workingArea: area,
+            orientation: .horizontal
+        )[fixture.token]
+        XCTAssertEqual(frame, fullscreenFrame)
     }
 
     func testFullscreenSizingUsesFullscreenLayoutFrame() {

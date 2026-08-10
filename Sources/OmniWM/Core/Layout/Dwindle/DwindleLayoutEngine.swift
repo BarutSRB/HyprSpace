@@ -1207,7 +1207,7 @@ final class DwindleLayoutEngine {
     }
 
     private func singleWindowRect(screen: CGRect, fullscreenScreen: CGRect, minSize: CGSize) -> CGRect {
-        let baseFrame = settings.singleWindowFit.mode == .fill ? fullscreenScreen : screen
+        let baseFrame = settings.singleWindowFit.usesFullscreenLayoutFrame ? fullscreenScreen : screen
         let fit = settings.singleWindowFit.frame(in: baseFrame)
         var rect = fit
         rect.size.width = min(max(fit.width, minSize.width), baseFrame.width)
