@@ -51,6 +51,46 @@ final class SettingsTOMLCodecTests: XCTestCase {
         XCTAssertEqual(decoded.hotkeyBindings.first { $0.id == "swapSplit" }?.binding, customTrigger)
     }
 
+    func testLoadingDropsDirectionalResizeActionsAndInjectsAxisActions() throws {
+        let oldIds = [
+            "resizeGrow.left",
+            "resizeGrow.right",
+            "resizeGrow.up",
+            "resizeGrow.down",
+            "resizeShrink.left",
+            "resizeShrink.right",
+            "resizeShrink.up",
+            "resizeShrink.down"
+        ]
+        let newIds = [
+            "resizeGrow.horizontal",
+            "resizeGrow.vertical",
+            "resizeShrink.horizontal",
+            "resizeShrink.vertical"
+        ]
+        let customTrigger = HotkeyTrigger.chord(
+            KeyBinding(keyCode: UInt32(kVK_ANSI_J), modifiers: UInt32(optionKey))
+        )
+        var export = SettingsExport.defaults()
+        export.hotkeyBindings.removeAll { newIds.contains($0.id) }
+        export.hotkeyBindings.append(contentsOf: oldIds.map { id in
+            HotkeyBinding(
+                id: id,
+                command: .resizeAlongAxis(.horizontal, true),
+                trigger: customTrigger
+            )
+        })
+
+        let decoded = try SettingsTOMLCodec.decode(SettingsTOMLCodec.encode(export))
+        let decodedIds = Set(decoded.hotkeyBindings.map(\.id))
+
+        XCTAssertTrue(decodedIds.isDisjoint(with: oldIds))
+        XCTAssertTrue(Set(newIds).isSubset(of: decodedIds))
+        for id in newIds {
+            XCTAssertEqual(decoded.hotkeyBindings.first { $0.id == id }?.binding, .unassigned)
+        }
+    }
+
     func testPreservingEncodeKeepsUnknownKeysInsideKnownTables() throws {
         let previous = try defaultsWithReplacements(
             ("[general]\n", "[general]\nfutureSetting = \"keep-me\"\n"),

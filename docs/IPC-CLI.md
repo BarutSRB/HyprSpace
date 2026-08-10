@@ -163,7 +163,7 @@ Turning **Enable IPC** on starts the server immediately and creates the Unix soc
 
 ## IPC Protocol
 
-**Protocol version:** 9
+**Protocol version:** 10
 
 ### Socket & Authorization
 
@@ -343,7 +343,7 @@ Workspace IDs are positive numeric strings. Direct hotkeys stay limited to `1-9`
 | `command move-to-root` | — | dwindle | Move the selected window to the root split |
 | `command toggle-split` | — | dwindle | Toggle the active split orientation |
 | `command swap-split` | — | dwindle | Swap the active split |
-| `command resize` | `<left\|right\|up\|down> <grow\|shrink>` | dwindle | Resize the selected window |
+| `command resize` | `<horizontal\|vertical> <grow\|shrink>` | dwindle | Grow or shrink the selected window along an axis |
 | `command resize-focused` | `<grow\|shrink>` | dwindle | Grow or shrink the focused window |
 | `command preselect` | `<left\|right\|up\|down>` | dwindle | Set the preselection direction |
 | `command preselect clear` | — | dwindle | Clear the preselection |
@@ -772,7 +772,7 @@ Completions are context-aware: query names, selectors, field names, command path
 
 ```json
 {
-  "version": 9,
+  "version": 10,
   "id": "<uuid>",
   "kind": "<ping|version|command|query|rule|workspace|window|subscribe>",
   "authorizationToken": "<token>",
@@ -788,6 +788,17 @@ Completions are context-aware: query names, selectors, field names, command path
   "name": "focus",
   "arguments": {
     "direction": "left"
+  }
+}
+```
+
+**Dwindle axis resize:**
+```json
+{
+  "name": "resize",
+  "arguments": {
+    "axis": "vertical",
+    "operation": "shrink"
   }
 }
 ```
@@ -864,7 +875,7 @@ Workspace requests use this flat wire shape. For `move-to-monitor`, `force` is o
 
 ```json
 {
-  "version": 9,
+  "version": 10,
   "id": "<request-id>",
   "ok": true,
   "kind": "<ping|version|command|query|rule|workspace|window|subscribe>",
@@ -881,7 +892,7 @@ Authorization, protocol, validation, and routing failures keep the originating r
 
 ```json
 {
-  "version": 9,
+  "version": 10,
   "id": "<request-id>",
   "ok": false,
   "kind": "query",
@@ -898,7 +909,7 @@ Events are sent on subscription connections after the initial response.
 
 ```json
 {
-  "version": 9,
+  "version": 10,
   "id": "<event-id>",
   "kind": "event",
   "channel": "focus",

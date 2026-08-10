@@ -746,64 +746,32 @@ enum ActionCatalog {
 
         specs.append(contentsOf: [
             action(
-                id: "resizeGrow.left",
-                command: .resizeInDirection(.left, true),
+                id: "resizeGrow.horizontal",
+                command: .resizeAlongAxis(.horizontal, true),
                 category: .layout,
                 binding: .unassigned,
                 visibility: .advanced,
                 keywords: ["resize", "grow"]
             ),
             action(
-                id: "resizeGrow.right",
-                command: .resizeInDirection(.right, true),
+                id: "resizeGrow.vertical",
+                command: .resizeAlongAxis(.vertical, true),
                 category: .layout,
                 binding: .unassigned,
                 visibility: .advanced,
                 keywords: ["resize", "grow"]
             ),
             action(
-                id: "resizeGrow.up",
-                command: .resizeInDirection(.up, true),
-                category: .layout,
-                binding: .unassigned,
-                visibility: .advanced,
-                keywords: ["resize", "grow"]
-            ),
-            action(
-                id: "resizeGrow.down",
-                command: .resizeInDirection(.down, true),
-                category: .layout,
-                binding: .unassigned,
-                visibility: .advanced,
-                keywords: ["resize", "grow"]
-            ),
-            action(
-                id: "resizeShrink.left",
-                command: .resizeInDirection(.left, false),
+                id: "resizeShrink.horizontal",
+                command: .resizeAlongAxis(.horizontal, false),
                 category: .layout,
                 binding: .unassigned,
                 visibility: .advanced,
                 keywords: ["resize", "shrink"]
             ),
             action(
-                id: "resizeShrink.right",
-                command: .resizeInDirection(.right, false),
-                category: .layout,
-                binding: .unassigned,
-                visibility: .advanced,
-                keywords: ["resize", "shrink"]
-            ),
-            action(
-                id: "resizeShrink.up",
-                command: .resizeInDirection(.up, false),
-                category: .layout,
-                binding: .unassigned,
-                visibility: .advanced,
-                keywords: ["resize", "shrink"]
-            ),
-            action(
-                id: "resizeShrink.down",
-                command: .resizeInDirection(.down, false),
+                id: "resizeShrink.vertical",
+                command: .resizeAlongAxis(.vertical, false),
                 category: .layout,
                 binding: .unassigned,
                 visibility: .advanced,
@@ -988,7 +956,7 @@ enum ActionCatalog {
              .swapSplit,
              .preselect,
              .preselectClear,
-             .resizeInDirection,
+             .resizeAlongAxis,
              .resizeFocusedWindow,
              .moveColumn(.up),
              .moveColumn(.down):
@@ -1144,7 +1112,8 @@ enum ActionCatalog {
         case .moveToRoot: "Move to Root"
         case .toggleSplit: "Toggle Split"
         case .swapSplit: "Swap Split"
-        case let .resizeInDirection(dir, grow): "\(grow ? "Grow" : "Shrink") \(dir.displayName)"
+        case let .resizeAlongAxis(orientation, grow):
+            "\(grow ? "Grow" : "Shrink") \(orientation == .horizontal ? "Horizontally" : "Vertically")"
         case let .resizeFocusedWindow(grow): "\(grow ? "Grow" : "Shrink") Focused Window"
         case let .preselect(dir): "Preselect \(dir.displayName)"
         case .preselectClear: "Clear Preselection"
@@ -1297,7 +1266,7 @@ enum ActionCatalog {
             .toggleSplit
         case .swapSplit:
             .swapSplit
-        case .resizeInDirection:
+        case .resizeAlongAxis:
             .resize
         case .resizeFocusedWindow:
             .resizeFocused

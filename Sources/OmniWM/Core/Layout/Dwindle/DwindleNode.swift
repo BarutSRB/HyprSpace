@@ -119,7 +119,7 @@ enum DwindleWindowActivationOutcome: Equatable {
     case activated
 }
 
-enum DwindleOrientation: Equatable, Codable {
+enum DwindleOrientation: Codable, Equatable, Hashable {
     case horizontal
     case vertical
 
@@ -138,15 +138,6 @@ extension Direction {
              .right: .horizontal
         case .up,
              .down: .vertical
-        }
-    }
-
-    var isPositive: Bool {
-        switch self {
-        case .right,
-             .up: true
-        case .left,
-             .down: false
         }
     }
 }

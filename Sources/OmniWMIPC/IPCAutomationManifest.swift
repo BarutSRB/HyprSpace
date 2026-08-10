@@ -51,6 +51,7 @@ public enum IPCCommandArgumentKind: String, Codable, CaseIterable, Equatable, Se
     case columnIndex = "column-index"
     case windowIndex = "window-index"
     case layout
+    case resizeAxis = "resize-axis"
     case resizeOperation = "resize-operation"
     case sizeChange = "size-change"
 
@@ -64,6 +65,8 @@ public enum IPCCommandArgumentKind: String, Codable, CaseIterable, Equatable, Se
             "<number>"
         case .layout:
             "<default|niri|dwindle>"
+        case .resizeAxis:
+            "<horizontal|vertical>"
         case .resizeOperation:
             "<grow|shrink>"
         case .sizeChange:
@@ -269,9 +272,13 @@ public enum IPCAutomationManifest {
         kind: .layout,
         summary: "Workspace layout selection."
     )
+    private static let resizeAxisArgument = IPCCommandArgumentDescriptor(
+        kind: .resizeAxis,
+        summary: "Dwindle split axis."
+    )
     private static let resizeOperationArgument = IPCCommandArgumentDescriptor(
         kind: .resizeOperation,
-        summary: "Resize direction mode."
+        summary: "Whether to grow or shrink."
     )
     private static let sizeChangeArgument = IPCCommandArgumentDescriptor(
         kind: .sizeChange,
@@ -798,7 +805,7 @@ public enum IPCAutomationManifest {
             ["resize"],
             name: .resize,
             summary: "Resize the selected Dwindle window.",
-            arguments: [directionArgument, resizeOperationArgument],
+            arguments: [resizeAxisArgument, resizeOperationArgument],
             layoutCompatibility: .dwindle
         ),
         command(

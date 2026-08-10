@@ -5,6 +5,7 @@ import ApplicationServices
 import CoreGraphics
 import Foundation
 @testable import OmniWM
+import OmniWMIPC
 import XCTest
 
 @MainActor
@@ -339,6 +340,41 @@ final class DwindleCommandRoutingTests: XCTestCase {
             fixture.controller.layoutRefreshController.layoutState.pendingRefresh?.reason,
             .layoutCommand
         )
+    }
+
+    func testIPCResizeRoutesGrowAndShrinkAlongAxis() throws {
+        let fixture = try makeFixture(groupedSource: false, includeTargetCandidate: false)
+        let secondToken = addWindow(
+            pid: 31_107,
+            windowId: 31_207,
+            to: fixture.sourceWorkspaceId,
+            controller: fixture.controller
+        )
+        fixture.controller.workspaceManager.withEngineMutationScope(in: fixture.sourceWorkspaceId) {
+            _ = fixture.engine.addWindow(
+                token: secondToken,
+                to: fixture.sourceWorkspaceId,
+                activeWindowFrame: nil
+            )
+            _ = fixture.engine.calculateLayout(
+                for: fixture.sourceWorkspaceId,
+                screen: fixture.sourceMonitor.visibleFrame
+            )
+            _ = fixture.engine.activateWindowOutcome(
+                fixture.firstToken,
+                in: fixture.sourceWorkspaceId
+            )
+        }
+        let blocker = blockLayoutRefresh(fixture)
+        defer { unblockLayoutRefresh(fixture.controller, blocker: blocker) }
+        let router = IPCCommandRouter(controller: fixture.controller, sessionToken: "test")
+        let root = try XCTUnwrap(fixture.engine.root(for: fixture.sourceWorkspaceId))
+
+        XCTAssertEqual(router.handle(.resize(axis: .horizontal, operation: .grow)), .executed)
+        XCTAssertEqual(root.splitRatio ?? 0, 1.1, accuracy: 0.000_001)
+
+        XCTAssertEqual(router.handle(.resize(axis: .horizontal, operation: .shrink)), .executed)
+        XCTAssertEqual(root.splitRatio ?? 0, 1.0, accuracy: 0.000_001)
     }
 
     private func makeFixture(

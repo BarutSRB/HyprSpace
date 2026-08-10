@@ -633,6 +633,13 @@ enum CLIParser {
         return direction
     }
 
+    private static func parseResizeAxis(_ rawValue: String) throws -> IPCResizeAxis {
+        guard let axis = IPCResizeAxis(rawValue: rawValue) else {
+            throw CLIParseError.usage(usageText)
+        }
+        return axis
+    }
+
     private static func parseWorkspaceNumber(_ rawValue: String) throws -> Int {
         guard let workspaceNumber = Int(rawValue), workspaceNumber > 0 else {
             throw CLIParseError.usage(usageText)
@@ -730,6 +737,8 @@ enum CLIParser {
             return .integer(try parseWindowIndex(token))
         case .layout:
             return .layout(try parseWorkspaceLayout(token))
+        case .resizeAxis:
+            return .resizeAxis(try parseResizeAxis(token))
         case .resizeOperation:
             return .resizeOperation(try parseResizeOperation(token))
         case .sizeChange:

@@ -169,9 +169,9 @@ final class IPCCommandRouter {
             return controller.commandHandler.performCommand(.toggleSplit)
         case .swapSplit:
             return controller.commandHandler.performCommand(.swapSplit)
-        case let .resize(ipcDirection, operation):
+        case let .resize(axis, operation):
             return controller.commandHandler.performCommand(
-                .resizeInDirection(direction(for: ipcDirection), operation == .grow)
+                .resizeAlongAxis(dwindleOrientation(for: axis), operation == .grow)
             )
         case let .resizeFocused(operation):
             return controller.commandHandler.performCommand(.resizeFocusedWindow(operation == .grow))
@@ -335,6 +335,15 @@ final class IPCCommandRouter {
             .up
         case .down:
             .down
+        }
+    }
+
+    private func dwindleOrientation(for axis: IPCResizeAxis) -> DwindleOrientation {
+        switch axis {
+        case .horizontal:
+            .horizontal
+        case .vertical:
+            .vertical
         }
     }
 

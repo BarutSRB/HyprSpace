@@ -592,8 +592,8 @@ The window-to-monitor actions send the focused window directly to the current wo
 | Move to Root | `Unassigned` | `Dwindle` |
 | Toggle Split | `Unassigned` | `Dwindle` |
 | Swap Split | `Unassigned` | `Dwindle` |
-| Grow Left / Right / Up / Down | `Unassigned` | `Dwindle` |
-| Shrink Left / Right / Up / Down | `Unassigned` | `Dwindle` |
+| Grow Horizontally / Vertically | `Unassigned` | `Dwindle` |
+| Shrink Horizontally / Vertically | `Unassigned` | `Dwindle` |
 | Grow / Shrink Focused Window | `Unassigned` | `Dwindle` |
 | Preselect Left / Right / Up / Down | `Unassigned` | `Dwindle` |
 | Clear Preselection | `Unassigned` | `Dwindle` |

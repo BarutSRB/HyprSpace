@@ -1651,13 +1651,11 @@ final class DwindleLayoutEngine {
     @discardableResult
     func resizeSelected(
         by delta: CGFloat,
-        direction: Direction,
+        orientation targetOrientation: DwindleOrientation,
         in workspaceId: WorkspaceDescriptor.ID
     ) -> Bool {
         assertSanctionedMutation()
         guard let selected = selectedNode(in: workspaceId) else { return false }
-
-        let targetOrientation = direction.dwindleOrientation
 
         var current = selected
         while let parent = current.parent {

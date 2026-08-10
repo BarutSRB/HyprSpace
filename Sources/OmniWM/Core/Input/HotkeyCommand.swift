@@ -92,7 +92,7 @@ enum HotkeyCommand: Codable, Equatable, Hashable {
     case moveToRoot
     case toggleSplit
     case swapSplit
-    case resizeInDirection(Direction, Bool)
+    case resizeAlongAxis(DwindleOrientation, Bool)
     case resizeFocusedWindow(Bool)
     case preselect(Direction)
     case preselectClear

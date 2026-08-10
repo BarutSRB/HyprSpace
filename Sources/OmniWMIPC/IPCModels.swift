@@ -4,7 +4,7 @@
 import Foundation
 
 public enum OmniWMIPCProtocol {
-    public static let version = 9
+    public static let version = 10
 }
 
 public struct IPCRequestEnvelope: Decodable, Sendable {
@@ -104,6 +104,11 @@ public enum IPCDirection: String, Codable, Equatable, Sendable {
     case right
     case up
     case down
+}
+
+public enum IPCResizeAxis: String, Codable, Equatable, Sendable {
+    case horizontal
+    case vertical
 }
 
 public enum IPCWindowMode: String, Codable, Equatable, Sendable {
@@ -323,6 +328,7 @@ public enum IPCCommandArgumentValue: Equatable, Sendable {
     case direction(IPCDirection)
     case integer(Int)
     case layout(IPCWorkspaceLayout)
+    case resizeAxis(IPCResizeAxis)
     case resizeOperation(IPCResizeOperation)
     case sizeChange(IPCSizeChange)
 }
@@ -396,7 +402,7 @@ public enum IPCCommandRequest: Equatable, Sendable {
     case moveToRoot
     case toggleSplit
     case swapSplit
-    case resize(direction: IPCDirection, operation: IPCResizeOperation)
+    case resize(axis: IPCResizeAxis, operation: IPCResizeOperation)
     case resizeFocused(operation: IPCResizeOperation)
     case preselect(direction: IPCDirection)
     case preselectClear
@@ -623,14 +629,14 @@ public enum IPCCommandRequest: Equatable, Sendable {
             return change
         }
 
-        func requireResizeArguments() throws -> (direction: IPCDirection, operation: IPCResizeOperation) {
+        func requireResizeArguments() throws -> (axis: IPCResizeAxis, operation: IPCResizeOperation) {
             guard argumentValues.count == 2,
-                  case let .direction(direction) = argumentValues[0],
+                  case let .resizeAxis(axis) = argumentValues[0],
                   case let .resizeOperation(operation) = argumentValues[1]
             else {
                 throw IPCCommandRequestConstructionError.invalidArgumentType
             }
-            return (direction, operation)
+            return (axis, operation)
         }
 
         func requireResizeOperation() throws -> IPCResizeOperation {
@@ -830,7 +836,7 @@ public enum IPCCommandRequest: Equatable, Sendable {
             self = .swapSplit
         case .resize:
             let arguments = try requireResizeArguments()
-            self = .resize(direction: arguments.direction, operation: arguments.operation)
+            self = .resize(axis: arguments.axis, operation: arguments.operation)
         case .resizeFocused:
             self = .resizeFocused(operation: try requireResizeOperation())
         case .preselect:
@@ -921,7 +927,7 @@ extension IPCCommandRequest: Codable {
     }
 
     private struct IPCResizeArguments: Codable, Equatable, Sendable {
-        let direction: IPCDirection
+        let axis: IPCResizeAxis
         let operation: IPCResizeOperation
     }
 
@@ -1082,7 +1088,7 @@ extension IPCCommandRequest: Codable {
             self = .swapSplit
         case .resize:
             let arguments = try container.decode(IPCResizeArguments.self, forKey: .arguments)
-            self = .resize(direction: arguments.direction, operation: arguments.operation)
+            self = .resize(axis: arguments.axis, operation: arguments.operation)
         case .resizeFocused:
             let arguments = try container.decode(IPCResizeOperationArguments.self, forKey: .arguments)
             self = .resizeFocused(operation: arguments.operation)
@@ -1261,9 +1267,9 @@ extension IPCCommandRequest: Codable {
             break
         case .swapSplit:
             break
-        case let .resize(direction, operation):
+        case let .resize(axis, operation):
             try container.encode(
-                IPCResizeArguments(direction: direction, operation: operation),
+                IPCResizeArguments(axis: axis, operation: operation),
                 forKey: .arguments
             )
         case let .resizeFocused(operation):
