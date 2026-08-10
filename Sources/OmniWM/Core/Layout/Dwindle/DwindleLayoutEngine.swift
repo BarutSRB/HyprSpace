@@ -1658,7 +1658,6 @@ final class DwindleLayoutEngine {
         guard let selected = selectedNode(in: workspaceId) else { return false }
 
         let targetOrientation = direction.dwindleOrientation
-        let increaseFirst = !direction.isPositive
 
         var current = selected
         while let parent = current.parent {
@@ -1669,13 +1668,7 @@ final class DwindleLayoutEngine {
 
             if orientation == targetOrientation {
                 let isFirst = current.isFirstChild(of: parent)
-                var newRatio = ratio
-
-                if (isFirst && increaseFirst) || (!isFirst && !increaseFirst) {
-                    newRatio += delta
-                } else {
-                    newRatio -= delta
-                }
+                let newRatio = isFirst ? ratio + delta : ratio - delta
 
                 let clampedRatio = clampedRatioRespectingMinimums(newRatio, for: parent)
                 guard clampedRatio != ratio else { return false }
