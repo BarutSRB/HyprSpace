@@ -418,13 +418,15 @@ brew install omniwm
 
 ### Nix
 
-OmniWM supports both community-maintained Nix packages below. They install official OmniWM release
-artifacts, while their Nix expressions are maintained by DoomHammer and DavSanchez respectively.
+OmniWM supports both community-maintained Nix packages below, alongside a real-world Home Manager
+configuration example. The packages install official OmniWM release artifacts, while their Nix
+expressions are maintained by DoomHammer and DavSanchez respectively.
 
-| Package | Best for | Packaging difference |
+| Package or example | Best for | Packaging or configuration difference |
 | --- | --- | --- |
 | [DoomHammer NUR package](https://nur.nix-community.org/repos/doomhammer/) | Fast release tracking | Its current `unzip` extraction does not preserve the release's valid Developer ID signature, and it installs the app bundle without exposing `omniwmctl` on `PATH`. |
 | [DavSanchez package](https://github.com/DavSanchez/nix-dotfiles/blob/master/pkgs/omniwm.nix) and [Home Manager module](https://github.com/DavSanchez/nix-dotfiles/blob/master/modules/home/omniwm.nix) | Signature-preserving, declarative integration | It may trail the latest release, but its `bsdtar` extraction preserves code signing and it provides `omniwmctl`, Home Manager settings, and launchd integration. |
+| [ryoppippi Home Manager configuration](https://github.com/ryoppippi/dotfiles/tree/main/nix/modules/darwin/programs/omniwm) | Real-world declarative setup example | It builds on DavSanchez's module, enables launchd, and merges a tracked settings template while preserving GUI-managed, machine-specific monitor settings. |
 
 Install the fast-tracking DoomHammer package directly:
 
