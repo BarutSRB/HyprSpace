@@ -353,6 +353,7 @@ final class ServiceLifecycleManager {
         guard performPostUpdateActions else { return }
 
         controller.syncMonitorsToNiriEngine()
+        controller.surfaceReconciler.noteWorldChanged()
 
         let focusedWsId = controller.workspaceManager.focusedToken
             .flatMap { controller.workspaceManager.workspace(for: $0) }
@@ -439,7 +440,9 @@ final class ServiceLifecycleManager {
     }
 
     func performStartupRefresh() {
-        controller?.layoutRefreshController.requestFullRescan(reason: .startup)
+        guard let controller else { return }
+        controller.surfaceReconciler.noteWorldChanged()
+        controller.layoutRefreshController.requestFullRescan(reason: .startup)
     }
 
     func handleActiveSpaceDidChange() {

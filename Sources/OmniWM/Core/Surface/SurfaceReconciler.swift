@@ -20,11 +20,27 @@ struct DesiredBarSurface: Equatable {
     var snapshot: WorkspaceBarSnapshot
 }
 
+struct ParkingEdgeMaskKey: Hashable {
+    enum Side: String, Hashable {
+        case left
+        case right
+    }
+
+    let monitorId: Monitor.ID
+    let side: Side
+}
+
+struct DesiredParkingEdgeMask: Equatable {
+    let key: ParkingEdgeMaskKey
+    let frame: CGRect
+}
+
 struct DesiredSurfaceScene: Equatable {
     var border: DesiredBorderSurface?
     var tabRails: [TabRailInfo] = []
     var placeholders: [NativeFullscreenPlaceholderUpdate] = []
     var bars: [DesiredBarSurface] = []
+    var parkingEdgeMasks: [DesiredParkingEdgeMask] = []
 
     static let empty = DesiredSurfaceScene()
 }
@@ -42,8 +58,39 @@ enum SurfaceDerivation {
             border: deriveBorder(world: world),
             tabRails: world.tabRailInfos(),
             placeholders: world.nativeFullscreenPlaceholders(),
-            bars: world.barSurfaces()
+            bars: world.barSurfaces(),
+            parkingEdgeMasks: deriveParkingEdgeMasks(monitors: world.monitors)
         )
+    }
+
+    static func deriveParkingEdgeMasks(monitors: [Monitor]) -> [DesiredParkingEdgeMask] {
+        let width: CGFloat = 1
+        var masks: [DesiredParkingEdgeMask] = []
+        masks.reserveCapacity(monitors.count * 2)
+
+        for monitor in monitors {
+            let frame = monitor.visibleFrame
+            guard !frame.isNull,
+                  !frame.isInfinite,
+                  frame.width >= width * 2,
+                  frame.height > 0
+            else { continue }
+
+            masks.append(
+                DesiredParkingEdgeMask(
+                    key: ParkingEdgeMaskKey(monitorId: monitor.id, side: .left),
+                    frame: CGRect(x: frame.minX, y: frame.minY, width: width, height: frame.height)
+                )
+            )
+            masks.append(
+                DesiredParkingEdgeMask(
+                    key: ParkingEdgeMaskKey(monitorId: monitor.id, side: .right),
+                    frame: CGRect(x: frame.maxX - width, y: frame.minY, width: width, height: frame.height)
+                )
+            )
+        }
+
+        return masks
     }
 
     @MainActor
@@ -135,6 +182,7 @@ final class SurfaceReconciler {
     private(set) var reconcileScheduled = false
     private(set) var forceOrderingOnNextReconcile = false
     private let borderApplier = BorderSurfaceApplier()
+    private let parkingEdgeMaskManager = ParkingEdgeMaskManager()
     private(set) var appliedScene = DesiredSurfaceScene.empty
 
     init(controller: WMController) {
@@ -187,6 +235,7 @@ final class SurfaceReconciler {
         reconcileScheduled = false
         forceOrderingOnNextReconcile = false
         borderApplier.cleanup()
+        parkingEdgeMaskManager.removeAll()
         appliedScene = .empty
     }
 
@@ -237,6 +286,7 @@ final class SurfaceReconciler {
         if desired.placeholders != appliedScene.placeholders {
             controller.nativeFullscreenPlaceholderManager.apply(desired.placeholders)
         }
+        parkingEdgeMaskManager.apply(desired.parkingEdgeMasks)
         appliedScene = desired
         if !borderOutcome.didApply {
             appliedScene.border = nil

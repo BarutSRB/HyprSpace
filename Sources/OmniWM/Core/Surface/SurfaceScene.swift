@@ -6,6 +6,7 @@ import Foundation
 
 enum SurfaceKind: String, Equatable {
     case border
+    case parkingEdgeMask
     case workspaceBar
     case overview
     case nativeFullscreenPlaceholder

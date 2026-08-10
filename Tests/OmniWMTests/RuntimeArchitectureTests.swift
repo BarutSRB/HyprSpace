@@ -2305,15 +2305,23 @@ final class RuntimeArchitectureTests: XCTestCase {
         let world = WorldView(controller: controller)
 
         XCTAssertFalse(SurfaceDerivation.derive(world: world).bars.isEmpty)
+        XCTAssertFalse(SurfaceDerivation.derive(world: world).parkingEdgeMasks.isEmpty)
         controller.surfaceReconciler.reconcileNow()
         XCTAssertFalse(controller.surfaceReconciler.appliedScene.bars.isEmpty)
+        XCTAssertFalse(controller.surfaceReconciler.appliedScene.parkingEdgeMasks.isEmpty)
+        XCTAssertFalse(
+            controller.ownedWindowRegistry.visibleSurfaceIDs(kind: .parkingEdgeMask).isEmpty
+        )
 
         controller.hasStartedServices = false
         controller.surfaceReconciler.cleanup()
 
         XCTAssertTrue(SurfaceDerivation.derive(world: world).bars.isEmpty)
+        XCTAssertTrue(SurfaceDerivation.derive(world: world).parkingEdgeMasks.isEmpty)
+        XCTAssertTrue(controller.ownedWindowRegistry.visibleSurfaceIDs(kind: .parkingEdgeMask).isEmpty)
         controller.surfaceReconciler.reconcileNow()
         XCTAssertTrue(controller.surfaceReconciler.appliedScene.bars.isEmpty)
+        XCTAssertTrue(controller.surfaceReconciler.appliedScene.parkingEdgeMasks.isEmpty)
     }
 
     @MainActor
