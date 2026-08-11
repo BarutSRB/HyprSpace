@@ -26,14 +26,16 @@ final class MenuExtractorTests: XCTestCase {
 
     func testMenuAnywhereControllerMenuWillOpenAndNeedsUpdateConfiguresSubmenu() {
         let controller = MenuAnywhereController.shared
-        let submenu = NSMenu(title: "Submenu Test")
-        XCTAssertTrue(submenu.autoenablesItems)
 
-        controller.menuWillOpen(submenu)
-        XCTAssertFalse(submenu.autoenablesItems, "menuWillOpen should set autoenablesItems = false")
+        let willOpenMenu = NSMenu(title: "WillOpen Test")
+        XCTAssertTrue(willOpenMenu.autoenablesItems)
+        controller.menuWillOpen(willOpenMenu)
+        XCTAssertFalse(willOpenMenu.autoenablesItems, "menuWillOpen should set autoenablesItems = false")
 
-        controller.menuNeedsUpdate(submenu)
-        XCTAssertFalse(submenu.autoenablesItems, "menuNeedsUpdate should set autoenablesItems = false")
+        let needsUpdateMenu = NSMenu(title: "NeedsUpdate Test")
+        XCTAssertTrue(needsUpdateMenu.autoenablesItems)
+        controller.menuNeedsUpdate(needsUpdateMenu)
+        XCTAssertFalse(needsUpdateMenu.autoenablesItems, "menuNeedsUpdate should set autoenablesItems = false even without axRoot")
     }
 
     @objc private func dummyAction() {}

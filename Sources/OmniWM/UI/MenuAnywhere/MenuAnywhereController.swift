@@ -99,8 +99,8 @@ final class MenuAnywhereController: NSObject, NSMenuDelegate {
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         if menu === activeMenu { return }
-        guard let axRoot = menu.axRootElement else { return }
         menu.autoenablesItems = false
+        guard let axRoot = menu.axRootElement else { return }
 
         let isPlaceholderOnly = menu.items.count == 1 && menu.items.first?.title == "Loading..."
         guard menu.items.isEmpty || isPlaceholderOnly else { return }
