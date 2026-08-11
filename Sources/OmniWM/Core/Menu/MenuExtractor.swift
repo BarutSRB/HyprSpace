@@ -288,6 +288,7 @@ final class MenuExtractor: @unchecked Sendable {
         }
 
         let submenu = NSMenu(title: item.title)
+        submenu.autoenablesItems = false
 
         submenu.delegate = target as? NSMenuDelegate
         submenu.axRootElement = firstSub
