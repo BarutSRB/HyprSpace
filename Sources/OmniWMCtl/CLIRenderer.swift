@@ -545,14 +545,15 @@ enum CLIRenderer {
         let cleanRows = rows.map { $0.map(sanitizedCell) }
         let widths = cleanHeaders.indices.map { column in
             ([cleanHeaders[column]] + cleanRows.map { row in row.indices.contains(column) ? row[column] : "" })
-                .map(\.count)
+                .map(TerminalCellWidth.measure)
                 .max() ?? 0
         }
 
         func renderRow(_ row: [String]) -> String {
             cleanHeaders.indices.map { column in
                 let value = row.indices.contains(column) ? row[column] : ""
-                return value.padding(toLength: widths[column], withPad: " ", startingAt: 0)
+                let padding = max(0, widths[column] - TerminalCellWidth.measure(value))
+                return value + String(repeating: " ", count: padding)
             }
             .joined(separator: "  ")
             .trimmingCharacters(in: .whitespaces)

@@ -7,12 +7,18 @@ import XCTest
 
 final class CLIRendererOutputTests: XCTestCase {
     private func windowResponse(title: String) -> IPCResponse {
-        IPCResponse.success(
+        windowResponse(titles: [title])
+    }
+
+    private func windowResponse(titles: [String], workspace: IPCWorkspaceRef? = nil) -> IPCResponse {
+        return IPCResponse.success(
             id: "1",
             kind: .query,
             result: IPCResult(
                 windows: IPCWindowsQueryResult(
-                    windows: [IPCWindowQuerySnapshot(id: "w-1", title: title)]
+                    windows: titles.enumerated().map { index, title in
+                        IPCWindowQuerySnapshot(id: "w-\(index)", workspace: workspace, title: title)
+                    }
                 )
             )
         )
@@ -87,5 +93,29 @@ final class CLIRendererOutputTests: XCTestCase {
         let response = windowResponse(title: "ESC\u{1B}CSI\u{9B}LS\u{2028}PS\u{2029}")
         let output = try CLIRenderer.responseOutput(response, format: .json)
         XCTAssertEqual(try IPCWire.decodeResponse(from: output.data), response)
+    }
+
+    func testTablePreservesAndAlignsUnicodeTitles() throws {
+        let titles = [
+            "abcdefgh",
+            "abc🚀xyz",
+            "界e\u{301}abcde",
+            "👩🏽‍💻🇨🇦1️⃣ab"
+        ]
+        let workspace = IPCWorkspaceRef(id: "workspace", rawName: "next", displayName: "NEXT", number: nil)
+        let response = windowResponse(titles: titles, workspace: workspace)
+        let output = try CLIRenderer.responseOutput(response, format: .table)
+        let text = try XCTUnwrap(String(data: output.data, encoding: .utf8))
+        let rows = text.split(separator: "\n").dropFirst(2)
+
+        XCTAssertEqual(rows.count, titles.count)
+
+        let markerColumns = try zip(rows, titles).map { row, title in
+            XCTAssertTrue(row.contains(title))
+            let marker = try XCTUnwrap(row.range(of: "NEXT"))
+            return TerminalCellWidth.measure(row[..<marker.lowerBound])
+        }
+
+        XCTAssertEqual(Set(markerColumns).count, 1)
     }
 }
