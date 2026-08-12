@@ -2955,20 +2955,29 @@ public enum IPCWindowOpaqueID {
             return nil
         }
 
-        // The payload layout is `<session-token>:<pid>:<window-id>`. The session token is a
-        // free-form String (it defaults to a UUID, but the public API accepts any value), so it
-        // may itself contain the `:` delimiter. Anchor the well-formed integer fields from the
-        // right and treat everything before them as the token instead of requiring exactly three
-        // fields, which silently rejected tokens containing a colon.
-        let parts = payload.split(separator: ":", omittingEmptySubsequences: false)
-        guard parts.count >= 3,
-              let pid = Int32(parts[parts.count - 2]),
-              let windowId = Int(parts[parts.count - 1])
+        let bytes = payload.utf8
+        guard let windowDelimiter = bytes.lastIndex(of: 0x3A),
+              let pidDelimiter = bytes[..<windowDelimiter].lastIndex(of: 0x3A)
         else {
             return nil
         }
-        let sessionToken = parts[0 ..< parts.count - 2].joined(separator: ":")
-        return DecodedPayload(sessionToken: sessionToken, pid: pid, windowId: windowId)
+
+        let pidStart = bytes.index(after: pidDelimiter)
+        let windowStart = bytes.index(after: windowDelimiter)
+        guard let sessionToken = String(bytes: bytes[..<pidDelimiter], encoding: .utf8),
+              let pidText = String(bytes: bytes[pidStart ..< windowDelimiter], encoding: .utf8),
+              let windowText = String(bytes: bytes[windowStart...], encoding: .utf8),
+              let pid = Int32(pidText),
+              let windowId = Int(windowText)
+        else {
+            return nil
+        }
+
+        return DecodedPayload(
+            sessionToken: sessionToken,
+            pid: pid,
+            windowId: windowId
+        )
     }
 
     private static func base64URLEncoded(_ data: Data) -> String {

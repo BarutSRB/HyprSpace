@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Copyright (C) 2026 BarutSRB — https://github.com/BarutSRB/OmniWM
 
+import Foundation
 import OmniWMIPC
 import XCTest
 
@@ -16,8 +17,6 @@ final class IPCWindowOpaqueIDTests: XCTestCase {
     }
 
     func testRoundTripsSessionTokenContainingColonDelimiter() {
-        // The session token is a free-form String; a token that itself contains the `:` payload
-        // delimiter must still round-trip instead of being reported as invalid.
         let token = "prefix:suffix"
         let opaque = IPCWindowOpaqueID.encode(pid: 42, windowId: 7, sessionToken: token)
 
@@ -29,11 +28,21 @@ final class IPCWindowOpaqueIDTests: XCTestCase {
 
     func testRoundTripsSessionTokenWithMultipleColons() {
         let token = "a:b:c:d"
-        let opaque = IPCWindowOpaqueID.encode(pid: -3, windowId: 999_999, sessionToken: token)
+        let opaque = IPCWindowOpaqueID.encode(pid: 3, windowId: 999_999, sessionToken: token)
 
         XCTAssertEqual(
             IPCWindowOpaqueID.validate(opaque, expectingSessionToken: token),
-            .valid(pid: -3, windowId: 999_999)
+            .valid(pid: 3, windowId: 999_999)
+        )
+    }
+
+    func testRoundTripsSessionTokenEndingInUnicodePrependScalar() {
+        let token = "prefix\u{0600}"
+        let opaque = IPCWindowOpaqueID.encode(pid: 42, windowId: 7, sessionToken: token)
+
+        XCTAssertEqual(
+            IPCWindowOpaqueID.validate(opaque, expectingSessionToken: token),
+            .valid(pid: 42, windowId: 7)
         )
     }
 
@@ -55,6 +64,21 @@ final class IPCWindowOpaqueIDTests: XCTestCase {
         }
     }
 
+    func testMalformedDecodedPayloadReportsInvalid() {
+        for payload in [
+            "session:42",
+            "session:not-a-pid:7",
+            "session:42:not-a-window",
+            "session::7",
+            "session:42:"
+        ] {
+            XCTAssertEqual(
+                IPCWindowOpaqueID.validate(opaqueID(payload: payload), expectingSessionToken: "session"),
+                .invalid
+            )
+        }
+    }
+
     func testDecodeReturnsNilForStaleOrInvalid() {
         let token = "session"
         let valid = IPCWindowOpaqueID.encode(pid: 1, windowId: 2, sessionToken: token)
@@ -62,5 +86,12 @@ final class IPCWindowOpaqueIDTests: XCTestCase {
         XCTAssertNotNil(IPCWindowOpaqueID.decode(valid, expectingSessionToken: token))
         XCTAssertNil(IPCWindowOpaqueID.decode(valid, expectingSessionToken: "other"))
         XCTAssertNil(IPCWindowOpaqueID.decode("ow_bogus", expectingSessionToken: token))
+    }
+
+    private func opaqueID(payload: String) -> String {
+        "ow_" + Data(payload.utf8).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
     }
 }
