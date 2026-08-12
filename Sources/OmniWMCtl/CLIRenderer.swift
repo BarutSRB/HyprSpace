@@ -532,7 +532,8 @@ enum CLIRenderer {
         case .json:
             return ""
         case .tsv:
-            return ([headers] + rows).map { $0.joined(separator: "\t") }.joined(separator: "\n")
+            let sanitizedRows = ([headers] + rows).map { $0.map(sanitizedCell) }
+            return sanitizedRows.map { $0.joined(separator: "\t") }.joined(separator: "\n")
         case .text,
              .table:
             return renderTable(headers: headers, rows: rows)
@@ -540,14 +541,16 @@ enum CLIRenderer {
     }
 
     private static func renderTable(headers: [String], rows: [[String]]) -> String {
-        let widths = headers.indices.map { column in
-            ([headers[column]] + rows.map { row in row.indices.contains(column) ? row[column] : "" })
+        let cleanHeaders = headers.map(sanitizedCell)
+        let cleanRows = rows.map { $0.map(sanitizedCell) }
+        let widths = cleanHeaders.indices.map { column in
+            ([cleanHeaders[column]] + cleanRows.map { row in row.indices.contains(column) ? row[column] : "" })
                 .map(\.count)
                 .max() ?? 0
         }
 
         func renderRow(_ row: [String]) -> String {
-            headers.indices.map { column in
+            cleanHeaders.indices.map { column in
                 let value = row.indices.contains(column) ? row[column] : ""
                 return value.padding(toLength: widths[column], withPad: " ", startingAt: 0)
             }
@@ -555,14 +558,21 @@ enum CLIRenderer {
             .trimmingCharacters(in: .whitespaces)
         }
 
-        var lines = [renderRow(headers)]
+        var lines = [renderRow(cleanHeaders)]
         lines.append(widths.map { String(repeating: "-", count: $0) }.joined(separator: "  "))
-        if rows.isEmpty {
+        if cleanRows.isEmpty {
             lines.append("(none)")
         } else {
-            lines.append(contentsOf: rows.map(renderRow))
+            lines.append(contentsOf: cleanRows.map(renderRow))
         }
         return lines.joined(separator: "\n")
+    }
+
+    private static func sanitizedCell(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\t", with: " ")
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
     }
 
     private static func boolDescription(_ value: Bool?) -> String {
