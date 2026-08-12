@@ -97,6 +97,14 @@ enum HotkeySettingsDisplayModel {
         }
     }
 
+    static func advancedSearchMatchCount(_ query: String, bindings: [HotkeyBinding]) -> Int {
+        guard !ActionCatalog.normalizedSearchTerm(query).isEmpty else { return 0 }
+        return bindings.count { binding in
+            ActionCatalog.visibility(for: binding.id) == .advanced
+                && matchesSearch(query, binding: binding)
+        }
+    }
+
     static func displayString(for binding: KeyBinding) -> String {
         binding.displayString
     }
@@ -149,11 +157,6 @@ struct HotkeySettingsView: View {
             subtitle: "Search commands, edit shortcuts, and review registration problems without leaving the settings window."
         ) {
             Section("Controls") {
-                LabeledContent("Advanced") {
-                    Toggle("Show Advanced", isOn: $showsAdvancedHotkeys)
-                        .toggleStyle(.switch)
-                }
-
                 LabeledContent("System Hyper Trigger") {
                     Picker("System Hyper Trigger", selection: $settings.systemHyperTrigger) {
                         Text("None").tag(SystemHyperTrigger.none)
@@ -235,7 +238,21 @@ struct HotkeySettingsView: View {
                     }
                 }
 
-                if !hasSearchMatches {
+                Toggle("Include Advanced Commands", isOn: $showsAdvancedHotkeys)
+                    .toggleStyle(.switch)
+                SettingsCaption("Includes advanced commands in the shortcut list and search results.")
+
+                let hiddenAdvancedMatchCount = hiddenAdvancedSearchMatchCount
+                if hiddenAdvancedMatchCount > 0 {
+                    HStack(spacing: 12) {
+                        Text(hiddenAdvancedSearchMessage(for: hiddenAdvancedMatchCount))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Show Advanced Commands") {
+                            showsAdvancedHotkeys = true
+                        }
+                    }
+                } else if !hasSearchMatches {
                     Text("No matching hotkeys.")
                         .foregroundStyle(.secondary)
                 }
@@ -314,6 +331,14 @@ struct HotkeySettingsView: View {
         settings.hotkeyBindings.filter(isVisible)
     }
 
+    private var hiddenAdvancedSearchMatchCount: Int {
+        guard !showsAdvancedHotkeys else { return 0 }
+        return HotkeySettingsDisplayModel.advancedSearchMatchCount(
+            searchText,
+            bindings: settings.hotkeyBindings
+        )
+    }
+
     private func actionsForCategory(_ category: HotkeyCategory) -> [HotkeyBinding] {
         visibleHotkeyBindings.filter { binding in
             binding.category == category && HotkeySettingsDisplayModel.matchesSearch(searchText, binding: binding)
@@ -325,6 +350,13 @@ struct HotkeySettingsView: View {
             bindingId: binding.id,
             showsAdvancedHotkeys: showsAdvancedHotkeys
         )
+    }
+
+    private func hiddenAdvancedSearchMessage(for count: Int) -> String {
+        if count == 1 {
+            return "1 matching advanced command is hidden."
+        }
+        return "\(count) matching advanced commands are hidden."
     }
 
     private var isRecordingOrDrafting: Bool {
