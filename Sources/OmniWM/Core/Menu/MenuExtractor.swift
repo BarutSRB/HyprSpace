@@ -5,7 +5,49 @@ import AppKit
 import ApplicationServices
 import ObjectiveC
 
-final class MenuExtractor: @unchecked Sendable {
+enum MenuExtractionError: Error, Equatable {
+    case ax(AXError)
+    case invalidResponse
+    case deadlineExceeded
+}
+
+struct MenuAXDeadline {
+    let expiresAt: TimeInterval
+
+    init(start: TimeInterval, timeout: TimeInterval) {
+        expiresAt = start + timeout
+    }
+
+    func remaining(at time: TimeInterval) throws -> Float {
+        let remaining = expiresAt - time
+        guard remaining > 0 else { throw MenuExtractionError.deadlineExceeded }
+        return Float(remaining)
+    }
+}
+
+@MainActor
+struct MenuExtractorEnvironment {
+    var now: @MainActor () -> TimeInterval
+    var readAttribute: @MainActor (AXUIElement, CFString, Float) throws -> Any?
+    var readAttributes: @MainActor (AXUIElement, CFArray, Float) throws -> [Any]
+
+    static var live: MenuExtractorEnvironment {
+        MenuExtractorEnvironment(
+            now: { ProcessInfo.processInfo.systemUptime },
+            readAttribute: readMenuAttribute,
+            readAttributes: readMenuAttributes
+        )
+    }
+}
+
+struct MenuItemSnapshot {
+    let element: AXUIElement
+    let attributes: [String: Any]
+    let submenuRoot: AXUIElement?
+}
+
+@MainActor
+final class MenuExtractor {
     private static let itemAttributeKeys = [
         "AXTitle", "AXRole", "AXRoleDescription", "AXEnabled",
         "AXMenuItemMarkChar", "AXMenuItemCmdChar", "AXMenuItemCmdModifiers", "AXChildren"
@@ -14,6 +56,16 @@ final class MenuExtractor: @unchecked Sendable {
     private let boldFont = NSFontManager.shared.convert(
         NSFont.menuFont(ofSize: NSFont.systemFontSize), toHaveTrait: .boldFontMask
     )
+    private let environment: MenuExtractorEnvironment
+    private let submenuTimeout: TimeInterval
+
+    init(
+        environment: MenuExtractorEnvironment = .live,
+        submenuTimeout: TimeInterval = 0.25
+    ) {
+        self.environment = environment
+        self.submenuTimeout = submenuTimeout
+    }
 
     func getMenuBar(for pid: pid_t) -> AXUIElement? {
         let app = AXUIElementCreateApplication(pid)
@@ -29,25 +81,24 @@ final class MenuExtractor: @unchecked Sendable {
         }
     }
 
-    func buildSubmenu(from element: AXUIElement, target: AnyObject?, action: Selector?) -> [NSMenuItem] {
-        autoreleasepool {
-            buildMenuItems(from: element, target: target, action: action, isSubmenu: true)
+    func buildSubmenu(
+        from element: AXUIElement,
+        target: AnyObject?,
+        action: Selector?
+    ) throws -> [NSMenuItem] {
+        try autoreleasepool {
+            let deadline = MenuAXDeadline(start: environment.now(), timeout: submenuTimeout)
+            let snapshots = try readSubmenuSnapshots(from: element, deadline: deadline)
+            return makeSubmenuItems(from: snapshots, target: target, action: action)
         }
     }
 
-    func buildSubmenu(
-        fromChildren children: [AXUIElement],
-        itemsData: [[String: Any]],
+    func makeSubmenuItems(
+        from snapshots: [MenuItemSnapshot],
         target: AnyObject?,
         action: Selector?
     ) -> [NSMenuItem] {
-        buildMenuItems(
-            children: children,
-            itemsData: itemsData,
-            target: target,
-            action: action,
-            isSubmenu: true
-        )
+        buildMenuItems(from: snapshots, target: target, action: action, isSubmenu: true)
     }
 
     func flattenMenuItems(
@@ -134,54 +185,209 @@ final class MenuExtractor: @unchecked Sendable {
         return parts.joined()
     }
 
+    private func readSubmenuSnapshots(
+        from element: AXUIElement,
+        deadline: MenuAXDeadline
+    ) throws -> [MenuItemSnapshot] {
+        let childrenValue = try environment.readAttribute(
+            element,
+            kAXChildrenAttribute as CFString,
+            deadline.remaining(at: environment.now())
+        )
+        guard let childrenValue,
+              let children = childrenValue as? [AXUIElement]
+        else {
+            throw MenuExtractionError.invalidResponse
+        }
+
+        let attributes = Self.itemAttributeKeys as CFArray
+        var snapshots: [MenuItemSnapshot] = []
+        snapshots.reserveCapacity(children.count)
+
+        for child in children {
+            let values = try environment.readAttributes(
+                child,
+                attributes,
+                deadline.remaining(at: environment.now())
+            )
+            var decoded = try Self.decodeAttributeValues(
+                names: Self.itemAttributeKeys,
+                values: values
+            )
+            let role = try Self.validateMenuItemAttributes(&decoded)
+            let submenuRoot = try readSubmenuRoot(
+                from: decoded,
+                role: role,
+                deadline: deadline
+            )
+            snapshots.append(
+                MenuItemSnapshot(
+                    element: child,
+                    attributes: decoded,
+                    submenuRoot: submenuRoot
+                )
+            )
+        }
+
+        return snapshots
+    }
+
+    private func readSubmenuRoot(
+        from attributes: [String: Any],
+        role: String,
+        deadline: MenuAXDeadline
+    ) throws -> AXUIElement? {
+        guard role != "AXSeparator",
+              let childrenValue = attributes[kAXChildrenAttribute as String]
+        else {
+            return nil
+        }
+        guard let children = childrenValue as? [AXUIElement] else {
+            throw MenuExtractionError.invalidResponse
+        }
+        guard let submenuRoot = children.first else { return nil }
+
+        let roleValue = try environment.readAttribute(
+            submenuRoot,
+            kAXRoleAttribute as CFString,
+            deadline.remaining(at: environment.now())
+        )
+        guard let submenuRole = roleValue as? String,
+              submenuRole == (kAXMenuRole as String)
+        else {
+            throw MenuExtractionError.invalidResponse
+        }
+        return submenuRoot
+    }
+
+    static func decodeAttributeValues(
+        names: [String],
+        values: [Any]
+    ) throws -> [String: Any] {
+        guard names.count == values.count else {
+            throw MenuExtractionError.invalidResponse
+        }
+
+        var decoded: [String: Any] = [:]
+        decoded.reserveCapacity(names.count)
+        for (name, value) in zip(names, values) {
+            if let value = try decodedAttributeValue(value) {
+                decoded[name] = value
+            }
+        }
+        return decoded
+    }
+
+    private static func decodedAttributeValue(_ value: Any) throws -> Any? {
+        let cfValue = value as CFTypeRef
+        let typeId = CFGetTypeID(cfValue)
+        if typeId == CFNullGetTypeID() {
+            return nil
+        }
+        guard typeId == AXValueGetTypeID() else {
+            return value
+        }
+
+        let axValue = unsafeDowncast(cfValue, to: AXValue.self)
+        guard AXValueGetType(axValue) == .axError else {
+            return value
+        }
+        var error = AXError.success
+        guard AXValueGetValue(axValue, .axError, &error) else {
+            throw MenuExtractionError.invalidResponse
+        }
+        switch error {
+        case .attributeUnsupported,
+             .noValue:
+            return nil
+        default:
+            throw MenuExtractionError.ax(error)
+        }
+    }
+
+    private static func validateMenuItemAttributes(_ attributes: inout [String: Any]) throws -> String {
+        guard let role = attributes[kAXRoleAttribute as String] as? String else {
+            throw MenuExtractionError.invalidResponse
+        }
+        if role != "AXSeparator" {
+            guard attributes[kAXTitleAttribute as String] is String else {
+                throw MenuExtractionError.invalidResponse
+            }
+        }
+        try validateOptionalType(String.self, key: kAXRoleDescriptionAttribute as String, in: attributes)
+        try validateOptionalType(Bool.self, key: kAXEnabledAttribute as String, in: attributes)
+        try validateOptionalType(String.self, key: kAXMenuItemMarkCharAttribute as String, in: attributes)
+        try validateOptionalType(String.self, key: kAXMenuItemCmdCharAttribute as String, in: attributes)
+        try validateOptionalType(Int.self, key: kAXMenuItemCmdModifiersAttribute as String, in: attributes)
+        try validateOptionalType([AXUIElement].self, key: kAXChildrenAttribute as String, in: attributes)
+        if attributes[kAXEnabledAttribute as String] == nil {
+            attributes[kAXEnabledAttribute as String] = false
+        }
+        return role
+    }
+
+    private static func validateOptionalType<T>(
+        _: T.Type,
+        key: String,
+        in attributes: [String: Any]
+    ) throws {
+        guard let value = attributes[key] else { return }
+        guard value is T else { throw MenuExtractionError.invalidResponse }
+    }
+
     private func buildMenuItems(
         from element: AXUIElement, target: AnyObject?, action: Selector?, isSubmenu: Bool
     ) -> [NSMenuItem] {
         guard let children = element.getChildren() else { return [] }
 
-        let itemsData = autoreleasepool {
-            var results: [[String: Any]] = []
+        let snapshots = autoreleasepool {
+            var results: [MenuItemSnapshot] = []
             results.reserveCapacity(children.count)
 
             for child in children {
-                if let values = child.getMultipleAttributes(Self.itemAttributeKeys) {
-                    results.append(values)
-                } else {
-                    results.append([:])
-                }
+                let attributes = child.getMultipleAttributes(Self.itemAttributeKeys) ?? [:]
+                let submenuRoot = legacySubmenuRoot(from: attributes)
+                results.append(
+                    MenuItemSnapshot(
+                        element: child,
+                        attributes: attributes,
+                        submenuRoot: submenuRoot
+                    )
+                )
             }
 
             return results
         }
 
         return buildMenuItems(
-            children: children, itemsData: itemsData, target: target, action: action, isSubmenu: isSubmenu
+            from: snapshots,
+            target: target,
+            action: action,
+            isSubmenu: isSubmenu
         )
     }
 
     private func buildMenuItems(
-        children: [AXUIElement],
-        itemsData: [[String: Any]],
+        from snapshots: [MenuItemSnapshot],
         target: AnyObject?,
         action: Selector?,
         isSubmenu: Bool
     ) -> [NSMenuItem] {
         var items: [NSMenuItem] = []
-        items.reserveCapacity(children.count)
+        items.reserveCapacity(snapshots.count)
 
         var appleItem: NSMenuItem?
         var isFirst = true
         var needsSeparator = false
 
-        for (index, child) in children.enumerated() {
+        for snapshot in snapshots {
             autoreleasepool {
-                let itemData = itemsData[index]
+                let itemData = snapshot.attributes
                 let isApple = isAppleMenuItem(
                     title: itemData["AXTitle"] as? String, itemData: itemData
                 )
                 if let item = buildSingleMenuItem(
-                    from: child,
-                    itemData: itemData,
+                    from: snapshot,
                     target: target,
                     action: action,
                     isSubmenu: isSubmenu,
@@ -218,14 +424,14 @@ final class MenuExtractor: @unchecked Sendable {
     }
 
     private func buildSingleMenuItem(
-        from child: AXUIElement,
-        itemData: [String: Any],
+        from snapshot: MenuItemSnapshot,
         target: AnyObject?,
         action: Selector?,
         isSubmenu: Bool,
         isFirst: inout Bool,
         isApple: Bool
     ) -> NSMenuItem? {
+        let itemData = snapshot.attributes
         let title = itemData["AXTitle"] as? String ?? ""
         let role = itemData["AXRole"] as? String ?? ""
 
@@ -234,7 +440,7 @@ final class MenuExtractor: @unchecked Sendable {
         }
 
         let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-        item.representedObject = child
+        item.representedObject = snapshot.element
 
         item.isEnabled = itemData["AXEnabled"] as? Bool ?? true
 
@@ -244,7 +450,7 @@ final class MenuExtractor: @unchecked Sendable {
 
         setKeyboardShortcut(for: item, from: itemData)
 
-        let hasSubmenu = handleSubmenu(for: item, from: itemData, target: target, action: action)
+        let hasSubmenu = handleSubmenu(for: item, root: snapshot.submenuRoot, target: target)
 
         if !hasSubmenu && item.isEnabled {
             item.target = target
@@ -274,27 +480,30 @@ final class MenuExtractor: @unchecked Sendable {
 
     private func handleSubmenu(
         for item: NSMenuItem,
-        from values: [String: Any],
-        target: AnyObject?,
-        action _: Selector?
+        root: AXUIElement?,
+        target: AnyObject?
     ) -> Bool {
-        guard let subChildren = values["AXChildren"] as? [AXUIElement],
-              !subChildren.isEmpty,
-              let firstSub = subChildren.first,
-              let subRole = firstSub.getAttribute("AXRole") as? String,
-              subRole == "AXMenu"
-        else {
-            return false
-        }
+        guard let root else { return false }
 
         let submenu = NSMenu(title: item.title)
         submenu.autoenablesItems = false
 
         submenu.delegate = target as? NSMenuDelegate
-        submenu.axRootElement = firstSub
+        submenu.axRootElement = root
         item.submenu = submenu
 
         return true
+    }
+
+    private func legacySubmenuRoot(from attributes: [String: Any]) -> AXUIElement? {
+        guard let children = attributes[kAXChildrenAttribute as String] as? [AXUIElement],
+              let root = children.first,
+              let role = root.getAttribute(kAXRoleAttribute as String) as? String,
+              role == (kAXMenuRole as String)
+        else {
+            return nil
+        }
+        return root
     }
 
     private func isAppleMenuItem(title: String?, itemData: [String: Any]) -> Bool {
@@ -302,9 +511,60 @@ final class MenuExtractor: @unchecked Sendable {
     }
 }
 
-private nonisolated(unsafe) var kAXRootElementAssociatedKey: UInt8 = 0
-private nonisolated(unsafe) var kIsPopulatingAssociatedKey: UInt8 = 0
+@MainActor
+private func readMenuAttribute(
+    _ element: AXUIElement,
+    _ attribute: CFString,
+    _ timeout: Float
+) throws -> Any? {
+    try MenuExtractor.withMessagingTimeout(on: element, timeout: timeout) {
+        var value: AnyObject?
+        let result = AXUIElementCopyAttributeValue(element, attribute, &value)
+        guard result == .success else { throw MenuExtractionError.ax(result) }
+        return value
+    }
+}
 
+@MainActor
+private func readMenuAttributes(
+    _ element: AXUIElement,
+    _ attributes: CFArray,
+    _ timeout: Float
+) throws -> [Any] {
+    try MenuExtractor.withMessagingTimeout(on: element, timeout: timeout) {
+        var values: CFArray?
+        let result = AXUIElementCopyMultipleAttributeValues(
+            element,
+            attributes,
+            AXCopyMultipleAttributeOptions(rawValue: 0),
+            &values
+        )
+        guard result == .success else { throw MenuExtractionError.ax(result) }
+        guard let values = values as? [Any] else {
+            throw MenuExtractionError.invalidResponse
+        }
+        return values
+    }
+}
+
+@MainActor
+extension MenuExtractor {
+    static func withMessagingTimeout<T>(
+        on element: AXUIElement,
+        timeout: Float,
+        setter: (AXUIElement, Float) -> AXError = { AXUIElementSetMessagingTimeout($0, $1) },
+        operation: () throws -> T
+    ) throws -> T {
+        let result = setter(element, timeout)
+        guard result == .success else { throw MenuExtractionError.ax(result) }
+        defer { _ = setter(element, 0) }
+        return try operation()
+    }
+}
+
+@MainActor private var kAXRootElementAssociatedKey: UInt8 = 0
+
+@MainActor
 extension NSMenu {
     var axRootElement: AXUIElement? {
         get {
@@ -319,21 +579,9 @@ extension NSMenu {
             )
         }
     }
-
-    var isPopulatingAsynchronously: Bool {
-        get {
-            (objc_getAssociatedObject(self, &kIsPopulatingAssociatedKey) as? NSNumber)?
-                .boolValue ?? false
-        }
-        set {
-            objc_setAssociatedObject(
-                self, &kIsPopulatingAssociatedKey, NSNumber(value: newValue),
-                .OBJC_ASSOCIATION_RETAIN_NONATOMIC
-            )
-        }
-    }
 }
 
+@MainActor
 extension AXUIElement {
     func getAttribute(_ name: String) -> Any? {
         autoreleasepool {

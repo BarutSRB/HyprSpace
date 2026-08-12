@@ -4,11 +4,19 @@
 @preconcurrency import AppKit
 @preconcurrency import ApplicationServices
 
+enum MenuSubmenuLoadResult {
+    case loaded([NSMenuItem])
+    case unavailable
+}
+
 @MainActor
 final class MenuAnywhereController: NSObject, NSMenuDelegate {
+    typealias SubmenuLoader = @MainActor (AXUIElement, AnyObject?, Selector?) -> MenuSubmenuLoadResult
+
     static let shared = MenuAnywhereController()
 
-    private let menuExtractor = MenuExtractor()
+    private let menuExtractor: MenuExtractor
+    private let submenuLoader: SubmenuLoader
     private weak var currentApp: NSRunningApplication?
     private var activeMenu: NSMenu?
     var onMenuTrackingChanged: ((Bool) -> Void)?
@@ -17,11 +25,28 @@ final class MenuAnywhereController: NSObject, NSMenuDelegate {
     private static let appActivationDelay: TimeInterval = 0.1
 
     override private init() {
+        let extractor = MenuExtractor()
+        menuExtractor = extractor
+        submenuLoader = { root, target, action in
+            do {
+                return .loaded(
+                    try extractor.buildSubmenu(from: root, target: target, action: action)
+                )
+            } catch {
+                return .unavailable
+            }
+        }
+        super.init()
+    }
+
+    init(submenuLoader: @escaping SubmenuLoader) {
+        menuExtractor = MenuExtractor()
+        self.submenuLoader = submenuLoader
         super.init()
     }
 
     func showNativeMenu() {
-        cleanupActiveMenu()
+        guard activeMenu == nil else { return }
 
         guard let app = NSWorkspace.shared.frontmostApplication else { return }
         currentApp = app
@@ -42,6 +67,7 @@ final class MenuAnywhereController: NSObject, NSMenuDelegate {
         activeMenu = menu
 
         onMenuTrackingChanged?(true)
+        defer { cleanupActiveMenu() }
         menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
     }
 
@@ -51,6 +77,7 @@ final class MenuAnywhereController: NSObject, NSMenuDelegate {
         cleanupMenuItems(menu.items)
         menu.removeAllItems()
         activeMenu = nil
+        currentApp = nil
         onMenuTrackingChanged?(false)
     }
 
@@ -84,37 +111,24 @@ final class MenuAnywhereController: NSObject, NSMenuDelegate {
         }
     }
 
-    func menuDidClose(_ menu: NSMenu) {
-        if menu === activeMenu {
-            DispatchQueue.main.async { [weak self] in
-                self?.cleanupActiveMenu()
-            }
-        }
-    }
-
-    func menuWillOpen(_ menu: NSMenu) {
-        if menu === activeMenu { return }
-        menu.autoenablesItems = false
-    }
-
     func menuNeedsUpdate(_ menu: NSMenu) {
         if menu === activeMenu { return }
         menu.autoenablesItems = false
-        guard let axRoot = menu.axRootElement else { return }
+        guard menu.items.isEmpty, let axRoot = menu.axRootElement else { return }
 
-        let isPlaceholderOnly = menu.items.count == 1 && menu.items.first?.title == "Loading..."
-        guard menu.items.isEmpty || isPlaceholderOnly else { return }
-
-        let items = menuExtractor.buildSubmenu(
-            from: axRoot, target: self, action: #selector(menuAction(_:))
-        )
-        menu.removeAllItems()
-        if items.isEmpty {
-            let empty = NSMenuItem(title: "(No items)", action: nil, keyEquivalent: "")
-            empty.isEnabled = false
-            menu.addItem(empty)
-        } else {
+        switch submenuLoader(axRoot, self, #selector(menuAction(_:))) {
+        case let .loaded(items) where !items.isEmpty:
             items.forEach(menu.addItem)
+        case .loaded:
+            menu.addItem(statusItem(title: "(No items)"))
+        case .unavailable:
+            menu.addItem(statusItem(title: "(Unavailable)"))
         }
+    }
+
+    private func statusItem(title: String) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.isEnabled = false
+        return item
     }
 }
