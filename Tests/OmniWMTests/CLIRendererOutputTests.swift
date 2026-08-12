@@ -25,13 +25,11 @@ final class CLIRendererOutputTests: XCTestCase {
         let body = text.trimmingCharacters(in: .newlines)
         let lines = body.components(separatedBy: "\n")
 
-        // A single window must occupy exactly one data row beneath the header.
         XCTAssertEqual(lines.count, 2)
 
         let dataFields = lines[1].components(separatedBy: "\t")
-        // The windows table has 10 columns; a tab inside the title must not add a column.
         XCTAssertEqual(dataFields.count, 10)
-        XCTAssertFalse(dataFields.contains { $0.contains("\t") || $0.contains("\n") || $0.contains("\r") })
+        XCTAssertEqual(dataFields[3], "Progress bar  second")
     }
 
     func testTableKeepsTitleOnSingleRow() throws {
@@ -41,15 +39,18 @@ final class CLIRendererOutputTests: XCTestCase {
         let body = text.trimmingCharacters(in: .newlines)
         let lines = body.components(separatedBy: "\n")
 
-        // Header, separator, and exactly one data row — a newline in the title must not split it.
         XCTAssertEqual(lines.count, 3)
-        XCTAssertFalse(lines.contains { $0.contains("\n") || $0.contains("\r") })
+        XCTAssertFalse(body.contains("\t"))
+        XCTAssertFalse(body.contains("\r"))
+        XCTAssertTrue(lines[2].contains("Progress bar  second"))
     }
 
     func testPlainTitleIsUnchanged() throws {
         let response = windowResponse(title: "Clean title")
         let output = try CLIRenderer.responseOutput(response, format: .tsv)
         let text = try XCTUnwrap(String(data: output.data, encoding: .utf8))
-        XCTAssertTrue(text.contains("Clean title"))
+        let dataRow = try XCTUnwrap(text.split(separator: "\n").last)
+        let dataFields = dataRow.split(separator: "\t", omittingEmptySubsequences: false)
+        XCTAssertEqual(dataFields[3], "Clean title")
     }
 }
