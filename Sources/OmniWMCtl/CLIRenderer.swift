@@ -569,10 +569,21 @@ enum CLIRenderer {
     }
 
     private static func sanitizedCell(_ value: String) -> String {
-        value
-            .replacingOccurrences(of: "\t", with: " ")
-            .replacingOccurrences(of: "\n", with: " ")
-            .replacingOccurrences(of: "\r", with: " ")
+        var result = String.UnicodeScalarView()
+        result.reserveCapacity(value.unicodeScalars.count)
+
+        for scalar in value.unicodeScalars {
+            switch scalar.properties.generalCategory {
+            case .control,
+                 .lineSeparator,
+                 .paragraphSeparator:
+                result.append(" ")
+            default:
+                result.append(scalar)
+            }
+        }
+
+        return String(result)
     }
 
     private static func boolDescription(_ value: Bool?) -> String {

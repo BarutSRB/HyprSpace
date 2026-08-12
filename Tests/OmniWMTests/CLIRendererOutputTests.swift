@@ -53,4 +53,39 @@ final class CLIRendererOutputTests: XCTestCase {
         let dataFields = dataRow.split(separator: "\t", omittingEmptySubsequences: false)
         XCTAssertEqual(dataFields[3], "Clean title")
     }
+
+    func testHumanReadableFormatsReplaceTerminalControls() throws {
+        let title = "NUL\u{0}TAB\tLF\nCR\rESC\u{1B}DEL\u{7F}C1\u{80}NEL\u{85}CSI\u{9B}LS\u{2028}PS\u{2029}END"
+        let expectedTitle = "NUL TAB LF CR ESC DEL C1 NEL CSI LS PS END"
+        let response = windowResponse(title: title)
+
+        let tsvOutput = try CLIRenderer.responseOutput(response, format: .tsv)
+        let tsvText = try XCTUnwrap(String(data: tsvOutput.data, encoding: .utf8))
+        let dataRow = try XCTUnwrap(tsvText.split(separator: "\n").last)
+        let dataFields = dataRow.split(separator: "\t", omittingEmptySubsequences: false)
+        XCTAssertEqual(dataFields[3], Substring(expectedTitle))
+
+        for format in [CLIOutputFormat.table, .text] {
+            let output = try CLIRenderer.responseOutput(response, format: format)
+            let text = try XCTUnwrap(String(data: output.data, encoding: .utf8))
+            let dataRow = try XCTUnwrap(text.split(separator: "\n").last)
+            XCTAssertTrue(dataRow.contains(expectedTitle))
+        }
+    }
+
+    func testTSVPreservesUnicodeFormatScalars() throws {
+        let title = "Résumé 👩‍💻"
+        let response = windowResponse(title: title)
+        let output = try CLIRenderer.responseOutput(response, format: .tsv)
+        let text = try XCTUnwrap(String(data: output.data, encoding: .utf8))
+        let dataRow = try XCTUnwrap(text.split(separator: "\n").last)
+        let dataFields = dataRow.split(separator: "\t", omittingEmptySubsequences: false)
+        XCTAssertEqual(dataFields[3], Substring(title))
+    }
+
+    func testJSONPreservesTerminalControls() throws {
+        let response = windowResponse(title: "ESC\u{1B}CSI\u{9B}LS\u{2028}PS\u{2029}")
+        let output = try CLIRenderer.responseOutput(response, format: .json)
+        XCTAssertEqual(try IPCWire.decodeResponse(from: output.data), response)
+    }
 }
