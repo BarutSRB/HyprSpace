@@ -346,18 +346,6 @@ final class OverviewController {
                 handle: selectedHandle,
                 direction: .up
             )
-        case .consumeOrExpelWindowLeft:
-            guard isNiri else { return .unchanged }
-            return wmController.niriLayoutHandler.consumeOrExpelWindow(
-                handle: selectedHandle,
-                direction: .left
-            )
-        case .consumeOrExpelWindowRight:
-            guard isNiri else { return .unchanged }
-            return wmController.niriLayoutHandler.consumeOrExpelWindow(
-                handle: selectedHandle,
-                direction: .right
-            )
         case .consumeWindowIntoColumn:
             guard isNiri else { return .unchanged }
             return wmController.niriLayoutHandler.consumeWindowIntoColumn(containing: selectedHandle)
@@ -434,8 +422,6 @@ final class OverviewController {
              .moveWindowUp,
              .moveWindowDownOrToWorkspaceDown,
              .moveWindowUpOrToWorkspaceUp,
-             .consumeOrExpelWindowLeft,
-             .consumeOrExpelWindowRight,
              .consumeWindowIntoColumn,
              .expelWindowFromColumn,
              .moveColumn,

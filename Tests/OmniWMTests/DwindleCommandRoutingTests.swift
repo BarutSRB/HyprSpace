@@ -377,6 +377,20 @@ final class DwindleCommandRoutingTests: XCTestCase {
         XCTAssertEqual(root.splitRatio ?? 0, 1.0, accuracy: 0.000_001)
     }
 
+    func testExplicitConsumeOrExpelCommandsRejectDwindleLayout() throws {
+        let fixture = try makeFixture(groupedSource: false, includeTargetCandidate: false)
+
+        for command in [
+            HotkeyCommand.consumeOrExpelWindowLeft,
+            .consumeOrExpelWindowRight
+        ] {
+            XCTAssertEqual(
+                fixture.controller.commandHandler.performCommand(command),
+                .ignoredLayoutMismatch
+            )
+        }
+    }
+
     private func makeFixture(
         groupedSource: Bool,
         includeTargetCandidate: Bool

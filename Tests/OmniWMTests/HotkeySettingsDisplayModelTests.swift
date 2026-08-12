@@ -38,8 +38,8 @@ final class HotkeySettingsDisplayModelTests: XCTestCase {
         )
     }
 
-    func testAdvancedSearchMatchCountExcludesNormalAndHiddenCommands() {
-        let ids = ["move.left", "moveColumn.left", "consumeOrExpelWindowLeft"]
+    func testAdvancedSearchMatchCountExcludesNormalCommands() {
+        let ids = ["move.left", "moveColumn.left"]
         let bindings = HotkeyBindingRegistry.defaults().filter { ids.contains($0.id) }
 
         XCTAssertEqual(bindings.count, ids.count)

@@ -76,7 +76,7 @@ enum HotkeySettingsDisplayModel {
             true
         case .advanced:
             showsAdvancedHotkeys
-        case .hidden:
+        case .unassignable:
             false
         }
     }

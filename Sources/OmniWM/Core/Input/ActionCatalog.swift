@@ -7,7 +7,7 @@ import OmniWMIPC
 enum HotkeyVisibility: String {
     case normal
     case advanced
-    case hidden
+    case unassignable
 }
 
 struct ActionSpec: Equatable {
@@ -75,7 +75,7 @@ enum ActionCatalog {
     }
 
     static func defaultHotkeyBindings() -> [HotkeyBinding] {
-        specs.map { spec in
+        specs.filter { $0.visibility != .unassignable }.map { spec in
             HotkeyBinding(
                 id: spec.id,
                 command: spec.command,
@@ -393,14 +393,14 @@ enum ActionCatalog {
                 command: .consumeOrExpelWindowLeft,
                 category: .move,
                 binding: .unassigned,
-                visibility: .hidden
+                visibility: .unassignable
             ),
             action(
                 id: "consumeOrExpelWindowRight",
                 command: .consumeOrExpelWindowRight,
                 category: .move,
                 binding: .unassigned,
-                visibility: .hidden
+                visibility: .unassignable
             ),
             action(
                 id: "consumeWindowIntoColumn",

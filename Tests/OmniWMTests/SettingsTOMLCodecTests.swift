@@ -7,6 +7,42 @@ import Foundation
 import XCTest
 
 final class SettingsTOMLCodecTests: XCTestCase {
+    func testDefaultTOMLOmitsUnassignableHotkeyActions() throws {
+        let toml = String(
+            decoding: try SettingsTOMLCodec.encode(.defaults()),
+            as: UTF8.self
+        )
+
+        for id in ["consumeOrExpelWindowLeft", "consumeOrExpelWindowRight"] {
+            XCTAssertFalse(toml.contains(#"id = "\#(id)""#))
+        }
+    }
+
+    func testTOMLDropsAssignedUnassignableHotkeyAction() throws {
+        let source = Data(
+            """
+            [[hotkeys]]
+            binding = "Option+H"
+            id = "consumeOrExpelWindowLeft"
+            """.utf8
+        )
+
+        let decoded = try SettingsTOMLCodec.decode(source)
+
+        XCTAssertFalse(
+            decoded.hotkeyBindings.contains { $0.id == "consumeOrExpelWindowLeft" }
+        )
+
+        let rewritten = String(
+            decoding: try SettingsTOMLCodec.encode(
+                decoded,
+                preservingUnknownKeysFrom: source
+            ),
+            as: UTF8.self
+        )
+        XCTAssertFalse(rewritten.contains(#"id = "consumeOrExpelWindowLeft""#))
+    }
+
     func testMonitorInnerGapOverrideRoundTrips() throws {
         var export = SettingsExport.defaults()
         export.monitorGapSettings = [

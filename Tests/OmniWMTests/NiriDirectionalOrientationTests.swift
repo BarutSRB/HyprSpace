@@ -4,6 +4,7 @@
 import ApplicationServices
 import CoreGraphics
 @testable import OmniWM
+import OmniWMIPC
 import XCTest
 
 @MainActor
@@ -370,6 +371,116 @@ final class NiriDirectionalOrientationTests: XCTestCase {
         rendered = frames(for: fixture)
         try assertOrder(fixture.secondToken, fixture.firstToken, in: rendered, by: \.midY)
     }
+
+    func testExplicitConsumeOrExpelIPCCommandDispatchesToNiri() throws {
+        let fixture = try makeFixture(
+            frame: CGRect(x: 0, y: 0, width: 1_600, height: 900),
+            topology: .containers
+        )
+        execute(.focus(.right), on: fixture.controller)
+        let descriptor = try executeIPCCommand(
+            "consume-or-expel-window-left",
+            on: fixture.controller
+        )
+
+        XCTAssertEqual(descriptor.name, .consumeOrExpelWindowLeft)
+        XCTAssertEqual(descriptor.layoutCompatibility, .niri)
+        XCTAssertEqual(fixture.engine.columns(in: fixture.workspaceId).count, 1)
+        XCTAssertEqual(
+            Set(fixture.engine.columns(in: fixture.workspaceId)[0].windowNodes.map(\.token)),
+            Set([fixture.firstToken, fixture.secondToken])
+        )
+    }
+
+    func testExplicitConsumeOrExpelIPCCommandsNeverWrapAtColumnEdges() throws {
+        let cases = [
+            ("consume-or-expel-window-left", false),
+            ("consume-or-expel-window-right", true)
+        ]
+
+        for (commandPath, selectsSecondColumn) in cases {
+            let fixture = try makeFixture(
+                frame: CGRect(x: 0, y: 0, width: 1_600, height: 900),
+                topology: .containers
+            )
+            fixture.controller.workspaceManager.withEngineMutationScope(
+                in: fixture.workspaceId,
+                label: "explicit_consume_or_expel_wrap_fixture"
+            ) {
+                fixture.engine.updateConfiguration(infiniteLoop: true)
+                fixture.engine.updateMonitorSettings(
+                    fixture.engine.globalResolvedSettings(),
+                    for: fixture.monitor.id
+                )
+            }
+            if selectsSecondColumn {
+                execute(.focus(.right), on: fixture.controller)
+            }
+
+            _ = try executeIPCCommand(commandPath, on: fixture.controller)
+
+            XCTAssertEqual(fixture.engine.columns(in: fixture.workspaceId).count, 2)
+            XCTAssertEqual(
+                fixture.engine.columns(in: fixture.workspaceId).map { $0.windowNodes.count },
+                [1, 1]
+            )
+        }
+    }
+
+    func testExplicitConsumeOrExpelIPCCommandNeverCrossesMonitors() throws {
+        let fixture = try makeMixedMonitorFixture()
+
+        _ = try executeIPCCommand(
+            "consume-or-expel-window-right",
+            on: fixture.controller
+        )
+
+        XCTAssertEqual(
+            fixture.controller.workspaceManager.workspace(for: fixture.token),
+            fixture.sourceWorkspaceId
+        )
+        XCTAssertNotNil(fixture.engine.findNode(for: fixture.token, in: fixture.sourceWorkspaceId))
+        XCTAssertNil(fixture.engine.findNode(for: fixture.token, in: fixture.targetWorkspaceId))
+        XCTAssertEqual(
+            fixture.controller.workspaceManager.interactionMonitorId,
+            fixture.sourceMonitor.id
+        )
+    }
+
+    func testMoveLeftTOMLBindingRoundTripsAndExecutes() throws {
+        let customTrigger = try XCTUnwrap(
+            HotkeyTrigger.fromHumanReadable("Control+Option+M")
+        )
+        var export = SettingsExport.defaults()
+        export.hotkeyBindings = export.hotkeyBindings.map { binding in
+            binding.id == "move.left"
+                ? HotkeyBinding(
+                    id: binding.id,
+                    command: binding.command,
+                    trigger: customTrigger
+                )
+                : binding
+        }
+        let data = try SettingsTOMLCodec.encode(export)
+        let decoded = try SettingsTOMLCodec.decode(data)
+        let binding = try XCTUnwrap(
+            decoded.hotkeyBindings.first { $0.id == "move.left" }
+        )
+        let fixture = try makeFixture(
+            frame: CGRect(x: 0, y: 0, width: 1_600, height: 900),
+            topology: .containers
+        )
+        execute(.focus(.right), on: fixture.controller)
+
+        XCTAssertEqual(binding.command, .move(.left))
+        XCTAssertEqual(binding.binding, customTrigger)
+        execute(binding.command, on: fixture.controller)
+        XCTAssertEqual(fixture.engine.columns(in: fixture.workspaceId).count, 1)
+        XCTAssertEqual(
+            Set(fixture.engine.columns(in: fixture.workspaceId)[0].windowNodes.map(\.token)),
+            Set([fixture.firstToken, fixture.secondToken])
+        )
+    }
 }
 
 extension NiriDirectionalOrientationTests {
@@ -419,6 +530,20 @@ extension NiriDirectionalOrientationTests {
 }
 
 extension NiriDirectionalOrientationTests {
+    private func executeIPCCommand(
+        _ path: String,
+        on controller: WMController
+    ) throws -> IPCCommandDescriptor {
+        let descriptors = IPCAutomationManifest.commandDescriptors(matching: [path])
+        let descriptor = try XCTUnwrap(descriptors.first)
+        let request = try IPCCommandRequest(name: descriptor.name)
+        let router = IPCCommandRouter(controller: controller, sessionToken: "test")
+
+        XCTAssertEqual(descriptors.count, 1)
+        XCTAssertEqual(router.handle(request), .executed)
+        return descriptor
+    }
+
     private func makeFixture(
         frame: CGRect,
         forcedOrientation: Monitor.Orientation? = nil,

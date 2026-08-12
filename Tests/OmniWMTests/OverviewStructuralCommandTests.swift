@@ -26,6 +26,31 @@ final class OverviewStructuralCommandTests: XCTestCase {
         let focusRecorder: FocusRecorder
     }
 
+    func testUnassignableConsumeOrExpelCommandsHaveNoOverviewRouting() throws {
+        let fixture = try makeFixture(layouts: [.niri])
+        let selected = try addManagedWindow(
+            pid: 461_020,
+            windowId: 22,
+            to: fixture.workspaceIds[0],
+            fixture: fixture
+        )
+        let overview = OverviewController(
+            wmController: fixture.controller,
+            motionPolicy: fixture.controller.motionPolicy
+        )
+        let cases = [
+            ("consumeOrExpelWindowLeft", HotkeyCommand.consumeOrExpelWindowLeft),
+            ("consumeOrExpelWindowRight", .consumeOrExpelWindowRight)
+        ]
+
+        for (id, command) in cases {
+            XCTAssertNil(HotkeyBindingRegistry.command(for: id))
+            XCTAssertNil(
+                overview.performStructuralHotkey(command, selectedHandle: selected)
+            )
+        }
+    }
+
     func testSelectedOverviewHandleMovesInsteadOfLiveFocusedHandle() throws {
         let fixture = try makeFixture(layouts: [.niri])
         let workspaceId = fixture.workspaceIds[0]

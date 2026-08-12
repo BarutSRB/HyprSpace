@@ -613,7 +613,7 @@ Focus management is split across several objects (there is no single coordinator
 
 **Hotkeys** (`Sources/OmniWM/Core/Input/`)
 
-`ActionCatalog` is the source of truth for bindable actions. `buildSpecs()` materializes **153** `ActionSpec`s (99 standalone actions + 6 loop templates × 9), each with a title, search keywords, category, layout compatibility, and default binding. `HotkeyBinding`/`HotkeyBindingRegistry` persist and canonicalize per-action bindings (an action can have several shortcuts).
+`ActionCatalog` is the source of truth for action metadata and shortcut assignability. `buildSpecs()` materializes **153** `ActionSpec`s (99 standalone actions + 6 loop templates × 9), each with a title, search keywords, category, layout compatibility, default binding, and visibility. `HotkeyBinding`/`HotkeyBindingRegistry` persist and canonicalize bindings only for specs that are not `.unassignable` (an assignable action can have several shortcuts); unassignable specs remain available to non-hotkey command surfaces such as IPC.
 
 `HotkeyCenter` (`Hotkeys.swift`) installs one Carbon `InstallEventHandler` and registers each binding via `RegisterEventHotKey`, plus a virtual-hyper synthesis path. On a press it emits a `HotkeyInvocation` through `onCommand`; the invocation carries the semantic `HotkeyCommand` and optional `PhysicalHotkeyTrigger` metadata (`keyCode`, modifiers, and repeat state). `WMController` wires it to `eventIntake.enqueue(.hotkeyInvocation(invocation))`, so physical commands enter the same ordered intake pipeline as everything else (falling back to `CommandHandler.handleHotkeyInvocation` only if intake is closed).
 
@@ -916,7 +916,7 @@ CLIRenderer displays the result
 ### 6.1 Adding a New Hotkey Command
 
 1. **Add the enum case** in `Core/Input/HotkeyCommand.swift`.
-2. **Add the action spec** in `Core/Input/ActionCatalog.swift` (title, keywords, category, layout compatibility, default binding). This is the source of truth for the command palette and default bindings.
+2. **Add the action spec** in `Core/Input/ActionCatalog.swift` (title, keywords, category, layout compatibility, default binding, and visibility). This is the source of truth for command metadata and shortcut assignability; `.unassignable` specs are omitted from default bindings while retaining metadata for non-hotkey command surfaces.
 3. **Handle it** in `Core/Controller/CommandHandler.swift` — set the right `LayoutCompatibility` so the guard accepts it under the active layout. Mutations must reach the world through `WorkspaceManager.recordReconcileEvent`, never by touching `WindowModel`/engines directly.
 4. **Route structural Overview behavior** when applicable in `OverviewController`, using an explicit-`WindowHandle` entry point owned by `NiriLayoutHandler` or `WorkspaceNavigationHandler`; do not fall back to the desktop-focused window.
 5. **Expose via IPC** (optional) in `IPC/IPCCommandRouter.swift` and the manifest (`OmniWMIPC/IPCAutomationManifest.swift`); add the CLI name in `OmniWMCtl/CLIParser.swift`.
