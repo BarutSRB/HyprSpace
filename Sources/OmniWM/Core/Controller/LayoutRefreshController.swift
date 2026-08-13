@@ -298,71 +298,6 @@ import QuartzCore
         )
     }
 
-    private func auditParkVisibility(displayId: CGDirectDisplayID) {
-        guard ParkVisibilityAudit.shared.isActive, let controller else { return }
-        let now = CACurrentMediaTime()
-        guard now - layoutState.lastParkAuditTime >= 0.1 else { return }
-        layoutState.lastParkAuditTime = now
-
-        let monitorFrames = controller.workspaceManager.monitors.map(\.frame)
-        var laggards: [String] = []
-        var strays: [String] = []
-        var visible: [Int] = []
-        var parkedCount = 0
-        for entry in controller.workspaceManager.allEntries() {
-            guard let windowId = UInt32(exactly: entry.windowId) else { continue }
-            guard controller.workspaceManager.hiddenState(for: entry.token) != nil else {
-                visible.append(entry.windowId)
-                if entry.mode == .tiling,
-                   let bounds = SkyLight.shared.getWindowBounds(windowId)
-                {
-                    let frame = ScreenCoordinateSpace.toAppKit(rect: bounds)
-                    let expectations = [
-                        controller.axManager.lastAppliedFrame(for: entry.windowId)?.origin,
-                        controller.axManager.pendingFrameWrite(for: entry.windowId)?.origin,
-                        controller.axManager.skyLightLivePosition(for: entry.windowId)
-                    ].compactMap(\.self)
-                    let strayEpsilon: CGFloat = 32
-                    let matchesExpectation = expectations.contains {
-                        abs($0.x - frame.origin.x) <= strayEpsilon
-                            && abs($0.y - frame.origin.y) <= strayEpsilon
-                    }
-                    if !matchesExpectation {
-                        let expected = expectations.first.map { TraceFormat.point($0) } ?? "none"
-                        strays.append(
-                            "\(entry.windowId):\(TraceFormat.point(frame.origin))→\(expected)"
-                        )
-                    }
-                }
-                continue
-            }
-            guard let bounds = SkyLight.shared.getWindowBounds(windowId) else { continue }
-            let frame = ScreenCoordinateSpace.toAppKit(rect: bounds)
-            let overlap = monitorFrames
-                .map { $0.intersection(frame) }
-                .filter { !$0.isNull && !$0.isEmpty }
-                .max { $0.width * $0.height < $1.width * $1.height }
-            if let overlap, overlap.width > 16, overlap.height > 16 {
-                laggards.append(
-                    "\(entry.windowId):\(Int(overlap.width))x\(Int(overlap.height))"
-                        + "@\(TraceFormat.point(frame.origin))"
-                )
-            } else {
-                parkedCount += 1
-            }
-        }
-        ParkVisibilityAudit.shared.record(
-            ParkVisibilityAudit.Record(
-                mediaTime: now,
-                displayId: displayId,
-                laggards: laggards,
-                strays: strays,
-                visible: visible.sorted(),
-                parkedCount: parkedCount
-            )
-        )
-    }
-
     func startScrollAnimation(for workspaceId: WorkspaceDescriptor.ID, forGesture: Bool = false) {
         guard forGesture || controller?.motionPolicy.animationsEnabled != false else { return }
         guard let controller else { return }
@@ -1202,6 +1137,7 @@ import QuartzCore
         guard let controller else { return false }
 
         if controller.isFrontmostAppLockScreen() || controller.isLockScreenActive {
+            recordVisibilityRefresh(refresh, outcome: .skipped, reason: .lockScreen)
             return false
         }
 
@@ -2307,6 +2243,13 @@ import QuartzCore
             holdInventoryStabilityFullRescan(refresh, isNewerThanHeld: true)
             return
         }
+        if refresh.visibilityTraceVisibility != nil {
+            if layoutState.pendingRefresh != nil {
+                recordVisibilityRefresh(refresh, outcome: .coalesced)
+            } else if layoutState.activeRefresh != nil {
+                recordVisibilityRefresh(refresh, outcome: .queued)
+            }
+        }
         if let activeRefresh = layoutState.activeRefresh {
             handleRefresh(refresh, whileActive: activeRefresh)
             return
@@ -2577,6 +2520,7 @@ import QuartzCore
         layoutState.pendingRefresh = nil
         layoutState.activeRefresh = refresh
         layoutState.didExecuteEffectPlan = false
+        recordVisibilityRefresh(refresh, outcome: .started)
         let refreshGeneration = layoutState.refreshGeneration
         layoutState.activeRefreshTask = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -2610,7 +2554,14 @@ import QuartzCore
     }
 
     private func finishRefresh(_ refresh: ScheduledRefresh, didComplete: Bool, generation: UInt64) {
-        guard generation == layoutState.refreshGeneration else { return }
+        guard generation == layoutState.refreshGeneration else {
+            recordVisibilityRefresh(
+                layoutState.activeRefresh ?? refresh,
+                outcome: .invalidated,
+                reason: .generationInvalidated
+            )
+            return
+        }
         let completedRefresh = layoutState.activeRefresh ?? refresh
         let didExecuteEffectPlan = layoutState.didExecuteEffectPlan
 
@@ -2621,6 +2572,10 @@ import QuartzCore
         layoutState.activeRefreshTask = nil
         layoutState.activeRefresh = nil
         layoutState.didExecuteEffectPlan = false
+        recordVisibilityRefresh(
+            completedRefresh,
+            outcome: didComplete ? .completed : .invalidated
+        )
 
         if didComplete {
             layoutBuildMetrics.recordCompletedCycle()

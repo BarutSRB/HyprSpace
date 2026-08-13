@@ -2358,6 +2358,15 @@ final class AXManager {
                 clearSkyLightLivePosition(for: windowId)
             }
         }
+        if AppVisibilityTrace.isActive {
+            AppVisibilityTrace.record(
+                .axFence,
+                pid: pid,
+                visibility: hidden ? .hidden : .visible,
+                outcome: hidden ? .enabled : .disabled,
+                managedWindowCount: entries.lazy.filter { $0.pid == pid }.count
+            )
+        }
     }
 
     private func uniqueFrameEntries(_ entries: [(pid: pid_t, windowId: Int)]) -> [(pid: pid_t, windowId: Int)] {

@@ -404,11 +404,35 @@ final class WindowActionHandler {
         handle: WindowHandle,
         destination: AppRevealFocusDestination
     ) -> Bool {
-        guard let controller,
-              controller.workspaceManager.handle(for: handle.id) === handle,
-              let entry = controller.workspaceManager.entry(for: handle)
-        else {
+        func reject(
+            _ reason: AppVisibilityTrace.Reason,
+            workspaceId: WorkspaceDescriptor.ID? = nil,
+            generation: UInt64? = nil
+        ) -> Bool {
+            AppVisibilityTrace.record(
+                .reveal,
+                pid: handle.id.pid,
+                outcome: .rejected,
+                windowId: handle.id.windowId,
+                workspaceId: workspaceId,
+                generation: generation,
+                destination: destination.traceDestination,
+                reason: reason
+            )
             return false
+        }
+
+        guard let controller else {
+            return reject(.controllerUnavailable)
+        }
+        guard let currentHandle = controller.workspaceManager.handle(for: handle.id) else {
+            return reject(.handleMissing)
+        }
+        guard currentHandle === handle else {
+            return reject(.handleIdentityChanged)
+        }
+        guard let entry = controller.workspaceManager.entry(for: handle) else {
+            return reject(.entryMissing)
         }
         guard controller.workspaceManager.isAppHidden(pid: entry.pid) else {
             switch destination {
@@ -418,21 +442,46 @@ final class WindowActionHandler {
                 return controller.activateScratchpadFromBar(on: monitorId) == .executed
             }
         }
-        guard entry.layoutReason == .standard || controller.isManagedWindowSuspendedForNativeFullscreen(entry.token),
-              entry.interactionPolicy.mayFocus
+        guard entry.layoutReason == .standard
+            || controller.isManagedWindowSuspendedForNativeFullscreen(entry.token)
         else {
-            return false
+            return reject(
+                .ineligibleLayout,
+                workspaceId: entry.workspaceId,
+                generation: controller.workspaceManager.appVisibilityGeneration(for: entry.pid)
+            )
+        }
+        guard entry.interactionPolicy.mayFocus else {
+            return reject(
+                .focusDisallowed,
+                workspaceId: entry.workspaceId,
+                generation: controller.workspaceManager.appVisibilityGeneration(for: entry.pid)
+            )
         }
 
+        let appVisibilityGeneration = controller.workspaceManager.appVisibilityGeneration(for: entry.pid)
         let intent = controller.intentLedger.beginAppRevealFocus(
             token: entry.token,
             workspaceId: entry.workspaceId,
             handleIdentity: ObjectIdentifier(handle),
-            appVisibilityGeneration: controller.workspaceManager.appVisibilityGeneration(for: entry.pid),
+            appVisibilityGeneration: appVisibilityGeneration,
             focusFingerprint: appRevealFocusFingerprint(controller: controller),
             destination: destination
         )
-        guard unhideApplication(entry.pid) else {
+        let didRequestUnhide = unhideApplication(entry.pid)
+        AppVisibilityTrace.record(
+            .reveal,
+            pid: entry.pid,
+            outcome: didRequestUnhide ? .succeeded : .failed,
+            intentId: intent.id,
+            windowId: entry.windowId,
+            workspaceId: entry.workspaceId,
+            generation: appVisibilityGeneration,
+            intentGeneration: appVisibilityGeneration,
+            destination: destination.traceDestination,
+            reason: didRequestUnhide ? nil : .unhideRequestFailed
+        )
+        guard didRequestUnhide else {
             controller.intentLedger.cancelAppRevealFocus(intentId: intent.id)
             return false
         }
@@ -441,39 +490,119 @@ final class WindowActionHandler {
 
     @discardableResult
     func completeAppRevealFocus(intentId: IntentID) -> Bool {
-        guard let controller,
-              let intent = controller.intentLedger.openIntent(id: intentId),
-              case let .appRevealFocus(payload) = intent.kind,
-              controller.intentLedger.newestFocusIntentId() == payload.focusIntentWatermark,
-              appRevealFocusFingerprint(controller: controller) == payload.focusFingerprint,
-              !controller.workspaceManager.isAppHidden(pid: payload.token.pid),
-              controller.workspaceManager.appVisibilityGeneration(for: payload.token.pid)
-              == payload.appVisibilityGeneration &+ 1,
-              let handle = controller.workspaceManager.handle(for: payload.token),
-              ObjectIdentifier(handle) == payload.handleIdentity,
-              let entry = controller.workspaceManager.entry(for: handle),
-              entry.pid == payload.token.pid,
-              entry.workspaceId == payload.workspaceId,
-              entry.layoutReason == .standard
-              || controller.isManagedWindowSuspendedForNativeFullscreen(entry.token),
-              entry.interactionPolicy.mayFocus
-        else {
-            controller?.intentLedger.cancelAppRevealFocus(intentId: intentId)
+        guard let controller else {
+            AppVisibilityTrace.record(
+                .reveal,
+                outcome: .rejected,
+                intentId: intentId,
+                reason: .controllerUnavailable
+            )
+            return false
+        }
+        guard let intent = controller.intentLedger.openIntent(id: intentId) else {
+            AppVisibilityTrace.record(
+                .reveal,
+                outcome: .rejected,
+                intentId: intentId,
+                reason: .intentMissing
+            )
+            return false
+        }
+        guard case let .appRevealFocus(payload) = intent.kind else {
+            controller.intentLedger.cancelAppRevealFocus(intentId: intentId)
+            AppVisibilityTrace.record(
+                .reveal,
+                pid: intent.kind.targetPid,
+                outcome: .rejected,
+                intentId: intentId,
+                reason: .intentKindMismatch
+            )
             return false
         }
 
-        guard controller.intentLedger.confirmAppRevealFocus(intentId: intentId) != nil else {
+        func record(
+            _ outcome: AppVisibilityTrace.Outcome,
+            reason: AppVisibilityTrace.Reason? = nil
+        ) {
+            AppVisibilityTrace.record(
+                .reveal,
+                pid: payload.token.pid,
+                outcome: outcome,
+                intentId: intentId,
+                windowId: payload.token.windowId,
+                workspaceId: payload.workspaceId,
+                generation: controller.workspaceManager.appVisibilityGeneration(for: payload.token.pid),
+                destination: payload.destination.traceDestination,
+                reason: reason
+            )
+        }
+
+        func reject(_ reason: AppVisibilityTrace.Reason) -> Bool {
+            controller.intentLedger.cancelAppRevealFocus(intentId: intentId)
+            record(.rejected, reason: reason)
             return false
         }
+
+        guard controller.intentLedger.newestFocusIntentId() == payload.focusIntentWatermark else {
+            return reject(.newerFocusIntent)
+        }
+        guard appRevealFocusFingerprint(controller: controller) == payload.focusFingerprint else {
+            return reject(.focusStateChanged)
+        }
+        guard !controller.workspaceManager.isAppHidden(pid: payload.token.pid) else {
+            return reject(.stillHidden)
+        }
+        guard controller.workspaceManager.appVisibilityGeneration(for: payload.token.pid)
+            == payload.appVisibilityGeneration &+ 1
+        else {
+            return reject(.visibilityGenerationChanged)
+        }
+        guard let handle = controller.workspaceManager.handle(for: payload.token) else {
+            return reject(.handleMissing)
+        }
+        guard ObjectIdentifier(handle) == payload.handleIdentity else {
+            return reject(.handleIdentityChanged)
+        }
+        guard let entry = controller.workspaceManager.entry(for: handle) else {
+            return reject(.entryMissing)
+        }
+        guard entry.pid == payload.token.pid else {
+            return reject(.pidChanged)
+        }
+        guard entry.workspaceId == payload.workspaceId else {
+            return reject(.workspaceChanged)
+        }
+        guard entry.layoutReason == .standard
+            || controller.isManagedWindowSuspendedForNativeFullscreen(entry.token)
+        else {
+            return reject(.ineligibleLayout)
+        }
+        guard entry.interactionPolicy.mayFocus else {
+            return reject(.focusDisallowed)
+        }
+
+        guard controller.intentLedger.confirmAppRevealFocus(intentId: intentId) != nil else {
+            record(.rejected, reason: .intentNotPending)
+            return false
+        }
+
+        func finish(_ didComplete: Bool) -> Bool {
+            record(
+                didComplete ? .completed : .failed,
+                reason: didComplete ? nil : .navigationFailed
+            )
+            return didComplete
+        }
+
         switch payload.destination {
         case .window:
             if controller.isManagedWindowSuspendedForNativeFullscreen(handle.id) {
                 controller.activateNativeFullscreenPlaceholder(handle.id)
-                return true
+                return finish(true)
             }
-            return navigateToWindowInternal(token: handle.id, workspaceId: payload.workspaceId)
+            return finish(navigateToWindowInternal(token: handle.id, workspaceId: payload.workspaceId))
         case let .scratchpad(monitorId):
-            return controller.activateScratchpadFromBar(on: monitorId) == .executed
+            return finish(controller.activateScratchpadFromBar(on: monitorId) == .executed)
         }
     }
 

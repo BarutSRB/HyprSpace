@@ -57,10 +57,13 @@ final class AppRevealFocusTests: XCTestCase {
             pid: fixture.token.pid,
             source: .service
         )
+        AppVisibilityTrace.shared.beginCapture()
+        defer { AppVisibilityTrace.shared.endCapture() }
 
         XCTAssertFalse(handler.navigateToExplicitlySelectedWindow(handle: staleHandle))
         XCTAssertEqual(unhideCount, 0)
         XCTAssertNil(fixture.controller.intentLedger.openAppRevealFocusIntent(pid: fixture.token.pid))
+        XCTAssertTrue(AppVisibilityTrace.shared.dump().contains("reason=handle_identity_changed"))
     }
 
     func testNewestExplicitRevealWins() {
@@ -163,6 +166,8 @@ final class AppRevealFocusTests: XCTestCase {
     }
 
     func testRevealIntentRekeysOnlyWithinSamePIDAndTerminationCancels() throws {
+        AppVisibilityTrace.shared.beginCapture()
+        defer { AppVisibilityTrace.shared.endCapture() }
         let ledger = IntentLedger()
         let oldToken = WindowToken(pid: 91_007, windowId: 91_107)
         let samePIDToken = WindowToken(pid: oldToken.pid, windowId: 91_108)
@@ -196,6 +201,10 @@ final class AppRevealFocusTests: XCTestCase {
 
         ledger.cancelAppRevealFocus(pid: samePIDToken.pid)
         XCTAssertEqual(ledger.intent(id: samePIDIntent.id)?.phase, .cancelled)
+        ledger.rekeyManagedRequest(
+            from: samePIDToken,
+            to: WindowToken(pid: samePIDToken.pid, windowId: 91_109)
+        )
 
         let crossPIDIntent = ledger.beginAppRevealFocus(
             token: oldToken,
@@ -209,6 +218,11 @@ final class AppRevealFocusTests: XCTestCase {
             to: WindowToken(pid: 91_008, windowId: oldToken.windowId)
         )
         XCTAssertEqual(ledger.intent(id: crossPIDIntent.id)?.phase, .cancelled)
+        let trace = AppVisibilityTrace.shared.dump()
+        XCTAssertTrue(trace.contains("outcome=rekeyed"))
+        XCTAssertEqual(trace.components(separatedBy: "outcome=rekeyed").count - 1, 1)
+        XCTAssertTrue(trace.contains("outcome=cancelled"))
+        XCTAssertTrue(trace.contains("reason=pid_changed"))
     }
 
     func testNewerWorkspaceSelectionRejectsRevealContinuation() throws {

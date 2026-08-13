@@ -633,7 +633,26 @@ final class ServiceLifecycleManager {
             guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else {
                 return
             }
-            EventIntake.post(.appHidden(pid: app.processIdentifier))
+            DiagnosticsEventRecorder.shared.recordLifecycle(
+                name: "workspace.appHidden",
+                pid: app.processIdentifier
+            )
+            AppVisibilityTrace.record(
+                .notification,
+                pid: app.processIdentifier,
+                visibility: .hidden,
+                outcome: .observed,
+                source: .service
+            )
+            let didEnqueue = EventIntake.post(.appHidden(pid: app.processIdentifier))
+            AppVisibilityTrace.record(
+                .intake,
+                pid: app.processIdentifier,
+                visibility: .hidden,
+                outcome: didEnqueue ? .enqueued : .dropped,
+                reason: didEnqueue ? nil : .intakeClosed,
+                source: .service
+            )
         }
 
         appUnhideObserver = NSWorkspace.shared.notificationCenter.addObserver(
@@ -644,7 +663,26 @@ final class ServiceLifecycleManager {
             guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else {
                 return
             }
-            EventIntake.post(.appUnhidden(pid: app.processIdentifier))
+            DiagnosticsEventRecorder.shared.recordLifecycle(
+                name: "workspace.appUnhidden",
+                pid: app.processIdentifier
+            )
+            AppVisibilityTrace.record(
+                .notification,
+                pid: app.processIdentifier,
+                visibility: .visible,
+                outcome: .observed,
+                source: .service
+            )
+            let didEnqueue = EventIntake.post(.appUnhidden(pid: app.processIdentifier))
+            AppVisibilityTrace.record(
+                .intake,
+                pid: app.processIdentifier,
+                visibility: .visible,
+                outcome: didEnqueue ? .enqueued : .dropped,
+                reason: didEnqueue ? nil : .intakeClosed,
+                source: .service
+            )
         }
     }
 

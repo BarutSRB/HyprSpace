@@ -30,8 +30,9 @@ extension WorkspaceManager {
     ) -> Set<WorkspaceDescriptor.ID> {
         let changedPIDs = hiddenAppPIDs.symmetricDifference(pids)
         guard !changedPIDs.isEmpty else { return [] }
+        let entries = allEntries()
         let affectedWorkspaceIds = Set(
-            allEntries().lazy
+            entries.lazy
                 .filter { changedPIDs.contains($0.pid) }
                 .map(\.workspaceId)
         )
@@ -42,6 +43,22 @@ extension WorkspaceManager {
                 source: source
             )
         )
+        if AppVisibilityTrace.isActive {
+            for pid in changedPIDs {
+                let pidEntries = entries.filter { $0.pid == pid }
+                AppVisibilityTrace.record(
+                    .stateTransition,
+                    pid: pid,
+                    visibility: pids.contains(pid) ? .hidden : .visible,
+                    outcome: .applied,
+                    worldSequence: worldSeq,
+                    generation: appVisibilityGeneration(for: pid),
+                    managedWindowCount: pidEntries.count,
+                    affectedWorkspaceCount: Set(pidEntries.map(\.workspaceId)).count,
+                    source: source
+                )
+            }
+        }
         if txn.plan.focusSession != nil {
             notifySessionStateChanged()
         }
@@ -66,6 +83,19 @@ extension WorkspaceManager {
                 source: source
             )
         )
+        if AppVisibilityTrace.isActive {
+            AppVisibilityTrace.record(
+                .stateTransition,
+                pid: pid,
+                visibility: isAppHidden(pid: pid) ? .hidden : .visible,
+                outcome: .invalidated,
+                worldSequence: worldSeq,
+                generation: appVisibilityGeneration(for: pid),
+                managedWindowCount: allEntries().lazy.filter { $0.pid == pid }.count,
+                affectedWorkspaceCount: affectedWorkspaceIds.count,
+                source: source
+            )
+        }
         return affectedWorkspaceIds
     }
 }

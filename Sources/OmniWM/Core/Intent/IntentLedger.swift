@@ -52,6 +52,15 @@ struct AppRevealFocusPayload: Equatable, Sendable {
 enum AppRevealFocusDestination: Equatable, Sendable {
     case window
     case scratchpad(monitorId: Monitor.ID?)
+
+    var traceDestination: AppVisibilityTrace.Destination {
+        switch self {
+        case .window:
+            .window
+        case .scratchpad:
+            .scratchpad
+        }
+    }
 }
 
 struct AppRevealFocusFingerprint: Equatable, Sendable {
@@ -356,6 +365,16 @@ final class IntentLedger {
             origin: .keyboardOrProgrammatic
         )
         deadlineWheel?.schedule(intentId: intent.id, after: Self.appRevealDeadline)
+        AppVisibilityTrace.record(
+            .reveal,
+            pid: token.pid,
+            outcome: .issued,
+            intentId: intent.id,
+            windowId: token.windowId,
+            workspaceId: workspaceId,
+            intentGeneration: appVisibilityGeneration,
+            destination: destination.traceDestination
+        )
         return intent
     }
 
@@ -521,13 +540,25 @@ final class IntentLedger {
                       payload.token == oldToken
             {
                 if oldToken.pid == newToken.pid {
+                    if entries[index].phase == .pending {
+                        AppVisibilityTrace.record(
+                            .reveal,
+                            pid: oldToken.pid,
+                            outcome: .rekeyed,
+                            intentId: entries[index].id,
+                            windowId: newToken.windowId,
+                            workspaceId: payload.workspaceId,
+                            intentGeneration: payload.appVisibilityGeneration,
+                            destination: payload.destination.traceDestination
+                        )
+                    }
                     payload.token = newToken
                     payload.focusFingerprint.rekey(from: oldToken, to: newToken)
                     entries[index].kind = .appRevealFocus(payload)
                 } else if entries[index].phase == .pending {
-                    entries[index].phase = .cancelled
-                    entries[index].retiredAt = clock()
-                    deadlineWheel?.cancel(intentId: entries[index].id)
+                    let intentId = entries[index].id
+                    _ = retire(id: intentId, phase: .cancelled, source: nil, reason: .pidChanged)
+                    deadlineWheel?.cancel(intentId: intentId)
                 }
             }
         }
@@ -574,12 +605,48 @@ final class IntentLedger {
         return intent
     }
 
-    private func retire(id: IntentID, phase: IntentPhase, source: ActivationEventSource?) -> Intent? {
+    private func retire(
+        id: IntentID,
+        phase: IntentPhase,
+        source: ActivationEventSource?,
+        reason: AppVisibilityTrace.Reason? = nil
+    ) -> Intent? {
         guard let index = entries.firstIndex(where: { $0.id == id && $0.phase == .pending }) else { return nil }
         entries[index].phase = phase
         entries[index].retiredAt = clock()
         if let source {
             entries[index].lastActivationSource = source
+        }
+        if case let .appRevealFocus(payload) = entries[index].kind {
+            let outcome: AppVisibilityTrace.Outcome
+            let resolvedReason: AppVisibilityTrace.Reason?
+            switch phase {
+            case .pending:
+                return entries[index]
+            case .confirmed:
+                outcome = .confirmed
+                resolvedReason = reason
+            case .superseded:
+                outcome = .cancelled
+                resolvedReason = .superseded
+            case .expired:
+                outcome = .expired
+                resolvedReason = reason
+            case .cancelled:
+                outcome = .cancelled
+                resolvedReason = reason
+            }
+            AppVisibilityTrace.record(
+                .reveal,
+                pid: payload.token.pid,
+                outcome: outcome,
+                intentId: id,
+                windowId: payload.token.windowId,
+                workspaceId: payload.workspaceId,
+                intentGeneration: payload.appVisibilityGeneration,
+                destination: payload.destination.traceDestination,
+                reason: resolvedReason
+            )
         }
         return entries[index]
     }

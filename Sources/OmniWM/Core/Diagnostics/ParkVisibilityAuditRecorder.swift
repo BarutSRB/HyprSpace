@@ -12,6 +12,7 @@ enum ParkVisibilityAudit {
         let strays: [String]
         let visible: [Int]
         let parkedCount: Int
+        let appHiddenCount: Int
     }
 
     static let shared = SessionTraceRecorder<Record>(
@@ -27,5 +28,6 @@ enum ParkVisibilityAudit {
             + " strays=\(strays)"
             + " visible=[\(visible)]"
             + " parked=\(record.parkedCount)"
+            + " appHidden=\(record.appHiddenCount)"
     }
 }

@@ -10,6 +10,8 @@ final class LayoutRefreshSchedulingTests: XCTestCase {
     func testVisibilityRefreshesDuringFullRescanCoalesceIntoOnePendingCycle() async throws {
         let controller = WindowAdmissionTestSupport.controller()
         let refreshController = controller.layoutRefreshController
+        AppVisibilityTrace.shared.beginCapture()
+        defer { AppVisibilityTrace.shared.endCapture() }
         var actionRefreshKinds: [LayoutRefreshController.ScheduledRefreshKind] = []
         refreshController.layoutState.pendingRefresh = .init(
             kind: .fullRescan,
@@ -57,5 +59,10 @@ final class LayoutRefreshSchedulingTests: XCTestCase {
         XCTAssertEqual(actionRefreshKinds, [.visibilityRefresh, .visibilityRefresh])
         XCTAssertNil(refreshController.layoutState.activeRefresh)
         XCTAssertNil(refreshController.layoutState.pendingRefresh)
+        let trace = AppVisibilityTrace.shared.dump()
+        XCTAssertTrue(trace.contains("event=refresh visibility=hidden outcome=queued"))
+        XCTAssertTrue(trace.contains("event=refresh visibility=visible outcome=coalesced"))
+        XCTAssertTrue(trace.contains("event=refresh visibility=visible outcome=started"))
+        XCTAssertTrue(trace.contains("event=refresh visibility=visible outcome=completed"))
     }
 }

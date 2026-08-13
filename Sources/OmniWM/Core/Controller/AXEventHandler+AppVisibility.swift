@@ -6,8 +6,28 @@ import Foundation
 @MainActor
 extension AXEventHandler {
     func handleAppHidden(pid: pid_t, source: WMEventSource = .ax) {
-        guard let controller else { return }
-        guard !controller.workspaceManager.isAppHidden(pid: pid) else { return }
+        guard let controller else {
+            AppVisibilityTrace.record(
+                .stateTransition,
+                pid: pid,
+                visibility: .hidden,
+                outcome: .rejected,
+                reason: .controllerUnavailable,
+                source: source
+            )
+            return
+        }
+        guard !controller.workspaceManager.isAppHidden(pid: pid) else {
+            AppVisibilityTrace.record(
+                .stateTransition,
+                pid: pid,
+                visibility: .hidden,
+                outcome: .duplicate,
+                generation: controller.workspaceManager.appVisibilityGeneration(for: pid),
+                source: source
+            )
+            return
+        }
         let entries = controller.workspaceManager.entries(forPid: pid)
         let affectedWorkspaceIds = Set(entries.map(\.workspaceId))
         controller.dwindleLayoutHandler.cancelPendingGroupReveals(pid: pid)
@@ -52,17 +72,61 @@ extension AXEventHandler {
             controller: controller
         )
         if !activeAffectedWorkspaceIds.isEmpty {
+            AppVisibilityTrace.record(
+                .refresh,
+                pid: pid,
+                visibility: .hidden,
+                outcome: .requested,
+                generation: controller.workspaceManager.appVisibilityGeneration(for: pid),
+                managedWindowCount: entries.count,
+                affectedWorkspaceCount: affectedWorkspaceIds.count,
+                activeWorkspaceCount: activeAffectedWorkspaceIds.count,
+                source: source
+            )
             controller.layoutRefreshController.requestVisibilityRefresh(
                 reason: .appHidden,
                 affectedWorkspaceIds: activeAffectedWorkspaceIds
+            )
+        } else {
+            AppVisibilityTrace.record(
+                .refresh,
+                pid: pid,
+                visibility: .hidden,
+                outcome: .skipped,
+                generation: controller.workspaceManager.appVisibilityGeneration(for: pid),
+                managedWindowCount: entries.count,
+                affectedWorkspaceCount: affectedWorkspaceIds.count,
+                activeWorkspaceCount: 0,
+                reason: .noActiveWorkspace,
+                source: source
             )
         }
         controller.surfaceReconciler.noteWorldChanged()
     }
 
     func handleAppUnhidden(pid: pid_t, source: WMEventSource = .ax) {
-        guard let controller else { return }
-        guard controller.workspaceManager.isAppHidden(pid: pid) else { return }
+        guard let controller else {
+            AppVisibilityTrace.record(
+                .stateTransition,
+                pid: pid,
+                visibility: .visible,
+                outcome: .rejected,
+                reason: .controllerUnavailable,
+                source: source
+            )
+            return
+        }
+        guard controller.workspaceManager.isAppHidden(pid: pid) else {
+            AppVisibilityTrace.record(
+                .stateTransition,
+                pid: pid,
+                visibility: .visible,
+                outcome: .duplicate,
+                generation: controller.workspaceManager.appVisibilityGeneration(for: pid),
+                source: source
+            )
+            return
+        }
         let entries = controller.workspaceManager.entries(forPid: pid)
         let affectedWorkspaceIds = Set(entries.map(\.workspaceId))
         let revealIntentId = controller.intentLedger.openAppRevealFocusIntent(pid: pid)?.intent.id
@@ -83,6 +147,17 @@ extension AXEventHandler {
         let activeAffectedWorkspaceIds = activeWorkspaceIds(
             in: affectedWorkspaceIds,
             controller: controller
+        )
+        AppVisibilityTrace.record(
+            .refresh,
+            pid: pid,
+            visibility: .visible,
+            outcome: .requested,
+            generation: controller.workspaceManager.appVisibilityGeneration(for: pid),
+            managedWindowCount: entries.count,
+            affectedWorkspaceCount: affectedWorkspaceIds.count,
+            activeWorkspaceCount: activeAffectedWorkspaceIds.count,
+            source: source
         )
         controller.layoutRefreshController.requestVisibilityRefresh(
             reason: .appUnhidden,

@@ -107,6 +107,13 @@ final class DiagnosticsTraceRecorderTests: XCTestCase {
 
     @MainActor
     func testCaptureCoordinatorTogglesDomainRecorders() async {
+        AppVisibilityTrace.record(
+            .notification,
+            pid: 1,
+            visibility: .hidden,
+            outcome: .observed
+        )
+        XCTAssertFalse(AppVisibilityTrace.shared.dump().contains("event=notification"))
         RawAXNotificationTrace.record(name: "ax.before", pid: 1, windowId: nil)
         XCTAssertFalse(RawAXNotificationTrace.shared.dump().contains("ax.before"))
 
@@ -121,6 +128,24 @@ final class DiagnosticsTraceRecorderTests: XCTestCase {
         }
 
         RawAXNotificationTrace.record(name: "ax.during", pid: 7, windowId: 42)
+        AppVisibilityTrace.record(
+            .stateTransition,
+            pid: 7,
+            visibility: .hidden,
+            outcome: .applied,
+            intakeSequence: 12,
+            worldSequence: 34,
+            intentId: 56,
+            windowId: 42,
+            workspaceId: UUID(uuidString: "00000000-0000-0000-0000-000000000042"),
+            generation: 3,
+            intentGeneration: 2,
+            managedWindowCount: 2,
+            affectedWorkspaceCount: 2,
+            activeWorkspaceCount: 1,
+            destination: .window,
+            source: .service
+        )
         NiriLayoutTrace.record(.viewport, workspaceId: nil, "jump 0→10 col=0")
         AnimationTickTrace.shared.record(
             AnimationTickTrace.Record(
@@ -163,6 +188,23 @@ final class DiagnosticsTraceRecorderTests: XCTestCase {
                 enhancedUI: true
             )
         )
+        let appVisibilityDump = AppVisibilityTrace.shared.dump()
+        XCTAssertTrue(appVisibilityDump.contains("event=state_transition"))
+        XCTAssertTrue(appVisibilityDump.contains("pid=7"))
+        XCTAssertTrue(appVisibilityDump.contains("visibility=hidden"))
+        XCTAssertTrue(appVisibilityDump.contains("outcome=applied"))
+        XCTAssertTrue(appVisibilityDump.contains("intake_seq=12"))
+        XCTAssertTrue(appVisibilityDump.contains("world_seq=34"))
+        XCTAssertTrue(appVisibilityDump.contains("intent=56"))
+        XCTAssertTrue(appVisibilityDump.contains("win=42"))
+        XCTAssertTrue(appVisibilityDump.contains("workspace=00000000-0000-0000-0000-000000000042"))
+        XCTAssertTrue(appVisibilityDump.contains("generation=3"))
+        XCTAssertTrue(appVisibilityDump.contains("intent_generation=2"))
+        XCTAssertTrue(appVisibilityDump.contains("managed_windows=2"))
+        XCTAssertTrue(appVisibilityDump.contains("affected_workspaces=2"))
+        XCTAssertTrue(appVisibilityDump.contains("active_workspaces=1"))
+        XCTAssertTrue(appVisibilityDump.contains("destination=window"))
+        XCTAssertTrue(appVisibilityDump.contains("source=service"))
         XCTAssertTrue(RawAXNotificationTrace.shared.dump().contains("ax.during"))
         XCTAssertTrue(NiriLayoutTrace.shared.dump().contains("jump 0→10"))
         XCTAssertTrue(AnimationTickTrace.shared.dump().contains("DROPPED"))
@@ -175,6 +217,8 @@ final class DiagnosticsTraceRecorderTests: XCTestCase {
             return XCTFail("expected capture to stop with an artifact")
         }
         let body = (try? String(contentsOf: artifact.url, encoding: .utf8)) ?? ""
+        XCTAssertTrue(body.contains("== macOS App Visibility Trace =="))
+        XCTAssertTrue(body.contains("event=state_transition"))
         XCTAssertTrue(body.contains("== Raw AX Notifications =="))
         XCTAssertTrue(body.contains("== Niri Layout Trace =="))
         XCTAssertTrue(body.contains("== Frame Apply Trace =="))
@@ -185,6 +229,13 @@ final class DiagnosticsTraceRecorderTests: XCTestCase {
         XCTAssertTrue(body.contains("== Mouse Trace =="))
         try? FileManager.default.removeItem(at: artifact.url)
 
+        AppVisibilityTrace.record(
+            .notification,
+            pid: 1,
+            visibility: .visible,
+            outcome: .observed
+        )
+        XCTAssertFalse(AppVisibilityTrace.shared.dump().contains("event=notification"))
         RawAXNotificationTrace.record(name: "ax.after", pid: 1, windowId: nil)
         XCTAssertFalse(RawAXNotificationTrace.shared.dump().contains("ax.after"))
     }

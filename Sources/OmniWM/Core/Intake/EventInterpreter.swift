@@ -41,7 +41,15 @@ final class EventInterpreter: EventIntakeSink {
             controller.axEventHandler.handleAppDeactivated(pid: pid)
 
         case let .appHidden(pid):
-            controller.axEventHandler.handleAppHidden(pid: pid)
+            AppVisibilityTrace.record(
+                .intake,
+                pid: pid,
+                visibility: .hidden,
+                outcome: .dispatched,
+                intakeSequence: stamped.seq,
+                source: .service
+            )
+            controller.axEventHandler.handleAppHidden(pid: pid, source: .service)
 
         case let .appLaunched(pid):
             controller.serviceLifecycleManager.handleAppLaunched(pid: pid)
@@ -50,7 +58,15 @@ final class EventInterpreter: EventIntakeSink {
             controller.serviceLifecycleManager.handleAppTerminated(pid: pid)
 
         case let .appUnhidden(pid):
-            controller.axEventHandler.handleAppUnhidden(pid: pid)
+            AppVisibilityTrace.record(
+                .intake,
+                pid: pid,
+                visibility: .visible,
+                outcome: .dispatched,
+                intakeSequence: stamped.seq,
+                source: .service
+            )
+            controller.axEventHandler.handleAppUnhidden(pid: pid, source: .service)
 
         case let .axFocusedWindowChanged(pid, callbackGeneration):
             guard acceptsCallbackGeneration(callbackGeneration, pid: pid) else { return }
