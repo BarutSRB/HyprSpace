@@ -162,6 +162,7 @@ extension NiriLayoutEngine {
             for child in column.children {
                 guard let window = child as? NiriWindow,
                       window.id != excludingWindowId,
+                      !isExcludedFromProjection(window.token, in: workspaceId),
                       let frame = window.renderedFrame ?? window.frame else { continue }
 
                 if frame.contains(point) {

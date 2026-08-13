@@ -430,6 +430,14 @@ final class MouseEventHandler {
         clearGestureLatches()
     }
 
+    func handleAppVisibilityChanged() {
+        cancelActiveMouseInteraction()
+        dropPendingTapEvents()
+        resetMouseWheelTrackers()
+        abortActiveGestureIfNeeded()
+        clearGestureLatches()
+    }
+
     func receiveTapMouseMoved(
         at location: CGPoint,
         modifiersRawValue: UInt64,
@@ -1247,7 +1255,10 @@ final class MouseEventHandler {
                     guard let window = controller.niriEngine?.findNode(
                         for: entry.token,
                         in: entry.workspaceId
-                    ), !window.isHiddenInTabbedMode else {
+                    ), controller.niriEngine?.isProjectedFocusableWindow(
+                        window,
+                        in: entry.workspaceId
+                    ) == true else {
                         return nil
                     }
                     return .niri(workspaceId: entry.workspaceId, window: window)
@@ -1729,8 +1740,13 @@ final class MouseEventHandler {
         var shouldStartAnimation = false
         controller.workspaceManager.withNiriViewportState(for: wsId) { vstate in
             for _ in 0 ..< abs(ticks) {
-                let columns = engine.columns(in: wsId)
-                let targetColumnIndex = vstate.activeColumnIndex + step
+                let columns = engine.projectedColumns(in: wsId)
+                let activeColumnIndex = engine.projectedActiveColumnIndex(
+                    state: vstate,
+                    columns: columns,
+                    in: wsId
+                )
+                let targetColumnIndex = activeColumnIndex + step
                 guard columns.indices.contains(targetColumnIndex),
                       let currentNode = currentSelectionNode(engine: engine, wsId: wsId, state: vstate),
                       let newNode = engine.focusColumn(
@@ -1787,7 +1803,6 @@ final class MouseEventHandler {
         }
 
         let insetFrame = controller.insetWorkingFrame(for: monitor)
-        let columns = engine.columns(in: wsId)
         let gap = controller.innerGap(for: monitor)
         let scale = NSScreen.screens.first(where: { $0.displayId == monitor.displayId })?
             .backingScaleFactor ?? 2.0
@@ -1807,10 +1822,11 @@ final class MouseEventHandler {
 
         var selectedWindow: NiriWindow?
         controller.workspaceManager.withNiriViewportState(for: wsId) { endState in
-            endState.endGesture(
+            selectedWindow = engine.endProjectedGesture(
+                state: &endState,
+                in: wsId,
                 currentOffset: baseOffset + sample.relativeOffset,
                 projectedOffset: baseOffset + sample.relativeProjectedOffset,
-                columns: columns,
                 gap: gap,
                 viewportSpan: viewportSpan,
                 orientation: orientation,
@@ -1822,7 +1838,6 @@ final class MouseEventHandler {
                 viewFrame: monitor.frame,
                 scale: scale
             )
-            selectedWindow = syncViewportSelectionToActiveColumn(columns: columns, state: &endState)
         }
         if let selectedWindow {
             rememberViewportFocusAnchor(selectedWindow, engine: engine, wsId: wsId)
@@ -1933,30 +1948,23 @@ final class MouseEventHandler {
         if let selectedNodeId = state.selectedNodeId,
            let selectedNode = engine.findNode(by: selectedNodeId, in: wsId)
         {
-            return selectedNode
+            let isExcluded = (selectedNode as? NiriWindow).map {
+                engine.isExcludedFromProjection($0.token, in: wsId)
+            } == true
+            if !isExcluded {
+                return selectedNode
+            }
         }
 
-        let columns = engine.columns(in: wsId)
-        guard columns.indices.contains(state.activeColumnIndex) else { return nil }
-        let activeColumn = columns[state.activeColumnIndex]
-        let windows = activeColumn.windowNodes
-        guard !windows.isEmpty else { return activeColumn.firstChild() }
-        let activeTileIndex = activeColumn.activeTileIdx.clamped(to: 0 ... (windows.count - 1))
-        return windows[activeTileIndex]
-    }
-
-    private func syncViewportSelectionToActiveColumn(
-        columns: [NiriContainer],
-        state: inout ViewportState
-    ) -> NiriWindow? {
-        guard columns.indices.contains(state.activeColumnIndex) else { return nil }
-        let activeColumn = columns[state.activeColumnIndex]
-        let windows = activeColumn.windowNodes
-        guard !windows.isEmpty else { return nil }
-        let activeTileIndex = activeColumn.activeTileIdx.clamped(to: 0 ... (windows.count - 1))
-        let selectedWindow = windows[activeTileIndex]
-        state.selectedNodeId = selectedWindow.id
-        return selectedWindow
+        let columns = engine.projectedColumns(in: wsId)
+        guard !columns.isEmpty else { return nil }
+        let activeColumnIndex = engine.projectedActiveColumnIndex(
+            state: state,
+            columns: columns,
+            in: wsId
+        )
+        guard columns.indices.contains(activeColumnIndex) else { return nil }
+        return engine.projectedActiveWindow(in: columns[activeColumnIndex])
     }
 
     private func focusViewportSelectionAfterGesture(_ window: NiriWindow) {

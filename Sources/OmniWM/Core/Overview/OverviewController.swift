@@ -295,10 +295,11 @@ final class OverviewController {
         selectedHandle: WindowHandle
     ) -> StructuralMutationOutcome? {
         guard let wmController,
-              let workspaceId = wmController.workspaceManager.workspace(for: selectedHandle.id)
+              let entry = visibleManagedEntry(for: selectedHandle)
         else {
             return .unchanged
         }
+        let workspaceId = entry.workspaceId
         let isNiri = wmController.workspaceManager.activeLayoutKind(for: workspaceId) == .niri
 
         switch command {
@@ -722,6 +723,7 @@ final class OverviewController {
 
                 for entry in workspaceManager.entries(in: ws.id) {
                     guard entry.layoutReason == .standard,
+                          !workspaceManager.isAppHidden(pid: entry.pid),
                           dwindleProjection?.includes(entry.token) != false,
                           let handle = workspaceManager.handle(for: entry.token)
                     else {
@@ -779,10 +781,12 @@ final class OverviewController {
         }
 
         var engineFrames: [WindowToken: CGRect] = [:]
+        var niriWorkspaceIds: Set<WorkspaceDescriptor.ID> = []
         var dwindleProjections: [WorkspaceDescriptor.ID: DwindleOverviewWorkspaceProjection] = [:]
         for workspaceId in affectedWorkspaceIds {
             switch workspaceManager.activeLayoutKind(for: workspaceId) {
             case .niri:
+                niriWorkspaceIds.insert(workspaceId)
                 if let frames = wmController.niriEngine?.captureWindowFrames(in: workspaceId) {
                     engineFrames.merge(frames) { _, new in new }
                 }
@@ -806,8 +810,12 @@ final class OverviewController {
             }
         }
 
+        var staleHandles: [WindowHandle] = []
         for (handle, data) in overviewSnapshot.windows {
-            guard let entry = workspaceManager.entry(for: handle) else { continue }
+            guard let entry = visibleManagedEntry(for: handle) else {
+                staleHandles.append(handle)
+                continue
+            }
             let frame = engineFrames[entry.token] ?? data.frame
             if entry.token != data.token || entry.workspaceId != data.workspaceId || frame != data.frame {
                 overviewSnapshot.windows[handle] = (
@@ -819,6 +827,17 @@ final class OverviewController {
                     frame: frame
                 )
             }
+        }
+        for handle in staleHandles {
+            overviewSnapshot.windows.removeValue(forKey: handle)
+            overviewSnapshot.groupCountByHandle.removeValue(forKey: handle)
+        }
+
+        for workspaceId in niriWorkspaceIds {
+            reconcileNiriOverviewProjection(
+                workspaceId: workspaceId,
+                frames: engineFrames
+            )
         }
 
         for (workspaceId, projection) in dwindleProjections {
@@ -871,6 +890,7 @@ final class OverviewController {
 
         for entry in workspaceManager.entries(in: workspaceId) {
             guard entry.layoutReason == .standard,
+                  !workspaceManager.isAppHidden(pid: entry.pid),
                   projection.includes(entry.token),
                   let handle = workspaceManager.handle(for: entry.token)
             else {
@@ -915,6 +935,56 @@ final class OverviewController {
         }
     }
 
+    private func reconcileNiriOverviewProjection(
+        workspaceId: WorkspaceDescriptor.ID,
+        frames: [WindowToken: CGRect]
+    ) {
+        guard let wmController else { return }
+        let workspaceManager = wmController.workspaceManager
+        var desiredHandles: Set<WindowHandle> = []
+
+        for entry in workspaceManager.entries(in: workspaceId) {
+            guard entry.layoutReason == .standard,
+                  !workspaceManager.isAppHidden(pid: entry.pid),
+                  let handle = workspaceManager.handle(for: entry.token)
+            else {
+                continue
+            }
+
+            desiredHandles.insert(handle)
+            let frame = frames[entry.token]
+                ?? overviewSnapshot.windows[handle]?.frame
+                ?? environment.windowFrame(entry)
+                ?? .zero
+            if let data = overviewSnapshot.windows[handle] {
+                if data.token != entry.token || data.workspaceId != workspaceId || data.frame != frame {
+                    overviewSnapshot.windows[handle] = (
+                        token: entry.token,
+                        workspaceId: workspaceId,
+                        title: data.title,
+                        appName: data.appName,
+                        appIcon: data.appIcon,
+                        frame: frame
+                    )
+                }
+            } else {
+                overviewSnapshot.windows[handle] = makeOverviewWindowData(
+                    for: entry,
+                    preferredFrame: frame,
+                    appInfoCache: wmController.appInfoCache
+                )
+            }
+        }
+
+        let staleHandles = overviewSnapshot.windows.compactMap { handle, data in
+            data.workspaceId == workspaceId && !desiredHandles.contains(handle) ? handle : nil
+        }
+        for handle in staleHandles {
+            overviewSnapshot.windows.removeValue(forKey: handle)
+            overviewSnapshot.groupCountByHandle.removeValue(forKey: handle)
+        }
+    }
+
     private func makeOverviewWindowData(
         for entry: WindowState,
         preferredFrame: CGRect?,
@@ -932,12 +1002,25 @@ final class OverviewController {
         )
     }
 
+    private func visibleManagedEntry(for handle: WindowHandle) -> WindowState? {
+        guard let workspaceManager = wmController?.workspaceManager,
+              workspaceManager.handle(for: handle.id) === handle,
+              let entry = workspaceManager.entry(for: handle),
+              !workspaceManager.isAppHidden(pid: entry.pid)
+        else {
+            return nil
+        }
+        return entry
+    }
+
     private func cachedNiriSnapshot(
         _ snapshot: NiriOverviewWorkspaceSnapshot
     ) -> NiriOverviewWorkspaceSnapshot? {
         let columns = snapshot.columns.compactMap { column -> NiriOverviewColumnSnapshot? in
             let tiles = column.tiles.filter { tile in
-                wmController?.workspaceManager.workspace(for: tile.token) == snapshot.workspaceId
+                guard let workspaceManager = wmController?.workspaceManager else { return false }
+                return workspaceManager.workspace(for: tile.token) == snapshot.workspaceId
+                    && !workspaceManager.isAppHidden(tile.token)
             }
             guard !tiles.isEmpty else { return nil }
             return NiriOverviewColumnSnapshot(
@@ -1055,11 +1138,12 @@ final class OverviewController {
 
         for workspace in overviewSnapshot.workspaces {
             guard isNiriLayout(workspaceId: workspace.id),
-                  let snapshot = engine.overviewSnapshot(for: workspace.id)
+                  let snapshot = engine.overviewSnapshot(for: workspace.id),
+                  let filteredSnapshot = cachedNiriSnapshot(snapshot)
             else {
                 continue
             }
-            snapshots[workspace.id] = snapshot
+            snapshots[workspace.id] = filteredSnapshot
         }
 
         return snapshots
@@ -1800,12 +1884,11 @@ private extension OverviewController {
 extension OverviewController {
     func beginDrag(on monitorId: Monitor.ID, handle: WindowHandle, startPoint: CGPoint) {
         guard case .open = state,
-              activeStructuralTransferGeneration == nil,
-              let wmController
+              activeStructuralTransferGeneration == nil
         else {
             return
         }
-        guard let entry = wmController.workspaceManager.entry(for: handle) else { return }
+        guard let entry = visibleManagedEntry(for: handle) else { return }
 
         activeInteractionMonitorId = monitorId
         dragSession = DragSession(
@@ -1903,7 +1986,11 @@ private extension OverviewController {
     }
 
     func performDragAction(session: DragSession, target: OverviewDragTarget) -> DragMutationOutcome {
-        guard let wmController else { return .unchanged }
+        guard let wmController,
+              visibleManagedEntry(for: session.handle) != nil
+        else {
+            return .unchanged
+        }
 
         switch target {
         case let .workspaceMove(targetWsId):
@@ -1915,7 +2002,11 @@ private extension OverviewController {
             return .changed(mutation)
 
         case let .niriWindowInsert(targetWsId, targetHandle, position):
-            guard isNiriLayout(workspaceId: targetWsId) else { return .unchanged }
+            guard isNiriLayout(workspaceId: targetWsId),
+                  visibleManagedEntry(for: targetHandle) != nil
+            else {
+                return .unchanged
+            }
             var transferMutation: StructuralMutation?
             if targetWsId != session.workspaceId {
                 guard case let .changed(mutation) = wmController.workspaceNavigationHandler.moveWindow(
@@ -2026,8 +2117,8 @@ private extension OverviewController {
               case .open = state,
               projectionMutationGeneration == projectionGeneration,
               activeStructuralTransferGeneration == transferGeneration,
-              wmController.workspaceManager.workspace(for: mutation.selectedHandle.id)
-              == mutation.destinationWorkspaceId
+              let selectedEntry = visibleManagedEntry(for: mutation.selectedHandle),
+              selectedEntry.workspaceId == mutation.destinationWorkspaceId
         else {
             finishDeferredDragMutation(
                 mutation,
@@ -2040,6 +2131,14 @@ private extension OverviewController {
         let inserted: Bool
         switch target {
         case let .niriWindowInsert(workspaceId, targetHandle, position):
+            guard visibleManagedEntry(for: targetHandle) != nil else {
+                finishDeferredDragMutation(
+                    mutation,
+                    transferGeneration: transferGeneration,
+                    projectionGeneration: projectionGeneration
+                )
+                return
+            }
             inserted = wmController.niriLayoutHandler.insertWindow(
                 handle: mutation.selectedHandle,
                 targetHandle: targetHandle,

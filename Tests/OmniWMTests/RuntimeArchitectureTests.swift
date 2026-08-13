@@ -1194,6 +1194,44 @@ final class RuntimeArchitectureTests: XCTestCase {
             to: workspaceId,
             afterSelection: geometricNode.id
         ))
+        let peerToken = controller.workspaceManager.addWindow(
+            AXWindowRef(element: AXUIElementCreateApplication(766_006), windowId: 766_106),
+            pid: 766_006,
+            windowId: 766_106,
+            to: workspaceId
+        )
+        let peerNode = try XCTUnwrap(controller.niriEngine?.addWindow(
+            token: peerToken,
+            to: workspaceId,
+            afterSelection: authoritativeNode.id
+        ))
+        let authoritativeColumn = try XCTUnwrap(
+            controller.niriEngine?.findColumn(containing: authoritativeNode, in: workspaceId)
+        )
+        var viewportState = ViewportState(selectedNodeId: authoritativeNode.id)
+        controller.workspaceManager.withEngineMutationScope {
+            XCTAssertTrue(
+                controller.niriEngine?.consumeWindow(
+                    peerNode,
+                    into: authoritativeColumn,
+                    enteringFrom: .right,
+                    in: workspaceId,
+                    motion: .disabled,
+                    state: &viewportState,
+                    workingFrame: monitor.visibleFrame,
+                    gaps: CGFloat(controller.workspaceManager.gaps),
+                    orientation: controller.settings.effectiveOrientation(for: monitor)
+                ) == true
+            )
+            authoritativeColumn.displayMode = .tabbed
+        }
+        let authoritativeIndex = try XCTUnwrap(
+            authoritativeColumn.windowNodes.firstIndex(where: { $0 === authoritativeNode })
+        )
+        controller.workspaceManager.withEngineMutationScope {
+            authoritativeColumn.setActiveTileIdx(authoritativeIndex)
+            controller.niriEngine?.updateTabbedColumnVisibility(column: authoritativeColumn)
+        }
         authoritativeNode.frame = pointerFrame.offsetBy(dx: pointerFrame.width + 40, dy: 0)
         authoritativeNode.renderedFrame = authoritativeNode.frame
 
@@ -1205,7 +1243,13 @@ final class RuntimeArchitectureTests: XCTestCase {
         XCTAssertEqual(focusedTokens, [authoritativeToken])
         XCTAssertEqual(controller.intentLedger.activeManagedRequest?.token, authoritativeToken)
 
-        authoritativeNode.isHiddenInTabbedMode = true
+        let peerIndex = try XCTUnwrap(
+            authoritativeColumn.windowNodes.firstIndex(where: { $0 === peerNode })
+        )
+        controller.workspaceManager.withEngineMutationScope {
+            authoritativeColumn.setActiveTileIdx(peerIndex)
+            controller.niriEngine?.updateTabbedColumnVisibility(column: authoritativeColumn)
+        }
         controller.mouseEventHandler.state.lastFocusFollowsMouseTime = .distantPast
 
         controller.mouseEventHandler.dispatchMouseMoved(

@@ -64,10 +64,28 @@ final class NiriColumnMinWidthTests: XCTestCase {
 
     func testTabbedFixedPrimarySpanUsesOuterContainerPixels() throws {
         let (engine, workspaceId, token, column) = makeSingleWindowEngine()
+        let second = engine.addWindow(
+            token: WindowToken(pid: 2, windowId: 2),
+            to: workspaceId,
+            afterSelection: nil
+        )
+        var state = ViewportState()
+        XCTAssertTrue(
+            engine.consumeWindow(
+                second,
+                into: column,
+                enteringFrom: .right,
+                in: workspaceId,
+                motion: .disabled,
+                state: &state,
+                workingFrame: workingFrame,
+                gaps: gaps,
+                orientation: .horizontal
+            )
+        )
         engine.singleWindowFit = SingleWindowFit(mode: .containerPrimarySpan)
         engine.renderStyle.tabIndicatorWidth = 30
         column.displayMode = .tabbed
-        var state = ViewportState()
 
         engine.setContainerPrimarySpan(
             column,

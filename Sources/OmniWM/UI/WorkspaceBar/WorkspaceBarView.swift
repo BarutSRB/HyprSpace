@@ -23,31 +23,45 @@ struct WorkspaceBarProjection: Equatable {
     let scratchpad: WorkspaceBarScratchpadItem?
 }
 
-struct WorkspaceBarWindowItem: Identifiable, Equatable {
+struct WorkspaceBarWindowItem: Identifiable, Equatable, @unchecked Sendable {
     let id: WindowToken
+    let handle: WindowHandle
     let windowId: Int
     let appName: String
     let icon: NSImage?
     let isFocused: Bool
     let windowCount: Int
+    let hiddenWindowCount: Int
     let allWindows: [WorkspaceBarWindowInfo]
+
+    var isAppHidden: Bool {
+        hiddenWindowCount == windowCount
+    }
+
+    var hasHiddenWindows: Bool {
+        hiddenWindowCount > 0
+    }
 
     static func == (lhs: WorkspaceBarWindowItem, rhs: WorkspaceBarWindowItem) -> Bool {
         lhs.id == rhs.id
+            && lhs.handle === rhs.handle
             && lhs.windowId == rhs.windowId
             && lhs.appName == rhs.appName
             && lhs.icon === rhs.icon
             && lhs.isFocused == rhs.isFocused
             && lhs.windowCount == rhs.windowCount
+            && lhs.hiddenWindowCount == rhs.hiddenWindowCount
             && lhs.allWindows == rhs.allWindows
     }
 }
 
-struct WorkspaceBarWindowInfo: Identifiable, Equatable {
+struct WorkspaceBarWindowInfo: Identifiable, Equatable, @unchecked Sendable {
     let id: WindowToken
+    let handle: WindowHandle
     let windowId: Int
     let title: String
     let isFocused: Bool
+    let isAppHidden: Bool
 }
 
 struct WorkspaceBarScratchpadItem: Identifiable, Equatable {
@@ -114,7 +128,7 @@ struct WorkspaceBarView: View {
     var showsSystemStatsButton = false
     @Bindable var motionPolicy: MotionPolicy
     let onFocusWorkspace: (WorkspaceBarItem) -> Void
-    let onFocusWindow: (WindowToken) -> Void
+    let onFocusWindow: (WindowHandle) -> Void
     let onActivateScratchpad: () -> Void
     var onToggleSystemStats: () -> Void = {}
     var onSystemStatsAnchorChange: (CGPoint?) -> Void = { _ in }
@@ -163,7 +177,7 @@ private struct WorkspaceBarContentView: View {
     var showsSystemStatsButton = false
     let animationsEnabled: Bool
     let onFocusWorkspace: (WorkspaceBarItem) -> Void
-    let onFocusWindow: (WindowToken) -> Void
+    let onFocusWindow: (WindowHandle) -> Void
     let onActivateScratchpad: () -> Void
     let onToggleSystemStats: () -> Void
     let onSystemStatsAnchorChange: (CGPoint?) -> Void
@@ -275,7 +289,7 @@ private struct WorkspaceItemView: View {
     let accentColor: Color?
     let textColor: Color?
     let onFocusWorkspace: () -> Void
-    let onFocusWindow: (WindowToken) -> Void
+    let onFocusWindow: (WindowHandle) -> Void
 
     @State private var isHovered = false
 
@@ -494,7 +508,7 @@ private struct FloatingWindowsGroupView: View {
     let animationsEnabled: Bool
     let accentColor: Color?
     let textColor: Color?
-    let onFocusWindow: (WindowToken) -> Void
+    let onFocusWindow: (WindowHandle) -> Void
 
     private var resolvedSecondaryTextColor: Color {
         textColor ?? .secondary
@@ -642,7 +656,7 @@ private struct WindowIconView: View {
     let animationsEnabled: Bool
     let accentColor: Color?
     let textColor: Color?
-    let onFocusWindow: (WindowToken) -> Void
+    let onFocusWindow: (WindowHandle) -> Void
 
     @State private var isHovered = false
     @State private var showingWindowList = false
@@ -656,7 +670,7 @@ private struct WindowIconView: View {
             if window.windowCount > 1 {
                 showingWindowList = true
             } else {
-                onFocusWindow(window.id)
+                onFocusWindow(window.handle)
             }
         } label: {
             ZStack(alignment: .topTrailing) {
@@ -669,6 +683,16 @@ private struct WindowIconView: View {
                 if window.windowCount > 1 {
                     WindowCountBadge(count: window.windowCount, iconSize: iconSize, textColor: textColor)
                         .offset(x: iconSize * 0.2, y: -iconSize * 0.1)
+                }
+
+                if window.hasHiddenWindows {
+                    Image(systemName: "eye.slash.fill")
+                        .font(.system(size: max(7, iconSize * 0.32), weight: .bold))
+                        .foregroundStyle(textColor ?? .primary)
+                        .padding(2)
+                        .background(.regularMaterial, in: Circle())
+                        .offset(x: iconSize * 0.18, y: iconSize * 0.72)
+                        .accessibilityLabel("Hidden")
                 }
             }
             .frame(minWidth: max(16, iconSize + 4), minHeight: max(16, iconSize + 4))
@@ -687,20 +711,22 @@ private struct WindowIconView: View {
                 appName: window.appName,
                 accentColor: accentColor,
                 textColor: textColor,
-                onFocusWindow: { token in
-                    onFocusWindow(token)
+                onFocusWindow: { handle in
+                    onFocusWindow(handle)
                     showingWindowList = false
                 }
             )
         }
         .accessibilityLabel(accessibilityLabel)
         .accessibilityValue(accessibilityValue)
-        .help(window.appName)
+        .help(window.hasHiddenWindows ? "\(window.appName) — Hidden" : window.appName)
     }
 
     private var opacity: Double {
         if isFocused {
             1.0
+        } else if window.isAppHidden {
+            0.3
         } else if isInFocusedWorkspace {
             0.4
         } else {
@@ -735,7 +761,14 @@ private struct WindowIconView: View {
     }
 
     private var accessibilityValue: String {
-        isFocused ? "Focused" : ""
+        var values: [String] = []
+        if isFocused {
+            values.append("Focused")
+        }
+        if window.hasHiddenWindows {
+            values.append(window.isAppHidden ? "Hidden" : "Contains hidden windows")
+        }
+        return values.joined(separator: ", ")
     }
 }
 
@@ -789,7 +822,7 @@ private struct WindowListSheet: View {
     let appName: String
     let accentColor: Color?
     let textColor: Color?
-    let onFocusWindow: (WindowToken) -> Void
+    let onFocusWindow: (WindowHandle) -> Void
     @Environment(\.dismiss) private var dismiss
 
     private var resolvedAccentColor: Color {
@@ -823,7 +856,7 @@ private struct WindowListSheet: View {
 
             List(windows) { windowInfo in
                 Button {
-                    onFocusWindow(windowInfo.id)
+                    onFocusWindow(windowInfo.handle)
                 } label: {
                     HStack {
                         Text(windowInfo.title)
@@ -833,6 +866,14 @@ private struct WindowListSheet: View {
                         if windowInfo.isFocused {
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundColor(resolvedAccentColor)
+                        }
+                        if windowInfo.isAppHidden {
+                            Text("Hidden")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundColor(resolvedSecondaryTextColor)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.secondary.opacity(0.16), in: Capsule())
                         }
                     }
                 }

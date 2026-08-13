@@ -395,51 +395,65 @@ extension NiriLayoutEngine {
         let settings = effectiveSettings(in: workspaceId)
         guard settings.centerFocusedColumn != .always else { return false }
 
-        let containers = columns(in: workspaceId)
-        guard singleWindowLayoutContext(in: workspaceId) == nil else { return false }
-        guard !(settings.alwaysCenterSingleColumn && containers.count == 1) else { return false }
-        guard containers.count > 1 else { return false }
-        guard containers.allSatisfy({ $0.effectiveSizingMode == .normal }) else { return false }
-        guard let selectedNodeId = state.selectedNodeId,
-              let selectedNode = findNode(by: selectedNodeId, in: workspaceId) as? NiriWindow,
-              let selectedContainer = findColumn(containing: selectedNode, in: workspaceId),
-              selectedContainer.effectiveSizingMode == .normal,
-              let selectedIndex = columnIndex(of: selectedContainer, in: workspaceId),
-              let sourceMonitor = monitorForWorkspace(workspaceId)
+        guard singleWindowLayoutContext(
+            in: workspaceId,
+            excluding: projectionExclusions(in: workspaceId)
+        ) == nil,
+            let sourceMonitor = monitorForWorkspace(workspaceId)
         else {
             return false
         }
 
-        var spans: [CGFloat] = []
-        spans.reserveCapacity(containers.count)
-        for container in containers {
-            let span: CGFloat = switch orientation {
-            case .horizontal: container.targetWidth ?? container.cachedWidth
-            case .vertical: container.cachedHeight
+        return withProjectedViewport(
+            state: &state,
+            in: workspaceId,
+            workingFrame: workingFrame,
+            gaps: gaps,
+            orientation: orientation
+        ) { containers, projectedState in
+            guard !(settings.alwaysCenterSingleColumn && containers.count == 1),
+                  containers.count > 1,
+                  containers.allSatisfy({ $0.effectiveSizingMode == .normal }),
+                  let selectedNodeId = projectedState.selectedNodeId,
+                  let selectedNode = findNode(by: selectedNodeId, in: workspaceId) as? NiriWindow,
+                  !isExcludedFromProjection(selectedNode.token, in: workspaceId),
+                  let selectedContainer = findColumn(containing: selectedNode, in: workspaceId),
+                  selectedContainer.effectiveSizingMode == .normal,
+                  let selectedIndex = containers.firstIndex(where: { $0 === selectedContainer })
+            else {
+                return false
             }
-            guard span > 0 else { return false }
-            spans.append(span)
-        }
 
-        let activeIndex = state.activeColumnIndex.clamped(to: 0 ... (containers.count - 1))
-        let sourceContext = HiddenPlacementMonitorContext(sourceMonitor)
-        let offset = NiriSettledCoverageEvaluator.bestOffset(
-            for: .init(
-                containerSpans: spans,
-                selectedIndex: selectedIndex,
-                activeIndex: activeIndex,
-                semanticOffset: state.viewOffset,
-                gap: gaps,
-                workingFrame: workingFrame,
-                sourceMonitor: sourceContext,
-                monitors: monitors.values.map(HiddenPlacementMonitorContext.init),
-                orientation: orientation,
-                scale: sourceMonitor.scale
+            var spans: [CGFloat] = []
+            spans.reserveCapacity(containers.count)
+            for container in containers {
+                let span: CGFloat = switch orientation {
+                case .horizontal: container.targetWidth ?? container.cachedWidth
+                case .vertical: container.cachedHeight
+                }
+                guard span > 0 else { return false }
+                spans.append(span)
+            }
+
+            let activeIndex = projectedState.activeColumnIndex.clamped(to: 0 ... containers.count - 1)
+            let offset = NiriSettledCoverageEvaluator.bestOffset(
+                for: .init(
+                    containerSpans: spans,
+                    selectedIndex: selectedIndex,
+                    activeIndex: activeIndex,
+                    semanticOffset: projectedState.viewOffset,
+                    gap: gaps,
+                    workingFrame: workingFrame,
+                    sourceMonitor: HiddenPlacementMonitorContext(sourceMonitor),
+                    monitors: monitors.values.map(HiddenPlacementMonitorContext.init),
+                    orientation: orientation,
+                    scale: sourceMonitor.scale
+                )
             )
-        )
-        guard abs(offset - state.viewOffset) > 0.0001 else { return false }
+            guard abs(offset - projectedState.viewOffset) > 0.0001 else { return false }
 
-        state.animateToOffset(offset, motion: motion, scale: sourceMonitor.scale)
-        return true
+            projectedState.animateToOffset(offset, motion: motion, scale: sourceMonitor.scale)
+            return true
+        } ?? false
     }
 }

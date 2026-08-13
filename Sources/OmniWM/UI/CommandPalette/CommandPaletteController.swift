@@ -14,6 +14,7 @@ struct CommandPaletteWindowItem: Identifiable {
     let appName: String
     let appIcon: NSImage?
     let workspaceName: String
+    let isAppHidden: Bool
 }
 
 struct CommandPaletteAppSnapshot: Equatable {
@@ -421,6 +422,10 @@ final class CommandPaletteController: NSObject, NSWindowDelegate {
         return InlineHint(title: "Summon Right", shortcut: "⇧↩")
     }
 
+    static func allowsSummonRight(_ item: CommandPaletteWindowItem) -> Bool {
+        !item.isAppHidden
+    }
+
     static func windowsStatusText(isSummonRightAvailable: Bool) -> String {
         let summonText = if isSummonRightAvailable {
             "Shift-Enter summons right."
@@ -498,7 +503,7 @@ final class CommandPaletteController: NSObject, NSWindowDelegate {
         }
     }
 
-    private func filterWindowItems(
+    func filterWindowItems(
         _ items: [CommandPaletteWindowItem],
         query rawQuery: String
     ) -> [CommandPaletteWindowItem] {
@@ -520,6 +525,17 @@ final class CommandPaletteController: NSObject, NSWindowDelegate {
             if let range = appLower.range(of: query) {
                 let pos = appLower.distance(from: appLower.startIndex, to: range.lowerBound)
                 return (item, 1000 + pos)
+            }
+
+            let workspaceLower = item.workspaceName.lowercased()
+            if let range = workspaceLower.range(of: query) {
+                let pos = workspaceLower.distance(from: workspaceLower.startIndex, to: range.lowerBound)
+                return (item, 2000 + pos)
+            }
+
+            if item.isAppHidden, let range = "hidden".range(of: query) {
+                let pos = "hidden".distance(from: "hidden".startIndex, to: range.lowerBound)
+                return (item, 3000 + pos)
             }
 
             return nil
@@ -609,7 +625,7 @@ final class CommandPaletteController: NSObject, NSWindowDelegate {
             .map(\.0)
     }
 
-    private func buildWindowItems(from wmController: WMController) -> [CommandPaletteWindowItem] {
+    func buildWindowItems(from wmController: WMController) -> [CommandPaletteWindowItem] {
         let entries = wmController.workspaceManager.allEntries()
         var items: [CommandPaletteWindowItem] = []
         items.reserveCapacity(entries.count)
@@ -628,11 +644,15 @@ final class CommandPaletteController: NSObject, NSWindowDelegate {
                 title: title,
                 appName: appInfo?.name ?? "Unknown",
                 appIcon: appInfo?.icon,
-                workspaceName: workspaceName
+                workspaceName: workspaceName,
+                isAppHidden: wmController.workspaceManager.isAppHidden(pid: entry.pid)
             ))
         }
 
-        items.sort { ($0.appName, $0.title) < ($1.appName, $1.title) }
+        items.sort {
+            ($0.isAppHidden ? 1 : 0, $0.appName, $0.title)
+                < ($1.isAppHidden ? 1 : 0, $1.appName, $1.title)
+        }
         return items
     }
 
@@ -913,7 +933,7 @@ final class CommandPaletteController: NSObject, NSWindowDelegate {
             case .primary:
                 return .navigateWindow(wmController, item.handle)
             case .alternate:
-                guard let summonAnchor else { return nil }
+                guard Self.allowsSummonRight(item), let summonAnchor else { return nil }
                 return .summonWindowRight(wmController, item.handle, summonAnchor)
             }
         case .menu:
@@ -995,7 +1015,8 @@ final class CommandPaletteController: NSObject, NSWindowDelegate {
 
     private func focus(target: CommandPaletteFocusTarget) -> Bool {
         guard let app = environment.runningApplication(target.app.processIdentifier),
-              !app.isTerminated
+              !app.isTerminated,
+              !app.isHidden
         else {
             return false
         }
@@ -1236,6 +1257,7 @@ private struct CommandPaletteView: View {
                                         item: item,
                                         isSelected: controller.selectedItemID == .window(item.id),
                                         isSummonRightAvailable: controller.isSummonRightAvailable
+                                            && CommandPaletteController.allowsSummonRight(item)
                                     )
                                     .id(CommandPaletteSelectionID.window(item.id))
                                     .onTapGesture {
@@ -1546,6 +1568,16 @@ private struct CommandPaletteWindowRow: View {
                     .font(.system(size: 12))
                     .foregroundColor(.secondary)
                     .lineLimit(1)
+
+                if item.isAppHidden {
+                    Text("Hidden")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(Color.secondary.opacity(0.16))
+                        .clipShape(Capsule())
+                }
             }
 
             Spacer()

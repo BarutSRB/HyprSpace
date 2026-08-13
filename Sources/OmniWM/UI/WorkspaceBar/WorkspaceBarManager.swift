@@ -316,8 +316,8 @@ final class WorkspaceBarManager {
             onFocusWorkspace: { [weak controller] item in
                 controller?.focusWorkspaceFromBar(id: item.id)
             },
-            onFocusWindow: { [weak controller] token in
-                controller?.focusWindowFromBar(token: token)
+            onFocusWindow: { [weak controller] handle in
+                controller?.focusWindowFromBar(handle: handle)
             },
             onActivateScratchpad: { [weak controller] in
                 controller?.activateScratchpadFromBar(on: monitorId)

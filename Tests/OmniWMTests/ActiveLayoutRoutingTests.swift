@@ -438,9 +438,27 @@ final class ActiveLayoutRoutingTests: XCTestCase {
 
         for (pid, workspaceId) in [(pid_t(960), niriWorkspaceId), (pid_t(961), dwindleWorkspaceId)] {
             let token = addManagedWindow(pid: pid, windowId: 1, to: workspaceId, controller: controller)
+            let secondToken = addManagedWindow(pid: pid, windowId: 2, to: workspaceId, controller: controller)
             controller.workspaceManager.withEngineMutationScope {
-                _ = niriEngine.addWindow(token: token, to: workspaceId, afterSelection: nil)
+                let firstNode = niriEngine.addWindow(token: token, to: workspaceId, afterSelection: nil)
+                let secondNode = niriEngine.addWindow(
+                    token: secondToken,
+                    to: workspaceId,
+                    afterSelection: firstNode.id
+                )
                 if let column = niriEngine.columns(in: workspaceId).first {
+                    var state = ViewportState(selectedNodeId: firstNode.id)
+                    _ = niriEngine.consumeWindow(
+                        secondNode,
+                        into: column,
+                        enteringFrom: .right,
+                        in: workspaceId,
+                        motion: .disabled,
+                        state: &state,
+                        workingFrame: screenFrame,
+                        gaps: 10,
+                        orientation: .horizontal
+                    )
                     column.displayMode = .tabbed
                     column.renderedFrame = staleNiriFrame
                 }

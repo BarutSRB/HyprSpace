@@ -56,7 +56,8 @@ extension NiriLayoutEngine {
         gaps: (horizontal: CGFloat, vertical: CGFloat),
         scale: CGFloat = 2.0,
         workingArea: WorkingAreaContext? = nil,
-        orientation: Monitor.Orientation
+        orientation: Monitor.Orientation,
+        excludedTokens: Set<WindowToken>? = nil
     ) -> [WindowToken: CGRect] {
         calculateLayoutWithVisibility(
             state: state,
@@ -66,7 +67,8 @@ extension NiriLayoutEngine {
             gaps: gaps,
             scale: scale,
             workingArea: workingArea,
-            orientation: orientation
+            orientation: orientation,
+            excludedTokens: excludedTokens
         ).frames
     }
 
@@ -83,7 +85,8 @@ extension NiriLayoutEngine {
         hiddenPlacementMonitor: HiddenPlacementMonitorContext? = nil,
         hiddenPlacementMonitors: [HiddenPlacementMonitorContext] = [],
         viewOffsetOverride: CGFloat? = nil,
-        settledVisibilityOffset: CGFloat? = nil
+        settledVisibilityOffset: CGFloat? = nil,
+        excludedTokens: Set<WindowToken>? = nil
     ) -> LayoutResult {
         var frames: [WindowToken: CGRect] = [:]
         var hiddenHandles: [WindowToken: HideSide] = [:]
@@ -102,7 +105,8 @@ extension NiriLayoutEngine {
             hiddenPlacementMonitor: hiddenPlacementMonitor,
             hiddenPlacementMonitors: hiddenPlacementMonitors,
             viewOffsetOverride: viewOffsetOverride,
-            settledVisibilityOffset: settledVisibilityOffset
+            settledVisibilityOffset: settledVisibilityOffset,
+            excludedTokens: excludedTokens
         )
         return LayoutResult(frames: frames, hiddenHandles: hiddenHandles)
     }
@@ -122,10 +126,15 @@ extension NiriLayoutEngine {
         hiddenPlacementMonitor: HiddenPlacementMonitorContext? = nil,
         hiddenPlacementMonitors: [HiddenPlacementMonitorContext] = [],
         viewOffsetOverride: CGFloat? = nil,
-        settledVisibilityOffset: CGFloat? = nil
+        settledVisibilityOffset: CGFloat? = nil,
+        excludedTokens: Set<WindowToken>? = nil
     ) {
-        let containers = columns(in: workspaceId)
-        guard !containers.isEmpty else { return }
+        if let excludedTokens {
+            setProjectionExclusions(excludedTokens, in: workspaceId)
+        }
+        let excludedTokens = projectionExclusions(in: workspaceId)
+        let projectedColumns = projectedColumns(in: workspaceId)
+        guard !projectedColumns.isEmpty else { return }
 
         let workingFrame = workingArea?.workingFrame ?? monitorFrame
         let fullscreenLayoutFrame = workingArea?.fullscreenLayoutFrame ?? workingFrame
@@ -150,7 +159,19 @@ extension NiriLayoutEngine {
             .offsetBy(dx: workspaceOffset, dy: 0)
             .roundedToPhysicalPixels(scale: effectiveScale)
 
-        if let singleWindowContext = singleWindowLayoutContext(in: workspaceId) {
+        if !excludedTokens.isEmpty {
+            for column in columns(in: workspaceId)
+                where column.windowNodes.allSatisfy({ excludedTokens.contains($0.token) })
+            {
+                column.frame = nil
+                column.renderedFrame = nil
+            }
+        }
+
+        if let singleWindowContext = singleWindowLayoutContext(
+            in: workspaceId,
+            excluding: excludedTokens
+        ) {
             layoutSingleWindowWorkspace(
                 singleWindowContext,
                 workingFrame: workingFrame,
@@ -169,42 +190,56 @@ extension NiriLayoutEngine {
             return
         }
 
-        for container in containers {
+        for projectedColumn in projectedColumns
+            where projectedColumn.windows.count == projectedColumn.column.windowNodes.count
+        {
             switch orientation {
             case .horizontal:
-                if container.cachedWidth <= 0 {
-                    container.resolveAndCacheWidth(
+                if projectedColumn.column.cachedWidth <= 0 {
+                    projectedColumn.column.resolveAndCacheWidth(
                         workingAreaWidth: workingFrame.width,
                         gaps: primaryGap,
-                        contentInset: tabContentInset(for: container)
+                        contentInset: projectedColumn.windows.count > 1
+                            ? tabContentInset(for: projectedColumn.column)
+                            : 0
                     )
                 }
             case .vertical:
-                if container.cachedHeight <= 0 {
-                    container.resolveAndCacheHeight(workingAreaHeight: workingFrame.height, gaps: primaryGap)
+                if projectedColumn.column.cachedHeight <= 0 {
+                    projectedColumn.column.resolveAndCacheHeight(
+                        workingAreaHeight: workingFrame.height,
+                        gaps: primaryGap
+                    )
                 }
             }
         }
 
-        let containerSpans: [CGFloat] = switch orientation {
-        case .horizontal: containers.map { $0.cachedWidth }
-        case .vertical: containers.map { $0.cachedHeight }
+        let containerSpans = projectedColumns.map {
+            projectedPrimarySpan(
+                for: $0,
+                workingFrame: workingFrame,
+                gap: primaryGap,
+                orientation: orientation
+            )
         }
-        let containerRenderOffsets = containers.map { $0.renderOffset(at: time) }
-        let containerWindowNodes = containers.map { $0.windowNodes }
+        let containerRenderOffsets = projectedColumns.map { $0.column.renderOffset(at: time) }
 
         var containerPositions = [CGFloat]()
-        containerPositions.reserveCapacity(containers.count)
+        containerPositions.reserveCapacity(projectedColumns.count)
         var runningPos: CGFloat = 0
-        for i in 0 ..< containers.count {
+        for i in 0 ..< projectedColumns.count {
             containerPositions.append(runningPos)
             let span = containerSpans[i]
             runningPos += span + primaryGap
         }
 
         let viewOffset = viewOffsetOverride ?? state.viewOffset
-        let activeIdx = state.activeColumnIndex.clamped(to: 0 ... max(0, containers.count - 1))
-        let activePos = containers.isEmpty ? 0 : containerPositions[activeIdx]
+        let activeIdx = projectedActiveColumnIndex(
+            state: state,
+            columns: projectedColumns,
+            in: workspaceId
+        )
+        let activePos = containerPositions[activeIdx]
         let viewPos = activePos + viewOffset
         let visibilityViewPositions: [CGFloat] = settledVisibilityOffset.map {
             [activePos + $0, viewPos]
@@ -214,7 +249,8 @@ extension NiriLayoutEngine {
         case .vertical: workingFrame.height * 0.25
         }
 
-        for idx in 0 ..< containers.count {
+        for idx in 0 ..< projectedColumns.count {
+            let projectedColumn = projectedColumns[idx]
             let containerPos = containerPositions[idx]
             let containerSpan = containerSpans[idx]
             let renderOffset = containerRenderOffsets[idx]
@@ -266,19 +302,20 @@ extension NiriLayoutEngine {
             switch visibilityState {
             case .visible:
                 renderedContainerRect = visibilityRect
-                if containers[idx].isTabbed {
+                if projectedColumn.column.isTabbed, projectedColumn.windows.count > 1 {
                     let parkEdge = hiddenEdge(
                         for: visibilityRect,
                         viewportFrame: workingFrame,
                         fallback: idx == 0 ? .minimum : .maximum,
                         orientation: orientation
                     )
-                    for window in containerWindowNodes[idx] where window.isHiddenInTabbedMode {
+                    let activeWindow = projectedActiveWindow(in: projectedColumn)
+                    for window in projectedColumn.windows where window !== activeWindow {
                         hiddenHandles[window.token] = parkEdge.encodedHideSide
                     }
                 }
             case let .hidden(hiddenEdge):
-                for window in containerWindowNodes[idx] {
+                for window in projectedColumn.windows {
                     hiddenHandles[window.token] = hiddenEdge.encodedHideSide
                 }
                 renderedContainerRect = hiddenRenderedContainerRect(
@@ -293,7 +330,8 @@ extension NiriLayoutEngine {
             }
 
             layoutContainer(
-                container: containers[idx],
+                container: projectedColumn.column,
+                windows: projectedColumn.windows,
                 canonicalContainerRect: canonicalContainerRect,
                 renderedContainerRect: renderedContainerRect,
                 fullscreenRect: canonicalFullscreenRect,
@@ -597,7 +635,7 @@ extension NiriLayoutEngine {
                 context.container.resolveAndCacheWidth(
                     workingAreaWidth: workingFrame.width,
                     gaps: primaryGap,
-                    contentInset: tabContentInset(for: context.container)
+                    contentInset: 0
                 )
             }
             boundedSize = CGSize(
@@ -629,7 +667,7 @@ extension NiriLayoutEngine {
                     gaps: primaryGap
                 )
             }
-            let tabOffset = context.container.isTabbed ? renderStyle.tabIndicatorWidth : 0
+            let tabOffset: CGFloat = 0
             let containerWidth = hasManualSecondaryOverride
                 ? context.window.constraints.clampWidth(windowWidth) + tabOffset
                 : windowWidth
@@ -672,7 +710,7 @@ extension NiriLayoutEngine {
         let renderedRect = canonicalRect
             .offsetBy(dx: workspaceOffset + renderOffset.x, dy: renderOffset.y)
             .roundedToPhysicalPixels(scale: scale)
-        let tabOffset = context.container.isTabbed ? renderStyle.tabIndicatorWidth : 0
+        let tabOffset: CGFloat = 0
         let secondarySpanOverride: CGFloat? = if orientation == .vertical,
                                                  context.window.windowWidth != .default
         {
@@ -683,6 +721,7 @@ extension NiriLayoutEngine {
 
         layoutContainer(
             container: context.container,
+            windows: [context.window],
             canonicalContainerRect: canonicalRect,
             renderedContainerRect: renderedRect,
             fullscreenRect: fullscreenRect,
@@ -699,6 +738,7 @@ extension NiriLayoutEngine {
 
     private func layoutContainer(
         container: NiriContainer,
+        windows: [NiriWindow],
         canonicalContainerRect: CGRect,
         renderedContainerRect: CGRect,
         fullscreenRect: CGRect,
@@ -714,7 +754,10 @@ extension NiriLayoutEngine {
         container.frame = canonicalContainerRect
         container.renderedFrame = renderedContainerRect
 
-        let tabOffset = container.isTabbed ? renderStyle.tabIndicatorWidth : 0
+        guard !windows.isEmpty else { return }
+
+        let isTabbed = container.isTabbed && windows.count > 1
+        let tabOffset = isTabbed ? renderStyle.tabIndicatorWidth : 0
         let contentRect = CGRect(
             x: canonicalContainerRect.origin.x + tabOffset,
             y: canonicalContainerRect.origin.y,
@@ -722,10 +765,6 @@ extension NiriLayoutEngine {
             height: canonicalContainerRect.height
         )
 
-        let windows = container.windowNodes
-        guard !windows.isEmpty else { return }
-
-        let isTabbed = container.isTabbed
         let time = animationTime ?? CACurrentMediaTime()
 
         let availableSpace: CGFloat = switch orientation {

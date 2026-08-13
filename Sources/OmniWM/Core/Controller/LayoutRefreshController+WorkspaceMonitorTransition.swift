@@ -384,21 +384,6 @@ extension LayoutRefreshController {
         }
     }
 
-    func absorbIntoActiveFullRescan(_ refresh: ScheduledRefresh) {
-        guard var activeRefresh = layoutState.activeRefresh else { return }
-        activeRefresh.postLayoutActions.append(contentsOf: refresh.postLayoutActions)
-        activeRefresh.workspaceMonitorRelocations = mergedWorkspaceMonitorRelocations(
-            activeRefresh.workspaceMonitorRelocations,
-            refresh.workspaceMonitorRelocations
-        )
-        activeRefresh.reconcilesWorkspaceMonitorState = activeRefresh.reconcilesWorkspaceMonitorState
-            || refresh.reconcilesWorkspaceMonitorState
-        activeRefresh.suppressesWindowActivation = activeRefresh.suppressesWindowActivation
-            || refresh.suppressesWindowActivation
-        mergeAbsorbedVisibility(into: &activeRefresh, from: refresh)
-        layoutState.activeRefresh = activeRefresh
-    }
-
     func mergedWorkspaceRefreshScope(
         _ existing: WorkspaceRefreshScope,
         _ incoming: WorkspaceRefreshScope

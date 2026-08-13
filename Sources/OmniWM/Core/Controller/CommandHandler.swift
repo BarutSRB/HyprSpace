@@ -328,7 +328,8 @@ final class CommandHandler {
         let orientation = controller.settings.effectiveOrientation(for: monitor)
 
         let previousWindow = controller.workspaceManager.withEngineMutationScope { () -> NiriWindow? in
-            if let currentId = state.selectedNodeId {
+            if let selected = engine.reconcileProjectedSelection(state: &state, in: workspaceId) {
+                let currentId = selected.id
                 engine.updateFocusTimestamp(for: currentId, in: workspaceId)
                 engine.activateWindow(currentId, in: workspaceId)
             }
@@ -378,6 +379,7 @@ final class CommandHandler {
     ) -> Bool {
         guard let anchor,
               let nodeId = anchor.nodeId,
+              !controller.workspaceManager.isAppHidden(anchor.token),
               let target = engine.findMostRecentlyFocusedWindow(excluding: nodeId, in: nil),
               let targetWorkspaceId = controller.workspaceManager.entry(for: target.token)?.workspaceId,
               targetWorkspaceId != anchor.workspaceId
@@ -407,7 +409,8 @@ final class CommandHandler {
             ?? frontmostPid.flatMap { controller.axEventHandler.focusedWindowToken(for: $0) }
 
         if let observedToken,
-           let entry = controller.workspaceManager.entry(for: observedToken)
+           let entry = controller.workspaceManager.entry(for: observedToken),
+           !controller.workspaceManager.isAppHidden(pid: entry.pid)
         {
             return FocusHistoryAnchor(
                 workspaceId: entry.workspaceId,
@@ -418,7 +421,8 @@ final class CommandHandler {
         }
 
         if let token = controller.workspaceManager.focusedToken,
-           let entry = controller.workspaceManager.entry(for: token)
+           let entry = controller.workspaceManager.entry(for: token),
+           !controller.workspaceManager.isAppHidden(pid: entry.pid)
         {
             return FocusHistoryAnchor(
                 workspaceId: entry.workspaceId,
@@ -432,7 +436,8 @@ final class CommandHandler {
             .niriViewportState(for: fallbackWorkspaceId)
             .selectedNodeId
         guard let selectedNodeId,
-              let node = engine.findNode(by: selectedNodeId, in: fallbackWorkspaceId) as? NiriWindow
+              let node = engine.findNode(by: selectedNodeId, in: fallbackWorkspaceId) as? NiriWindow,
+              !engine.isExcludedFromProjection(node.token, in: fallbackWorkspaceId)
         else {
             return nil
         }
@@ -775,7 +780,8 @@ final class CommandHandler {
         }
 
         if let token = controller.workspaceManager.focusedToken,
-           let entry = controller.workspaceManager.entry(for: token)
+           let entry = controller.workspaceManager.entry(for: token),
+           !controller.workspaceManager.isAppHidden(pid: entry.pid)
         {
             let currentState = isFullscreen(entry.axRef)
             if currentState {
@@ -805,7 +811,8 @@ final class CommandHandler {
         let frontmostToken = frontmostFocusedWindowTokenProvider?()
             ?? frontmostPid.flatMap { controller.axEventHandler.focusedWindowToken(for: $0) }
         guard let token = controller.workspaceManager.nativeFullscreenCommandTarget(frontmostToken: frontmostToken),
-              let entry = controller.workspaceManager.entry(for: token)
+              let entry = controller.workspaceManager.entry(for: token),
+              !controller.workspaceManager.isAppHidden(pid: entry.pid)
         else {
             return
         }

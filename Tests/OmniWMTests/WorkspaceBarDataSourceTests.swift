@@ -410,6 +410,87 @@ final class WorkspaceBarDataSourceTests: XCTestCase {
         XCTAssertTrue(item.tiledWindows.allSatisfy { $0.windowCount == 1 })
     }
 
+    func testMacOSHiddenWindowsRemainVisibleAndSortAfterVisibleWindows() throws {
+        let fixture = try makeFixture()
+        let hiddenFirst = addWindow(
+            pid: 49_101,
+            windowId: 49_201,
+            bundleId: "com.example.hidden.first",
+            mode: .tiling,
+            to: fixture
+        )
+        let visibleFirst = addWindow(
+            pid: 49_102,
+            windowId: 49_202,
+            bundleId: "com.example.visible.first",
+            mode: .tiling,
+            to: fixture
+        )
+        let hiddenSecond = addWindow(
+            pid: 49_103,
+            windowId: 49_203,
+            bundleId: "com.example.hidden.second",
+            mode: .tiling,
+            to: fixture
+        )
+        let visibleSecond = addWindow(
+            pid: 49_104,
+            windowId: 49_204,
+            bundleId: "com.example.visible.second",
+            mode: .tiling,
+            to: fixture
+        )
+        fixture.workspaceManager.setAppHidden(true, pid: hiddenFirst.pid, source: .service)
+        fixture.workspaceManager.setAppHidden(true, pid: hiddenSecond.pid, source: .service)
+
+        let projection = project(fixture, excludedBundleIDs: [])
+        let item = try XCTUnwrap(projection.items.first { $0.id == fixture.workspaceId })
+
+        XCTAssertEqual(
+            item.tiledWindows.map(\.id),
+            [visibleFirst, visibleSecond, hiddenFirst, hiddenSecond]
+        )
+        XCTAssertEqual(item.tiledWindows.map(\.isAppHidden), [false, false, true, true])
+        XCTAssertEqual(item.tiledWindows.map(\.hiddenWindowCount), [0, 0, 1, 1])
+        for window in item.tiledWindows {
+            XCTAssertTrue(window.handle === fixture.workspaceManager.handle(for: window.id))
+        }
+    }
+
+    func testDeduplicatedMixedVisibilityKeepsExactPIDRowsVisibleFirst() throws {
+        let fixture = try makeFixture()
+        let hidden = addWindow(
+            pid: 49_201,
+            windowId: 49_301,
+            bundleId: "com.example.mixed",
+            mode: .tiling,
+            to: fixture
+        )
+        let visible = addWindow(
+            pid: 49_202,
+            windowId: 49_302,
+            bundleId: "COM.EXAMPLE.MIXED",
+            mode: .tiling,
+            to: fixture
+        )
+        fixture.workspaceManager.setAppHidden(true, pid: hidden.pid, source: .service)
+
+        let projection = project(fixture, deduplicate: true, excludedBundleIDs: [])
+        let workspace = try XCTUnwrap(projection.items.first { $0.id == fixture.workspaceId })
+        let item = try XCTUnwrap(workspace.tiledWindows.first)
+
+        XCTAssertEqual(workspace.tiledWindows.count, 1)
+        XCTAssertEqual(item.windowCount, 2)
+        XCTAssertEqual(item.hiddenWindowCount, 1)
+        XCTAssertFalse(item.isAppHidden)
+        XCTAssertTrue(item.hasHiddenWindows)
+        XCTAssertEqual(item.allWindows.map(\.id), [visible, hidden])
+        XCTAssertEqual(item.allWindows.map(\.isAppHidden), [false, true])
+        XCTAssertEqual(item.allWindows.map(\.id.pid), [visible.pid, hidden.pid])
+        XCTAssertTrue(item.allWindows[0].handle === fixture.workspaceManager.handle(for: visible))
+        XCTAssertTrue(item.allWindows[1].handle === fixture.workspaceManager.handle(for: hidden))
+    }
+
     func testOverrideAppliesToTiledFloatingAndScratchpadItems() throws {
         let overrideImage = NSImage(size: NSSize(width: 32, height: 32))
         let fixture = try makeFixture { _ in overrideImage }

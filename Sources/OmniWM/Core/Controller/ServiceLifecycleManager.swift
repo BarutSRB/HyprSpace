@@ -371,16 +371,10 @@ final class ServiceLifecycleManager {
 
     func handleAppTerminated(pid: pid_t) {
         guard let controller else { return }
+        controller.intentLedger.cancelAppRevealFocus(pid: pid)
         let allEntries = controller.workspaceManager.allEntries()
-        if controller.workspaceManager.isAppHidden(pid: pid) {
-            let entries = allEntries.filter { $0.pid == pid }
-            controller.axManager.setMacOSAppHidden(
-                false,
-                pid: pid,
-                entries: entries.map { (pid: $0.pid, windowId: $0.windowId) }
-            )
-            controller.workspaceManager.setAppHidden(false, pid: pid, source: .service)
-        } else {
+        let wasHidden = controller.workspaceManager.isAppHidden(pid: pid)
+        if !wasHidden {
             controller.workspaceManager.invalidateAppVisibility(for: pid, source: .service)
         }
         let dependentTargetPIDs = controller.axEventHandler.fullRescanTargetPIDsDepending(
@@ -397,6 +391,14 @@ final class ServiceLifecycleManager {
                 : nil
         })
         let affectedWorkspaces = controller.workspaceManager.removeWindowsForApp(pid: pid)
+        if wasHidden {
+            controller.axManager.setMacOSAppHidden(
+                false,
+                pid: pid,
+                entries: removedEntries.map { (pid: $0.pid, windowId: $0.windowId) }
+            )
+            controller.workspaceManager.setAppHidden(false, pid: pid, source: .service)
+        }
         for entry in removedEntries {
             controller.axManager.removeWindowState(pid: entry.pid, expectedWindow: entry.axRef)
             if scratchpadTokens.contains(entry.token) {

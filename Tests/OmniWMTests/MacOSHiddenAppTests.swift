@@ -8,7 +8,12 @@ import XCTest
 
 @MainActor
 final class MacOSHiddenAppTests: XCTestCase {
-    func testLayoutRefreshInputExcludesMacOSHiddenAppWindows() throws {
+    func testOnlyHideVisibilityRefreshRecoversFocus() {
+        XCTAssertTrue(RefreshReason.appHidden.recoversFocusAfterVisibilityChange)
+        XCTAssertFalse(RefreshReason.appUnhidden.recoversFocusAfterVisibilityChange)
+    }
+
+    func testLayoutRefreshInputRetainsAndMarksMacOSHiddenAppWindows() throws {
         let controller = makeController()
         let workspaceId = try XCTUnwrap(controller.workspaceManager.workspaceId(for: "1", createIfMissing: true))
         _ = controller.workspaceManager.focusWorkspace(named: "1")
@@ -29,7 +34,11 @@ final class MacOSHiddenAppTests: XCTestCase {
             )
         )
 
-        XCTAssertEqual(input.windows.map(\.token), [visibleToken])
+        XCTAssertEqual(
+            Set(input.windows.map(\.token)),
+            [hiddenByPIDToken, secondHiddenToken, visibleToken]
+        )
+        XCTAssertEqual(input.excludedTokens, [hiddenByPIDToken, secondHiddenToken])
     }
 
     func testFocusResolutionSkipsPIDHiddenWindowsEvenBeforeLayoutReasonUpdates() throws {
@@ -81,6 +90,67 @@ final class MacOSHiddenAppTests: XCTestCase {
 
         XCTAssertTrue(controller.workspaceManager.isAppHidden(token))
         XCTAssertNil(controller.workspaceManager.resolveWorkspaceFocusToken(in: workspaceId))
+    }
+
+    func testHiddenFloatingWindowKeepsWorkspaceInactiveRestoreState() throws {
+        let controller = makeController()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        _ = controller.workspaceManager.focusWorkspace(named: "1")
+        let token = addWindow(pid: 880_014, windowId: 880_114, to: workspaceId, controller: controller)
+        XCTAssertTrue(controller.workspaceManager.setWindowMode(.floating, for: token))
+        let hiddenState = HiddenState(
+            proportionalPosition: CGPoint(x: 0.5, y: 0.5),
+            referenceMonitorId: nil,
+            reason: .workspaceInactive
+        )
+        controller.workspaceManager.setHiddenState(hiddenState, for: token)
+        controller.workspaceManager.setAppHidden(true, pid: token.pid, source: .ax)
+
+        XCTAssertEqual(
+            controller.layoutRefreshController.restoreWorkspaceInactiveFloatingWindows(
+                activeWorkspaceIds: [workspaceId]
+            ),
+            0
+        )
+        XCTAssertEqual(controller.workspaceManager.hiddenState(for: token), hiddenState)
+    }
+
+    func testUnhideReparksWindowThatBelongsToInactiveWorkspace() async throws {
+        let controller = makeController()
+        let sourceWorkspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        _ = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "2", createIfMissing: true)
+        )
+        _ = controller.workspaceManager.focusWorkspace(named: "1")
+        let token = addWindow(pid: 880_015, windowId: 880_115, to: sourceWorkspaceId, controller: controller)
+        XCTAssertTrue(controller.workspaceManager.setWindowMode(.floating, for: token))
+        var frameReadCount = 0
+        controller.layoutRefreshController.fastFrameProvider = { _, _ in
+            frameReadCount += 1
+            return CGRect(x: 100, y: 100, width: 500, height: 350)
+        }
+        controller.workspaceManager.setAppHidden(true, pid: token.pid, source: .service)
+        controller.axManager.setMacOSAppHidden(
+            true,
+            pid: token.pid,
+            entries: [(pid: token.pid, windowId: token.windowId)]
+        )
+        _ = controller.workspaceManager.focusWorkspace(named: "2")
+        controller.layoutRefreshController.hideInactiveWorkspacesSync()
+
+        XCTAssertTrue(controller.workspaceManager.hiddenState(for: token)?.workspaceInactive == true)
+        XCTAssertNil(controller.axManager.pendingParkFrameRequest(for: token.windowId))
+        let frameReadsBeforeUnhide = frameReadCount
+
+        controller.axEventHandler.handleAppUnhidden(pid: token.pid, source: .service)
+        await WindowAdmissionTestSupport.drainLayoutRefreshes(controller)
+
+        XCTAssertTrue(controller.workspaceManager.hiddenState(for: token)?.workspaceInactive == true)
+        XCTAssertGreaterThan(frameReadCount, frameReadsBeforeUnhide)
     }
 
     func testNativeFullscreenReasonSurvivesAppHideAndUnhide() throws {
@@ -311,6 +381,57 @@ final class MacOSHiddenAppTests: XCTestCase {
         XCTAssertNil(controller.layoutRefreshController.layoutState.closingAnimationsByDisplay[monitor.displayId])
     }
 
+    func testHideCancelsDelayedScratchpadRevealWithoutClearingHiddenState() throws {
+        let controller = makeController()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let token = addWindow(pid: 880_025, windowId: 880_125, to: workspaceId, controller: controller)
+        XCTAssertTrue(controller.workspaceManager.setWindowMode(.floating, for: token))
+        let hiddenState = HiddenState(
+            proportionalPosition: .zero,
+            referenceMonitorId: nil,
+            reason: .scratchpad
+        )
+        controller.workspaceManager.setScratchpadToken(token)
+        controller.workspaceManager.setHiddenState(hiddenState, for: token)
+        let entry = try XCTUnwrap(controller.workspaceManager.entry(for: token))
+        let targetFrame = CGRect(x: 40, y: 40, width: 400, height: 300)
+        let transactionId = try XCTUnwrap(
+            controller.layoutRefreshController.beginPendingRevealTransaction(
+                for: entry,
+                hiddenState: hiddenState,
+                targetFrame: targetFrame,
+                monitor: controller.workspaceManager.monitor(for: workspaceId) ?? Monitor.fallback()
+            )
+        )
+        controller.layoutRefreshController.completePendingRevealTransaction(
+            with: AXFrameApplyResult(
+                requestId: 1,
+                pid: token.pid,
+                windowId: token.windowId,
+                expectedWindow: entry.axRef,
+                targetFrame: targetFrame,
+                currentFrameHint: nil,
+                writeResult: AXFrameWriteResult(
+                    targetFrame: targetFrame,
+                    observedFrame: nil,
+                    writeOrder: .sizeThenPosition,
+                    sizeError: .success,
+                    positionError: .success,
+                    failureReason: .verificationMismatch
+                )
+            ),
+            transactionId: transactionId
+        )
+        XCTAssertTrue(controller.layoutRefreshController.hasPendingRevealTransaction(for: token.windowId))
+
+        controller.axEventHandler.handleAppHidden(pid: token.pid)
+
+        XCTAssertFalse(controller.layoutRefreshController.hasPendingRevealTransaction(for: token.windowId))
+        XCTAssertEqual(controller.workspaceManager.hiddenState(for: token), hiddenState)
+    }
+
     func testRealLayoutPlanIsRejectedAfterVisibilityTransition() throws {
         let controller = makeController()
         let workspaceId = try XCTUnwrap(controller.workspaceManager.workspaceId(for: "1", createIfMissing: true))
@@ -366,7 +487,7 @@ final class MacOSHiddenAppTests: XCTestCase {
         XCTAssertEqual(controller.workspaceManager.niriViewportState(for: workspaceId).selectedNodeId, visibleNode.id)
     }
 
-    func testNiriMacOSHiddenAppRemovalAndUnhidePreservesPlacement() throws {
+    func testNiriMacOSHiddenAppProjectionAndUnhidePreservesPlacement() throws {
         let controller = makeController()
         let workspaceId = try XCTUnwrap(controller.workspaceManager.workspaceId(for: "1", createIfMissing: true))
         _ = controller.workspaceManager.focusWorkspace(named: "1")
@@ -404,8 +525,17 @@ final class MacOSHiddenAppTests: XCTestCase {
         XCTAssertTrue(controller.layoutRefreshController.executeLayoutPlan(hidePlan))
         XCTAssertEqual(
             engine.columns(in: workspaceId).map { $0.windowNodes.map(\.token) },
-            [[firstToken], [thirdToken]]
+            [[firstToken], [hiddenToken], [thirdToken]]
         )
+        XCTAssertFalse(hidePlan.diff.frameChanges.contains { $0.token == hiddenToken })
+        XCTAssertFalse(hidePlan.diff.restoreChanges.contains { $0.token == hiddenToken })
+        XCTAssertFalse(hidePlan.diff.visibilityChanges.contains { change in
+            switch change {
+            case let .show(token),
+                 let .hide(token, _):
+                token == hiddenToken
+            }
+        })
         XCTAssertEqual(controller.workspaceManager.restoreIntent(for: thirdToken)?.niriPlacement?.columnIndex, 2)
 
         controller.workspaceManager.setAppHidden(false, pid: hiddenToken.pid, source: .ax)

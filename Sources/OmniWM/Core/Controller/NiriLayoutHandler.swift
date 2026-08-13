@@ -501,6 +501,7 @@ enum StructuralMutationOutcome: Equatable {
             workspaceId: wsId,
             monitor: refreshInput.monitor,
             windows: refreshInput.windows,
+            excludedTokens: refreshInput.excludedTokens,
             plannedSeq: refreshInput.plannedSeq,
             viewportState: effectiveViewportState,
             preferredFocusToken: controller.workspaceManager.preferredFocusToken(in: wsId),
@@ -549,7 +550,8 @@ enum StructuralMutationOutcome: Equatable {
             settledVisibilityOffset: controller?.workspaceManager.animationDriver.settledVisibilityOffset(
                 in: snapshot.workspaceId,
                 semanticOffset: snapshot.viewportState.viewOffset
-            )
+            ),
+            excludedTokens: snapshot.excludedTokens
         )
 
         let diff = layoutDiff(
@@ -560,6 +562,7 @@ enum StructuralMutationOutcome: Equatable {
             workspaceId: snapshot.workspaceId,
             canRestoreHiddenWorkspaceWindows: snapshot.isActiveWorkspace,
             reassertHidden: animationTime == nil,
+            excludedTokens: snapshot.excludedTokens,
             pendingParkWindowIds: controller?.axManager.pendingParkWindowIds ?? []
         )
 
@@ -595,6 +598,7 @@ enum StructuralMutationOutcome: Equatable {
         )
         let windowTokens = snapshot.windows.map(\.token)
         let currentSelection = state.selectedNodeId
+        pass.engine.setProjectionExclusions(snapshot.excludedTokens, in: pass.wsId)
 
         let removal = processWindowRemovals(
             pass: pass,
@@ -649,18 +653,9 @@ enum StructuralMutationOutcome: Equatable {
             viewportNeedsRecalc: selection.viewportNeedsRecalc,
             snapshot: snapshot
         )
-        if shouldPersistNiriRestorePlacements(in: pass.wsId) {
-            plan.niriRestorePlacements = pass.engine.persistedPlacements(in: pass.wsId)
-        }
+        plan.niriRestorePlacements = pass.engine.persistedPlacements(in: pass.wsId)
 
         return plan
-    }
-
-    private func shouldPersistNiriRestorePlacements(in workspaceId: WorkspaceDescriptor.ID) -> Bool {
-        guard let controller else { return true }
-        return !controller.workspaceManager.tiledEntries(in: workspaceId).contains {
-            controller.isManagedWindowSuppressedByMacOSHide($0.token)
-        }
     }
 
     private func restoreInitialNiriPlacementsIfNeeded(
@@ -731,13 +726,16 @@ enum StructuralMutationOutcome: Equatable {
             preferredFocusToken: preferredFocusToken
         )
         let newTokens = windowTokens.filter { !removal.existingHandleIds.contains($0) }
+        let visibleNewTokens = newTokens.filter {
+            !pass.engine.isExcludedFromProjection($0, in: pass.wsId)
+        }
         var tabLocalTokens = Set<WindowToken>()
 
         let columns = pass.engine.columns(in: pass.wsId)
         resolvePrimaryContainerSpansIfNeeded(pass: pass)
 
-        if !removal.wasEmptyBeforeSync, !newTokens.isEmpty {
-            let newTokenSet = Set(newTokens)
+        if !removal.wasEmptyBeforeSync, !visibleNewTokens.isEmpty {
+            let newTokenSet = Set(visibleNewTokens)
             let preexistingSurvivingTokens = Set(windowTokens).intersection(removal.existingHandleIds)
             var newColumnData: [(col: NiriContainer, colIdx: Int)] = []
 
@@ -788,7 +786,7 @@ enum StructuralMutationOutcome: Equatable {
         }
 
         return InsertionContext(
-            newTokens: newTokens,
+            newTokens: visibleNewTokens,
             tabLocalTokens: tabLocalTokens,
             viewOriginBeforeInsertion: viewOriginBeforeInsertion
         )
@@ -854,6 +852,7 @@ enum StructuralMutationOutcome: Equatable {
         snapshot: NiriWorkspaceSnapshot
     ) -> (viewportNeedsRecalc: Bool, rememberedFocusToken: WindowToken?) {
         state.displayRefreshRate = snapshot.displayRefreshRate
+        let visibleWindowTokens = windowTokens.filter { !snapshot.excludedTokens.contains($0) }
 
         if let finalSelectionId = removal.removalResult.finalSelectionId {
             state.selectedNodeId = finalSelectionId
@@ -863,15 +862,28 @@ enum StructuralMutationOutcome: Equatable {
             state.selectedNodeId = pass.engine.validateSelection(selectedId, in: pass.wsId)
         }
 
+        if let selectedNodeId = state.selectedNodeId,
+           let selectedWindow = pass.engine.findNode(by: selectedNodeId, in: pass.wsId) as? NiriWindow,
+           snapshot.excludedTokens.contains(selectedWindow.token)
+        {
+            state.selectedNodeId = nil
+        }
+
         if state.selectedNodeId == nil {
-            if let firstToken = windowTokens.first,
+            let fallbackToken = snapshot.preferredFocusToken.flatMap {
+                visibleWindowTokens.contains($0) ? $0 : nil
+            } ?? visibleWindowTokens.first
+            if let firstToken = fallbackToken,
                let firstNode = pass.engine.findNode(for: firstToken, in: pass.wsId)
             {
                 state.selectedNodeId = firstNode.id
             }
         }
 
-        let usesSingleWindowFit = pass.engine.singleWindowLayoutContext(in: pass.wsId) != nil
+        let usesSingleWindowFit = pass.engine.singleWindowLayoutContext(
+            in: pass.wsId,
+            excluding: snapshot.excludedTokens
+        ) != nil
         if usesSingleWindowFit {
             resetViewportForSingleWindowFit(state: &state)
         }
@@ -892,16 +904,30 @@ enum StructuralMutationOutcome: Equatable {
            !removal.removalResult.visibilityWasCorrected,
            removal.removalResult.removedTokens.isEmpty || removal.removalResult.fromIndexForVisibility != nil
         {
-            pass.engine.ensureSelectionVisible(
-                node: selectedNode,
-                in: pass.wsId,
-                motion: motion,
-                state: &state,
-                workingFrame: pass.insetFrame,
-                gaps: pass.gap,
-                orientation: pass.orientation,
-                fromContainerIndex: removal.removalResult.fromIndexForVisibility
-            )
+            if snapshot.excludedTokens.isEmpty {
+                pass.engine.ensureSelectionVisible(
+                    node: selectedNode,
+                    in: pass.wsId,
+                    motion: motion,
+                    state: &state,
+                    workingFrame: pass.insetFrame,
+                    gaps: pass.gap,
+                    orientation: pass.orientation,
+                    fromContainerIndex: removal.removalResult.fromIndexForVisibility
+                )
+            } else {
+                pass.engine.ensureProjectedSelectionVisible(
+                    node: selectedNode,
+                    in: pass.wsId,
+                    motion: motion,
+                    state: &state,
+                    workingFrame: pass.insetFrame,
+                    gaps: pass.gap,
+                    orientation: pass.orientation,
+                    animationConfig: nil,
+                    fromContainerIndex: removal.removalResult.fromIndexForVisibility
+                )
+            }
             let liveOffsetDelta = state.hasPendingOffsetAnimation
                 ? state.offsetTransition.rebaseDelta - rebaseDeltaBefore
                 : state.viewOffset - offsetBefore
@@ -911,6 +937,7 @@ enum StructuralMutationOutcome: Equatable {
         }
 
         if !usesSingleWindowFit,
+           snapshot.excludedTokens.isEmpty,
            removal.removalResult.removedColumnIndicesBefore.isEmpty,
            pass.engine.correctViewportAfterColumnRemoval(
                in: pass.wsId,
@@ -926,7 +953,8 @@ enum StructuralMutationOutcome: Equatable {
 
         let rememberedFocusToken: WindowToken?
         if let selectedId = state.selectedNodeId,
-           let selectedNode = pass.engine.findNode(by: selectedId, in: pass.wsId) as? NiriWindow
+           let selectedNode = pass.engine.findNode(by: selectedId, in: pass.wsId) as? NiriWindow,
+           !snapshot.excludedTokens.contains(selectedNode.token)
         {
             rememberedFocusToken = selectedNode.token
         } else {
@@ -944,7 +972,7 @@ enum StructuralMutationOutcome: Equatable {
         existingHandleIds: Set<WindowToken>,
         snapshot: NiriWorkspaceSnapshot
     ) -> ArrivalContext {
-        let wasEmpty = existingHandleIds.isEmpty
+        let wasEmpty = existingHandleIds.subtracting(snapshot.excludedTokens).isEmpty
         let newTokens = insertion.newTokens
 
         var activateWindowToken: WindowToken?
@@ -960,23 +988,25 @@ enum StructuralMutationOutcome: Equatable {
             state.selectedNodeId = newNode.id
 
             if wasEmpty {
-                if pass.engine.singleWindowLayoutContext(in: pass.wsId) != nil {
+                if pass.engine.singleWindowLayoutContext(
+                    in: pass.wsId,
+                    excluding: snapshot.excludedTokens
+                ) != nil {
                     resetViewportForSingleWindowFit(state: &state)
+                    if let column = pass.engine.column(of: newNode),
+                       let durableIndex = pass.engine.columnIndex(of: column, in: pass.wsId)
+                    {
+                        state.activeColumnIndex = durableIndex
+                    }
                 } else {
-                    let cols = pass.engine.columns(in: pass.wsId)
-                    let settings = pass.engine.effectiveSettings(in: pass.wsId)
-                    state.transitionToColumn(
-                        0,
-                        columns: cols,
-                        gap: pass.gap,
-                        workingArea: pass.insetFrame,
-                        orientation: pass.orientation,
-                        motion: motion,
-                        animate: false,
-                        centerMode: settings.centerFocusedColumn,
-                        alwaysCenterSingleColumn: settings.alwaysCenterSingleColumn,
-                        scale: pass.engine.displayScale(in: pass.wsId),
-                        viewFrame: pass.monitor.frame
+                    pass.engine.ensureSelectionVisible(
+                        node: newNode,
+                        in: pass.wsId,
+                        motion: .disabled,
+                        state: &state,
+                        workingFrame: pass.insetFrame,
+                        gaps: pass.gap,
+                        orientation: pass.orientation
                     )
                 }
             } else if isTabLocalArrival {
@@ -1154,7 +1184,8 @@ enum StructuralMutationOutcome: Equatable {
                     localState: state,
                     storeOffset: $0.workspaceManager.niriViewportState(for: pass.wsId).viewOffset
                 )
-            }
+            },
+            excludedTokens: snapshot.excludedTokens
         )
 
         let hasColumnAnimations = pass.engine.hasAnyColumnAnimationsRunning(in: pass.wsId)
@@ -1177,7 +1208,10 @@ enum StructuralMutationOutcome: Equatable {
         }
 
         if let removalSeed = snapshot.removalSeed, !removalSeed.oldFrames.isEmpty {
-            let newFrames = pass.engine.captureWindowFrames(in: pass.wsId)
+            let newFrames = pass.engine.captureWindowFrames(
+                in: pass.wsId,
+                excluding: snapshot.excludedTokens
+            )
             let animationsTriggered = pass.engine.triggerMoveAnimations(
                 in: pass.wsId,
                 oldFrames: removalSeed.oldFrames,
@@ -1198,7 +1232,8 @@ enum StructuralMutationOutcome: Equatable {
             engine: pass.engine,
             workspaceId: pass.wsId,
             canRestoreHiddenWorkspaceWindows: snapshot.isActiveWorkspace,
-            reassertHidden: true
+            reassertHidden: true,
+            excludedTokens: snapshot.excludedTokens
         )
         let startsAnimation = directives.contains {
             if case .startNiriScroll = $0 { return true }
@@ -1239,11 +1274,15 @@ enum StructuralMutationOutcome: Equatable {
         workspaceId: WorkspaceDescriptor.ID,
         canRestoreHiddenWorkspaceWindows: Bool,
         reassertHidden: Bool,
+        excludedTokens: Set<WindowToken> = [],
         pendingParkWindowIds: Set<Int> = []
     ) -> WorkspaceLayoutDiff {
         var diff = WorkspaceLayoutDiff()
         for window in windows {
             let token = window.token
+            if excludedTokens.contains(token) {
+                continue
+            }
             if window.isNativeFullscreenSuspended {
                 continue
             }
@@ -1321,14 +1360,17 @@ enum StructuralMutationOutcome: Equatable {
                 visibleFrame: monitor.visibleFrame
             ) else { continue }
 
-            let windows = column.windowNodes
-            guard !windows.isEmpty else { continue }
+            let windows = engine.projectedWindows(in: column, workspaceId: workspaceId)
+            guard windows.count > 1 else { continue }
 
-            guard let activeWindow = column.activeWindow else { continue }
+            guard let activeWindow = engine.projectedActiveWindow(
+                in: column,
+                workspaceId: workspaceId
+            ) else { continue }
             let activeWindowId = controller.workspaceManager.entry(for: activeWindow.handle)?.windowId
-            let activeVisualIndex = column.activeVisualTileIdx
+            guard let activeStorageIndex = windows.firstIndex(where: { $0 === activeWindow }) else { continue }
+            let activeVisualIndex = windows.count - 1 - activeStorageIndex
             let tabs = tabbedColumnTabs(
-                column: column,
                 windows: windows,
                 activeVisualIndex: activeVisualIndex,
                 controller: controller
@@ -1352,7 +1394,6 @@ enum StructuralMutationOutcome: Equatable {
     }
 
     private func tabbedColumnTabs(
-        column: NiriContainer,
         windows: [NiriWindow],
         activeVisualIndex: Int,
         controller: WMController
@@ -1362,11 +1403,7 @@ enum StructuralMutationOutcome: Equatable {
         var tabs: [TabRailTabInfo] = []
         tabs.reserveCapacity(windows.count)
         for visualIndex in 0 ..< windows.count {
-            guard let storageIndex = column.storageTileIndex(forVisualTileIndex: visualIndex),
-                  windows.indices.contains(storageIndex)
-            else {
-                continue
-            }
+            let storageIndex = windows.count - 1 - visualIndex
             let window = windows[storageIndex]
             let entry = controller.workspaceManager.entry(for: window.handle)
             let appName: String?
@@ -1408,17 +1445,17 @@ enum StructuralMutationOutcome: Equatable {
         }
         guard let column = engine.columns(in: workspaceId).first(where: { $0.id == columnId }) else { return }
 
-        let windows = column.windowNodes
-        guard let storageIndex = column.storageTileIndex(forVisualTileIndex: visualIndex),
-              windows.indices.contains(storageIndex)
-        else {
-            return
+        let windows = engine.projectedWindows(in: column, workspaceId: workspaceId)
+        let target: NiriWindow
+        if let expectedToken {
+            guard let expectedWindow = windows.first(where: { $0.token == expectedToken }) else { return }
+            target = expectedWindow
+        } else {
+            let storageIndex = windows.count - 1 - visualIndex
+            guard windows.indices.contains(storageIndex) else { return }
+            target = windows[storageIndex]
         }
-
-        let target = windows[storageIndex]
-        if let expectedToken, target.token != expectedToken {
-            return
-        }
+        guard let storageIndex = column.windowNodes.firstIndex(where: { $0 === target }) else { return }
 
         let activeTileChanged = column.activeTileIdx != storageIndex
         controller.workspaceManager.withEngineMutationScope {
@@ -2105,12 +2142,16 @@ enum StructuralMutationOutcome: Equatable {
         guard let controller,
               let workspaceId = controller.activeWorkspace()?.id,
               controller.workspaceManager.activeLayoutKind(for: workspaceId) == .niri,
-              let selectedNodeId = controller.workspaceManager.niriViewportState(for: workspaceId).selectedNodeId,
-              let window = controller.niriEngine?.findNode(by: selectedNodeId, in: workspaceId) as? NiriWindow
+              let engine = controller.niriEngine,
+              let window = engine.projectedSelectedWindow(
+                  state: controller.workspaceManager.niriViewportState(for: workspaceId),
+                  in: workspaceId
+              ),
+              let handle = controller.workspaceManager.handle(for: window.token)
         else {
             return nil
         }
-        return window.handle
+        return handle
     }
 
     private func performStructuralMutation(
@@ -2119,8 +2160,11 @@ enum StructuralMutationOutcome: Equatable {
     ) -> StructuralMutationOutcome {
         guard let controller,
               let entry = controller.workspaceManager.entry(for: handle.id),
+              controller.workspaceManager.handle(for: handle.id) === handle,
+              !controller.workspaceManager.isAppHidden(pid: entry.pid),
               controller.workspaceManager.activeLayoutKind(for: entry.workspaceId) == .niri,
               let engine = controller.niriEngine,
+              !engine.isExcludedFromProjection(handle.id, in: entry.workspaceId),
               let windowNode = engine.findNode(for: handle, in: entry.workspaceId),
               let monitor = controller.workspaceManager.monitor(for: entry.workspaceId)
         else {
@@ -2159,15 +2203,29 @@ enum StructuralMutationOutcome: Equatable {
 
             engine.activateWindow(windowNode.id, in: workspaceId)
             state.selectedNodeId = windowNode.id
-            engine.ensureSelectionVisible(
-                node: windowNode,
-                in: workspaceId,
-                motion: context.motion,
-                state: &state,
-                workingFrame: workingFrame,
-                gaps: gaps,
-                orientation: orientation
-            )
+            if engine.projectionExclusions(in: workspaceId).isEmpty {
+                engine.ensureSelectionVisible(
+                    node: windowNode,
+                    in: workspaceId,
+                    motion: context.motion,
+                    state: &state,
+                    workingFrame: workingFrame,
+                    gaps: gaps,
+                    orientation: orientation
+                )
+            } else {
+                engine.ensureProjectedSelectionVisible(
+                    node: windowNode,
+                    in: workspaceId,
+                    motion: context.motion,
+                    state: &state,
+                    workingFrame: workingFrame,
+                    gaps: gaps,
+                    orientation: orientation,
+                    animationConfig: nil,
+                    fromContainerIndex: nil
+                )
+            }
             completedMutation = mutation
             committedState = state
         }
@@ -2308,7 +2366,11 @@ enum StructuralMutationOutcome: Equatable {
                 orientation: .horizontal
             )
             let oldFrames = ctx.engine.captureWindowFrames(in: ctx.wsId)
-            guard ctx.engine.moveWindowWithinContainer(ctx.windowNode, step: step) else {
+            guard ctx.engine.moveWindowWithinContainer(
+                ctx.windowNode,
+                step: step,
+                in: ctx.wsId
+            ) else {
                 return nil
             }
             ctx.preparePredictedAnimation(
@@ -2449,10 +2511,10 @@ enum StructuralMutationOutcome: Equatable {
             guard let column = ctx.engine.findColumn(containing: ctx.windowNode, in: ctx.wsId) else {
                 return nil
             }
-            guard let columnIndex = ctx.engine.columnIndex(of: column, in: ctx.wsId) else { return nil }
-            let columns = ctx.engine.columns(in: ctx.wsId)
-            guard columns.indices.contains(columnIndex + 1),
-                  let movedToken = columns[columnIndex + 1].windowNodes.last?.token
+            let projectedColumns = ctx.engine.projectedColumns(in: ctx.wsId)
+            guard let projectedIndex = projectedColumns.firstIndex(where: { $0.column === column }),
+                  projectedColumns.indices.contains(projectedIndex + 1),
+                  let movedToken = projectedColumns[projectedIndex + 1].windows.last?.token
             else { return nil }
             guard ctx.engine.consumeWindowIntoColumn(
                 focusedColumn: column,
@@ -2482,7 +2544,10 @@ enum StructuralMutationOutcome: Equatable {
             guard let column = ctx.engine.findColumn(containing: ctx.windowNode, in: ctx.wsId) else {
                 return nil
             }
-            guard let movedToken = column.windowNodes.first?.token else { return nil }
+            guard let movedToken = ctx.engine.projectedWindows(
+                in: column,
+                workspaceId: ctx.wsId
+            ).first?.token else { return nil }
             guard ctx.engine.expelWindowFromColumn(
                 focusedColumn: column,
                 in: ctx.wsId,
@@ -2624,8 +2689,12 @@ enum StructuralMutationOutcome: Equatable {
         }
 
         if let step = direction.secondaryStep(for: orientation) {
-            let sibling = step > 0 ? node.nextSibling() : node.prevSibling()
-            return sibling == nil ? .atWorkspaceEdge : .blocked
+            guard let column = engine.findColumn(containing: node, in: workspaceId) else {
+                return .blocked
+            }
+            let visibleWindows = engine.projectedWindows(in: column, workspaceId: workspaceId)
+            guard let index = visibleWindows.firstIndex(where: { $0 === node }) else { return .blocked }
+            return visibleWindows.indices.contains(index + step) ? .blocked : .atWorkspaceEdge
         }
 
         guard let step = direction.primaryStep(for: orientation) else { return .blocked }
@@ -2640,15 +2709,14 @@ enum StructuralMutationOutcome: Equatable {
         in workspaceId: WorkspaceDescriptor.ID
     ) -> Bool {
         guard let column = engine.findColumn(containing: node, in: workspaceId),
-              column.windowNodes.count == 1,
-              let index = engine.columnIndex(of: column, in: workspaceId)
+              engine.projectedWindows(in: column, workspaceId: workspaceId).count == 1
         else {
             return false
         }
 
-        return step > 0
-            ? index == engine.columns(in: workspaceId).count - 1
-            : index == 0
+        let projectedColumns = engine.projectedColumns(in: workspaceId)
+        guard let index = projectedColumns.firstIndex(where: { $0.column === column }) else { return false }
+        return step > 0 ? index == projectedColumns.count - 1 : index == 0
     }
 
     func withNiriWorkspaceContext(
@@ -2672,6 +2740,7 @@ enum StructuralMutationOutcome: Equatable {
         let gaps = controller.innerGap(for: monitor)
         let orientation = resolvedOrientation(for: wsId, monitor: monitor, engine: engine)
         controller.workspaceManager.withNiriViewportState(for: wsId) { state in
+            _ = engine.reconcileProjectedSelection(state: &state, in: wsId)
             perform(engine, wsId, motion, &state, monitor, workingFrame, gaps, orientation)
         }
     }
@@ -2697,6 +2766,7 @@ enum StructuralMutationOutcome: Equatable {
         let gaps = controller.innerGap(for: monitor)
         let orientation = resolvedOrientation(for: workspaceId, monitor: monitor, engine: engine)
         controller.workspaceManager.withNiriViewportState(for: workspaceId) { state in
+            _ = engine.reconcileProjectedSelection(state: &state, in: workspaceId)
             perform(engine, workspaceId, motion, &state, monitor, workingFrame, gaps, orientation)
         }
     }
@@ -2709,6 +2779,18 @@ enum StructuralMutationOutcome: Equatable {
         in workspaceId: WorkspaceDescriptor.ID,
         source: WMEventSource = .command
     ) -> Bool {
+        guard let controller,
+              let sourceEntry = controller.workspaceManager.entry(for: handle.id),
+              sourceEntry.workspaceId == workspaceId,
+              controller.workspaceManager.handle(for: handle.id) === handle,
+              !controller.workspaceManager.isAppHidden(pid: sourceEntry.pid),
+              let targetEntry = controller.workspaceManager.entry(for: targetHandle.id),
+              targetEntry.workspaceId == workspaceId,
+              controller.workspaceManager.handle(for: targetHandle.id) === targetHandle,
+              !controller.workspaceManager.isAppHidden(pid: targetEntry.pid)
+        else {
+            return false
+        }
         var didMove = false
         withNiriWorkspaceContext(
             for: workspaceId
@@ -2741,6 +2823,14 @@ enum StructuralMutationOutcome: Equatable {
         sizingPolicy: NiriLayoutEngine.NewContainerSizingPolicy = .workspaceDefault,
         source: WMEventSource = .command
     ) -> Bool {
+        guard let controller,
+              let entry = controller.workspaceManager.entry(for: handle.id),
+              entry.workspaceId == workspaceId,
+              controller.workspaceManager.handle(for: handle.id) === handle,
+              !controller.workspaceManager.isAppHidden(pid: entry.pid)
+        else {
+            return false
+        }
         var didMove = false
         withNiriWorkspaceContext(
             for: workspaceId

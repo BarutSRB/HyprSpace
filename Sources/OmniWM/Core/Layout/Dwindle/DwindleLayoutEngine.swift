@@ -8,6 +8,7 @@ import QuartzCore
 private final class DwindleWorkspaceState {
     let root = DwindleNode(kind: .leaf(tile: nil))
     var leafByToken: [WindowToken: DwindleNode] = [:]
+    var excludedTokens: Set<WindowToken> = []
     var tileCount = 0
     var selectedNodeId: DwindleNodeId?
     var preselection: Direction?
@@ -120,6 +121,34 @@ final class DwindleLayoutEngine {
         states[workspaceId]?.leafByToken.count ?? 0
     }
 
+    func setExcludedTokens(
+        _ excludedTokens: Set<WindowToken>,
+        authoritativeTokens: Set<WindowToken>? = nil,
+        in workspaceId: WorkspaceDescriptor.ID
+    ) {
+        let currentTokens = states[workspaceId]?.excludedTokens ?? []
+        let resolvedTokens: Set<WindowToken>
+        if let authoritativeTokens {
+            resolvedTokens = excludedTokens.union(currentTokens.subtracting(authoritativeTokens))
+        } else {
+            resolvedTokens = excludedTokens
+        }
+        guard isMutationSanctioned else {
+            assert(
+                currentTokens == resolvedTokens,
+                "Dwindle projection exclusions changed outside a sanctioned WorldStore scope"
+            )
+            return
+        }
+        let state = ensureState(for: workspaceId)
+        state.excludedTokens = resolvedTokens
+        reconcileProjectedSelection(in: state)
+    }
+
+    func excludedTokens(in workspaceId: WorkspaceDescriptor.ID) -> Set<WindowToken> {
+        states[workspaceId]?.excludedTokens ?? []
+    }
+
     func tileCount(in workspaceId: WorkspaceDescriptor.ID) -> Int {
         states[workspaceId]?.tileCount ?? 0
     }
@@ -128,8 +157,13 @@ final class DwindleLayoutEngine {
         guard let state = states[workspaceId] else { return [] }
         var tokens: Set<WindowToken> = []
         tokens.reserveCapacity(state.tileCount)
-        for (token, leaf) in state.leafByToken where leaf.windowToken == token {
-            tokens.insert(token)
+        for leaf in state.root.collectAllLeaves() {
+            guard let tile = leaf.tile,
+                  let member = visibleMember(in: tile, excluding: state.excludedTokens)
+            else {
+                continue
+            }
+            tokens.insert(member.token)
         }
         return tokens
     }
@@ -138,8 +172,11 @@ final class DwindleLayoutEngine {
         guard let state = states[workspaceId] else { return [] }
         var tokens: Set<WindowToken> = []
         tokens.reserveCapacity(max(0, state.leafByToken.count - state.tileCount))
-        for (token, leaf) in state.leafByToken where leaf.windowToken != token {
-            if leaf.tile?.isGrouped == true {
+        for (token, leaf) in state.leafByToken {
+            if let tile = leaf.tile,
+               tile.isGrouped,
+               visibleMember(in: tile, excluding: state.excludedTokens)?.token != token
+            {
                 tokens.insert(token)
             }
         }
@@ -150,12 +187,13 @@ final class DwindleLayoutEngine {
         _ token: WindowToken,
         in workspaceId: WorkspaceDescriptor.ID
     ) -> Bool {
-        guard let tile = states[workspaceId]?.leafByToken[token]?.tile,
+        guard let state = states[workspaceId],
+              let tile = state.leafByToken[token]?.tile,
               tile.isGrouped
         else {
             return false
         }
-        return tile.activeToken != token
+        return visibleMember(in: tile, excluding: state.excludedTokens)?.token != token
     }
 
     func tileSnapshot(for token: WindowToken, in workspaceId: WorkspaceDescriptor.ID) -> DwindleTileSnapshot? {
@@ -164,9 +202,13 @@ final class DwindleLayoutEngine {
     }
 
     func groupedTileSnapshots(in workspaceId: WorkspaceDescriptor.ID) -> [DwindleTileSnapshot] {
-        guard let root = states[workspaceId]?.root else { return [] }
+        guard let state = states[workspaceId] else { return [] }
         var snapshots: [DwindleTileSnapshot] = []
-        collectGroupedTileSnapshots(node: root, into: &snapshots)
+        collectGroupedTileSnapshots(
+            node: state.root,
+            excludedTokens: state.excludedTokens,
+            into: &snapshots
+        )
         return snapshots
     }
 
@@ -190,14 +232,34 @@ final class DwindleLayoutEngine {
 
     private func collectGroupedTileSnapshots(
         node: DwindleNode,
+        excludedTokens: Set<WindowToken>,
         into snapshots: inout [DwindleTileSnapshot]
     ) {
-        if let tile = node.tile, tile.isGrouped {
-            snapshots.append(tileSnapshot(tile: tile, leaf: node))
+        if let tile = node.tile {
+            let members = tile.members.filter { !excludedTokens.contains($0.token) }
+            guard members.count > 1,
+                  let member = visibleMember(in: tile, excluding: excludedTokens),
+                  let activeIndex = members.firstIndex(where: { $0.token == member.token })
+            else {
+                return
+            }
+            snapshots.append(
+                DwindleTileSnapshot(
+                    id: tile.id,
+                    members: members,
+                    activeIndex: activeIndex,
+                    tileFrame: node.cachedFrame,
+                    contentFrame: node.cachedContentFrame
+                )
+            )
             return
         }
         for child in node.children {
-            collectGroupedTileSnapshots(node: child, into: &snapshots)
+            collectGroupedTileSnapshots(
+                node: child,
+                excludedTokens: excludedTokens,
+                into: &snapshots
+            )
         }
     }
 
@@ -417,6 +479,7 @@ final class DwindleLayoutEngine {
         if state.leafByToken.isEmpty {
             state.selectedNodeId = nil
         }
+        state.excludedTokens.remove(token)
         releaseConstraintsIfUntracked(token)
     }
 
@@ -445,6 +508,9 @@ final class DwindleLayoutEngine {
         if let constraints = windowConstraints[oldToken] {
             windowConstraints[newToken] = constraints
         }
+        if state.excludedTokens.remove(oldToken) != nil {
+            state.excludedTokens.insert(newToken)
+        }
         releaseConstraintsIfUntracked(oldToken)
         return true
     }
@@ -453,11 +519,44 @@ final class DwindleLayoutEngine {
         selectedNode(in: workspaceId)?.windowToken
     }
 
+    func projectedActiveToken(in workspaceId: WorkspaceDescriptor.ID) -> WindowToken? {
+        guard let state = states[workspaceId] else { return nil }
+        if let tile = selectedNode(in: workspaceId)?.tile,
+           let member = visibleMember(in: tile, excluding: state.excludedTokens)
+        {
+            return member.token
+        }
+        guard let leaf = firstVisibleLeaf(in: state.root, excluding: state.excludedTokens),
+              let tile = leaf.tile
+        else {
+            return nil
+        }
+        return visibleMember(in: tile, excluding: state.excludedTokens)?.token
+    }
+
+    private func reconcileProjectedSelection(in state: DwindleWorkspaceState) {
+        if let selectedNodeId = state.selectedNodeId,
+           let selected = findNodeById(selectedNodeId, in: state.root),
+           visibleMember(in: selected.tile, excluding: state.excludedTokens) != nil
+        {
+            return
+        }
+        state.selectedNodeId = firstVisibleLeaf(
+            in: state.root,
+            excluding: state.excludedTokens
+        )?.id
+    }
+
     func activeTileMember(
         containing token: WindowToken,
         in workspaceId: WorkspaceDescriptor.ID
     ) -> WindowToken? {
-        states[workspaceId]?.leafByToken[token]?.tile?.activeToken
+        guard let state = states[workspaceId],
+              let tile = state.leafByToken[token]?.tile
+        else {
+            return nil
+        }
+        return visibleMember(in: tile, excluding: state.excludedTokens)?.token
     }
 
     @discardableResult
@@ -484,7 +583,7 @@ final class DwindleLayoutEngine {
 
     @discardableResult
     func groupWindow(direction: Direction, in workspaceId: WorkspaceDescriptor.ID) -> Bool {
-        guard let token = activeToken(in: workspaceId) else { return false }
+        guard let token = projectedActiveToken(in: workspaceId) else { return false }
         return groupWindow(token, direction: direction, in: workspaceId)
     }
 
@@ -549,7 +648,7 @@ final class DwindleLayoutEngine {
 
     @discardableResult
     func ungroupWindow(direction: Direction, in workspaceId: WorkspaceDescriptor.ID) -> Bool {
-        guard let token = activeToken(in: workspaceId) else { return false }
+        guard let token = projectedActiveToken(in: workspaceId) else { return false }
         return ungroupWindow(token, direction: direction, in: workspaceId)
     }
 
@@ -611,6 +710,16 @@ final class DwindleLayoutEngine {
         direction: Direction,
         in workspaceId: WorkspaceDescriptor.ID
     ) -> Bool {
+        guard let token = projectedActiveToken(in: workspaceId) else { return false }
+        return moveGroupMember(token, direction: direction, in: workspaceId)
+    }
+
+    @discardableResult
+    func moveGroupMember(
+        _ token: WindowToken,
+        direction: Direction,
+        in workspaceId: WorkspaceDescriptor.ID
+    ) -> Bool {
         assertSanctionedMutation()
         let offset: Int
         switch direction {
@@ -622,8 +731,20 @@ final class DwindleLayoutEngine {
              .right:
             return false
         }
-        guard let tile = selectedNode(in: workspaceId)?.tile else { return false }
-        return tile.moveActive(offset: offset)
+        guard let state = states[workspaceId],
+              !state.excludedTokens.contains(token),
+              let tile = state.leafByToken[token]?.tile,
+              let sourceIndex = tile.memberIndex(for: token)
+        else {
+            return false
+        }
+        let visibleIndices = tile.members.indices.filter {
+            !state.excludedTokens.contains(tile.members[$0].token)
+        }
+        guard let projectedIndex = visibleIndices.firstIndex(of: sourceIndex) else { return false }
+        let destinationIndex = projectedIndex + offset
+        guard visibleIndices.indices.contains(destinationIndex) else { return false }
+        return tile.move(token, to: visibleIndices[destinationIndex])
     }
 
     private func detachMember(
@@ -697,6 +818,15 @@ final class DwindleLayoutEngine {
             removeWindow(token: token, from: workspaceId)
         }
 
+        if let focusedToken,
+           states[workspaceId]?.excludedTokens.contains(focusedToken) != true,
+           let focusedNode = findNode(for: focusedToken, in: workspaceId)
+        {
+            states[workspaceId]?.selectedNodeId = focusedNode.id
+        } else if let state = states[workspaceId] {
+            reconcileProjectedSelection(in: state)
+        }
+
         let shouldBootstrapIncrementally = bootstrapScreen != nil
             && !tokens.isEmpty
             && currentFrames(in: workspaceId).isEmpty
@@ -743,9 +873,8 @@ final class DwindleLayoutEngine {
         fullscreenScreen: CGRect? = nil
     ) -> [WindowToken: CGRect] {
         guard let state = states[workspaceId] else { return [:] }
-
-        let tileCount = state.tileCount
-        if tileCount == 0 {
+        let excludedTokens = state.excludedTokens
+        guard subtreeHasVisibleMember(state.root, excluding: excludedTokens) else {
             return [:]
         }
 
@@ -755,10 +884,11 @@ final class DwindleLayoutEngine {
         let tilingArea = screen
         let fullscreenArea = fullscreenScreen ?? screen
 
-        if tileCount == 1 {
-            let leaf = state.root.descendToFirstLeaf()
-            if let tile = leaf.tile {
-                let active = tile.activeMember
+        if visibleLeafCount(in: state.root, excluding: excludedTokens) == 1 {
+            if let leaf = firstVisibleLeaf(in: state.root, excluding: excludedTokens),
+               let tile = leaf.tile,
+               let active = visibleMember(in: tile, excluding: excludedTokens)
+            {
                 let rect: CGRect
                 if active.isFullscreen {
                     rect = fullscreenArea
@@ -766,11 +896,16 @@ final class DwindleLayoutEngine {
                     rect = singleWindowRect(
                         screen: tilingArea,
                         fullscreenScreen: fullscreenArea,
-                        minSize: minimumSize(for: tile)
+                        minSize: minimumSize(for: tile, excluding: excludedTokens)
                     )
                 }
                 leaf.cachedFrame = rect
-                let content = contentFrame(for: tile, tileFrame: rect)
+                let content = contentFrame(
+                    for: tile,
+                    member: active,
+                    tileFrame: rect,
+                    excludedTokens: excludedTokens
+                )
                 leaf.cachedContentFrame = content
                 output[active.token] = content
             }
@@ -781,6 +916,7 @@ final class DwindleLayoutEngine {
                 tilingArea: tilingArea,
                 fullscreenArea: fullscreenArea,
                 boundaryEdges: .all,
+                excludedTokens: excludedTokens,
                 output: &output
             )
         }
@@ -789,38 +925,63 @@ final class DwindleLayoutEngine {
     }
 
     func currentFrames(in workspaceId: WorkspaceDescriptor.ID) -> [WindowToken: CGRect] {
-        guard let root = states[workspaceId]?.root else { return [:] }
+        guard let state = states[workspaceId] else { return [:] }
         var frames: [WindowToken: CGRect] = [:]
-        collectCurrentFrames(node: root, into: &frames)
+        collectCurrentFrames(
+            node: state.root,
+            excludedTokens: state.excludedTokens,
+            into: &frames
+        )
         return frames
     }
 
-    private func collectCurrentFrames(node: DwindleNode, into frames: inout [WindowToken: CGRect]) {
-        if let handle = node.windowToken, let frame = node.cachedContentFrame ?? node.cachedFrame {
-            frames[handle] = frame
+    private func collectCurrentFrames(
+        node: DwindleNode,
+        excludedTokens: Set<WindowToken>,
+        into frames: inout [WindowToken: CGRect]
+    ) {
+        if let tile = node.tile,
+           let member = visibleMember(in: tile, excluding: excludedTokens),
+           let frame = node.cachedContentFrame ?? node.cachedFrame
+        {
+            frames[member.token] = frame
         }
         for child in node.children {
-            collectCurrentFrames(node: child, into: &frames)
+            collectCurrentFrames(node: child, excludedTokens: excludedTokens, into: &frames)
         }
     }
 
     func presentedFrames(in workspaceId: WorkspaceDescriptor.ID, at time: TimeInterval) -> [WindowToken: CGRect] {
-        guard let root = states[workspaceId]?.root else { return [:] }
+        guard let state = states[workspaceId] else { return [:] }
         var frames: [WindowToken: CGRect] = [:]
-        collectPresentedFrames(node: root, at: time, into: &frames)
+        collectPresentedFrames(
+            node: state.root,
+            at: time,
+            excludedTokens: state.excludedTokens,
+            into: &frames
+        )
         return frames
     }
 
     private func collectPresentedFrames(
         node: DwindleNode,
         at time: TimeInterval,
+        excludedTokens: Set<WindowToken>,
         into frames: inout [WindowToken: CGRect]
     ) {
-        if let handle = node.windowToken, let frame = node.presentedFrame(at: time) {
-            frames[handle] = frame
+        if let tile = node.tile,
+           let member = visibleMember(in: tile, excluding: excludedTokens),
+           let frame = node.presentedFrame(at: time)
+        {
+            frames[member.token] = frame
         }
         for child in node.children {
-            collectPresentedFrames(node: child, at: time, into: &frames)
+            collectPresentedFrames(
+                node: child,
+                at: time,
+                excludedTokens: excludedTokens,
+                into: &frames
+            )
         }
     }
 
@@ -829,13 +990,14 @@ final class DwindleLayoutEngine {
         in workspaceId: WorkspaceDescriptor.ID,
         at time: TimeInterval
     ) -> WindowToken? {
-        guard let root = states[workspaceId]?.root else { return nil }
+        guard let state = states[workspaceId] else { return nil }
 
         var firstVisibleMatch: WindowToken?
         return hitTestFocusableWindow(
             point: point,
             at: time,
-            in: root,
+            in: state.root,
+            excludedTokens: state.excludedTokens,
             firstVisibleMatch: &firstVisibleMatch
         ) ?? firstVisibleMatch
     }
@@ -844,18 +1006,20 @@ final class DwindleLayoutEngine {
         point: CGPoint,
         at time: TimeInterval,
         in node: DwindleNode,
+        excludedTokens: Set<WindowToken>,
         firstVisibleMatch: inout WindowToken?
     ) -> WindowToken? {
-        if let handle = node.windowToken,
+        if let tile = node.tile,
+           let member = visibleMember(in: tile, excluding: excludedTokens),
            let frame = presentedFrame(for: node, at: time),
            frame.contains(point)
         {
-            if node.isFullscreen {
-                return handle
+            if member.isFullscreen {
+                return member.token
             }
 
             if firstVisibleMatch == nil {
-                firstVisibleMatch = handle
+                firstVisibleMatch = member.token
             }
             return nil
         }
@@ -865,6 +1029,7 @@ final class DwindleLayoutEngine {
                 point: point,
                 at: time,
                 in: child,
+                excludedTokens: excludedTokens,
                 firstVisibleMatch: &firstVisibleMatch
             ) {
                 return fullscreenMatch
@@ -884,12 +1049,16 @@ final class DwindleLayoutEngine {
         tilingArea: CGRect,
         fullscreenArea: CGRect,
         boundaryEdges: ResizeEdge,
+        excludedTokens: Set<WindowToken>,
         output: inout [WindowToken: CGRect]
     ) {
         switch node.kind {
         case let .leaf(tile):
-            guard let tile else { return }
-            let active = tile.activeMember
+            guard let tile,
+                  let active = visibleMember(in: tile, excluding: excludedTokens)
+            else {
+                return
+            }
 
             let target: CGRect
             if active.isFullscreen {
@@ -902,28 +1071,51 @@ final class DwindleLayoutEngine {
                 )
             }
             node.cachedFrame = target
-            let content = contentFrame(for: tile, tileFrame: target)
+            let content = contentFrame(
+                for: tile,
+                member: active,
+                tileFrame: target,
+                excludedTokens: excludedTokens
+            )
             node.cachedContentFrame = content
             output[active.token] = content
 
         case let .split(orientation, ratio):
             node.cachedFrame = rect
 
+            let first = node.firstChild()
+            let second = node.secondChild()
+            let firstVisible = first.map { subtreeHasVisibleMember($0, excluding: excludedTokens) } ?? false
+            let secondVisible = second.map { subtreeHasVisibleMember($0, excluding: excludedTokens) } ?? false
+
+            if firstVisible != secondVisible {
+                let visibleChild = firstVisible ? first : second
+                if let visibleChild {
+                    calculateLayoutRecursive(
+                        node: visibleChild,
+                        rect: rect,
+                        tilingArea: tilingArea,
+                        fullscreenArea: fullscreenArea,
+                        boundaryEdges: boundaryEdges,
+                        excludedTokens: excludedTokens,
+                        output: &output
+                    )
+                }
+                return
+            }
+            guard firstVisible, secondVisible, let first, let second else { return }
+
             let childEdges = splitChildBoundaryEdges(boundaryEdges, orientation: orientation)
-            let firstMin: CGSize
-            let secondMin: CGSize
-
-            if let first = node.firstChild() {
-                firstMin = computeMinSizeForSubtree(first, boundaryEdges: childEdges.first, cached: true)
-            } else {
-                firstMin = CGSize(width: 1, height: 1)
-            }
-
-            if let second = node.secondChild() {
-                secondMin = computeMinSizeForSubtree(second, boundaryEdges: childEdges.second, cached: true)
-            } else {
-                secondMin = CGSize(width: 1, height: 1)
-            }
+            let firstMin = computeProjectedMinSizeForSubtree(
+                first,
+                boundaryEdges: childEdges.first,
+                excludedTokens: excludedTokens
+            )
+            let secondMin = computeProjectedMinSizeForSubtree(
+                second,
+                boundaryEdges: childEdges.second,
+                excludedTokens: excludedTokens
+            )
 
             let (r1, r2) = splitRect(
                 rect,
@@ -933,31 +1125,38 @@ final class DwindleLayoutEngine {
                 secondMinSize: secondMin
             )
 
-            if let first = node.firstChild() {
-                calculateLayoutRecursive(
-                    node: first,
-                    rect: r1,
-                    tilingArea: tilingArea,
-                    fullscreenArea: fullscreenArea,
-                    boundaryEdges: childEdges.first,
-                    output: &output
-                )
-            }
-            if let second = node.secondChild() {
-                calculateLayoutRecursive(
-                    node: second,
-                    rect: r2,
-                    tilingArea: tilingArea,
-                    fullscreenArea: fullscreenArea,
-                    boundaryEdges: childEdges.second,
-                    output: &output
-                )
-            }
+            calculateLayoutRecursive(
+                node: first,
+                rect: r1,
+                tilingArea: tilingArea,
+                fullscreenArea: fullscreenArea,
+                boundaryEdges: childEdges.first,
+                excludedTokens: excludedTokens,
+                output: &output
+            )
+            calculateLayoutRecursive(
+                node: second,
+                rect: r2,
+                tilingArea: tilingArea,
+                fullscreenArea: fullscreenArea,
+                boundaryEdges: childEdges.second,
+                excludedTokens: excludedTokens,
+                output: &output
+            )
         }
     }
 
-    private func contentFrame(for tile: DwindleTile, tileFrame: CGRect) -> CGRect {
-        guard tile.isGrouped, !tile.activeMember.isFullscreen else { return tileFrame }
+    private func contentFrame(
+        for tile: DwindleTile,
+        member: DwindleTileMember,
+        tileFrame: CGRect,
+        excludedTokens: Set<WindowToken>
+    ) -> CGRect {
+        guard tile.members.count(where: { !excludedTokens.contains($0.token) }) > 1,
+              !member.isFullscreen
+        else {
+            return tileFrame
+        }
         let railWidth = min(tabRailWidth, tileFrame.width)
         return CGRect(
             x: tileFrame.minX + railWidth,
@@ -965,6 +1164,159 @@ final class DwindleLayoutEngine {
             width: max(0, tileFrame.width - railWidth),
             height: tileFrame.height
         )
+    }
+
+    private func visibleMember(
+        in tile: DwindleTile,
+        excluding excludedTokens: Set<WindowToken>
+    ) -> DwindleTileMember? {
+        if !excludedTokens.contains(tile.activeToken) {
+            return tile.activeMember
+        }
+        return tile.members.first { !excludedTokens.contains($0.token) }
+    }
+
+    private func visibleMember(
+        in tile: DwindleTile?,
+        excluding excludedTokens: Set<WindowToken>
+    ) -> DwindleTileMember? {
+        guard let tile else { return nil }
+        return visibleMember(in: tile, excluding: excludedTokens)
+    }
+
+    private func subtreeHasVisibleMember(
+        _ node: DwindleNode,
+        excluding excludedTokens: Set<WindowToken>
+    ) -> Bool {
+        if let tile = node.tile {
+            return visibleMember(in: tile, excluding: excludedTokens) != nil
+        }
+        for child in node.children where subtreeHasVisibleMember(child, excluding: excludedTokens) {
+            return true
+        }
+        return false
+    }
+
+    func splitHasTwoVisibleBranches(
+        _ split: DwindleNode,
+        excluding excludedTokens: Set<WindowToken>
+    ) -> Bool {
+        guard let first = split.firstChild(), let second = split.secondChild() else {
+            return false
+        }
+        return subtreeHasVisibleMember(first, excluding: excludedTokens)
+            && subtreeHasVisibleMember(second, excluding: excludedTokens)
+    }
+
+    private func firstVisibleSplitAncestor(
+        from node: DwindleNode,
+        excluding excludedTokens: Set<WindowToken>
+    ) -> (split: DwindleNode, child: DwindleNode)? {
+        var child = node
+        var current = node.parent
+        while let split = current {
+            if splitHasTwoVisibleBranches(split, excluding: excludedTokens) {
+                return (split, child)
+            }
+            child = split
+            current = split.parent
+        }
+        return nil
+    }
+
+    private func visibleLeafCount(
+        in node: DwindleNode,
+        excluding excludedTokens: Set<WindowToken>
+    ) -> Int {
+        if let tile = node.tile {
+            return visibleMember(in: tile, excluding: excludedTokens) == nil ? 0 : 1
+        }
+        return node.children.reduce(into: 0) { count, child in
+            count += visibleLeafCount(in: child, excluding: excludedTokens)
+        }
+    }
+
+    private func firstVisibleLeaf(
+        in node: DwindleNode,
+        excluding excludedTokens: Set<WindowToken>
+    ) -> DwindleNode? {
+        if let tile = node.tile {
+            return visibleMember(in: tile, excluding: excludedTokens) == nil ? nil : node
+        }
+        for child in node.children {
+            if let leaf = firstVisibleLeaf(in: child, excluding: excludedTokens) {
+                return leaf
+            }
+        }
+        return nil
+    }
+
+    private func computeProjectedMinSizeForSubtree(
+        _ node: DwindleNode,
+        boundaryEdges: ResizeEdge,
+        excludedTokens: Set<WindowToken>,
+        innerGap: CGFloat? = nil
+    ) -> CGSize {
+        let effectiveInnerGap = innerGap ?? settings.innerGap
+        switch node.kind {
+        case let .leaf(tile):
+            guard let tile,
+                  visibleMember(in: tile, excluding: excludedTokens) != nil
+            else {
+                return CGSize(width: 1, height: 1)
+            }
+            var minSize = minimumSize(for: tile, excluding: excludedTokens)
+            let inset = effectiveInnerGap / 2
+            if !boundaryEdges.contains(.left) { minSize.width += inset }
+            if !boundaryEdges.contains(.right) { minSize.width += inset }
+            if !boundaryEdges.contains(.top) { minSize.height += inset }
+            if !boundaryEdges.contains(.bottom) { minSize.height += inset }
+            return minSize
+
+        case let .split(orientation, _):
+            guard let first = node.firstChild(), let second = node.secondChild() else {
+                return CGSize(width: 1, height: 1)
+            }
+            let firstVisible = subtreeHasVisibleMember(first, excluding: excludedTokens)
+            let secondVisible = subtreeHasVisibleMember(second, excluding: excludedTokens)
+            if firstVisible != secondVisible {
+                return computeProjectedMinSizeForSubtree(
+                    firstVisible ? first : second,
+                    boundaryEdges: boundaryEdges,
+                    excludedTokens: excludedTokens,
+                    innerGap: effectiveInnerGap
+                )
+            }
+            guard firstVisible, secondVisible else {
+                return CGSize(width: 1, height: 1)
+            }
+
+            let childEdges = splitChildBoundaryEdges(boundaryEdges, orientation: orientation)
+            let firstMin = computeProjectedMinSizeForSubtree(
+                first,
+                boundaryEdges: childEdges.first,
+                excludedTokens: excludedTokens,
+                innerGap: effectiveInnerGap
+            )
+            let secondMin = computeProjectedMinSizeForSubtree(
+                second,
+                boundaryEdges: childEdges.second,
+                excludedTokens: excludedTokens,
+                innerGap: effectiveInnerGap
+            )
+            switch orientation {
+            case .horizontal:
+                return CGSize(
+                    width: firstMin.width + secondMin.width,
+                    height: max(firstMin.height, secondMin.height)
+                )
+            case .vertical:
+                return CGSize(
+                    width: max(firstMin.width, secondMin.width),
+                    height: firstMin.height + secondMin.height
+                )
+            }
+        }
     }
 
     private func splitChildBoundaryEdges(
@@ -1070,6 +1422,22 @@ final class DwindleLayoutEngine {
         return result
     }
 
+    private func minimumSize(
+        for tile: DwindleTile,
+        excluding excludedTokens: Set<WindowToken>
+    ) -> CGSize {
+        var result = CGSize(width: 1, height: 1)
+        for member in tile.members where !excludedTokens.contains(member.token) {
+            let minimum = constraints(for: member.token).minSize
+            result.width = max(result.width, minimum.width)
+            result.height = max(result.height, minimum.height)
+        }
+        if tile.members.count(where: { !excludedTokens.contains($0.token) }) > 1 {
+            result.width += tabRailWidth
+        }
+        return result
+    }
+
     private func tilingBoundaryEdges(of node: DwindleNode) -> ResizeEdge {
         var edges = ResizeEdge.all
         var child = node
@@ -1087,7 +1455,11 @@ final class DwindleLayoutEngine {
         return edges
     }
 
-    private func feasibleRatioRange(for split: DwindleNode, innerGap: CGFloat) -> ClosedRange<CGFloat>? {
+    private func feasibleRatioRange(
+        for split: DwindleNode,
+        innerGap: CGFloat,
+        excludedTokens: Set<WindowToken>
+    ) -> ClosedRange<CGFloat>? {
         guard case let .split(orientation, _) = split.kind,
               let rect = split.cachedFrame,
               let first = split.firstChild(),
@@ -1097,16 +1469,16 @@ final class DwindleLayoutEngine {
         }
 
         let childEdges = splitChildBoundaryEdges(tilingBoundaryEdges(of: split), orientation: orientation)
-        let firstMinSize = computeMinSizeForSubtree(
+        let firstMinSize = computeProjectedMinSizeForSubtree(
             first,
             boundaryEdges: childEdges.first,
-            cached: false,
+            excludedTokens: excludedTokens,
             innerGap: innerGap
         )
-        let secondMinSize = computeMinSizeForSubtree(
+        let secondMinSize = computeProjectedMinSizeForSubtree(
             second,
             boundaryEdges: childEdges.second,
-            cached: false,
+            excludedTokens: excludedTokens,
             innerGap: innerGap
         )
 
@@ -1136,15 +1508,25 @@ final class DwindleLayoutEngine {
     }
 
     func clampedRatioRespectingMinimums(_ ratio: CGFloat, for split: DwindleNode) -> CGFloat {
-        clampedRatioRespectingMinimums(ratio, for: split, innerGap: settings.innerGap)
+        clampedRatioRespectingMinimums(
+            ratio,
+            for: split,
+            innerGap: settings.innerGap,
+            excludedTokens: []
+        )
     }
 
     func clampedRatioRespectingMinimums(
         _ ratio: CGFloat,
         for split: DwindleNode,
-        innerGap: CGFloat
+        innerGap: CGFloat,
+        excludedTokens: Set<WindowToken> = []
     ) -> CGFloat {
-        guard let range = feasibleRatioRange(for: split, innerGap: innerGap) else {
+        guard let range = feasibleRatioRange(
+            for: split,
+            innerGap: innerGap,
+            excludedTokens: excludedTokens
+        ) else {
             return split.splitRatio ?? settings.clampedRatio(ratio)
         }
         return min(max(ratio, range.lowerBound), range.upperBound)
@@ -1224,13 +1606,16 @@ final class DwindleLayoutEngine {
     ) -> WindowToken? {
         guard let state = states[workspaceId],
               let currentNode = state.leafByToken[handle],
+              let currentTile = currentNode.tile,
+              visibleMember(in: currentTile, excluding: state.excludedTokens)?.token == handle,
               let rootFrame = state.root.cachedFrame,
               let currentFrame = structuralFrame(
                   for: currentNode,
                   from: state.root,
                   rect: rootFrame,
                   tilingArea: rootFrame,
-                  boundaryEdges: .all
+                  boundaryEdges: .all,
+                  excludedTokens: state.excludedTokens
               )
         else {
             return nil
@@ -1247,6 +1632,7 @@ final class DwindleLayoutEngine {
             currentFrame: currentFrame,
             direction: direction,
             innerGap: settings.innerGap,
+            excludedTokens: state.excludedTokens,
             bestCandidate: &bestCandidate
         )
 
@@ -1258,10 +1644,15 @@ final class DwindleLayoutEngine {
         from node: DwindleNode,
         rect: CGRect,
         tilingArea: CGRect,
-        boundaryEdges: ResizeEdge
+        boundaryEdges: ResizeEdge,
+        excludedTokens: Set<WindowToken>
     ) -> CGRect? {
         if node.id == target.id {
-            guard node.isLeaf else { return nil }
+            guard node.isLeaf,
+                  visibleMember(in: node.tile, excluding: excludedTokens) != nil
+            else {
+                return nil
+            }
             return DwindleGapCalculator.applyGaps(
                 nodeRect: rect,
                 tilingArea: tilingArea,
@@ -1276,9 +1667,31 @@ final class DwindleLayoutEngine {
             return nil
         }
 
+        let firstVisible = subtreeHasVisibleMember(first, excluding: excludedTokens)
+        let secondVisible = subtreeHasVisibleMember(second, excluding: excludedTokens)
+        if firstVisible != secondVisible {
+            return structuralFrame(
+                for: target,
+                from: firstVisible ? first : second,
+                rect: rect,
+                tilingArea: tilingArea,
+                boundaryEdges: boundaryEdges,
+                excludedTokens: excludedTokens
+            )
+        }
+        guard firstVisible, secondVisible else { return nil }
+
         let childEdges = splitChildBoundaryEdges(boundaryEdges, orientation: orientation)
-        let firstMin = computeMinSizeForSubtree(first, boundaryEdges: childEdges.first, cached: true)
-        let secondMin = computeMinSizeForSubtree(second, boundaryEdges: childEdges.second, cached: true)
+        let firstMin = computeProjectedMinSizeForSubtree(
+            first,
+            boundaryEdges: childEdges.first,
+            excludedTokens: excludedTokens
+        )
+        let secondMin = computeProjectedMinSizeForSubtree(
+            second,
+            boundaryEdges: childEdges.second,
+            excludedTokens: excludedTokens
+        )
         let (firstRect, secondRect) = splitRect(
             rect,
             orientation: orientation,
@@ -1292,13 +1705,15 @@ final class DwindleLayoutEngine {
             from: first,
             rect: firstRect,
             tilingArea: tilingArea,
-            boundaryEdges: childEdges.first
+            boundaryEdges: childEdges.first,
+            excludedTokens: excludedTokens
         ) ?? structuralFrame(
             for: target,
             from: second,
             rect: secondRect,
             tilingArea: tilingArea,
-            boundaryEdges: childEdges.second
+            boundaryEdges: childEdges.second,
+            excludedTokens: excludedTokens
         )
     }
 
@@ -1311,11 +1726,15 @@ final class DwindleLayoutEngine {
         currentFrame: CGRect,
         direction: Direction,
         innerGap: CGFloat,
+        excludedTokens: Set<WindowToken>,
         bestCandidate: inout (handle: WindowToken, overlap: CGFloat)?
     ) {
         guard node.id != current.id else { return }
+        guard subtreeHasVisibleMember(node, excluding: excludedTokens) else { return }
 
-        if node.isLeaf, let handle = node.windowToken {
+        if let tile = node.tile,
+           let member = visibleMember(in: tile, excluding: excludedTokens)
+        {
             let candidateFrame = DwindleGapCalculator.applyGaps(
                 nodeRect: rect,
                 tilingArea: tilingArea,
@@ -1329,7 +1748,7 @@ final class DwindleLayoutEngine {
             ),
                 bestCandidate.map({ overlap > $0.overlap }) ?? true
             {
-                bestCandidate = (handle, overlap)
+                bestCandidate = (member.token, overlap)
             }
             return
         }
@@ -1341,9 +1760,36 @@ final class DwindleLayoutEngine {
             return
         }
 
+        let firstVisible = subtreeHasVisibleMember(first, excluding: excludedTokens)
+        let secondVisible = subtreeHasVisibleMember(second, excluding: excludedTokens)
+        if firstVisible != secondVisible {
+            collectNavigationCandidates(
+                from: firstVisible ? first : second,
+                rect: rect,
+                tilingArea: tilingArea,
+                boundaryEdges: boundaryEdges,
+                current: current,
+                currentFrame: currentFrame,
+                direction: direction,
+                innerGap: innerGap,
+                excludedTokens: excludedTokens,
+                bestCandidate: &bestCandidate
+            )
+            return
+        }
+        guard firstVisible, secondVisible else { return }
+
         let childEdges = splitChildBoundaryEdges(boundaryEdges, orientation: orientation)
-        let firstMin = computeMinSizeForSubtree(first, boundaryEdges: childEdges.first, cached: true)
-        let secondMin = computeMinSizeForSubtree(second, boundaryEdges: childEdges.second, cached: true)
+        let firstMin = computeProjectedMinSizeForSubtree(
+            first,
+            boundaryEdges: childEdges.first,
+            excludedTokens: excludedTokens
+        )
+        let secondMin = computeProjectedMinSizeForSubtree(
+            second,
+            boundaryEdges: childEdges.second,
+            excludedTokens: excludedTokens
+        )
         let (firstRect, secondRect) = splitRect(
             rect,
             orientation: orientation,
@@ -1361,6 +1807,7 @@ final class DwindleLayoutEngine {
             currentFrame: currentFrame,
             direction: direction,
             innerGap: innerGap,
+            excludedTokens: excludedTokens,
             bestCandidate: &bestCandidate
         )
         collectNavigationCandidates(
@@ -1372,6 +1819,7 @@ final class DwindleLayoutEngine {
             currentFrame: currentFrame,
             direction: direction,
             innerGap: innerGap,
+            excludedTokens: excludedTokens,
             bestCandidate: &bestCandidate
         )
     }
@@ -1434,19 +1882,23 @@ final class DwindleLayoutEngine {
 
     func moveFocus(direction: Direction, in workspaceId: WorkspaceDescriptor.ID) -> WindowToken? {
         assertSanctionedMutation()
+        guard let state = states[workspaceId] else { return nil }
         guard let current = selectedNode(in: workspaceId),
-              let currentHandle = current.windowToken
+              let currentTile = current.tile,
+              let currentMember = visibleMember(in: currentTile, excluding: state.excludedTokens)
         else {
-            if let state = states[workspaceId] {
-                let firstLeaf = state.root.descendToFirstLeaf()
+            if let firstLeaf = firstVisibleLeaf(in: state.root, excluding: state.excludedTokens),
+               let tile = firstLeaf.tile,
+               let member = visibleMember(in: tile, excluding: state.excludedTokens)
+            {
                 state.selectedNodeId = firstLeaf.id
-                return firstLeaf.windowToken
+                return member.token
             }
             return nil
         }
 
         guard let neighborHandle = findGeometricNeighbor(
-            from: currentHandle,
+            from: currentMember.token,
             direction: direction,
             in: workspaceId
         ) else {
@@ -1468,7 +1920,12 @@ final class DwindleLayoutEngine {
             return .blocked
         }
 
-        let currentHandle = currentTile.activeToken
+        guard let currentHandle = visibleMember(
+            in: currentTile,
+            excluding: state.excludedTokens
+        )?.token else {
+            return .blocked
+        }
 
         guard let neighborHandle = findGeometricNeighbor(
             from: currentHandle,
@@ -1511,7 +1968,7 @@ final class DwindleLayoutEngine {
         if state.pendingMovementFrameSeeds[currentTile.activeToken] == nil,
            let currentMovementFrameSeed
         {
-            state.pendingMovementFrameSeeds[currentTile.activeToken] = currentMovementFrameSeed
+            state.pendingMovementFrameSeeds[currentHandle] = currentMovementFrameSeed
         }
         if state.pendingMovementFrameSeeds[neighborTile.activeToken] == nil,
            let neighborMovementFrameSeed
@@ -1527,8 +1984,12 @@ final class DwindleLayoutEngine {
     @discardableResult
     func toggleOrientation(in workspaceId: WorkspaceDescriptor.ID) -> Bool {
         assertSanctionedMutation()
-        guard let selected = selectedNode(in: workspaceId),
-              let parent = selected.parent,
+        guard let state = states[workspaceId],
+              let selected = selectedNode(in: workspaceId),
+              let parent = firstVisibleSplitAncestor(
+                  from: selected,
+                  excluding: state.excludedTokens
+              )?.split,
               case let .split(orientation, ratio) = parent.kind
         else {
             return false
@@ -1540,13 +2001,14 @@ final class DwindleLayoutEngine {
 
     func toggleFullscreen(in workspaceId: WorkspaceDescriptor.ID) -> WindowToken? {
         assertSanctionedMutation()
-        guard let selected = selectedNode(in: workspaceId),
-              let tile = selected.tile
+        guard let state = states[workspaceId],
+              let selected = selectedNode(in: workspaceId),
+              let tile = selected.tile,
+              let handle = visibleMember(in: tile, excluding: state.excludedTokens)?.token
         else {
             return nil
         }
 
-        let handle = tile.activeToken
         _ = tile.toggleFullscreen(for: handle)
         return handle
     }
@@ -1655,7 +2117,9 @@ final class DwindleLayoutEngine {
         in workspaceId: WorkspaceDescriptor.ID
     ) -> Bool {
         assertSanctionedMutation()
-        guard let selected = selectedNode(in: workspaceId) else { return false }
+        guard let state = states[workspaceId],
+              let selected = selectedNode(in: workspaceId)
+        else { return false }
 
         var current = selected
         while let parent = current.parent {
@@ -1664,11 +2128,18 @@ final class DwindleLayoutEngine {
                 continue
             }
 
-            if orientation == targetOrientation {
+            if orientation == targetOrientation,
+               splitHasTwoVisibleBranches(parent, excluding: state.excludedTokens)
+            {
                 let isFirst = current.isFirstChild(of: parent)
                 let newRatio = isFirst ? ratio + delta : ratio - delta
 
-                let clampedRatio = clampedRatioRespectingMinimums(newRatio, for: parent)
+                let clampedRatio = clampedRatioRespectingMinimums(
+                    newRatio,
+                    for: parent,
+                    innerGap: settings.innerGap,
+                    excludedTokens: state.excludedTokens
+                )
                 guard clampedRatio != ratio else { return false }
                 parent.kind = .split(orientation: orientation, ratio: clampedRatio)
                 return true
@@ -1682,7 +2153,9 @@ final class DwindleLayoutEngine {
     @discardableResult
     func resizeFocusedWindow(by delta: CGFloat, in workspaceId: WorkspaceDescriptor.ID) -> Bool {
         assertSanctionedMutation()
-        guard let selected = selectedNode(in: workspaceId) else { return false }
+        guard let state = states[workspaceId],
+              let selected = selectedNode(in: workspaceId)
+        else { return false }
 
         var current = selected
         while let parent = current.parent {
@@ -1690,9 +2163,18 @@ final class DwindleLayoutEngine {
                 current = parent
                 continue
             }
+            guard splitHasTwoVisibleBranches(parent, excluding: state.excludedTokens) else {
+                current = parent
+                continue
+            }
             let isFirst = current.isFirstChild(of: parent)
             let newRatio = isFirst ? ratio + delta : ratio - delta
-            let clampedRatio = clampedRatioRespectingMinimums(newRatio, for: parent)
+            let clampedRatio = clampedRatioRespectingMinimums(
+                newRatio,
+                for: parent,
+                innerGap: settings.innerGap,
+                excludedTokens: state.excludedTokens
+            )
             guard clampedRatio != ratio else { return false }
             parent.kind = .split(orientation: orientation, ratio: clampedRatio)
             return true
@@ -1703,19 +2185,37 @@ final class DwindleLayoutEngine {
     @discardableResult
     func balanceSizes(in workspaceId: WorkspaceDescriptor.ID) -> Bool {
         assertSanctionedMutation()
-        guard let root = states[workspaceId]?.root else { return false }
-        return balanceSizesRecursive(root)
+        guard let state = states[workspaceId] else { return false }
+        return balanceSizesRecursive(state.root, excludedTokens: state.excludedTokens)
     }
 
-    private func balanceSizesRecursive(_ node: DwindleNode) -> Bool {
+    private func balanceSizesRecursive(
+        _ node: DwindleNode,
+        excludedTokens: Set<WindowToken>
+    ) -> Bool {
         guard case let .split(orientation, ratio) = node.kind else { return false }
-        let target = clampedRatioRespectingMinimums(1.0, for: node)
-        var changed = ratio != target
-        if changed {
-            node.kind = .split(orientation: orientation, ratio: target)
+        let first = node.firstChild()
+        let second = node.secondChild()
+        let firstVisible = first.map { subtreeHasVisibleMember($0, excluding: excludedTokens) } ?? false
+        let secondVisible = second.map { subtreeHasVisibleMember($0, excluding: excludedTokens) } ?? false
+        var changed = false
+        if firstVisible, secondVisible {
+            let target = clampedRatioRespectingMinimums(
+                1.0,
+                for: node,
+                innerGap: settings.innerGap,
+                excludedTokens: excludedTokens
+            )
+            changed = ratio != target
+            if changed {
+                node.kind = .split(orientation: orientation, ratio: target)
+            }
         }
-        for child in node.children {
-            changed = balanceSizesRecursive(child) || changed
+        if firstVisible, let first {
+            changed = balanceSizesRecursive(first, excludedTokens: excludedTokens) || changed
+        }
+        if secondVisible, let second {
+            changed = balanceSizesRecursive(second, excludedTokens: excludedTokens) || changed
         }
         return changed
     }
@@ -1723,8 +2223,12 @@ final class DwindleLayoutEngine {
     @discardableResult
     func swapSplit(in workspaceId: WorkspaceDescriptor.ID) -> Bool {
         assertSanctionedMutation()
-        guard let selected = selectedNode(in: workspaceId),
-              let parent = selected.parent,
+        guard let state = states[workspaceId],
+              let selected = selectedNode(in: workspaceId),
+              let parent = firstVisibleSplitAncestor(
+                  from: selected,
+                  excluding: state.excludedTokens
+              )?.split,
               parent.children.count == 2 else { return false }
 
         let first = parent.children[0]
@@ -1736,8 +2240,12 @@ final class DwindleLayoutEngine {
     @discardableResult
     func cycleSplitRatio(forward: Bool, in workspaceId: WorkspaceDescriptor.ID) -> Bool {
         assertSanctionedMutation()
-        guard let selected = selectedNode(in: workspaceId),
-              let parent = selected.parent,
+        guard let state = states[workspaceId],
+              let selected = selectedNode(in: workspaceId),
+              let parent = firstVisibleSplitAncestor(
+                  from: selected,
+                  excluding: state.excludedTokens
+              )?.split,
               case let .split(orientation, currentRatio) = parent.kind else { return false }
 
         let presets: [CGFloat] = [0.3, 0.5, 0.7]
@@ -1753,7 +2261,12 @@ final class DwindleLayoutEngine {
             newIndex = (currentIndex - 1 + presets.count) % presets.count
         }
 
-        let newRatio = clampedRatioRespectingMinimums(presets[newIndex], for: parent)
+        let newRatio = clampedRatioRespectingMinimums(
+            presets[newIndex],
+            for: parent,
+            innerGap: settings.innerGap,
+            excludedTokens: state.excludedTokens
+        )
         guard newRatio != currentRatio else { return false }
         parent.kind = .split(orientation: orientation, ratio: newRatio)
         return true

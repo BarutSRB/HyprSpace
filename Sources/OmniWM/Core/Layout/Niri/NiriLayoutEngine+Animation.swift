@@ -238,7 +238,8 @@ extension NiriLayoutEngine {
         gaps: LayoutGaps,
         state: ViewportState,
         workingArea: WorkingAreaContext? = nil,
-        animationTime: TimeInterval? = nil
+        animationTime: TimeInterval? = nil,
+        excludedTokens: Set<WindowToken>? = nil
     ) -> [WindowToken: CGRect] {
         calculateCombinedLayoutWithVisibility(
             in: workspaceId,
@@ -246,7 +247,8 @@ extension NiriLayoutEngine {
             gaps: gaps,
             state: state,
             workingArea: workingArea,
-            animationTime: animationTime
+            animationTime: animationTime,
+            excludedTokens: excludedTokens
         ).frames
     }
 
@@ -258,7 +260,8 @@ extension NiriLayoutEngine {
         workingArea: WorkingAreaContext? = nil,
         animationTime: TimeInterval? = nil,
         viewOffsetOverride: CGFloat? = nil,
-        settledVisibilityOffset: CGFloat? = nil
+        settledVisibilityOffset: CGFloat? = nil,
+        excludedTokens: Set<WindowToken>? = nil
     ) -> LayoutResult {
         let area = workingArea ?? WorkingAreaContext(
             workingFrame: monitor.visibleFrame,
@@ -284,7 +287,8 @@ extension NiriLayoutEngine {
             hiddenPlacementMonitor: hiddenPlacementMonitor,
             hiddenPlacementMonitors: hiddenPlacementMonitors,
             viewOffsetOverride: viewOffsetOverride,
-            settledVisibilityOffset: settledVisibilityOffset
+            settledVisibilityOffset: settledVisibilityOffset,
+            excludedTokens: excludedTokens
         )
     }
 
@@ -296,7 +300,8 @@ extension NiriLayoutEngine {
         workingArea: WorkingAreaContext? = nil,
         animationTime: TimeInterval? = nil,
         viewOffsetOverride: CGFloat? = nil,
-        settledVisibilityOffset: CGFloat? = nil
+        settledVisibilityOffset: CGFloat? = nil,
+        excludedTokens: Set<WindowToken>? = nil
     ) -> (frames: [WindowToken: CGRect], hiddenHandles: [WindowToken: HideSide]) {
         framePool.removeAll(keepingCapacity: true)
         hiddenPool.removeAll(keepingCapacity: true)
@@ -327,16 +332,20 @@ extension NiriLayoutEngine {
             hiddenPlacementMonitor: hiddenPlacementMonitor,
             hiddenPlacementMonitors: hiddenPlacementMonitors,
             viewOffsetOverride: viewOffsetOverride,
-            settledVisibilityOffset: settledVisibilityOffset
+            settledVisibilityOffset: settledVisibilityOffset,
+            excludedTokens: excludedTokens
         )
 
         return (framePool, hiddenPool)
     }
 
-    func captureWindowFrames(in workspaceId: WorkspaceDescriptor.ID) -> [WindowToken: CGRect] {
+    func captureWindowFrames(
+        in workspaceId: WorkspaceDescriptor.ID,
+        excluding excludedTokens: Set<WindowToken> = []
+    ) -> [WindowToken: CGRect] {
         guard let root = root(for: workspaceId) else { return [:] }
         var frames: [WindowToken: CGRect] = [:]
-        for window in root.allWindows {
+        for window in root.allWindows where !excludedTokens.contains(window.token) {
             if let frame = window.renderedFrame ?? window.frame {
                 frames[window.token] = frame
             }

@@ -189,4 +189,8 @@ enum RefreshReason: String, Sendable {
             .plain
         }
     }
+
+    var recoversFocusAfterVisibilityChange: Bool {
+        self == .appHidden
+    }
 }

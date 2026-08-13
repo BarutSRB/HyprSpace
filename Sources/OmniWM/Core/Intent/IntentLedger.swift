@@ -39,8 +39,46 @@ struct SameAppCloseProbePayload: Equatable, Sendable {
     var observationGeneration: UInt64
 }
 
+struct AppRevealFocusPayload: Equatable, Sendable {
+    var token: WindowToken
+    let workspaceId: WorkspaceDescriptor.ID
+    let handleIdentity: ObjectIdentifier
+    let appVisibilityGeneration: UInt64
+    let focusIntentWatermark: IntentID?
+    var focusFingerprint: AppRevealFocusFingerprint
+    let destination: AppRevealFocusDestination
+}
+
+enum AppRevealFocusDestination: Equatable, Sendable {
+    case window
+    case scratchpad(monitorId: Monitor.ID?)
+}
+
+struct AppRevealFocusFingerprint: Equatable, Sendable {
+    var focusedToken: WindowToken?
+    var pendingFocusedToken: WindowToken?
+    let pendingFocusedWorkspaceId: WorkspaceDescriptor.ID?
+    let isNonManagedFocusActive: Bool
+    var nonManagedFocusToken: WindowToken?
+    let interactionMonitorId: Monitor.ID?
+    let activeWorkspaceIdsByMonitor: [Monitor.ID: WorkspaceDescriptor.ID]
+
+    mutating func rekey(from oldToken: WindowToken, to newToken: WindowToken) {
+        if focusedToken == oldToken {
+            focusedToken = newToken
+        }
+        if pendingFocusedToken == oldToken {
+            pendingFocusedToken = newToken
+        }
+        if nonManagedFocusToken == oldToken {
+            nonManagedFocusToken = newToken
+        }
+    }
+}
+
 enum IntentKind: Equatable, Sendable {
     case activateApp(pid: pid_t)
+    case appRevealFocus(AppRevealFocusPayload)
     case focusPolicyLease(owner: FocusPolicyLeaseOwner)
     case focusWindow(token: WindowToken, workspaceId: WorkspaceDescriptor.ID)
     case replacementFocus(ReplacementFocusPayload)
@@ -49,6 +87,7 @@ enum IntentKind: Equatable, Sendable {
     var focusTargetToken: WindowToken? {
         switch self {
         case .activateApp,
+             .appRevealFocus,
              .focusPolicyLease,
              .replacementFocus,
              .sameAppCloseProbe:
@@ -69,6 +108,8 @@ enum IntentKind: Equatable, Sendable {
         switch self {
         case let .activateApp(pid):
             pid
+        case let .appRevealFocus(payload):
+            payload.token.pid
         case .focusPolicyLease:
             nil
         case let .focusWindow(token, _):
@@ -127,6 +168,7 @@ enum EchoClassification: Equatable {
 final class IntentLedger {
     static let capacity = 256
     static let activationSettleDeadline: Duration = .milliseconds(100)
+    static let appRevealDeadline: Duration = .seconds(2)
     private static let lateEchoWindow: Duration = .seconds(1)
 
     var seqProvider: () -> UInt64 = { 0 }
@@ -285,6 +327,76 @@ final class IntentLedger {
     }
 
     @discardableResult
+    func beginAppRevealFocus(
+        token: WindowToken,
+        workspaceId: WorkspaceDescriptor.ID,
+        handleIdentity: ObjectIdentifier,
+        appVisibilityGeneration: UInt64,
+        focusFingerprint: AppRevealFocusFingerprint,
+        destination: AppRevealFocusDestination = .window
+    ) -> Intent {
+        for entry in entries where entry.phase == .pending {
+            guard case .appRevealFocus = entry.kind else { continue }
+            _ = supersede(id: entry.id)
+            deadlineWheel?.cancel(intentId: entry.id)
+        }
+
+        let intent = append(
+            kind: .appRevealFocus(
+                AppRevealFocusPayload(
+                    token: token,
+                    workspaceId: workspaceId,
+                    handleIdentity: handleIdentity,
+                    appVisibilityGeneration: appVisibilityGeneration,
+                    focusIntentWatermark: newestFocusIntentId(),
+                    focusFingerprint: focusFingerprint,
+                    destination: destination
+                )
+            ),
+            origin: .keyboardOrProgrammatic
+        )
+        deadlineWheel?.schedule(intentId: intent.id, after: Self.appRevealDeadline)
+        return intent
+    }
+
+    func openAppRevealFocusIntent(pid: pid_t) -> (intent: Intent, payload: AppRevealFocusPayload)? {
+        guard let intent = entries.last(where: { entry in
+            guard entry.phase == .pending,
+                  case let .appRevealFocus(payload) = entry.kind
+            else {
+                return false
+            }
+            return payload.token.pid == pid
+        }),
+            case let .appRevealFocus(payload) = intent.kind
+        else {
+            return nil
+        }
+        return (intent, payload)
+    }
+
+    @discardableResult
+    func confirmAppRevealFocus(intentId: IntentID) -> AppRevealFocusPayload? {
+        guard let intent = confirm(id: intentId),
+              case let .appRevealFocus(payload) = intent.kind
+        else {
+            return nil
+        }
+        deadlineWheel?.cancel(intentId: intentId)
+        return payload
+    }
+
+    func cancelAppRevealFocus(intentId: IntentID) {
+        guard cancel(id: intentId) != nil else { return }
+        deadlineWheel?.cancel(intentId: intentId)
+    }
+
+    func cancelAppRevealFocus(pid: pid_t) {
+        guard let open = openAppRevealFocusIntent(pid: pid) else { return }
+        cancelAppRevealFocus(intentId: open.intent.id)
+    }
+
+    @discardableResult
     func registerReplacementFocus(_ payload: ReplacementFocusPayload) -> Intent {
         append(kind: .replacementFocus(payload), origin: .keyboardOrProgrammatic)
     }
@@ -405,6 +517,18 @@ final class IntentLedger {
         for index in entries.indices {
             if case let .focusWindow(token, workspaceId) = entries[index].kind, token == oldToken {
                 entries[index].kind = .focusWindow(token: newToken, workspaceId: workspaceId)
+            } else if case var .appRevealFocus(payload) = entries[index].kind,
+                      payload.token == oldToken
+            {
+                if oldToken.pid == newToken.pid {
+                    payload.token = newToken
+                    payload.focusFingerprint.rekey(from: oldToken, to: newToken)
+                    entries[index].kind = .appRevealFocus(payload)
+                } else if entries[index].phase == .pending {
+                    entries[index].phase = .cancelled
+                    entries[index].retiredAt = clock()
+                    deadlineWheel?.cancel(intentId: entries[index].id)
+                }
             }
         }
     }

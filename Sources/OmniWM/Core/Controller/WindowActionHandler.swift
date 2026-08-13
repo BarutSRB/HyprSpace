@@ -59,6 +59,7 @@ final class WindowActionHandler {
     private let visibleWindowInfoProvider: () -> [WindowServerInfo]
     private let visibleOwnedWindowsProvider: () -> [NSWindow]
     private let frontOwnedWindow: (NSWindow) -> Void
+    private let unhideApplication: (pid_t) -> Bool
 
     @ObservationIgnored
     private var overviewControllerStorage: OverviewController?
@@ -89,12 +90,21 @@ final class WindowActionHandler {
         frontOwnedWindow: @escaping (NSWindow) -> Void = { window in
             NSApp.activate(ignoringOtherApps: true)
             window.makeKeyAndOrderFront(nil)
+        },
+        unhideApplication: @escaping (pid_t) -> Bool = { pid in
+            guard let app = NSRunningApplication(processIdentifier: pid),
+                  !app.isTerminated
+            else {
+                return false
+            }
+            return app.unhide()
         }
     ) {
         self.controller = controller
         self.visibleWindowInfoProvider = visibleWindowInfoProvider
         self.visibleOwnedWindowsProvider = visibleOwnedWindowsProvider
         self.frontOwnedWindow = frontOwnedWindow
+        self.unhideApplication = unhideApplication
     }
 
     func openMenuAnywhere() {
@@ -200,6 +210,7 @@ final class WindowActionHandler {
               entry.mode == .floating,
               entry.layoutReason == .standard,
               entry.interactionPolicy.mayFocus,
+              !controller.workspaceManager.isAppHidden(pid: entry.pid),
               !controller.workspaceManager.isHiddenInCorner(token),
               controller.workspaceManager.visibleWorkspaceIds().contains(entry.workspaceId)
         else {
@@ -225,7 +236,9 @@ final class WindowActionHandler {
                 controller.workspaceManager.floatingEntries(in: workspaceId)
             }
             .filter { entry in
-                entry.layoutReason == .standard && !controller.workspaceManager.isHiddenInCorner(entry.token)
+                entry.layoutReason == .standard
+                    && !controller.workspaceManager.isAppHidden(pid: entry.pid)
+                    && !controller.workspaceManager.isHiddenInCorner(entry.token)
             }
             .map(RaisableSurface.managed)
         let ownedSurfaces = visibleOwnedWindowsProvider()
@@ -369,6 +382,120 @@ final class WindowActionHandler {
     }
 
     @discardableResult
+    func navigateToExplicitlySelectedWindow(handle: WindowHandle) -> Bool {
+        guard let controller else { return false }
+        let destination: AppRevealFocusDestination =
+            controller.workspaceManager.isScratchpadToken(handle.id)
+                || controller.workspaceManager.hiddenState(for: handle.id)?.isScratchpad == true
+                ? .scratchpad(monitorId: nil)
+                : .window
+        return requestAppRevealIfNeeded(handle: handle, destination: destination)
+    }
+
+    @discardableResult
+    func revealScratchpadFromBar(handle: WindowHandle, monitorId: Monitor.ID?) -> Bool {
+        requestAppRevealIfNeeded(
+            handle: handle,
+            destination: .scratchpad(monitorId: monitorId)
+        )
+    }
+
+    private func requestAppRevealIfNeeded(
+        handle: WindowHandle,
+        destination: AppRevealFocusDestination
+    ) -> Bool {
+        guard let controller,
+              controller.workspaceManager.handle(for: handle.id) === handle,
+              let entry = controller.workspaceManager.entry(for: handle)
+        else {
+            return false
+        }
+        guard controller.workspaceManager.isAppHidden(pid: entry.pid) else {
+            switch destination {
+            case .window:
+                return navigateToWindowInternal(token: handle.id, workspaceId: entry.workspaceId)
+            case let .scratchpad(monitorId):
+                return controller.activateScratchpadFromBar(on: monitorId) == .executed
+            }
+        }
+        guard entry.layoutReason == .standard || controller.isManagedWindowSuspendedForNativeFullscreen(entry.token),
+              entry.interactionPolicy.mayFocus
+        else {
+            return false
+        }
+
+        let intent = controller.intentLedger.beginAppRevealFocus(
+            token: entry.token,
+            workspaceId: entry.workspaceId,
+            handleIdentity: ObjectIdentifier(handle),
+            appVisibilityGeneration: controller.workspaceManager.appVisibilityGeneration(for: entry.pid),
+            focusFingerprint: appRevealFocusFingerprint(controller: controller),
+            destination: destination
+        )
+        guard unhideApplication(entry.pid) else {
+            controller.intentLedger.cancelAppRevealFocus(intentId: intent.id)
+            return false
+        }
+        return true
+    }
+
+    @discardableResult
+    func completeAppRevealFocus(intentId: IntentID) -> Bool {
+        guard let controller,
+              let intent = controller.intentLedger.openIntent(id: intentId),
+              case let .appRevealFocus(payload) = intent.kind,
+              controller.intentLedger.newestFocusIntentId() == payload.focusIntentWatermark,
+              appRevealFocusFingerprint(controller: controller) == payload.focusFingerprint,
+              !controller.workspaceManager.isAppHidden(pid: payload.token.pid),
+              controller.workspaceManager.appVisibilityGeneration(for: payload.token.pid)
+              == payload.appVisibilityGeneration &+ 1,
+              let handle = controller.workspaceManager.handle(for: payload.token),
+              ObjectIdentifier(handle) == payload.handleIdentity,
+              let entry = controller.workspaceManager.entry(for: handle),
+              entry.pid == payload.token.pid,
+              entry.workspaceId == payload.workspaceId,
+              entry.layoutReason == .standard
+              || controller.isManagedWindowSuspendedForNativeFullscreen(entry.token),
+              entry.interactionPolicy.mayFocus
+        else {
+            controller?.intentLedger.cancelAppRevealFocus(intentId: intentId)
+            return false
+        }
+
+        guard controller.intentLedger.confirmAppRevealFocus(intentId: intentId) != nil else {
+            return false
+        }
+        switch payload.destination {
+        case .window:
+            if controller.isManagedWindowSuspendedForNativeFullscreen(handle.id) {
+                controller.activateNativeFullscreenPlaceholder(handle.id)
+                return true
+            }
+            return navigateToWindowInternal(token: handle.id, workspaceId: payload.workspaceId)
+        case let .scratchpad(monitorId):
+            return controller.activateScratchpadFromBar(on: monitorId) == .executed
+        }
+    }
+
+    private func appRevealFocusFingerprint(controller: WMController) -> AppRevealFocusFingerprint {
+        AppRevealFocusFingerprint(
+            focusedToken: controller.workspaceManager.focusedToken,
+            pendingFocusedToken: controller.workspaceManager.pendingFocusedToken,
+            pendingFocusedWorkspaceId: controller.workspaceManager.pendingFocusedWorkspaceId,
+            isNonManagedFocusActive: controller.workspaceManager.isNonManagedFocusActive,
+            nonManagedFocusToken: controller.workspaceManager.nonManagedFocusToken,
+            interactionMonitorId: controller.workspaceManager.interactionMonitorId,
+            activeWorkspaceIdsByMonitor: Dictionary(
+                uniqueKeysWithValues: controller.workspaceManager.monitors.compactMap { monitor in
+                    controller.workspaceManager.activeWorkspace(on: monitor.id).map {
+                        (monitor.id, $0.id)
+                    }
+                }
+            )
+        )
+    }
+
+    @discardableResult
     func summonWindowRight(handle: WindowHandle) -> Bool {
         guard let controller,
               let currentWorkspace = controller.activeWorkspace(),
@@ -395,7 +522,9 @@ final class WindowActionHandler {
         guard let controller,
               let anchorEntry = controller.workspaceManager.entry(for: anchorToken),
               anchorEntry.workspaceId == anchorWorkspaceId,
-              let targetEntry = controller.workspaceManager.entry(for: handle)
+              !controller.workspaceManager.isAppHidden(pid: anchorEntry.pid),
+              let targetEntry = controller.workspaceManager.entry(for: handle),
+              !controller.workspaceManager.isAppHidden(pid: targetEntry.pid)
         else {
             return false
         }
@@ -428,7 +557,8 @@ final class WindowActionHandler {
         guard let controller,
               let handle = controller.workspaceManager.handle(for: token),
               let entry = controller.workspaceManager.entry(for: token),
-              entry.workspaceId == workspaceId
+              entry.workspaceId == workspaceId,
+              !controller.workspaceManager.isAppHidden(pid: entry.pid)
         else {
             return false
         }
@@ -465,13 +595,10 @@ final class WindowActionHandler {
             if let niriWindow = engine.findNode(for: token, in: workspaceId) {
                 targetState.selectedNodeId = niriWindow.id
 
-                if let column = engine.findColumn(containing: niriWindow, in: workspaceId),
-                   let colIdx = engine.columnIndex(of: column, in: workspaceId),
+                if engine.findColumn(containing: niriWindow, in: workspaceId) != nil,
                    let monitor = controller.workspaceManager.monitor(for: workspaceId)
                 {
-                    let cols = engine.columns(in: workspaceId)
                     let gap = controller.innerGap(for: monitor)
-                    let settings = engine.effectiveSettings(in: workspaceId)
                     let workingFrame = controller.insetWorkingFrame(for: monitor)
                     let orientation = controller.settings.effectiveOrientation(for: monitor)
                     controller.workspaceManager.withEngineMutationScope {
@@ -482,22 +609,19 @@ final class WindowActionHandler {
                             gaps: gap,
                             orientation: orientation
                         )
+                        engine.ensureProjectedSelectionVisible(
+                            node: niriWindow,
+                            in: workspaceId,
+                            motion: .disabled,
+                            state: &targetState,
+                            workingFrame: workingFrame,
+                            gaps: gap,
+                            orientation: orientation,
+                            animationConfig: nil,
+                            fromContainerIndex: nil
+                        )
+                        targetState.selectionProgress = 0
                     }
-
-                    targetState.transitionToColumn(
-                        colIdx,
-                        columns: cols,
-                        gap: gap,
-                        workingArea: workingFrame,
-                        orientation: orientation,
-                        motion: .disabled,
-                        animate: false,
-                        centerMode: settings.centerFocusedColumn,
-                        alwaysCenterSingleColumn: settings.alwaysCenterSingleColumn,
-                        scale: engine.displayScale(in: workspaceId),
-                        viewFrame: monitor.frame
-                    )
-                    targetState.selectionProgress = 0
                 }
             }
 
@@ -546,6 +670,7 @@ final class WindowActionHandler {
         focusedToken: WindowToken
     ) -> Bool {
         guard let controller,
+              let handle = controller.workspaceManager.handle(for: token),
               let engine = controller.niriEngine,
               let focusedNode = engine.findNode(for: focusedToken, in: targetWorkspaceId),
               let focusedColumn = engine.findColumn(containing: focusedNode, in: targetWorkspaceId),
@@ -559,7 +684,7 @@ final class WindowActionHandler {
 
         if sourceWorkspaceId == targetWorkspaceId {
             guard controller.niriLayoutHandler.insertWindowInNewColumn(
-                handle: WindowHandle(id: token),
+                handle: handle,
                 insertIndex: insertIndex,
                 in: targetWorkspaceId
             ) else {
@@ -570,7 +695,7 @@ final class WindowActionHandler {
         }
 
         guard controller.workspaceNavigationHandler.moveWindow(
-            handle: WindowHandle(id: token),
+            handle: handle,
             toWorkspaceId: targetWorkspaceId
         ).didMutate else {
             return false
@@ -587,7 +712,7 @@ final class WindowActionHandler {
         }
 
         guard controller.niriLayoutHandler.insertWindowInNewColumn(
-            handle: WindowHandle(id: token),
+            handle: handle,
             insertIndex: insertIndex,
             in: targetWorkspaceId,
             sizingPolicy: .inheritSource
@@ -745,8 +870,13 @@ final class WindowActionHandler {
     @discardableResult
     func focusWindowFromBar(token: WindowToken) -> Bool {
         guard let controller else { return false }
-        guard let entry = controller.workspaceManager.entry(for: token) else { return false }
-        return navigateToWindowInternal(token: token, workspaceId: entry.workspaceId)
+        guard let handle = controller.workspaceManager.handle(for: token) else { return false }
+        return focusWindowFromBar(handle: handle)
+    }
+
+    @discardableResult
+    func focusWindowFromBar(handle: WindowHandle) -> Bool {
+        return navigateToExplicitlySelectedWindow(handle: handle)
     }
 
     func runningAppsWithWindows() -> [RunningAppInfo] {

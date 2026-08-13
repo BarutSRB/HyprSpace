@@ -846,6 +846,10 @@ final class WMController {
         windowActionHandler.focusWindowFromBar(token: token)
     }
 
+    func focusWindowFromBar(handle: WindowHandle) {
+        windowActionHandler.focusWindowFromBar(handle: handle)
+    }
+
     func toggleSystemStats() {
         let monitors = workspaceManager.monitors
         let target = SystemStatsPopupController.targetMonitor(
@@ -885,6 +889,15 @@ final class WMController {
         }
         guard !isManagedWindowSuspendedForNativeFullscreen(scratchpadToken) else {
             return .notFound
+        }
+
+        if workspaceManager.isAppHidden(pid: entry.pid),
+           let handle = workspaceManager.handle(for: scratchpadToken)
+        {
+            return windowActionHandler.revealScratchpadFromBar(
+                handle: handle,
+                monitorId: monitorId
+            ) ? .executed : .notFound
         }
 
         if let monitorId {
@@ -1514,7 +1527,10 @@ final class WMController {
 
     private func focusedManagedTokenForCommand() -> WindowToken? {
         let token = focusedOrFrontmostWindowTokenForAutomation()
-        guard let token, workspaceManager.entry(for: token) != nil else {
+        guard let token,
+              workspaceManager.entry(for: token) != nil,
+              !workspaceManager.isAppHidden(token)
+        else {
             return nil
         }
         return token
@@ -2716,6 +2732,9 @@ final class WMController {
         guard !isManagedWindowSuspendedForNativeFullscreen(scratchpadToken) else {
             return .notFound
         }
+        guard !workspaceManager.isAppHidden(pid: entry.pid) else {
+            return .notFound
+        }
         guard let target = scratchpadTarget() else {
             return .notFound
         }
@@ -2801,7 +2820,7 @@ final class WMController {
     }
 
     func navigateToCommandPaletteWindow(_ handle: WindowHandle) {
-        windowActionHandler.navigateToWindow(handle: handle)
+        windowActionHandler.navigateToExplicitlySelectedWindow(handle: handle)
     }
 
     func summonCommandPaletteWindowRight(
@@ -2854,6 +2873,7 @@ final class WMController {
 
         for entry in workspaceManager.allFloatingEntries() {
             guard entry.layoutReason == .standard else { continue }
+            guard !workspaceManager.isAppHidden(pid: entry.pid) else { continue }
             guard visibleWorkspaceIds.contains(entry.workspaceId) else { continue }
             guard let targetMonitor = workspaceManager.monitor(for: entry.workspaceId)
                 ?? monitorForInteraction()
@@ -3188,6 +3208,12 @@ extension WMController {
         windowId: Int,
         axRef: AXWindowRef
     ) {
+        guard !workspaceManager.isAppHidden(pid: pid) else { return }
+        if let entry = workspaceManager.entry(forWindowId: windowId),
+           workspaceManager.isAppHidden(pid: entry.pid)
+        {
+            return
+        }
         let policy = workspaceManager.entry(forWindowId: windowId)?.interactionPolicy ?? .full
         guard policy.mayFocus,
               focusPolicyEngine.evaluate(.windowFronting).allowsFocusChange
@@ -3204,6 +3230,11 @@ extension WMController {
     }
 
     func performWindowOrdering(windowId: Int) {
+        if let entry = workspaceManager.entry(forWindowId: windowId),
+           workspaceManager.isAppHidden(pid: entry.pid)
+        {
+            return
+        }
         let policy = workspaceManager.entry(forWindowId: windowId)?.interactionPolicy ?? .full
         guard policy.mayOrder else { return }
         windowFocusOperations.orderWindow(UInt32(windowId))
@@ -3284,6 +3315,7 @@ extension WMController {
             }
 
             let pid = target.pid
+            guard !workspaceManager.isAppHidden(pid: pid) else { return }
             guard let app = NSRunningApplication(processIdentifier: pid),
                   !app.isTerminated
             else {

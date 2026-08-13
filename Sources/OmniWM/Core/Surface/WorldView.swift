@@ -123,6 +123,7 @@ struct WorldView {
             guard let workspace = workspaceManager.activeWorkspaceOrFirst(on: monitor.id) else { continue }
             for entry in workspaceManager.entries(in: workspace.id) {
                 guard entry.layoutReason == .nativeFullscreen,
+                      !workspaceManager.isAppHidden(pid: entry.pid),
                       workspaceManager.showsNativeFullscreenPlaceholder(for: entry.token),
                       !workspaceManager.isHiddenInCorner(entry.token),
                       let frame = placeholderFrame(for: entry.token),

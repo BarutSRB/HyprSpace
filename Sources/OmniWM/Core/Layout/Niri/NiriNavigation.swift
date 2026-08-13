@@ -19,26 +19,61 @@ extension NiriLayoutEngine {
     ) -> NiriNode? {
         guard steps != 0 else { return currentSelection }
 
-        let cols = columns(in: workspaceId)
-        guard !cols.isEmpty else { return nil }
+        let projectedColumns = projectedColumns(in: workspaceId)
+        guard !projectedColumns.isEmpty else { return nil }
 
         guard let currentColumn = column(of: currentSelection),
-              let currentIdx = columnIndex(of: currentColumn, in: workspaceId)
+              let durableCurrentIndex = columnIndex(of: currentColumn, in: workspaceId)
         else {
             return nil
         }
 
-        updateActiveTileIdx(for: currentSelection.id, in: currentColumn)
+        if let currentWindow = currentSelection as? NiriWindow,
+           !isExcludedFromProjection(currentWindow.token, in: workspaceId)
+        {
+            updateActiveTileIdx(for: currentSelection.id, in: currentColumn)
+        }
 
-        guard let targetIdx = wrapIndex(currentIdx + steps, total: cols.count, in: workspaceId) else {
+        let projectedCurrentIndex = projectedColumns.firstIndex { $0.column === currentColumn }
+        let targetIndex: Int
+        if let projectedCurrentIndex {
+            guard let wrappedIndex = wrapIndex(
+                projectedCurrentIndex + steps,
+                total: projectedColumns.count,
+                in: workspaceId
+            ) else {
+                return nil
+            }
+            targetIndex = wrappedIndex
+        } else {
+            let candidates = projectedColumns.indices.filter {
+                steps > 0
+                    ? projectedColumns[$0].durableIndex > durableCurrentIndex
+                    : projectedColumns[$0].durableIndex < durableCurrentIndex
+            }
+            guard let firstIndex = steps > 0 ? candidates.first : candidates.last else { return nil }
+            let remainingSteps = steps > 0 ? steps - 1 : steps + 1
+            guard let wrappedIndex = wrapIndex(
+                firstIndex + remainingSteps,
+                total: projectedColumns.count,
+                in: workspaceId
+            ) else {
+                return nil
+            }
+            targetIndex = wrappedIndex
+        }
+
+        let targetColumn = projectedColumns[targetIndex]
+        let targetRows = targetColumn.windows
+        guard !targetRows.isEmpty else {
             return nil
         }
 
-        let targetColumn = cols[targetIdx]
-        let targetRows = targetColumn.windowNodes
-        guard !targetRows.isEmpty else { return targetColumn.firstChild() }
-
-        let clampedRowIndex = min(targetRowIndex ?? targetColumn.activeTileIdx, targetRows.count - 1)
+        let activeWindow = projectedActiveWindow(in: targetColumn)
+        let activeRowIndex = activeWindow.flatMap { activeWindow in
+            targetRows.firstIndex(where: { $0 === activeWindow })
+        } ?? 0
+        let clampedRowIndex = min(targetRowIndex ?? activeRowIndex, targetRows.count - 1)
         return targetRows[clampedRowIndex]
     }
 
@@ -134,17 +169,24 @@ extension NiriLayoutEngine {
             return moveSelectionWithinContainerTabbed(
                 direction: direction,
                 in: container,
-                orientation: orientation
+                orientation: orientation,
+                workspaceId: workspaceId
             )
         }
 
-        let target = step > 0 ? currentSelection.nextSibling() : currentSelection.prevSibling()
+        let windows = workspaceId.map { projectedWindows(in: container, workspaceId: $0) }
+            ?? container.windowNodes
+        guard let currentWindow = currentSelection as? NiriWindow,
+              let currentIndex = windows.firstIndex(where: { $0 === currentWindow })
+        else {
+            return step > 0 ? windows.first : windows.last
+        }
+        let targetIndex = currentIndex + step
+        guard windows.indices.contains(targetIndex) else { return nil }
+        let target = windows[targetIndex]
 
-        if let target {
-            let windowNodes = container.windowNodes
-            if let idx = windowNodes.firstIndex(where: { $0 === target }) {
-                container.setActiveTileIdx(idx)
-            }
+        if let idx = container.windowNodes.firstIndex(where: { $0 === target }) {
+            container.setActiveTileIdx(idx)
         }
 
         return target
@@ -153,18 +195,28 @@ extension NiriLayoutEngine {
     private func moveSelectionWithinContainerTabbed(
         direction: Direction,
         in container: NiriContainer,
-        orientation: Monitor.Orientation
+        orientation: Monitor.Orientation,
+        workspaceId: WorkspaceDescriptor.ID?
     ) -> NiriNode? {
         guard let step = direction.secondaryStep(for: orientation) else { return nil }
 
-        let windows = container.windowNodes
+        let windows = workspaceId.map { projectedWindows(in: container, workspaceId: $0) }
+            ?? container.windowNodes
         guard !windows.isEmpty else { return nil }
 
-        let currentIdx = container.activeTileIdx
+        let activeWindow = workspaceId.flatMap {
+            projectedActiveWindow(in: container, workspaceId: $0)
+        }
+        let currentIdx = activeWindow.flatMap { activeWindow in
+            windows.firstIndex(where: { $0 === activeWindow })
+        } ?? 0
         let newIdx = currentIdx + step
         guard newIdx >= 0, newIdx < windows.count else { return nil }
 
-        container.setActiveTileIdx(newIdx)
+        guard let durableIndex = container.windowNodes.firstIndex(where: { $0 === windows[newIdx] }) else {
+            return nil
+        }
+        container.setActiveTileIdx(durableIndex)
         updateTabbedColumnVisibility(column: container)
 
         return windows[newIdx]
@@ -183,6 +235,20 @@ extension NiriLayoutEngine {
         previousActiveContainerPosition: CGFloat? = nil
     ) {
         assertSanctionedMutation()
+        if !projectionExclusions(in: workspaceId).isEmpty {
+            ensureProjectedSelectionVisible(
+                node: node,
+                in: workspaceId,
+                motion: motion,
+                state: &state,
+                workingFrame: workingFrame,
+                gaps: gaps,
+                orientation: orientation,
+                animationConfig: animationConfig,
+                fromContainerIndex: fromContainerIndex
+            )
+            return
+        }
         resolvePrimaryContainerSpans(
             in: workspaceId,
             workingFrame: workingFrame,
@@ -306,7 +372,8 @@ extension NiriLayoutEngine {
         let target = moveSelectionWithinContainer(
             direction: direction,
             currentSelection: currentSelection,
-            orientation: orientation
+            orientation: orientation,
+            workspaceId: workspaceId
         )
 
         if let target {
@@ -335,7 +402,11 @@ extension NiriLayoutEngine {
         orientation: Monitor.Orientation,
         targetRowIndex: Int? = nil
     ) -> NiriNode? {
-        if let target = moveSelectionVertical(direction: verticalDirection, currentSelection: currentSelection) {
+        if let target = moveSelectionVertical(
+            direction: verticalDirection,
+            currentSelection: currentSelection,
+            in: workspaceId
+        ) {
             ensureSelectionVisible(
                 node: target,
                 in: workspaceId,
@@ -418,20 +489,23 @@ extension NiriLayoutEngine {
         gaps: CGFloat,
         orientation: Monitor.Orientation
     ) -> NiriNode? {
-        let cols = columns(in: workspaceId)
-        guard cols.indices.contains(targetIndex) else { return nil }
+        let columns = projectedColumns(in: workspaceId)
+        guard columns.indices.contains(targetIndex) else { return nil }
 
-        if let currentColumn = column(of: currentSelection) {
+        if let currentWindow = currentSelection as? NiriWindow,
+           !isExcludedFromProjection(currentWindow.token, in: workspaceId),
+           let currentColumn = column(of: currentSelection)
+        {
             updateActiveTileIdx(for: currentSelection.id, in: currentColumn)
         }
 
         state.activatePrevColumnOnRemoval = nil
 
-        let targetColumn = cols[targetIndex]
-        let windows = targetColumn.windowNodes
-        guard !windows.isEmpty else { return targetColumn.firstChild() }
+        let targetColumn = columns[targetIndex]
+        let windows = targetColumn.windows
+        guard !windows.isEmpty else { return nil }
 
-        let target = windows[min(targetColumn.activeTileIdx, windows.count - 1)]
+        let target = projectedActiveWindow(in: targetColumn) ?? windows[0]
         ensureSelectionVisible(
             node: target,
             in: workspaceId,
@@ -476,10 +550,10 @@ extension NiriLayoutEngine {
         orientation: Monitor.Orientation
     ) -> NiriNode? {
         assertSanctionedMutation()
-        let cols = columns(in: workspaceId)
-        guard !cols.isEmpty else { return nil }
+        let columns = projectedColumns(in: workspaceId)
+        guard !columns.isEmpty else { return nil }
         return focusColumnByIndex(
-            cols.count - 1,
+            columns.count - 1,
             currentSelection: currentSelection,
             in: workspaceId,
             motion: motion,
@@ -590,7 +664,11 @@ extension NiriLayoutEngine {
         orientation: Monitor.Orientation
     ) -> NiriNode? {
         assertSanctionedMutation()
-        if let target = moveSelectionVertical(direction: .down, currentSelection: currentSelection) {
+        if let target = moveSelectionVertical(
+            direction: .down,
+            currentSelection: currentSelection,
+            in: workspaceId
+        ) {
             ensureSelectionVisible(
                 node: target,
                 in: workspaceId,
@@ -624,7 +702,11 @@ extension NiriLayoutEngine {
         orientation: Monitor.Orientation
     ) -> NiriNode? {
         assertSanctionedMutation()
-        if let target = moveSelectionVertical(direction: .up, currentSelection: currentSelection) {
+        if let target = moveSelectionVertical(
+            direction: .up,
+            currentSelection: currentSelection,
+            in: workspaceId
+        ) {
             ensureSelectionVisible(
                 node: target,
                 in: workspaceId,
@@ -683,17 +765,20 @@ extension NiriLayoutEngine {
     ) -> NiriNode? {
         guard let currentColumn = column(of: currentSelection) else { return nil }
 
-        let windows = currentColumn.windowNodes
+        let windows = projectedWindows(in: currentColumn, workspaceId: workspaceId)
         guard !windows.isEmpty else { return nil }
 
         let clampedVisualIndex = min(max(visualIndex, 0), windows.count - 1)
-        let storageIndex = windows.count - 1 - clampedVisualIndex
-        currentColumn.setActiveTileIdx(storageIndex)
+        let projectedStorageIndex = windows.count - 1 - clampedVisualIndex
+        let target = windows[projectedStorageIndex]
+        guard let durableStorageIndex = currentColumn.windowNodes.firstIndex(where: { $0 === target }) else {
+            return nil
+        }
+        currentColumn.setActiveTileIdx(durableStorageIndex)
         if currentColumn.isTabbed {
             updateTabbedColumnVisibility(column: currentColumn)
         }
 
-        let target = windows[storageIndex]
         ensureSelectionVisible(
             node: target,
             in: workspaceId,

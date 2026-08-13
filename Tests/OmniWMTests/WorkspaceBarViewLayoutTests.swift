@@ -48,19 +48,24 @@ final class WorkspaceBarViewLayoutTests: XCTestCase {
         ] {
             let windows = (0 ..< windowCount).map { index in
                 let token = WindowToken(pid: 1, windowId: index + 1)
+                let handle = WindowHandle(id: token)
                 return WorkspaceBarWindowItem(
                     id: token,
+                    handle: handle,
                     windowId: token.windowId,
                     appName: "App \(index + 1)",
                     icon: nil,
                     isFocused: false,
                     windowCount: 1,
+                    hiddenWindowCount: 0,
                     allWindows: [
                         WorkspaceBarWindowInfo(
                             id: token,
+                            handle: handle,
                             windowId: token.windowId,
                             title: "Window \(index + 1)",
-                            isFocused: false
+                            isFocused: false,
+                            isAppHidden: false
                         )
                     ]
                 )

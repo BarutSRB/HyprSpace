@@ -39,19 +39,29 @@ extension NiriLayoutEngine {
         }
 
         guard let step = direction.secondaryStep(for: orientation) else { return false }
-        return moveWindowWithinContainer(node, step: step)
+        return moveWindowWithinContainer(node, step: step, in: workspaceId)
     }
 
-    func moveWindowWithinContainer(_ node: NiriWindow, step: Int) -> Bool {
+    func moveWindowWithinContainer(
+        _ node: NiriWindow,
+        step: Int,
+        in workspaceId: WorkspaceDescriptor.ID
+    ) -> Bool {
         assertSanctionedMutation()
         guard let column = node.parent as? NiriContainer else {
             return false
         }
-
-        let sibling = step > 0 ? node.nextSibling() : node.prevSibling()
-        guard let targetSibling = sibling else {
+        guard !isExcludedFromProjection(node.token, in: workspaceId) else {
             return false
         }
+
+        let visibleWindows = projectedWindows(in: column, workspaceId: workspaceId)
+        guard let visibleIndex = visibleWindows.firstIndex(where: { $0 === node }) else { return false }
+        let siblingIndex = visibleIndex + step
+        guard visibleWindows.indices.contains(siblingIndex) else {
+            return false
+        }
+        let targetSibling = visibleWindows[siblingIndex]
 
         let nodeIdx = column.windowNodes.firstIndex { $0 === node }
         let siblingIdx = column.windowNodes.firstIndex { $0 === targetSibling }

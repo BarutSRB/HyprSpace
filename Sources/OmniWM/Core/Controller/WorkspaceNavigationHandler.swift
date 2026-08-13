@@ -943,6 +943,7 @@ final class WorkspaceNavigationHandler {
         let token = handle.id
         guard let entry = workspaceManager.entry(for: token),
               workspaceManager.handle(for: token) === handle,
+              !workspaceManager.isAppHidden(pid: entry.pid),
               entry.mode == .floating,
               entry.workspaceId != targetWorkspaceId,
               workspaceManager.descriptor(for: targetWorkspaceId) != nil,
@@ -1009,7 +1010,8 @@ final class WorkspaceNavigationHandler {
     ) -> StructuralMutationOutcome {
         guard let controller,
               controller.workspaceManager.descriptor(for: targetWsId) != nil,
-              controller.workspaceManager.monitorForWorkspace(targetWsId) != nil
+              controller.workspaceManager.monitorForWorkspace(targetWsId) != nil,
+              !controller.workspaceManager.isAppHidden(handle.id)
         else {
             return .unchanged
         }
@@ -1108,6 +1110,7 @@ final class WorkspaceNavigationHandler {
     ) -> StructuralMutationOutcome {
         guard let controller,
               let engine = controller.niriEngine,
+              !controller.workspaceManager.isAppHidden(handle.id),
               let sourceWorkspaceId = controller.workspaceManager.workspace(for: handle.id),
               sourceWorkspaceId != targetWorkspaceId,
               controller.workspaceManager.activeLayoutKind(for: sourceWorkspaceId) == .niri,

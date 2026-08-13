@@ -427,6 +427,41 @@ final class OverviewStructuralCommandTests: XCTestCase {
         XCTAssertEqual(fixture.focusRecorder.callCount, 0)
     }
 
+    func testHiddenWindowCannotExecuteOverviewStructuralHotkey() throws {
+        let fixture = try makeFixture(layouts: [.niri])
+        let workspaceId = fixture.workspaceIds[0]
+        _ = try addManagedWindow(pid: 461_030, windowId: 40, to: workspaceId, fixture: fixture)
+        let selected = try addManagedWindow(
+            pid: 461_031,
+            windowId: 41,
+            to: workspaceId,
+            fixture: fixture
+        )
+        let engine = try XCTUnwrap(fixture.controller.niriEngine)
+        let originalColumns = engine.columns(in: workspaceId).map { $0.windowNodes.map(\.token) }
+        fixture.controller.workspaceManager.setAppHidden(
+            true,
+            pid: selected.pid,
+            source: .service
+        )
+        let overview = OverviewController(
+            wmController: fixture.controller,
+            motionPolicy: fixture.controller.motionPolicy
+        )
+
+        let outcome = overview.performStructuralHotkey(
+            .moveColumnToFirst,
+            selectedHandle: selected
+        )
+
+        XCTAssertEqual(outcome, .unchanged)
+        XCTAssertEqual(
+            engine.columns(in: workspaceId).map { $0.windowNodes.map(\.token) },
+            originalColumns
+        )
+        XCTAssertEqual(fixture.focusRecorder.callCount, 0)
+    }
+
     func testCombinedVerticalMoveCreatesAdjacentWorkspaceAtEdge() throws {
         let fixture = try makeFixture(layouts: [.niri])
         let sourceWorkspaceId = fixture.workspaceIds[0]
@@ -754,6 +789,74 @@ final class OverviewStructuralCommandTests: XCTestCase {
         XCTAssertFalse(callbackWorkspaceWasPresent)
         XCTAssertNil(manager.entry(for: handle.id))
         XCTAssertNil(manager.workspace(for: handle.id))
+    }
+
+    func testHiddenWindowCannotBeginOverviewDrag() throws {
+        let fixture = try makeFixture(layouts: [.niri])
+        let workspaceId = fixture.workspaceIds[0]
+        let handle = try addManagedWindow(
+            pid: 461_032,
+            windowId: 42,
+            to: workspaceId,
+            fixture: fixture
+        )
+        let prepared = try prepareDragOverview(fixture)
+        fixture.controller.workspaceManager.setAppHidden(
+            true,
+            pid: handle.pid,
+            source: .service
+        )
+
+        prepared.overview.beginDrag(
+            on: fixture.monitor.id,
+            handle: handle,
+            startPoint: .zero
+        )
+
+        XCTAssertFalse(prepared.overview.hasActiveDragSession)
+    }
+
+    func testDragDoesNotMutateAfterDraggedApplicationBecomesHidden() throws {
+        let fixture = try makeFixture(layouts: [.niri])
+        let workspaceId = fixture.workspaceIds[0]
+        let target = try addManagedWindow(
+            pid: 461_033,
+            windowId: 43,
+            to: workspaceId,
+            fixture: fixture
+        )
+        let dragged = try addManagedWindow(
+            pid: 461_034,
+            windowId: 44,
+            to: workspaceId,
+            fixture: fixture
+        )
+        let prepared = try prepareDragOverview(fixture)
+        let targetFrame = try XCTUnwrap(prepared.layout.window(for: target)?.overviewFrame)
+        let dropPoint = CGPoint(
+            x: targetFrame.midX,
+            y: targetFrame.maxY - targetFrame.height * 0.1
+        )
+        let engine = try XCTUnwrap(fixture.controller.niriEngine)
+        let originalColumns = engine.columns(in: workspaceId).map { $0.windowNodes.map(\.token) }
+
+        prepared.overview.beginDrag(on: fixture.monitor.id, handle: dragged, startPoint: .zero)
+        prepared.overview.updateDrag(on: fixture.monitor.id, at: dropPoint)
+        XCTAssertTrue(prepared.overview.hasActiveDragSession)
+        fixture.controller.workspaceManager.setAppHidden(
+            true,
+            pid: dragged.pid,
+            source: .service
+        )
+        prepared.overview.endDrag(on: fixture.monitor.id, at: dropPoint)
+
+        XCTAssertFalse(prepared.overview.hasActiveDragSession)
+        XCTAssertEqual(
+            engine.columns(in: workspaceId).map { $0.windowNodes.map(\.token) },
+            originalColumns
+        )
+        XCTAssertEqual(fixture.controller.workspaceManager.workspace(for: dragged.id), workspaceId)
+        XCTAssertEqual(fixture.focusRecorder.callCount, 0)
     }
 
     func testMouseDragInsertsNiriCardBeforeTarget() throws {

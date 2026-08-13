@@ -135,6 +135,8 @@ final class NiriLayoutEngine {
 
     var axisSolveCache: [NiriAxisSolveKey: [NiriAxisSolver.Output]] = [:]
 
+    var excludedTokensByWorkspace: [WorkspaceDescriptor.ID: Set<WindowToken>] = [:]
+
     var visibleContainerCount: Int
     var infiniteLoop: Bool
 
@@ -352,21 +354,29 @@ final class NiriLayoutEngine {
         let fit: SingleWindowFit
     }
 
-    func singleWindowLayoutContext(in workspaceId: WorkspaceDescriptor.ID) -> SingleWindowLayoutContext? {
+    func singleWindowLayoutContext(
+        in workspaceId: WorkspaceDescriptor.ID,
+        excluding excludedTokens: Set<WindowToken>? = nil
+    ) -> SingleWindowLayoutContext? {
         let fit = effectiveSingleWindowFit(in: workspaceId)
         guard fit.mode != .containerPrimarySpan else {
             return nil
         }
 
-        let workspaceColumns = columns(in: workspaceId)
+        let effectiveExcludedTokens = excludedTokens ?? projectionExclusions(in: workspaceId)
+        let workspaceColumns = columns(in: workspaceId).compactMap { column -> (NiriContainer, [NiriWindow])? in
+            let windows = effectiveExcludedTokens.isEmpty
+                ? column.windowNodes
+                : column.windowNodes.filter { !effectiveExcludedTokens.contains($0.token) }
+            return windows.isEmpty ? nil : (column, windows)
+        }
         guard workspaceColumns.count == 1,
-              let column = workspaceColumns.first,
+              let (column, windows) = workspaceColumns.first,
               !column.isTabbed
         else {
             return nil
         }
 
-        let windows = column.windowNodes
         guard windows.count == 1,
               let window = windows.first,
               window.sizingMode == .normal

@@ -1623,6 +1623,48 @@ final class AXFullRescanBoundaryTests: XCTestCase {
         XCTAssertTrue(controller.workspaceManager.hiddenState(for: pinnedToken)?.isScratchpad == true)
     }
 
+    func testFullRescanDoesNotRevealScratchpadForMacOSHiddenApplication() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let pid: pid_t = 72_039
+        let windowId = 72_040
+        let token = controller.workspaceManager.addWindow(
+            AXWindowRef(element: AXUIElementCreateApplication(pid), windowId: windowId),
+            pid: pid,
+            windowId: windowId,
+            to: workspaceId,
+            mode: .floating
+        )
+        let hiddenState = HiddenState(
+            proportionalPosition: .zero,
+            referenceMonitorId: nil,
+            reason: .scratchpad
+        )
+        controller.workspaceManager.setHiddenState(hiddenState, for: token)
+        controller.workspaceManager.setAppHidden(true, pid: pid, source: .service)
+        let visibleFrame = controller.workspaceManager.monitors.first?.visibleFrame
+            ?? CGRect(x: 0, y: 0, width: 800, height: 600)
+        var seenKeys: Set<WindowToken> = []
+
+        controller.layoutRefreshController.preserveScratchpadHiddenWindowsDuringFullRescan(
+            controller.workspaceManager.allEntries(),
+            windowServerInfoByWindowId: [
+                windowId: WindowServerInfo(
+                    id: UInt32(windowId),
+                    pid: pid,
+                    level: 0,
+                    frame: visibleFrame
+                )
+            ],
+            seenKeys: &seenKeys
+        )
+
+        XCTAssertEqual(seenKeys, [token])
+        XCTAssertEqual(controller.workspaceManager.hiddenState(for: token), hiddenState)
+    }
+
     func testFullRescanPreservesFocusedTrackedSheetWithMatchingWindowServerIdentity() throws {
         for (index, mode) in [TrackedWindowMode.tiling, .floating].enumerated() {
             let controller = WindowAdmissionTestSupport.controller()

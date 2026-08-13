@@ -310,7 +310,7 @@ import QuartzCore
     func moveWindow(direction: Direction) -> WindowMoveOutcome {
         var outcome = WindowMoveOutcome.blocked
         withDwindleContext { engine, workspaceId in
-            guard let token = engine.activeToken(in: workspaceId) else { return }
+            guard let token = engine.projectedActiveToken(in: workspaceId) else { return }
             let sourceIsGrouped: Bool
             if let snapshot = engine.tileSnapshot(for: token, in: workspaceId) {
                 sourceIsGrouped = snapshot.isGrouped
@@ -320,7 +320,8 @@ import QuartzCore
             guard groupMembershipMutationIsAllowed(
                 for: token,
                 engine: engine,
-                workspaceId: workspaceId
+                workspaceId: workspaceId,
+                requiresAllMembers: !sourceIsGrouped
             )
             else {
                 return
@@ -367,18 +368,23 @@ import QuartzCore
     func moveGroupMember(direction: Direction) -> Bool {
         var didMove = false
         withDwindleContext { engine, workspaceId in
-            guard let token = engine.activeToken(in: workspaceId),
+            guard let token = engine.projectedActiveToken(in: workspaceId),
                   let destinationToken = groupMemberReorderDestination(
                       direction: direction,
                       engine: engine,
                       workspaceId: workspaceId
                   ),
                   groupMembershipMutationIsAllowed(
-                      for: destinationToken,
+                      for: token,
                       engine: engine,
+                      workspaceId: workspaceId,
+                      requiresAllMembers: false
+                  ),
+                  groupMemberActivationIsAllowed(
+                      destinationToken,
                       workspaceId: workspaceId
                   ),
-                  engine.moveGroupMember(direction: direction, in: workspaceId)
+                  engine.moveGroupMember(token, direction: direction, in: workspaceId)
             else {
                 return
             }
@@ -397,13 +403,22 @@ import QuartzCore
         workspaceId: WorkspaceDescriptor.ID
     ) -> WindowToken? {
         guard let offset = groupMemberOffset(for: direction),
-              let token = engine.activeToken(in: workspaceId),
+              let token = engine.projectedActiveToken(in: workspaceId),
               let snapshot = engine.tileSnapshot(for: token, in: workspaceId),
-              snapshot.members.indices.contains(snapshot.activeIndex + offset)
+              let activeIndex = snapshot.members.firstIndex(where: { $0.token == token })
         else {
             return nil
         }
-        return snapshot.members[snapshot.activeIndex + offset].token
+        let visibleMembers = snapshot.members.filter {
+            groupMemberActivationIsAllowed($0.token, workspaceId: workspaceId)
+        }
+        guard let visibleIndex = visibleMembers.firstIndex(
+            where: { $0.token == snapshot.members[activeIndex].token }
+        ), visibleMembers.indices.contains(visibleIndex + offset)
+        else {
+            return nil
+        }
+        return visibleMembers[visibleIndex + offset].token
     }
 
     private func focusGroupMember(
@@ -413,15 +428,16 @@ import QuartzCore
         workspaceId: WorkspaceDescriptor.ID
     ) -> Bool {
         guard let offset = groupMemberOffset(for: direction),
-              let activeToken = engine.activeToken(in: workspaceId),
+              let activeToken = engine.projectedActiveToken(in: workspaceId),
               let snapshot = engine.tileSnapshot(for: activeToken, in: workspaceId),
+              let activeIndex = snapshot.members.firstIndex(where: { $0.token == activeToken }),
               snapshot.members.count > 1
         else {
             return false
         }
 
         for distance in 1 ..< snapshot.members.count {
-            let candidateIndex = snapshot.activeIndex + offset * distance
+            let candidateIndex = activeIndex + offset * distance
             let index: Int
             if wraps {
                 index = (
@@ -536,8 +552,7 @@ import QuartzCore
               let token = expectedToken ?? info.tabs[visualIndex].token,
               let snapshot = engine.tileSnapshot(for: token, in: info.workspaceId),
               snapshot.id == tileId,
-              snapshot.members.indices.contains(visualIndex),
-              snapshot.members[visualIndex].token == token,
+              snapshot.members.contains(where: { $0.token == token }),
               groupMemberActivationIsAllowed(token, workspaceId: info.workspaceId)
         else {
             return
@@ -565,11 +580,15 @@ import QuartzCore
     private func groupMembershipMutationIsAllowed(
         for token: WindowToken,
         engine: DwindleLayoutEngine,
-        workspaceId: WorkspaceDescriptor.ID
+        workspaceId: WorkspaceDescriptor.ID,
+        requiresAllMembers: Bool = true
     ) -> Bool {
         guard let snapshot = engine.tileSnapshot(for: token, in: workspaceId)
         else {
             return false
+        }
+        guard requiresAllMembers else {
+            return groupMemberActivationIsAllowed(token, workspaceId: workspaceId)
         }
         return snapshot.members.allSatisfy { member in
             groupMemberActivationIsAllowed(member.token, workspaceId: workspaceId)
@@ -738,6 +757,12 @@ import QuartzCore
         nextPendingGroupRevealTransactionId = 1
     }
 
+    func cancelPendingGroupReveals(pid: pid_t) {
+        pendingGroupRevealTransactionsByWindowId = pendingGroupRevealTransactionsByWindowId.filter {
+            $0.value.pid != pid
+        }
+    }
+
     func currentPendingGroupRevealFocusTransactionIds(
         in workspaceId: WorkspaceDescriptor.ID
     ) -> Set<UInt64> {
@@ -831,7 +856,8 @@ import QuartzCore
               revealTile.activeToken == transaction.token,
               let revealEntry = controller.workspaceManager.entry(for: transaction.token),
               revealEntry.workspaceId == transaction.workspaceId,
-              revealEntry.layoutReason == .standard
+              revealEntry.layoutReason == .standard,
+              !controller.workspaceManager.isAppHidden(pid: revealEntry.pid)
         else {
             return
         }
@@ -851,7 +877,8 @@ import QuartzCore
                   engine.tileSnapshot(for: change.token, in: transaction.workspaceId)?.id == revealTile.id,
                   let entry = controller.workspaceManager.entry(for: change.token),
                   entry.workspaceId == transaction.workspaceId,
-                  entry.layoutReason != .nativeFullscreen
+                  entry.layoutReason != .nativeFullscreen,
+                  !controller.workspaceManager.isAppHidden(pid: entry.pid)
             else {
                 continue
             }
@@ -896,6 +923,7 @@ import QuartzCore
               let rollbackToken = transaction.hides.lazy.map(\.token).first(where: {
                   engine.tileSnapshot(for: $0, in: transaction.workspaceId)?.id == transaction.tileId
                       && controller.workspaceManager.entry(for: $0)?.layoutReason == .standard
+                      && !controller.workspaceManager.isAppHidden($0)
               })
         else {
             return
@@ -1057,6 +1085,7 @@ import QuartzCore
             workspaceId: wsId,
             monitor: refreshInput.monitor,
             windows: refreshInput.windows,
+            excludedTokens: refreshInput.excludedTokens,
             plannedSeq: refreshInput.plannedSeq,
             preferredFocusToken: controller.workspaceManager.preferredFocusToken(in: wsId),
             preferredHideSide: controller.layoutRefreshController.preferredHideSide(for: monitor),
@@ -1070,6 +1099,11 @@ import QuartzCore
         engine: DwindleLayoutEngine
     ) -> WorkspaceLayoutPlan {
         applyResolvedSettings(snapshot.settings, to: engine)
+        engine.setExcludedTokens(
+            snapshot.excludedTokens,
+            authoritativeTokens: Set(snapshot.windows.lazy.map(\.token)),
+            in: snapshot.workspaceId
+        )
 
         let now = controller?.animationClock.now() ?? CACurrentMediaTime()
         var previousTargetFrames = engine.currentFrames(in: snapshot.workspaceId)
@@ -1100,11 +1134,11 @@ import QuartzCore
         if !removedTokens.isEmpty {
             controller?.windowActionHandler.refreshOverviewProjection(
                 affectedWorkspaceIds: [snapshot.workspaceId],
-                selectedToken: engine.activeToken(in: snapshot.workspaceId)
+                selectedToken: engine.projectedActiveToken(in: snapshot.workspaceId)
             )
         }
 
-        let rememberedFocusToken = engine.activeToken(in: snapshot.workspaceId)
+        let rememberedFocusToken = engine.projectedActiveToken(in: snapshot.workspaceId)
 
         engine.animateWindowMovements(
             oldFrames: oldFrames,
@@ -1157,6 +1191,11 @@ import QuartzCore
         engine: DwindleLayoutEngine
     ) -> WorkspaceLayoutPlan {
         applyResolvedSettings(snapshot.settings, to: engine)
+        engine.setExcludedTokens(
+            snapshot.excludedTokens,
+            authoritativeTokens: Set(snapshot.windows.lazy.map(\.token)),
+            in: snapshot.workspaceId
+        )
 
         let frames = engine.calculateLayout(
             for: snapshot.workspaceId,
@@ -1193,6 +1232,11 @@ import QuartzCore
         targetTime: TimeInterval
     ) -> WorkspaceLayoutPlan {
         applyResolvedSettings(snapshot.settings, to: engine)
+        engine.setExcludedTokens(
+            snapshot.excludedTokens,
+            authoritativeTokens: Set(snapshot.windows.lazy.map(\.token)),
+            in: snapshot.workspaceId
+        )
 
         let baseFrames = engine.calculateLayout(
             for: snapshot.workspaceId,
@@ -1242,8 +1286,12 @@ import QuartzCore
     ) -> WorkspaceLayoutDiff {
         var diff = WorkspaceLayoutDiff()
         let effectiveScale = max(scale, 1.0)
+        let excludedTokens = engine.excludedTokens(in: workspaceId)
         for window in windows {
             let token = window.token
+            if excludedTokens.contains(token) {
+                continue
+            }
             if window.isNativeFullscreenSuspended {
                 continue
             }

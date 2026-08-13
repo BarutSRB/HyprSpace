@@ -35,8 +35,18 @@ extension DwindleLayoutEngine {
         guard interactiveResize == nil else { return false }
         guard let leaf = findNode(for: token, in: workspaceId), leaf.isLeaf, !leaf.isFullscreen else { return false }
 
-        let horizontal = resolveControllingSplit(from: leaf, edges: edges, axis: .horizontal)
-        let vertical = resolveControllingSplit(from: leaf, edges: edges, axis: .vertical)
+        let horizontal = resolveControllingSplit(
+            from: leaf,
+            edges: edges,
+            axis: .horizontal,
+            workspaceId: workspaceId
+        )
+        let vertical = resolveControllingSplit(
+            from: leaf,
+            edges: edges,
+            axis: .vertical,
+            workspaceId: workspaceId
+        )
         guard horizontal != nil || vertical != nil else { return false }
 
         interactiveResize = DwindleInteractiveResize(
@@ -133,7 +143,12 @@ extension DwindleLayoutEngine {
         delta: CGFloat
     ) -> Bool {
         guard let splitId, let childId, let originRatio, let axisLength,
-              let match = controllingSplit(from: leaf, orientation: axis, wantFirstChild: wantFirstChild),
+              let match = controllingSplit(
+                  from: leaf,
+                  orientation: axis,
+                  wantFirstChild: wantFirstChild,
+                  workspaceId: resize.workspaceId
+              ),
               match.split.id == splitId,
               match.child.id == childId
         else {
@@ -143,7 +158,8 @@ extension DwindleLayoutEngine {
         let newRatio = clampedRatioRespectingMinimums(
             originRatio + 2 * delta / axisLength,
             for: match.split,
-            innerGap: resize.innerGap
+            innerGap: resize.innerGap,
+            excludedTokens: excludedTokens(in: resize.workspaceId)
         )
         guard newRatio != match.split.splitRatio else { return false }
         match.split.kind = .split(orientation: axis, ratio: newRatio)
@@ -153,7 +169,8 @@ extension DwindleLayoutEngine {
     private func resolveControllingSplit(
         from leaf: DwindleNode,
         edges: ResizeEdge,
-        axis: DwindleOrientation
+        axis: DwindleOrientation,
+        workspaceId: WorkspaceDescriptor.ID
     ) -> (split: DwindleNode, child: DwindleNode, axisLength: CGFloat)? {
         let wantFirstChild: Bool
         switch axis {
@@ -175,8 +192,13 @@ extension DwindleLayoutEngine {
             }
         }
 
-        guard let match = controllingSplit(from: leaf, orientation: axis, wantFirstChild: wantFirstChild),
-              let frame = match.split.cachedFrame
+        guard let match = controllingSplit(
+            from: leaf,
+            orientation: axis,
+            wantFirstChild: wantFirstChild,
+            workspaceId: workspaceId
+        ),
+            let frame = match.split.cachedFrame
         else {
             return nil
         }
@@ -188,13 +210,18 @@ extension DwindleLayoutEngine {
     private func controllingSplit(
         from leaf: DwindleNode,
         orientation: DwindleOrientation,
-        wantFirstChild: Bool
+        wantFirstChild: Bool,
+        workspaceId: WorkspaceDescriptor.ID
     ) -> (split: DwindleNode, child: DwindleNode)? {
         var child = leaf
         var current = leaf.parent
         while let parent = current {
             if case let .split(splitOrientation, _) = parent.kind,
                splitOrientation == orientation,
+               splitHasTwoVisibleBranches(
+                   parent,
+                   excluding: excludedTokens(in: workspaceId)
+               ),
                child.isFirstChild(of: parent) == wantFirstChild
             {
                 return (parent, child)

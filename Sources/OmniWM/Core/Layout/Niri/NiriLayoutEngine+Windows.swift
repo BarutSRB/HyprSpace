@@ -137,6 +137,11 @@ extension NiriLayoutEngine {
         column.adjustActiveTileIdxForRemoval(of: node)
         node.remove()
         state.unindex(node)
+        if excludedTokensByWorkspace[workspaceId]?.remove(token) != nil,
+           excludedTokensByWorkspace[workspaceId]?.isEmpty == true
+        {
+            excludedTokensByWorkspace.removeValue(forKey: workspaceId)
+        }
 
         if column.displayMode == .tabbed, !column.children.isEmpty {
             column.clampActiveTileIdx()
@@ -806,7 +811,11 @@ extension NiriLayoutEngine {
         }
 
         let candidates = allWindows.filter { window in
-            window.id != excludingNodeId && window.lastFocusedTime != nil
+            guard window.id != excludingNodeId, window.lastFocusedTime != nil else { return false }
+            if let workspaceId {
+                return !isExcludedFromProjection(window.token, in: workspaceId)
+            }
+            return !excludedTokensByWorkspace.values.contains { $0.contains(window.token) }
         }
 
         return candidates.max { ($0.lastFocusedTime ?? .distantPast) < ($1.lastFocusedTime ?? .distantPast) }

@@ -230,6 +230,7 @@ final class WorldStore {
                 keeping: mode == .tiling ? workspaceId : nil,
                 monitors: monitors
             )
+            refreshProjectionExclusions(in: [workspaceId])
 
         case let .windowRekeyed(from, to, workspaceId, _, _, newAXRef, metadata, _):
             guard phase == .beforePlan else { return }
@@ -250,6 +251,7 @@ final class WorldStore {
             )
             _ = niriEngine?.rekeyWindow(from: from, to: to, in: workspaceId)
             _ = dwindleEngine?.rekeyWindow(from: from, to: to, in: workspaceId)
+            refreshProjectionExclusions(in: [workspaceId])
 
         case let .windowRemoved(token, _, _):
             guard phase == .afterPlan else { return }
@@ -260,10 +262,14 @@ final class WorldStore {
         case let .workspaceAssigned(token, _, to, _, _):
             guard phase == .beforePlan else { return }
             updateWorkspace(for: token, workspace: to, monitors: monitors)
+            refreshProjectionExclusions(in: [to])
 
-        case let .windowModeChanged(token, _, _, mode, _):
+        case let .windowModeChanged(token, workspaceId, _, mode, _):
             guard phase == .beforePlan else { return }
             setMode(mode, for: token, monitors: monitors)
+            if mode == .tiling {
+                refreshProjectionExclusions(in: [workspaceId])
+            }
 
         case let .floatingGeometryUpdated(token, _, referenceMonitorId, frame, normalizedOrigin, restoreToFloating, _):
             guard phase == .beforePlan else { return }
@@ -300,12 +306,13 @@ final class WorldStore {
                 model.setRestoreIntent(restoreIntent, for: token)
             }
 
-        case let .hiddenApplicationsChanged(pids, _, _):
+        case let .hiddenApplicationsChanged(pids, affectedWorkspaceIds, _):
             guard phase == .beforePlan else { return }
             for pid in hiddenAppPIDs.symmetricDifference(pids) {
                 appVisibilityGenerationByPID[pid, default: 0] &+= 1
             }
             hiddenAppPIDs = pids
+            refreshProjectionExclusions(in: affectedWorkspaceIds)
 
         case let .appVisibilityInvalidated(pid, _, _):
             guard phase == .beforePlan else { return }
@@ -370,6 +377,24 @@ final class WorldStore {
 
     private func assertInCommit(_ operation: StaticString) {
         assert(commitDepth > 0, "\(operation) must run inside WorldStore.commit")
+    }
+
+    private func refreshProjectionExclusions(
+        in workspaceIds: Set<WorkspaceDescriptor.ID>
+    ) {
+        for workspaceId in workspaceIds {
+            let tiledEntries = model.windows(in: workspaceId).filter { $0.mode == .tiling }
+            let authoritativeTokens = Set(tiledEntries.lazy.map(\.token))
+            let excludedTokens = Set(tiledEntries.lazy.filter {
+                self.hiddenAppPIDs.contains($0.pid)
+            }.map(\.token))
+            niriEngine?.setProjectionExclusions(excludedTokens, in: workspaceId)
+            dwindleEngine?.setExcludedTokens(
+                excludedTokens,
+                authoritativeTokens: authoritativeTokens,
+                in: workspaceId
+            )
+        }
     }
 
     private func canUpdateAdmissionHints(for token: WindowToken) -> Bool {

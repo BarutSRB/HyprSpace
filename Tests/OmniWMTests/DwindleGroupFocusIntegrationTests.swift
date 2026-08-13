@@ -185,6 +185,30 @@ final class DwindleGroupFocusIntegrationTests: XCTestCase {
         XCTAssertEqual(regrouped.activeToken, fixture.activeToken)
     }
 
+    func testMoveExtractsProjectedVisibleMemberWhileGroupedPeerIsAppHidden() throws {
+        let fixture = try makeFixture { _, _ in }
+        fixture.controller.workspaceManager.setAppHidden(
+            true,
+            pid: fixture.activeToken.pid,
+            source: .service
+        )
+        let blocker = blockLayoutRefresh(fixture.controller, workspaceId: fixture.workspaceId)
+        defer { unblockLayoutRefresh(fixture.controller, blocker: blocker) }
+
+        XCTAssertEqual(fixture.engine.projectedActiveToken(in: fixture.workspaceId), fixture.inactiveToken)
+        XCTAssertEqual(
+            fixture.controller.dwindleLayoutHandler.moveWindow(direction: .left),
+            .movedWithinWorkspace
+        )
+        XCTAssertEqual(fixture.engine.tileCount(in: fixture.workspaceId), 2)
+        XCTAssertEqual(
+            fixture.engine.tileSnapshot(for: fixture.inactiveToken, in: fixture.workspaceId)?.members.map(\.token),
+            [fixture.inactiveToken]
+        )
+        XCTAssertNotNil(fixture.engine.findNode(for: fixture.activeToken, in: fixture.workspaceId))
+        XCTAssertTrue(fixture.engine.excludedTokens(in: fixture.workspaceId).contains(fixture.activeToken))
+    }
+
     func testMoveFromGroupedSourceToGroupedNeighborIsTwoStep() throws {
         let fixture = try makeFixture { _, _ in }
         let destination = addGroupedNeighbor(to: fixture)
@@ -959,6 +983,36 @@ final class DwindleGroupFocusIntegrationTests: XCTestCase {
         XCTAssertNotNil(fixture.engine.tileSnapshot(for: replacementToken, in: fixture.workspaceId))
         XCTAssertEqual(frontedTokens, [fixture.inactiveToken])
         XCTAssertNil(fixture.controller.workspaceManager.hiddenState(for: fixture.inactiveToken))
+    }
+
+    func testAppHideCancelsPendingGroupRevealBeforeFrameCompletion() throws {
+        let fixture = try makeFixture { _, _ in }
+        let pending = try beginPendingReveal(fixture)
+        let revealHiddenState = fixture.controller.workspaceManager.hiddenState(for: fixture.inactiveToken)
+        let peerHiddenState = fixture.controller.workspaceManager.hiddenState(for: fixture.activeToken)
+
+        fixture.controller.axEventHandler.handleAppHidden(
+            pid: fixture.inactiveToken.pid,
+            source: .service
+        )
+        fixture.controller.dwindleLayoutHandler.completePendingGroupRevealTransaction(
+            with: frameResult(token: fixture.inactiveToken, frame: pending.frame),
+            transactionId: pending.transactionId
+        )
+
+        XCTAssertNil(
+            fixture.controller.dwindleLayoutHandler.pendingGroupRevealTransactionId(
+                for: fixture.inactiveToken.windowId
+            )
+        )
+        XCTAssertEqual(
+            fixture.controller.workspaceManager.hiddenState(for: fixture.inactiveToken),
+            revealHiddenState
+        )
+        XCTAssertEqual(
+            fixture.controller.workspaceManager.hiddenState(for: fixture.activeToken),
+            peerHiddenState
+        )
     }
 
     func testFailedGroupRevealAfterHideMemberRekeyRollsBackToReplacement() throws {

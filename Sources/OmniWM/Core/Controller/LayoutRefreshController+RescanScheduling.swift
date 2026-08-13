@@ -12,7 +12,7 @@ extension LayoutRefreshController {
         case (.fullRescan, .fullRescan):
             mergePendingRefresh(refresh)
         case (.fullRescan, .visibilityRefresh):
-            absorbIntoActiveFullRescan(refresh)
+            mergePendingRefresh(refresh)
         case (.fullRescan, .windowRemoval),
              (.fullRescan, .immediateRelayout),
              (.fullRescan, .relayout):

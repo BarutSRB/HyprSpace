@@ -363,11 +363,13 @@ extension NiriLayoutEngine {
         assertSanctionedMutation()
         guard let step = direction.primaryStep(for: orientation) else { return false }
 
-        let cols = columns(in: workspaceId)
-        guard let currentIdx = columnIndex(of: column, in: workspaceId) else { return false }
-
-        let targetIdx = currentIdx + step
-        guard targetIdx >= 0, targetIdx < cols.count else { return false }
+        let projectedColumns = projectedColumns(in: workspaceId)
+        guard let currentProjectedIndex = projectedColumns.firstIndex(where: { $0.column === column }) else {
+            return false
+        }
+        let targetProjectedIndex = currentProjectedIndex + step
+        guard projectedColumns.indices.contains(targetProjectedIndex) else { return false }
+        let targetIdx = projectedColumns[targetProjectedIndex].durableIndex
         return moveColumn(
             column,
             to: targetIdx,
@@ -435,10 +437,15 @@ extension NiriLayoutEngine {
         orientation: Monitor.Orientation
     ) -> Bool {
         assertSanctionedMutation()
-        let cols = columns(in: workspaceId)
-        guard !cols.isEmpty else { return false }
+        let projectedColumns = projectedColumns(in: workspaceId)
+        guard !projectedColumns.isEmpty,
+              projectedColumns.contains(where: { $0.column === column })
+        else {
+            return false
+        }
 
-        let targetIdx = min(oneBasedIndex <= 1 ? 0 : oneBasedIndex - 1, cols.count - 1)
+        let projectedTargetIndex = min(oneBasedIndex <= 1 ? 0 : oneBasedIndex - 1, projectedColumns.count - 1)
+        let targetIdx = projectedColumns[projectedTargetIndex].durableIndex
         return moveColumn(
             column,
             to: targetIdx,
@@ -603,14 +610,15 @@ extension NiriLayoutEngine {
     ) -> Bool {
         assertSanctionedMutation()
         guard direction == .left || direction == .right else { return false }
+        guard !isExcludedFromProjection(window.token, in: workspaceId) else { return false }
 
-        guard let currentColumn = findColumn(containing: window, in: workspaceId),
-              let currentIdx = columnIndex(of: currentColumn, in: workspaceId)
+        guard let currentColumn = findColumn(containing: window, in: workspaceId)
         else {
             return false
         }
 
-        if currentColumn.windowNodes.count > 1 {
+        let visibleMembers = projectedWindows(in: currentColumn, workspaceId: workspaceId)
+        if visibleMembers.count > 1 {
             return expelWindow(
                 window,
                 to: direction,
@@ -623,17 +631,24 @@ extension NiriLayoutEngine {
             )
         }
 
-        let cols = columns(in: workspaceId)
+        let projectedColumns = projectedColumns(in: workspaceId)
+        guard let currentIdx = projectedColumns.firstIndex(where: { $0.column === currentColumn }) else {
+            return false
+        }
         let step = (direction == .right) ? 1 : -1
         let neighborIdx: Int
         if allowEdgeWrap {
-            guard let wrappedIdx = wrapIndex(currentIdx + step, total: cols.count, in: workspaceId) else {
+            guard let wrappedIdx = wrapIndex(
+                currentIdx + step,
+                total: projectedColumns.count,
+                in: workspaceId
+            ) else {
                 return false
             }
             neighborIdx = wrappedIdx
         } else {
             let adjacentIdx = currentIdx + step
-            guard adjacentIdx >= 0, adjacentIdx < cols.count else {
+            guard projectedColumns.indices.contains(adjacentIdx) else {
                 return false
             }
             neighborIdx = adjacentIdx
@@ -641,7 +656,7 @@ extension NiriLayoutEngine {
 
         if neighborIdx == currentIdx { return false }
 
-        let neighborColumn = cols[neighborIdx]
+        let neighborColumn = projectedColumns[neighborIdx].column
         guard neighborColumn.id != currentColumn.id else { return false }
 
         return consumeWindow(
@@ -672,7 +687,7 @@ extension NiriLayoutEngine {
             let minSize = tile.constraints.normalized().minSize
             return orientation == .horizontal ? minSize.height : minSize.width
         }
-        let remaining = column.windowNodes.filter { $0 !== removedWindow }
+        let remaining = projectedWindows(in: column, workspaceId: workspaceId).filter { $0 !== removedWindow }
         let minSum = remaining.reduce(axisMinimum(window)) { $0 + axisMinimum($1) }
         let gapSum = gaps * CGFloat(remaining.count + 2)
         return minSum + gapSum <= axisSpace + 0.5
@@ -824,16 +839,19 @@ extension NiriLayoutEngine {
         orientation: Monitor.Orientation
     ) -> Bool {
         assertSanctionedMutation()
-        let cols = columns(in: workspaceId)
-        guard let targetColumnIdx = columnIndex(of: targetColumn, in: workspaceId),
-              targetColumnIdx + 1 < cols.count
+        let projectedColumns = projectedColumns(in: workspaceId)
+        guard let targetProjectedIndex = projectedColumns.firstIndex(where: { $0.column === targetColumn }),
+              projectedColumns.indices.contains(targetProjectedIndex + 1)
         else {
             return false
         }
 
-        let sourceColumnIdx = targetColumnIdx + 1
-        let sourceColumn = cols[sourceColumnIdx]
-        guard let window = sourceColumn.windowNodes.last,
+        let sourceProjectedColumn = projectedColumns[targetProjectedIndex + 1]
+        let sourceColumn = sourceProjectedColumn.column
+        let sourceColumnIdx = sourceProjectedColumn.durableIndex
+        let targetColumnIdx = projectedColumns[targetProjectedIndex].durableIndex
+        let cols = columns(in: workspaceId)
+        guard let window = sourceProjectedColumn.windows.last,
               let sourceTileIdx = sourceColumn.windowNodes.firstIndex(where: { $0 === window })
         else {
             return false
@@ -939,10 +957,11 @@ extension NiriLayoutEngine {
         orientation: Monitor.Orientation
     ) -> Bool {
         assertSanctionedMutation()
-        guard sourceColumn.windowNodes.count > 1,
+        let visibleWindows = projectedWindows(in: sourceColumn, workspaceId: workspaceId)
+        guard visibleWindows.count > 1,
               let root = root(for: workspaceId),
               let sourceColumnIdx = columnIndex(of: sourceColumn, in: workspaceId),
-              let window = sourceColumn.windowNodes.first
+              let window = visibleWindows.first
         else {
             return false
         }
@@ -970,7 +989,7 @@ extension NiriLayoutEngine {
             gaps: gaps,
             orientation: orientation
         )
-        let replacementSelectionId = sourceColumn.windowNodes.dropFirst().first?.id
+        let replacementSelectionId = visibleWindows.dropFirst().first?.id
         let selectedExpelledWindow = state.selectedNodeId == window.id
 
         let newColumn = NiriContainer()
@@ -1166,7 +1185,7 @@ extension NiriLayoutEngine {
         animationConfig: SpringConfig? = nil,
         fromContainerIndex: Int? = nil
     ) {
-        if let firstWindow = column.windowNodes.first {
+        if let firstWindow = projectedWindows(in: column, workspaceId: workspaceId).first {
             ensureSelectionVisible(
                 node: firstWindow,
                 in: workspaceId,

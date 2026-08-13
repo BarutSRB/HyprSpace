@@ -2,6 +2,7 @@
 // Copyright (C) 2026 BarutSRB — https://github.com/BarutSRB/OmniWM
 
 import AppKit
+import ApplicationServices
 import Carbon
 @testable import OmniWM
 import XCTest
@@ -111,6 +112,23 @@ final class CommandPaletteControllerTests: XCTestCase {
         )
     }
 
+    func testHiddenManagedRowsRemainSearchableAndSortAfterVisibleRows() throws {
+        let (wmController, visibleToken, hiddenToken) = try makeWindowFixture()
+        let palette = CommandPaletteController(
+            motionPolicy: MotionPolicy(animationsEnabled: false)
+        )
+
+        let items = palette.buildWindowItems(from: wmController)
+
+        XCTAssertEqual(items.map(\.id), [visibleToken, hiddenToken])
+        XCTAssertEqual(items.map(\.isAppHidden), [false, true])
+        XCTAssertTrue(items[0].handle === wmController.workspaceManager.handle(for: visibleToken))
+        XCTAssertTrue(items[1].handle === wmController.workspaceManager.handle(for: hiddenToken))
+        XCTAssertEqual(palette.filterWindowItems(items, query: "hidden").map(\.id), [hiddenToken])
+        XCTAssertTrue(CommandPaletteController.allowsSummonRight(items[0]))
+        XCTAssertFalse(CommandPaletteController.allowsSummonRight(items[1]))
+    }
+
     private func modeNavigationTarget(
         currentMode: CommandPaletteMode,
         isMenuModeAvailable: Bool = true,
@@ -137,5 +155,47 @@ final class CommandPaletteControllerTests: XCTestCase {
             relevantModifiers: .command,
             charactersIgnoringModifiers: characters
         )
+    }
+
+    private func makeWindowFixture() throws -> (WMController, WindowToken, WindowToken) {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("OmniWMCommandPaletteTests-\(UUID().uuidString)", isDirectory: true)
+        let settings = SettingsStore(
+            persistence: SettingsFilePersistence(
+                directory: root.appendingPathComponent("config", isDirectory: true),
+                startWatching: false,
+                deferSaves: false
+            ),
+            runtimeState: RuntimeStateStore(
+                directory: root.appendingPathComponent("state", isDirectory: true),
+                deferSaves: false
+            ),
+            autosaveEnabled: false
+        )
+        let controller = WMController(
+            settings: settings,
+            windowFocusOperations: WindowFocusOperations(
+                activateApp: { _ in },
+                focusSpecificWindow: { _, _, _ in },
+                raiseWindow: { _ in }
+            )
+        )
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let hiddenToken = controller.workspaceManager.addWindow(
+            AXWindowRef(element: AXUIElementCreateApplication(92_001), windowId: 92_101),
+            pid: 92_001,
+            windowId: 92_101,
+            to: workspaceId
+        )
+        let visibleToken = controller.workspaceManager.addWindow(
+            AXWindowRef(element: AXUIElementCreateApplication(92_002), windowId: 92_102),
+            pid: 92_002,
+            windowId: 92_102,
+            to: workspaceId
+        )
+        controller.workspaceManager.setAppHidden(true, pid: hiddenToken.pid, source: .service)
+        return (controller, visibleToken, hiddenToken)
     }
 }

@@ -138,6 +138,7 @@ extension NiriLayoutEngine {
             niriMonitor.workspaceRoots.removeValue(forKey: workspaceId)
         }
         states.removeValue(forKey: workspaceId)
+        excludedTokensByWorkspace.removeValue(forKey: workspaceId)
     }
 
     func adjacentWorkspace(

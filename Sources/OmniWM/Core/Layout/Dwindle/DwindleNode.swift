@@ -95,6 +95,19 @@ final class DwindleTile {
         activeIndex = destination
         return true
     }
+
+    @discardableResult
+    func move(_ token: WindowToken, to destination: Int) -> Bool {
+        guard let source = memberIndex(for: token),
+              members.indices.contains(destination),
+              source != destination
+        else {
+            return false
+        }
+        members.swapAt(source, destination)
+        activeIndex = destination
+        return true
+    }
 }
 
 struct DwindleTileSnapshot: Equatable {

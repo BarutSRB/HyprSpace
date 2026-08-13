@@ -481,10 +481,11 @@ extension NiriLayoutEngine {
 
     func calculateVerticalPixelsPerWeightUnit(
         column: NiriContainer,
+        workspaceId: WorkspaceDescriptor.ID,
         monitorFrame: CGRect,
         gaps: LayoutGaps
     ) -> CGFloat {
-        let windows = column.children
+        let windows = projectedWindows(in: column, workspaceId: workspaceId)
         guard !windows.isEmpty else { return 0 }
 
         let totalWeight = windows.reduce(CGFloat(0)) { $0 + $1.size }
@@ -868,109 +869,110 @@ extension NiriLayoutEngine {
             return
         }
 
-        let columns = self.columns(in: workspaceId)
-        guard let activeColumnIndex = columnIndex(of: column, in: workspaceId) else { return }
+        var resultingWidth: CGFloat?
+        _ = withProjectedViewport(
+            state: &state,
+            in: workspaceId,
+            workingFrame: workingFrame,
+            gaps: gaps,
+            orientation: orientation
+        ) { columns, projectedState in
+            guard let activeColumnIndex = columns.firstIndex(where: { $0 === column }) else { return }
+            let viewX = projectedState.columnX(
+                at: projectedState.activeColumnIndex.clamped(to: 0 ... max(0, columns.count - 1)),
+                columns: columns,
+                gap: gaps
+            ) + projectedState.viewOffset
 
-        for candidate in columns where candidate.cachedWidth <= 0 {
-            candidate.resolveAndCacheWidth(
-                workingAreaWidth: workingFrame.width,
-                gaps: gaps,
-                contentInset: tabContentInset(for: candidate)
-            )
-        }
+            var widthTaken: CGFloat = 0
+            var leftmostColX: CGFloat?
+            var activeColX: CGFloat?
+            var activeColumnWasFullyVisible = false
+            var countedNonActiveColumn = false
 
-        let viewX = state.columnX(
-            at: state.activeColumnIndex.clamped(to: 0 ... max(0, columns.count - 1)),
-            columns: columns,
-            gap: gaps
-        ) + state.viewOffset
+            for idx in columns.indices {
+                let colX = projectedState.columnX(at: idx, columns: columns, gap: gaps)
+                if colX < viewX + gaps {
+                    continue
+                }
 
-        var widthTaken: CGFloat = 0
-        var leftmostColX: CGFloat?
-        var activeColX: CGFloat?
-        var activeColumnWasFullyVisible = false
-        var countedNonActiveColumn = false
+                if leftmostColX == nil {
+                    leftmostColX = colX
+                }
 
-        for idx in columns.indices {
-            let colX = state.columnX(at: idx, columns: columns, gap: gaps)
-            if colX < viewX + gaps {
-                continue
+                let width = columns[idx].cachedWidth
+                if viewX + workingFrame.width < colX + width + gaps {
+                    break
+                }
+
+                if idx == activeColumnIndex {
+                    activeColumnWasFullyVisible = true
+                    activeColX = colX
+                } else {
+                    countedNonActiveColumn = true
+                }
+
+                widthTaken += width + gaps
             }
 
-            if leftmostColX == nil {
-                leftmostColX = colX
+            guard activeColumnWasFullyVisible else { return }
+            let availableWidth = workingFrame.width - gaps - widthTaken
+            guard availableWidth > 0 else { return }
+
+            if !countedNonActiveColumn {
+                toggleContainerFullPrimarySpan(
+                    column,
+                    in: workspaceId,
+                    motion: motion,
+                    state: &projectedState,
+                    workingFrame: workingFrame,
+                    gaps: gaps,
+                    orientation: orientation
+                )
+                resultingWidth = column.cachedWidth
+                return
             }
 
-            let width = columns[idx].cachedWidth
-            if viewX + workingFrame.width < colX + width + gaps {
-                break
-            }
-
-            if idx == activeColumnIndex {
-                activeColumnWasFullyVisible = true
-                activeColX = colX
-            } else {
-                countedNonActiveColumn = true
-            }
-
-            widthTaken += width + gaps
-        }
-
-        guard activeColumnWasFullyVisible else { return }
-
-        let availableWidth = workingFrame.width - gaps - widthTaken
-        guard availableWidth > 0 else { return }
-
-        if !countedNonActiveColumn {
-            toggleContainerFullPrimarySpan(
+            guard let leftmostColX, let activeColX else { return }
+            let previousWidth = cachedWidthForResizeStart(
                 column,
                 in: workspaceId,
+                workingFrame: workingFrame,
+                gaps: gaps
+            )
+            let targetWidth = (column.cachedWidth + availableWidth).clamped(to: 1 ... NiriSizeChange.maxPixels)
+            applyColumnWidth(
+                column,
+                width: .fixed(targetWidth),
+                presetIndex: nil,
+                previousWidth: previousWidth,
+                in: workspaceId,
                 motion: motion,
-                state: &state,
+                state: &projectedState,
+                workingFrame: workingFrame,
+                gaps: gaps,
+                orientation: orientation,
+                recoversSettledCoverage: false
+            )
+            resultingWidth = column.cachedWidth
+            let targetOffset = leftmostColX - gaps - activeColX
+            projectedState.animateToOffset(
+                targetOffset,
+                motion: motion,
+                scale: displayScale(in: workspaceId)
+            )
+            recoverSettledCoverage(
+                in: workspaceId,
+                motion: motion,
+                state: &projectedState,
                 workingFrame: workingFrame,
                 gaps: gaps,
                 orientation: orientation
             )
-            return
         }
-
-        guard let leftmostColX, let activeColX else { return }
-
-        let previousWidth = cachedWidthForResizeStart(
-            column,
-            in: workspaceId,
-            workingFrame: workingFrame,
-            gaps: gaps
-        )
-        let targetWidth = (column.cachedWidth + availableWidth).clamped(to: 1 ... NiriSizeChange.maxPixels)
-        applyColumnWidth(
-            column,
-            width: .fixed(targetWidth),
-            presetIndex: nil,
-            previousWidth: previousWidth,
-            in: workspaceId,
-            motion: motion,
-            state: &state,
-            workingFrame: workingFrame,
-            gaps: gaps,
-            orientation: orientation,
-            recoversSettledCoverage: false
-        )
-
-        let targetOffset = leftmostColX - gaps - activeColX
-        state.animateToOffset(
-            targetOffset,
-            motion: motion,
-            scale: displayScale(in: workspaceId)
-        )
-        recoverSettledCoverage(
-            in: workspaceId,
-            motion: motion,
-            state: &state,
-            workingFrame: workingFrame,
-            gaps: gaps,
-            orientation: orientation
-        )
+        if let resultingWidth {
+            column.cachedWidth = resultingWidth
+        }
     }
 
     private func currentWindowWidth(_ window: NiriWindow) -> CGFloat {

@@ -9,6 +9,16 @@ extension AXEventHandler {
         guard let controller else { return }
         guard !controller.workspaceManager.isAppHidden(pid: pid) else { return }
         let entries = controller.workspaceManager.entries(forPid: pid)
+        let affectedWorkspaceIds = Set(entries.map(\.workspaceId))
+        controller.dwindleLayoutHandler.cancelPendingGroupReveals(pid: pid)
+        for entry in entries {
+            controller.layoutRefreshController.cancelPendingScratchpadReveal(for: entry.token)
+        }
+        controller.mouseEventHandler.handleAppVisibilityChanged()
+        for workspaceId in affectedWorkspaceIds {
+            controller.layoutRefreshController.cancelActiveAnimations(for: workspaceId)
+        }
+        controller.layoutRefreshController.stopAllDwindleAnimations()
         controller.layoutRefreshController.cancelFrameAnimations(forPID: pid)
         controller.axManager.setMacOSAppHidden(
             true,
@@ -33,8 +43,20 @@ extension AXEventHandler {
                 preserveFocusedToken: true
             )
         }
+        controller.windowActionHandler.refreshOverviewProjection(
+            affectedWorkspaceIds: affectedWorkspaceIds
+        )
 
-        controller.layoutRefreshController.requestVisibilityRefresh(reason: .appHidden)
+        let activeAffectedWorkspaceIds = activeWorkspaceIds(
+            in: affectedWorkspaceIds,
+            controller: controller
+        )
+        if !activeAffectedWorkspaceIds.isEmpty {
+            controller.layoutRefreshController.requestVisibilityRefresh(
+                reason: .appHidden,
+                affectedWorkspaceIds: activeAffectedWorkspaceIds
+            )
+        }
         controller.surfaceReconciler.noteWorldChanged()
     }
 
@@ -42,13 +64,44 @@ extension AXEventHandler {
         guard let controller else { return }
         guard controller.workspaceManager.isAppHidden(pid: pid) else { return }
         let entries = controller.workspaceManager.entries(forPid: pid)
+        let affectedWorkspaceIds = Set(entries.map(\.workspaceId))
+        let revealIntentId = controller.intentLedger.openAppRevealFocusIntent(pid: pid)?.intent.id
         controller.workspaceManager.setAppHidden(false, pid: pid, source: source)
         controller.axManager.setMacOSAppHidden(
             false,
             pid: pid,
             entries: entries.map { (pid: $0.pid, windowId: $0.windowId) }
         )
-        controller.layoutRefreshController.requestVisibilityRefresh(reason: .appUnhidden)
+        controller.windowActionHandler.refreshOverviewProjection(
+            affectedWorkspaceIds: affectedWorkspaceIds
+        )
+        let completeReveal = revealIntentId.map { intentId -> LayoutRefreshController.PostLayoutAction in
+            { [weak controller] in
+                _ = controller?.windowActionHandler.completeAppRevealFocus(intentId: intentId)
+            }
+        }
+        let activeAffectedWorkspaceIds = activeWorkspaceIds(
+            in: affectedWorkspaceIds,
+            controller: controller
+        )
+        controller.layoutRefreshController.requestVisibilityRefresh(
+            reason: .appUnhidden,
+            affectedWorkspaceIds: activeAffectedWorkspaceIds,
+            postLayout: completeReveal,
+            postLayoutInvalidated: completeReveal
+        )
         controller.surfaceReconciler.noteWorldChanged()
+    }
+
+    private func activeWorkspaceIds(
+        in workspaceIds: Set<WorkspaceDescriptor.ID>,
+        controller: WMController
+    ) -> Set<WorkspaceDescriptor.ID> {
+        Set(workspaceIds.filter { workspaceId in
+            guard let monitorId = controller.workspaceManager.monitorId(for: workspaceId) else {
+                return false
+            }
+            return controller.workspaceManager.activeWorkspace(on: monitorId)?.id == workspaceId
+        })
     }
 }

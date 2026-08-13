@@ -17,6 +17,7 @@ extension NiriLayoutEngine {
         for (colIdx, column) in root.columns.enumerated() {
             for child in column.children {
                 guard let window = child as? NiriWindow,
+                      isProjectedFocusableWindow(window, in: workspaceId),
                       let frame = window.renderedFrame ?? window.frame else { continue }
 
                 if window.isFullscreen {
@@ -48,6 +49,7 @@ extension NiriLayoutEngine {
         for column in root.columns {
             for child in column.children {
                 guard let window = child as? NiriWindow,
+                      isProjectedFocusableWindow(window, in: workspaceId),
                       let frame = window.renderedFrame ?? window.frame else { continue }
 
                 if frame.contains(point) {
@@ -70,7 +72,7 @@ extension NiriLayoutEngine {
         for column in root.columns {
             for child in column.children {
                 guard let window = child as? NiriWindow,
-                      !window.isHiddenInTabbedMode,
+                      isProjectedFocusableWindow(window, in: workspaceId),
                       let frame = window.renderedFrame ?? window.frame,
                       frame.contains(point)
                 else {
@@ -119,7 +121,11 @@ extension NiriLayoutEngine {
         return edges
     }
 
-    private func interactiveResizeStartWidth(for column: NiriContainer, window: NiriWindow) -> CGFloat {
+    private func interactiveResizeStartWidth(
+        for column: NiriContainer,
+        window: NiriWindow,
+        workspaceId: WorkspaceDescriptor.ID
+    ) -> CGFloat {
         if column.cachedWidth > 0 {
             return column.cachedWidth
         }
@@ -130,14 +136,19 @@ extension NiriLayoutEngine {
             return width
         }
         if let width = window.frame?.width, width > 0 {
-            return width + (column.isTabbed ? renderStyle.tabIndicatorWidth : 0)
+            let tabOffset = projectedWindows(in: column, workspaceId: workspaceId).count > 1
+                ? renderStyle.tabIndicatorWidth
+                : 0
+            return width + tabOffset
         }
-        return column.widthBounds(
-            contentInset: tabContentInset(for: column)
-        ).min
+        return projectedWidthBounds(for: column, workspaceId: workspaceId).min
     }
 
-    private func interactiveResizeStartHeight(for column: NiriContainer, window: NiriWindow) -> CGFloat {
+    private func interactiveResizeStartHeight(
+        for column: NiriContainer,
+        window: NiriWindow,
+        workspaceId: WorkspaceDescriptor.ID
+    ) -> CGFloat {
         if column.cachedHeight > 0 {
             return column.cachedHeight
         }
@@ -150,21 +161,22 @@ extension NiriLayoutEngine {
         if let height = window.frame?.height, height > 0 {
             return height
         }
-        return column.heightBounds().min
+        return projectedHeightBounds(for: column, workspaceId: workspaceId).min
     }
 
     private func calculateHorizontalPixelsPerWeightUnit(
         column: NiriContainer,
+        workspaceId: WorkspaceDescriptor.ID,
         monitorFrame: CGRect,
         gaps: LayoutGaps
     ) -> CGFloat {
-        let windows = column.windowNodes
+        let windows = projectedWindows(in: column, workspaceId: workspaceId)
         guard !windows.isEmpty else { return 0 }
 
         let totalWeight = windows.reduce(CGFloat(0)) { $0 + $1.widthWeight }
         guard totalWeight > 0 else { return 0 }
 
-        let tabOffset = column.isTabbed ? renderStyle.tabIndicatorWidth : 0
+        let tabOffset = column.isTabbed && windows.count > 1 ? renderStyle.tabIndicatorWidth : 0
         let totalGaps = CGFloat(windows.count + 1) * gaps.horizontal
         let usableWidth = monitorFrame.width - tabOffset - totalGaps
 
@@ -183,6 +195,7 @@ extension NiriLayoutEngine {
         guard interactiveMove == nil else { return false }
 
         guard let windowNode = findNode(by: windowId, in: workspaceId) as? NiriWindow else { return false }
+        guard isProjectedFocusableWindow(windowNode, in: workspaceId) else { return false }
         guard let column = findColumn(containing: windowNode, in: workspaceId) else { return false }
         guard let colIdx = columnIndex(of: column, in: workspaceId) else { return false }
         if windowNode.isFullscreen {
@@ -198,15 +211,18 @@ extension NiriLayoutEngine {
         switch orientation {
         case .horizontal:
             originalContainerSpan = edges.hasHorizontal
-                ? interactiveResizeStartWidth(for: column, window: windowNode)
+                ? interactiveResizeStartWidth(for: column, window: windowNode, workspaceId: workspaceId)
                 : nil
             originalWindowBaseline = edges.hasVertical ? .weight(windowNode.size) : nil
         case .vertical:
             originalContainerSpan = edges.hasVertical
-                ? interactiveResizeStartHeight(for: column, window: windowNode)
+                ? interactiveResizeStartHeight(for: column, window: windowNode, workspaceId: workspaceId)
                 : nil
             if edges.hasHorizontal,
-               let singleWindowContext = singleWindowLayoutContext(in: workspaceId),
+               let singleWindowContext = singleWindowLayoutContext(
+                   in: workspaceId,
+                   excluding: projectionExclusions(in: workspaceId)
+               ),
                singleWindowContext.container === column
             {
                 originalWindowBaseline = .fixedPixels(
@@ -281,9 +297,7 @@ extension NiriLayoutEngine {
                     dx = -dx
                 }
 
-                let widthBounds = column.widthBounds(
-                    contentInset: tabContentInset(for: column)
-                )
+                let widthBounds = projectedWidthBounds(for: column, workspaceId: resize.workspaceId)
                 let minWidth = widthBounds.min
                 let viewportMaxWidth = monitorFrame.width - gaps.horizontal
                 let maxWidth = max(
@@ -319,6 +333,7 @@ extension NiriLayoutEngine {
 
                 let pixelsPerWeight = calculateVerticalPixelsPerWeightUnit(
                     column: column,
+                    workspaceId: resize.workspaceId,
                     monitorFrame: monitorFrame,
                     gaps: gaps
                 )
@@ -355,6 +370,7 @@ extension NiriLayoutEngine {
                 case let .weight(originalWidthWeight):
                     let pixelsPerWeight = calculateHorizontalPixelsPerWeightUnit(
                         column: column,
+                        workspaceId: resize.workspaceId,
                         monitorFrame: monitorFrame,
                         gaps: gaps
                     )
@@ -380,7 +396,7 @@ extension NiriLayoutEngine {
                     dy = -dy
                 }
 
-                let heightBounds = column.heightBounds()
+                let heightBounds = projectedHeightBounds(for: column, workspaceId: resize.workspaceId)
                 let minHeight = heightBounds.min
                 let viewportMaxHeight = monitorFrame.height - gaps.vertical
                 let maxHeight = max(
@@ -406,6 +422,44 @@ extension NiriLayoutEngine {
         }
 
         return changed
+    }
+
+    private func projectedWidthBounds(
+        for column: NiriContainer,
+        workspaceId: WorkspaceDescriptor.ID
+    ) -> (min: CGFloat, max: CGFloat?) {
+        let windows = projectedWindows(in: column, workspaceId: workspaceId)
+        var minimum: CGFloat = 1
+        var maximum: CGFloat?
+        for window in windows {
+            let constraints = window.constraints.normalized()
+            minimum = max(minimum, constraints.minSize.width)
+            if constraints.hasMaxWidth {
+                maximum = min(maximum ?? constraints.maxSize.width, constraints.maxSize.width)
+            }
+        }
+        let contentInset = column.isTabbed && windows.count > 1 ? tabContentInset(for: column) : 0
+        return (
+            minimum + contentInset,
+            maximum.map { max($0, minimum) + contentInset }
+        )
+    }
+
+    private func projectedHeightBounds(
+        for column: NiriContainer,
+        workspaceId: WorkspaceDescriptor.ID
+    ) -> (min: CGFloat, max: CGFloat?) {
+        let windows = projectedWindows(in: column, workspaceId: workspaceId)
+        var minimum: CGFloat = 1
+        var maximum: CGFloat?
+        for window in windows {
+            let constraints = window.constraints.normalized()
+            minimum = max(minimum, constraints.minSize.height)
+            if constraints.hasMaxHeight {
+                maximum = min(maximum ?? constraints.maxSize.height, constraints.maxSize.height)
+            }
+        }
+        return (minimum, maximum.map { max($0, minimum) })
     }
 
     func clearInteractiveResize() {

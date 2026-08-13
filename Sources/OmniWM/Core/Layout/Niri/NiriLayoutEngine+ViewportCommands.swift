@@ -14,11 +14,6 @@ extension NiriLayoutEngine {
         orientation: Monitor.Orientation
     ) -> Bool {
         assertSanctionedMutation()
-        let columns = columns(in: workspaceId)
-        guard !columns.isEmpty else { return false }
-
-        let activeIndex = state.activeColumnIndex.clamped(to: 0 ... (columns.count - 1))
-        state.activeColumnIndex = activeIndex
         resolvePrimaryContainerSpans(
             in: workspaceId,
             workingFrame: workingFrame,
@@ -35,28 +30,36 @@ extension NiriLayoutEngine {
             sizeKeyPath = \.cachedHeight
             viewportSpan = workingFrame.height
         }
-
-        cancelInteractiveResize(for: columns[activeIndex], in: workspaceId)
-
         let scale = displayScale(in: workspaceId)
         let viewFrame = monitorForWorkspace(workspaceId)?.frame
-        let targetOffset = state.computeCenteredOffset(
-            containerIndex: activeIndex,
-            containers: columns,
-            gap: gaps,
-            viewportSpan: viewportSpan,
-            sizeKeyPath: sizeKeyPath,
-            workingArea: workingFrame,
-            viewFrame: viewFrame,
-            orientation: orientation,
-            scale: scale
-        )
-        state.animateToOffset(
-            targetOffset,
-            motion: motion,
-            scale: scale
-        )
-        return true
+        return withProjectedViewport(
+            state: &state,
+            in: workspaceId,
+            workingFrame: workingFrame,
+            gaps: gaps,
+            orientation: orientation
+        ) { columns, projectedState in
+            let activeIndex = projectedState.activeColumnIndex.clamped(to: 0 ... columns.count - 1)
+            projectedState.activeColumnIndex = activeIndex
+            cancelInteractiveResize(for: columns[activeIndex], in: workspaceId)
+            let targetOffset = projectedState.computeCenteredOffset(
+                containerIndex: activeIndex,
+                containers: columns,
+                gap: gaps,
+                viewportSpan: viewportSpan,
+                sizeKeyPath: sizeKeyPath,
+                workingArea: workingFrame,
+                viewFrame: viewFrame,
+                orientation: orientation,
+                scale: scale
+            )
+            projectedState.animateToOffset(
+                targetOffset,
+                motion: motion,
+                scale: scale
+            )
+            return true
+        } ?? false
     }
 
     @discardableResult
@@ -69,18 +72,7 @@ extension NiriLayoutEngine {
         orientation: Monitor.Orientation
     ) -> Bool {
         assertSanctionedMutation()
-        let columns = columns(in: workspaceId)
-        guard !columns.isEmpty else { return false }
-
         let settings = effectiveSettings(in: workspaceId)
-        if settings.centerFocusedColumn == .always
-            || (settings.alwaysCenterSingleColumn && columns.count <= 1)
-        {
-            return false
-        }
-
-        let activeIndex = state.activeColumnIndex.clamped(to: 0 ... (columns.count - 1))
-        state.activeColumnIndex = activeIndex
         resolvePrimaryContainerSpans(
             in: workspaceId,
             workingFrame: workingFrame,
@@ -100,84 +92,92 @@ extension NiriLayoutEngine {
 
         let scale = displayScale(in: workspaceId)
         let viewFrame = monitorForWorkspace(workspaceId)?.frame
-        let areas = state.normalizedFittingAreas(
-            viewportSpan: viewportSpan,
-            workingArea: workingFrame,
-            viewFrame: viewFrame,
-            orientation: orientation,
-            scale: scale
-        )
-        let activePosition = state.containerPosition(
-            at: activeIndex,
-            containers: columns,
-            gap: gaps,
-            sizeKeyPath: sizeKeyPath
-        )
-        let viewStart = activePosition + state.viewOffset
-        let workingStart = areas.origin(of: areas.working)
-        let workingSpan = areas.span(of: areas.working)
+        return withProjectedViewport(
+            state: &state,
+            in: workspaceId,
+            workingFrame: workingFrame,
+            gaps: gaps,
+            orientation: orientation
+        ) { columns, projectedState in
+            guard settings.centerFocusedColumn != .always,
+                  !settings.alwaysCenterSingleColumn || columns.count > 1
+            else {
+                return false
+            }
 
-        var spanTaken: CGFloat = 0
-        var firstVisiblePosition: CGFloat?
-        var activeContainerPosition: CGFloat?
-
-        for (idx, column) in columns.enumerated() {
-            let position = state.containerPosition(
-                at: idx,
+            let activeIndex = projectedState.activeColumnIndex.clamped(to: 0 ... columns.count - 1)
+            projectedState.activeColumnIndex = activeIndex
+            let areas = projectedState.normalizedFittingAreas(
+                viewportSpan: viewportSpan,
+                workingArea: workingFrame,
+                viewFrame: viewFrame,
+                orientation: orientation,
+                scale: scale
+            )
+            let activePosition = projectedState.containerPosition(
+                at: activeIndex,
                 containers: columns,
                 gap: gaps,
                 sizeKeyPath: sizeKeyPath
             )
-            if position < viewStart + workingStart + gaps {
-                continue
+            let viewStart = activePosition + projectedState.viewOffset
+            let workingStart = areas.origin(of: areas.working)
+            let workingSpan = areas.span(of: areas.working)
+
+            var spanTaken: CGFloat = 0
+            var firstVisiblePosition: CGFloat?
+            var activeContainerPosition: CGFloat?
+
+            for (idx, column) in columns.enumerated() {
+                let position = projectedState.containerPosition(
+                    at: idx,
+                    containers: columns,
+                    gap: gaps,
+                    sizeKeyPath: sizeKeyPath
+                )
+                if position < viewStart + workingStart + gaps {
+                    continue
+                }
+
+                if firstVisiblePosition == nil {
+                    firstVisiblePosition = position
+                }
+
+                let span = column[keyPath: sizeKeyPath]
+                if viewStart + workingStart + workingSpan < position + span + gaps {
+                    break
+                }
+
+                if idx == activeIndex {
+                    activeContainerPosition = position
+                }
+
+                spanTaken += span + gaps
             }
 
-            if firstVisiblePosition == nil {
-                firstVisiblePosition = position
-            }
+            guard let firstVisiblePosition, let activeContainerPosition else { return false }
+            cancelInteractiveResize(for: columns[activeIndex], in: workspaceId)
+            let freeSpace = workingSpan - spanTaken + gaps
+            let newViewStart = firstVisiblePosition - freeSpace / 2 - workingStart
+            let targetOffset = newViewStart - activeContainerPosition
 
-            let span = column[keyPath: sizeKeyPath]
-            if viewStart + workingStart + workingSpan < position + span + gaps {
-                break
-            }
-
-            if idx == activeIndex {
-                activeContainerPosition = position
-            }
-
-            spanTaken += span + gaps
-        }
-
-        guard let firstVisiblePosition, let activeContainerPosition else { return false }
-
-        cancelInteractiveResize(for: columns[activeIndex], in: workspaceId)
-
-        let freeSpace = workingSpan - spanTaken + gaps
-        let newViewStart = firstVisiblePosition - freeSpace / 2 - workingStart
-        let targetOffset = newViewStart - activeContainerPosition
-
-        state.animateToOffset(
-            targetOffset,
-            motion: motion,
-            scale: scale
-        )
-
-        state.ensureContainerVisible(
-            containerIndex: activeIndex,
-            containers: columns,
-            gap: gaps,
-            viewportSpan: workingSpan,
-            motion: motion,
-            sizeKeyPath: sizeKeyPath,
-            centerMode: settings.centerFocusedColumn,
-            alwaysCenterSingleColumn: settings.alwaysCenterSingleColumn,
-            scale: scale,
-            workingArea: workingFrame,
-            viewFrame: viewFrame,
-            orientation: orientation
-        )
-
-        return true
+            projectedState.animateToOffset(targetOffset, motion: motion, scale: scale)
+            projectedState.ensureContainerVisible(
+                containerIndex: activeIndex,
+                containers: columns,
+                gap: gaps,
+                viewportSpan: workingSpan,
+                motion: motion,
+                sizeKeyPath: sizeKeyPath,
+                centerMode: settings.centerFocusedColumn,
+                alwaysCenterSingleColumn: settings.alwaysCenterSingleColumn,
+                scale: scale,
+                workingArea: workingFrame,
+                viewFrame: viewFrame,
+                orientation: orientation
+            )
+            return true
+        } ?? false
     }
 
     private func cancelInteractiveResize(
