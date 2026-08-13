@@ -89,7 +89,7 @@ final class AppVisibilityLifecycleTraceTests: XCTestCase {
             visibleWindowInfoProvider: { [] },
             visibleOwnedWindowsProvider: { [] },
             frontOwnedWindow: { _ in },
-            unhideApplication: { _ in true }
+            requestApplicationUnhide: { _ in .requestReportedSent }
         )
         fixture.controller.workspaceManager.setAppHidden(
             true,
@@ -119,7 +119,7 @@ final class AppVisibilityLifecycleTraceTests: XCTestCase {
         assertOrdered(
             [
                 "event=reveal pid=92003 outcome=issued",
-                "event=reveal pid=92003 outcome=succeeded",
+                "event=reveal pid=92003 outcome=requested",
                 "event=reveal pid=92003 outcome=cancelled",
                 "event=reveal pid=92003 outcome=rejected"
             ],
@@ -136,7 +136,7 @@ final class AppVisibilityLifecycleTraceTests: XCTestCase {
             visibleWindowInfoProvider: { [] },
             visibleOwnedWindowsProvider: { [] },
             frontOwnedWindow: { _ in },
-            unhideApplication: { _ in true }
+            requestApplicationUnhide: { _ in .requestReportedSent }
         )
         fixture.controller.workspaceManager.setAppHidden(
             true,
@@ -165,7 +165,7 @@ final class AppVisibilityLifecycleTraceTests: XCTestCase {
         assertOrdered(
             [
                 "event=reveal pid=92004 outcome=issued",
-                "event=reveal pid=92004 outcome=succeeded",
+                "event=reveal pid=92004 outcome=requested",
                 "event=reveal pid=92004 outcome=confirmed",
                 "event=reveal pid=92004 outcome=completed"
             ],

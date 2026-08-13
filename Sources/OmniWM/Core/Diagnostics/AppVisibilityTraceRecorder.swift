@@ -38,6 +38,7 @@ enum AppVisibilityTrace {
         case issued
         case rekeyed
         case succeeded
+        case indeterminate
         case failed
         case confirmed
         case rejected
@@ -56,7 +57,8 @@ enum AppVisibilityTrace {
         case noActiveWorkspace = "no_active_workspace"
         case lockScreen = "lock_screen"
         case generationInvalidated = "generation_invalidated"
-        case unhideRequestFailed = "unhide_request_failed"
+        case applicationUnavailable = "application_unavailable"
+        case unhideRequestReportedNotSent = "unhide_request_reported_not_sent"
         case superseded
         case intentMissing = "intent_missing"
         case intentKindMismatch = "intent_kind_mismatch"

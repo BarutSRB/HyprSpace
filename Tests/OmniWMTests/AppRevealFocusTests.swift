@@ -44,6 +44,131 @@ final class AppRevealFocusTests: XCTestCase {
         XCTAssertEqual(open.payload.handleIdentity, ObjectIdentifier(fixture.handle))
     }
 
+    func testFalseUnhideResultCompletesAfterAuthoritativeNotification() async throws {
+        let fixture = try makeFixture(pid: 91_015, windowId: 91_115)
+        let handler = makeHandler(controller: fixture.controller) { _ in false }
+        fixture.controller.workspaceManager.setAppHidden(
+            true,
+            pid: fixture.token.pid,
+            source: .service
+        )
+        AppVisibilityTrace.shared.beginCapture()
+        defer { AppVisibilityTrace.shared.endCapture() }
+
+        XCTAssertTrue(handler.navigateToExplicitlySelectedWindow(handle: fixture.handle))
+        let intentId = try XCTUnwrap(
+            fixture.controller.intentLedger.openAppRevealFocusIntent(pid: fixture.token.pid)?.intent.id
+        )
+        XCTAssertEqual(fixture.controller.intentLedger.intent(id: intentId)?.phase, .pending)
+
+        fixture.controller.axEventHandler.handleAppUnhidden(
+            pid: fixture.token.pid,
+            source: .service
+        )
+        await WindowAdmissionTestSupport.drainLayoutRefreshes(fixture.controller)
+
+        XCTAssertEqual(fixture.controller.intentLedger.intent(id: intentId)?.phase, .confirmed)
+        XCTAssertEqual(fixture.controller.intentLedger.activeManagedRequest?.token, fixture.token)
+        XCTAssertEqual(fixture.controller.workspaceManager.pendingFocusedToken, fixture.token)
+        XCTAssertFalse(fixture.controller.workspaceManager.isAppHidden(pid: fixture.token.pid))
+        let dump = AppVisibilityTrace.shared.dump()
+        assertOrdered(
+            [
+                "event=reveal pid=91015 outcome=issued",
+                "event=reveal pid=91015 outcome=indeterminate",
+                "event=state_transition pid=91015 visibility=visible outcome=applied",
+                "event=reveal pid=91015 outcome=confirmed",
+                "event=reveal pid=91015 outcome=completed"
+            ],
+            in: dump
+        )
+        XCTAssertTrue(dump.contains("reason=unhide_request_reported_not_sent"))
+    }
+
+    func testFalseUnhideResultExpiresWithoutAuthoritativeNotification() throws {
+        let fixture = try makeFixture(pid: 91_016, windowId: 91_116)
+        let handler = makeHandler(controller: fixture.controller) { _ in false }
+        fixture.controller.workspaceManager.setAppHidden(
+            true,
+            pid: fixture.token.pid,
+            source: .service
+        )
+        AppVisibilityTrace.shared.beginCapture()
+        defer { AppVisibilityTrace.shared.endCapture() }
+
+        XCTAssertTrue(handler.navigateToExplicitlySelectedWindow(handle: fixture.handle))
+        let intentId = try XCTUnwrap(
+            fixture.controller.intentLedger.openAppRevealFocusIntent(pid: fixture.token.pid)?.intent.id
+        )
+        fixture.controller.deadlineWheel.cancel(intentId: intentId)
+        fixture.controller.axEventHandler.handleIntentExpired(intentId)
+
+        XCTAssertEqual(fixture.controller.intentLedger.intent(id: intentId)?.phase, .expired)
+        XCTAssertTrue(fixture.controller.workspaceManager.isAppHidden(pid: fixture.token.pid))
+        let dump = AppVisibilityTrace.shared.dump()
+        assertOrdered(
+            [
+                "event=reveal pid=91016 outcome=indeterminate",
+                "event=reveal pid=91016 outcome=expired"
+            ],
+            in: dump
+        )
+    }
+
+    func testPendingRevealCancelsWhenApplicationTerminates() throws {
+        let fixture = try makeFixture(pid: 91_018, windowId: 91_118)
+        let handler = makeHandler(controller: fixture.controller) { _ in false }
+        fixture.controller.workspaceManager.setAppHidden(
+            true,
+            pid: fixture.token.pid,
+            source: .service
+        )
+
+        XCTAssertTrue(handler.navigateToExplicitlySelectedWindow(handle: fixture.handle))
+        let intentId = try XCTUnwrap(
+            fixture.controller.intentLedger.openAppRevealFocusIntent(pid: fixture.token.pid)?.intent.id
+        )
+
+        fixture.controller.serviceLifecycleManager.handleAppTerminated(pid: fixture.token.pid)
+
+        XCTAssertEqual(fixture.controller.intentLedger.intent(id: intentId)?.phase, .cancelled)
+        XCTAssertNil(fixture.controller.intentLedger.openAppRevealFocusIntent(pid: fixture.token.pid))
+        XCTAssertNil(fixture.controller.workspaceManager.handle(for: fixture.token))
+        XCTAssertFalse(fixture.controller.workspaceManager.isAppHidden(pid: fixture.token.pid))
+    }
+
+    func testUnavailableApplicationCancelsRevealImmediately() throws {
+        let fixture = try makeFixture(pid: 91_017, windowId: 91_117)
+        let handler = WindowActionHandler(
+            controller: fixture.controller,
+            visibleWindowInfoProvider: { [] },
+            visibleOwnedWindowsProvider: { [] },
+            frontOwnedWindow: { _ in },
+            requestApplicationUnhide: { _ in .applicationUnavailable }
+        )
+        fixture.controller.workspaceManager.setAppHidden(
+            true,
+            pid: fixture.token.pid,
+            source: .service
+        )
+        AppVisibilityTrace.shared.beginCapture()
+        defer { AppVisibilityTrace.shared.endCapture() }
+
+        XCTAssertFalse(handler.navigateToExplicitlySelectedWindow(handle: fixture.handle))
+
+        XCTAssertNil(fixture.controller.intentLedger.openAppRevealFocusIntent(pid: fixture.token.pid))
+        let dump = AppVisibilityTrace.shared.dump()
+        assertOrdered(
+            [
+                "event=reveal pid=91017 outcome=issued",
+                "event=reveal pid=91017 outcome=failed",
+                "event=reveal pid=91017 outcome=cancelled"
+            ],
+            in: dump
+        )
+        XCTAssertTrue(dump.contains("reason=application_unavailable"))
+    }
+
     func testStaleSameTokenHandleCannotRequestUnhide() throws {
         let fixture = try makeFixture(pid: 91_002, windowId: 91_102)
         let staleHandle = WindowHandle(id: fixture.token)
@@ -422,8 +547,26 @@ final class AppRevealFocusTests: XCTestCase {
             visibleWindowInfoProvider: { [] },
             visibleOwnedWindowsProvider: { [] },
             frontOwnedWindow: { _ in },
-            unhideApplication: unhideApplication
+            requestApplicationUnhide: { pid in
+                unhideApplication(pid) ? .requestReportedSent : .requestReportedNotSent
+            }
         )
+    }
+
+    private func assertOrdered(
+        _ fragments: [String],
+        in text: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        var cursor = text.startIndex
+        for fragment in fragments {
+            guard let range = text.range(of: fragment, range: cursor ..< text.endIndex) else {
+                XCTFail("Missing ordered fragment: \(fragment)\n\(text)", file: file, line: line)
+                return
+            }
+            cursor = range.upperBound
+        }
     }
 
     private func emptyFocusFingerprint() -> AppRevealFocusFingerprint {

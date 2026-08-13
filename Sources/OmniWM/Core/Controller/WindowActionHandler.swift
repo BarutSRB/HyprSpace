@@ -6,6 +6,12 @@ import Foundation
 
 @MainActor
 final class WindowActionHandler {
+    enum AppUnhideRequestResult {
+        case applicationUnavailable
+        case requestReportedSent
+        case requestReportedNotSent
+    }
+
     private enum RaisableSurfaceBatchKey: Hashable {
         case application(pid_t)
         case ownedApplication
@@ -59,7 +65,7 @@ final class WindowActionHandler {
     private let visibleWindowInfoProvider: () -> [WindowServerInfo]
     private let visibleOwnedWindowsProvider: () -> [NSWindow]
     private let frontOwnedWindow: (NSWindow) -> Void
-    private let unhideApplication: (pid_t) -> Bool
+    private let requestApplicationUnhide: (pid_t) -> AppUnhideRequestResult
 
     @ObservationIgnored
     private var overviewControllerStorage: OverviewController?
@@ -91,20 +97,20 @@ final class WindowActionHandler {
             NSApp.activate(ignoringOtherApps: true)
             window.makeKeyAndOrderFront(nil)
         },
-        unhideApplication: @escaping (pid_t) -> Bool = { pid in
+        requestApplicationUnhide: @escaping (pid_t) -> AppUnhideRequestResult = { pid in
             guard let app = NSRunningApplication(processIdentifier: pid),
                   !app.isTerminated
             else {
-                return false
+                return .applicationUnavailable
             }
-            return app.unhide()
+            return app.unhide() ? .requestReportedSent : .requestReportedNotSent
         }
     ) {
         self.controller = controller
         self.visibleWindowInfoProvider = visibleWindowInfoProvider
         self.visibleOwnedWindowsProvider = visibleOwnedWindowsProvider
         self.frontOwnedWindow = frontOwnedWindow
-        self.unhideApplication = unhideApplication
+        self.requestApplicationUnhide = requestApplicationUnhide
     }
 
     func openMenuAnywhere() {
@@ -468,20 +474,37 @@ final class WindowActionHandler {
             focusFingerprint: appRevealFocusFingerprint(controller: controller),
             destination: destination
         )
-        let didRequestUnhide = unhideApplication(entry.pid)
+        let unhideResult = requestApplicationUnhide(entry.pid)
+        let traceOutcome: AppVisibilityTrace.Outcome
+        let traceReason: AppVisibilityTrace.Reason?
+        let keepsIntentPending: Bool
+        switch unhideResult {
+        case .applicationUnavailable:
+            traceOutcome = .failed
+            traceReason = .applicationUnavailable
+            keepsIntentPending = false
+        case .requestReportedSent:
+            traceOutcome = .requested
+            traceReason = nil
+            keepsIntentPending = true
+        case .requestReportedNotSent:
+            traceOutcome = .indeterminate
+            traceReason = .unhideRequestReportedNotSent
+            keepsIntentPending = true
+        }
         AppVisibilityTrace.record(
             .reveal,
             pid: entry.pid,
-            outcome: didRequestUnhide ? .succeeded : .failed,
+            outcome: traceOutcome,
             intentId: intent.id,
             windowId: entry.windowId,
             workspaceId: entry.workspaceId,
             generation: appVisibilityGeneration,
             intentGeneration: appVisibilityGeneration,
             destination: destination.traceDestination,
-            reason: didRequestUnhide ? nil : .unhideRequestFailed
+            reason: traceReason
         )
-        guard didRequestUnhide else {
+        guard keepsIntentPending else {
             controller.intentLedger.cancelAppRevealFocus(intentId: intent.id)
             return false
         }
