@@ -495,6 +495,262 @@ final class NiriProjectionCommandTests: XCTestCase {
         XCTAssertEqual(projected.a.widthWeight, baseline.a.widthWeight, accuracy: 0.001)
     }
 
+    func testDiscreteSecondarySizingMatchesEquivalentVisibleTree() throws {
+        for orientation in [Monitor.Orientation.horizontal, .vertical] {
+            let projected = try makeMixedColumnFixture(orientation: orientation)
+            let baseline = try makeVisibleMixedColumnFixture(orientation: orientation)
+            projected.hidden.constraints = WindowSizeConstraints(
+                minSize: CGSize(width: 1100, height: 700),
+                maxSize: .zero,
+                isFixed: false
+            )
+
+            setSecondarySize(.fixed(73), for: projected.hidden, orientation: orientation)
+            let hiddenSizing = secondarySize(of: projected.hidden, orientation: orientation)
+
+            projected.engine.setWindowSecondarySpan(
+                projected.a,
+                change: .setProportion(70),
+                in: projected.workspaceId,
+                workingFrame: workingFrame,
+                gaps: gap,
+                orientation: orientation
+            )
+            baseline.engine.setWindowSecondarySpan(
+                baseline.a,
+                change: .setProportion(70),
+                in: baseline.workspaceId,
+                workingFrame: workingFrame,
+                gaps: gap,
+                orientation: orientation
+            )
+
+            let projectedFrames = layout(
+                engine: projected.engine,
+                workspaceId: projected.workspaceId,
+                selectedWindow: projected.a,
+                orientation: orientation
+            )
+            let baselineFrames = layout(
+                engine: baseline.engine,
+                workspaceId: baseline.workspaceId,
+                selectedWindow: baseline.a,
+                orientation: orientation
+            )
+            let projectedFrame = try XCTUnwrap(projectedFrames[projected.a.token])
+            let baselineFrame = try XCTUnwrap(baselineFrames[baseline.a.token])
+            XCTAssertEqual(
+                secondarySpan(of: projectedFrame, orientation: orientation),
+                secondarySpan(of: baselineFrame, orientation: orientation),
+                accuracy: 0.001
+            )
+            XCTAssertEqual(secondarySize(of: projected.hidden, orientation: orientation), hiddenSizing)
+        }
+    }
+
+    func testSecondaryPresetCyclePreservesHiddenSizing() throws {
+        for orientation in [Monitor.Orientation.horizontal, .vertical] {
+            let projected = try makeMixedColumnFixture(orientation: orientation)
+            projected.engine.presetWindowSecondarySpans = [.fixed(200), .proportion(0.5), .fixed(700)]
+            setResolvedSecondarySpan(300, for: projected.a, orientation: orientation)
+            setSecondarySize(.fixed(73), for: projected.hidden, orientation: orientation)
+            let hiddenSizing = secondarySize(of: projected.hidden, orientation: orientation)
+
+            projected.engine.toggleWindowSecondarySpan(
+                projected.a,
+                forwards: true,
+                in: projected.workspaceId,
+                workingFrame: workingFrame,
+                gaps: gap,
+                orientation: orientation
+            )
+            XCTAssertEqual(secondarySize(of: projected.a, orientation: orientation), .preset(1))
+            XCTAssertTrue(secondarySize(of: projected.b, orientation: orientation).isAuto)
+            XCTAssertEqual(secondarySize(of: projected.hidden, orientation: orientation), hiddenSizing)
+            let frame = try XCTUnwrap(layout(
+                engine: projected.engine,
+                workspaceId: projected.workspaceId,
+                selectedWindow: projected.a,
+                orientation: orientation
+            )[projected.a.token])
+            let expectedSpan: CGFloat = orientation == .horizontal ? 382 : 582
+            XCTAssertEqual(secondarySpan(of: frame, orientation: orientation), expectedSpan, accuracy: 0.001)
+        }
+    }
+
+    func testProjectedSingletonTabbedSecondarySizingHasNoTabInset() throws {
+        let fixture = try makeMixedColumnFixture(orientation: .vertical)
+        fixture.engine.renderStyle = NiriRenderStyle(tabIndicatorWidth: 50)
+        fixture.column.displayMode = .tabbed
+        _ = fixture.engine.calculateLayout(
+            state: ViewportState(selectedNodeId: fixture.a.id),
+            workspaceId: fixture.workspaceId,
+            monitorFrame: workingFrame,
+            gaps: (horizontal: gap, vertical: gap),
+            orientation: .vertical,
+            excludedTokens: [fixture.hidden.token, fixture.b.token]
+        )
+
+        fixture.engine.setWindowSecondarySpan(
+            fixture.a,
+            change: .setProportion(50),
+            in: fixture.workspaceId,
+            workingFrame: workingFrame,
+            gaps: gap,
+            orientation: .vertical
+        )
+
+        let frame = try XCTUnwrap(layout(
+            engine: fixture.engine,
+            workspaceId: fixture.workspaceId,
+            selectedWindow: fixture.a,
+            orientation: .vertical
+        )[fixture.a.token])
+        XCTAssertEqual(frame.width, 582, accuracy: 0.001)
+    }
+
+    func testTabbedSecondaryResetPreservesExcludedMembers() throws {
+        for orientation in [Monitor.Orientation.horizontal, .vertical] {
+            let fixture = try makeMixedColumnFixture(orientation: orientation)
+            fixture.column.displayMode = .tabbed
+            setSecondarySize(.fixed(211), for: fixture.a, orientation: orientation)
+            setSecondarySize(.fixed(223), for: fixture.b, orientation: orientation)
+            setSecondarySize(.fixed(73), for: fixture.hidden, orientation: orientation)
+            fixture.hidden.savedHeight = .fixed(61)
+            let hiddenSizing = secondarySize(of: fixture.hidden, orientation: orientation)
+            let hiddenSavedHeight = fixture.hidden.savedHeight
+
+            fixture.engine.resetWindowSecondarySpan(
+                fixture.hidden,
+                in: fixture.workspaceId,
+                orientation: orientation
+            )
+            XCTAssertEqual(secondarySize(of: fixture.a, orientation: orientation), .fixed(211))
+            XCTAssertEqual(secondarySize(of: fixture.hidden, orientation: orientation), hiddenSizing)
+            XCTAssertEqual(fixture.hidden.savedHeight, hiddenSavedHeight)
+
+            fixture.engine.resetWindowSecondarySpan(
+                fixture.a,
+                in: fixture.workspaceId,
+                orientation: orientation
+            )
+            XCTAssertEqual(secondarySize(of: fixture.a, orientation: orientation), .auto(weight: 1))
+            XCTAssertEqual(secondarySize(of: fixture.b, orientation: orientation), .auto(weight: 1))
+            XCTAssertEqual(secondarySize(of: fixture.hidden, orientation: orientation), hiddenSizing)
+            XCTAssertEqual(fixture.hidden.savedHeight, hiddenSavedHeight)
+        }
+    }
+
+    func testBalancePreservesHiddenOnlyColumnsAndExcludedMembers() throws {
+        for orientation in [Monitor.Orientation.horizontal, .vertical] {
+            let fixture = try makeMixedColumnFixture(orientation: orientation)
+            fixture.engine.visibleContainerCount = 2
+            fixture.hidden.constraints = WindowSizeConstraints(
+                minSize: CGSize(width: 1100, height: 700),
+                maxSize: .zero,
+                isFixed: false
+            )
+            let hiddenOnly = fixture.engine.addWindow(
+                token: WindowToken(pid: 753, windowId: orientation == .horizontal ? 4 : 5),
+                to: fixture.workspaceId,
+                afterSelection: fixture.b.id
+            )
+            let hiddenOnlyColumn = try XCTUnwrap(
+                fixture.engine.findColumn(containing: hiddenOnly, in: fixture.workspaceId)
+            )
+            _ = fixture.engine.calculateLayout(
+                state: ViewportState(selectedNodeId: fixture.a.id),
+                workspaceId: fixture.workspaceId,
+                monitorFrame: workingFrame,
+                gaps: (horizontal: gap, vertical: gap),
+                orientation: orientation,
+                excludedTokens: [fixture.hidden.token, hiddenOnly.token]
+            )
+
+            fixture.column.width = .fixed(333)
+            fixture.column.height = .fixed(222)
+            hiddenOnlyColumn.width = .fixed(487)
+            hiddenOnlyColumn.height = .fixed(391)
+            hiddenOnlyColumn.cachedWidth = 487
+            hiddenOnlyColumn.cachedHeight = 391
+            hiddenOnlyColumn.isFullWidth = true
+            hiddenOnlyColumn.isFullHeight = true
+            hiddenOnlyColumn.savedWidth = .fixed(478)
+            hiddenOnlyColumn.savedHeight = .fixed(382)
+            hiddenOnlyColumn.hasManualSingleWindowWidthOverride = true
+            hiddenOnlyColumn.hasManualSingleWindowHeightOverride = true
+            hiddenOnly.height = .fixed(173)
+            hiddenOnly.windowWidth = .fixed(181)
+
+            let hiddenOnlySizingState = try XCTUnwrap(
+                fixture.engine.containerSizingState(for: hiddenOnly.token, in: fixture.workspaceId)
+            )
+            let hiddenOnlyCachedWidth = hiddenOnlyColumn.cachedWidth
+            let hiddenOnlyCachedHeight = hiddenOnlyColumn.cachedHeight
+            let hiddenOnlyWindowHeight = hiddenOnly.height
+            let hiddenOnlyWindowWidth = hiddenOnly.windowWidth
+
+            setSecondarySize(.auto(weight: 2), for: fixture.a, orientation: orientation)
+            setSecondarySize(.auto(weight: 3), for: fixture.b, orientation: orientation)
+            setSecondarySize(.auto(weight: 43), for: fixture.hidden, orientation: orientation)
+            let mixedHiddenSizing = secondarySize(of: fixture.hidden, orientation: orientation)
+
+            XCTAssertTrue(
+                fixture.engine.balanceSizes(
+                    in: fixture.workspaceId,
+                    motion: .disabled,
+                    workingFrame: workingFrame,
+                    gaps: gap,
+                    orientation: orientation
+                )
+            )
+
+            XCTAssertEqual(
+                try XCTUnwrap(fixture.engine.containerSizingState(for: hiddenOnly.token, in: fixture.workspaceId)),
+                hiddenOnlySizingState
+            )
+            XCTAssertEqual(hiddenOnlyColumn.cachedWidth, hiddenOnlyCachedWidth)
+            XCTAssertEqual(hiddenOnlyColumn.cachedHeight, hiddenOnlyCachedHeight)
+            XCTAssertEqual(hiddenOnly.height, hiddenOnlyWindowHeight)
+            XCTAssertEqual(hiddenOnly.windowWidth, hiddenOnlyWindowWidth)
+            XCTAssertEqual(secondarySize(of: fixture.a, orientation: orientation), .auto(weight: 1))
+            XCTAssertEqual(secondarySize(of: fixture.b, orientation: orientation), .auto(weight: 1))
+            XCTAssertEqual(secondarySize(of: fixture.hidden, orientation: orientation), mixedHiddenSizing)
+
+            switch orientation {
+            case .horizontal:
+                XCTAssertNotEqual(fixture.column.width, .fixed(333))
+                XCTAssertEqual(fixture.column.cachedWidth, 582, accuracy: 0.001)
+            case .vertical:
+                XCTAssertNotEqual(fixture.column.height, .fixed(222))
+                XCTAssertEqual(fixture.column.cachedHeight, 382, accuracy: 0.001)
+            }
+        }
+    }
+
+    func testBalanceReturnsFalseWhenEveryColumnIsExcluded() throws {
+        let fixture = makeColumnFixture(includeHidden: true)
+        let hidden = try XCTUnwrap(fixture.hidden)
+        _ = fixture.engine.calculateLayout(
+            state: ViewportState(selectedNodeId: fixture.a.id),
+            workspaceId: fixture.workspaceId,
+            monitorFrame: workingFrame,
+            gaps: (horizontal: gap, vertical: gap),
+            orientation: .horizontal,
+            excludedTokens: [fixture.a.token, hidden.token, fixture.b.token]
+        )
+
+        XCTAssertFalse(
+            fixture.engine.balanceSizes(
+                in: fixture.workspaceId,
+                motion: .disabled,
+                workingFrame: workingFrame,
+                gaps: gap,
+                orientation: .horizontal
+            )
+        )
+    }
+
     private func resizeSecondaryWidth(
         engine: NiriLayoutEngine,
         workspaceId: WorkspaceDescriptor.ID,
@@ -580,7 +836,9 @@ final class NiriProjectionCommandTests: XCTestCase {
         }
     }
 
-    private func makeMixedColumnFixture() throws -> (
+    private func makeMixedColumnFixture(
+        orientation: Monitor.Orientation = .horizontal
+    ) throws -> (
         engine: NiriLayoutEngine,
         workspaceId: WorkspaceDescriptor.ID,
         column: NiriContainer,
@@ -597,24 +855,115 @@ final class NiriProjectionCommandTests: XCTestCase {
             into: column,
             engine: fixture.engine,
             workspaceId: fixture.workspaceId,
-            state: &state
+            state: &state,
+            orientation: orientation
         ))
         XCTAssertTrue(consume(
             fixture.b,
             into: column,
             engine: fixture.engine,
             workspaceId: fixture.workspaceId,
-            state: &state
+            state: &state,
+            orientation: orientation
         ))
         _ = fixture.engine.calculateLayout(
             state: state,
             workspaceId: fixture.workspaceId,
             monitorFrame: workingFrame,
             gaps: (horizontal: gap, vertical: gap),
-            orientation: .horizontal,
+            orientation: orientation,
             excludedTokens: [hidden.token]
         )
         return (fixture.engine, fixture.workspaceId, column, fixture.a, hidden, fixture.b)
+    }
+
+    private func makeVisibleMixedColumnFixture(
+        orientation: Monitor.Orientation
+    ) throws -> (
+        engine: NiriLayoutEngine,
+        workspaceId: WorkspaceDescriptor.ID,
+        column: NiriContainer,
+        a: NiriWindow,
+        b: NiriWindow
+    ) {
+        let fixture = makeColumnFixture(includeHidden: false)
+        let column = try XCTUnwrap(fixture.engine.findColumn(containing: fixture.a, in: fixture.workspaceId))
+        var state = ViewportState(selectedNodeId: fixture.a.id)
+        XCTAssertTrue(consume(
+            fixture.b,
+            into: column,
+            engine: fixture.engine,
+            workspaceId: fixture.workspaceId,
+            state: &state,
+            orientation: orientation
+        ))
+        _ = fixture.engine.calculateLayout(
+            state: state,
+            workspaceId: fixture.workspaceId,
+            monitorFrame: workingFrame,
+            gaps: (horizontal: gap, vertical: gap),
+            orientation: orientation,
+            excludedTokens: []
+        )
+        return (fixture.engine, fixture.workspaceId, column, fixture.a, fixture.b)
+    }
+
+    private func layout(
+        engine: NiriLayoutEngine,
+        workspaceId: WorkspaceDescriptor.ID,
+        selectedWindow: NiriWindow,
+        orientation: Monitor.Orientation
+    ) -> [WindowToken: CGRect] {
+        engine.calculateLayout(
+            state: ViewportState(selectedNodeId: selectedWindow.id),
+            workspaceId: workspaceId,
+            monitorFrame: workingFrame,
+            gaps: (horizontal: gap, vertical: gap),
+            orientation: orientation,
+            excludedTokens: engine.projectionExclusions(in: workspaceId)
+        )
+    }
+
+    private func secondarySize(
+        of window: NiriWindow,
+        orientation: Monitor.Orientation
+    ) -> WeightedSize {
+        switch orientation {
+        case .horizontal: window.height
+        case .vertical: window.windowWidth
+        }
+    }
+
+    private func setSecondarySize(
+        _ size: WeightedSize,
+        for window: NiriWindow,
+        orientation: Monitor.Orientation
+    ) {
+        switch orientation {
+        case .horizontal: window.height = size
+        case .vertical: window.windowWidth = size
+        }
+    }
+
+    private func setResolvedSecondarySpan(
+        _ span: CGFloat,
+        for window: NiriWindow,
+        orientation: Monitor.Orientation
+    ) {
+        switch orientation {
+        case .horizontal: window.resolvedHeight = span
+        case .vertical: window.resolvedWidth = span
+        }
+    }
+
+    private func secondarySpan(
+        of frame: CGRect,
+        orientation: Monitor.Orientation
+    ) -> CGFloat {
+        switch orientation {
+        case .horizontal: frame.height
+        case .vertical: frame.width
+        }
     }
 
     private func consume(
@@ -622,7 +971,8 @@ final class NiriProjectionCommandTests: XCTestCase {
         into column: NiriContainer,
         engine: NiriLayoutEngine,
         workspaceId: WorkspaceDescriptor.ID,
-        state: inout ViewportState
+        state: inout ViewportState,
+        orientation: Monitor.Orientation = .horizontal
     ) -> Bool {
         engine.consumeWindow(
             window,
@@ -633,7 +983,7 @@ final class NiriProjectionCommandTests: XCTestCase {
             state: &state,
             workingFrame: workingFrame,
             gaps: gap,
-            orientation: .horizontal
+            orientation: orientation
         )
     }
 }

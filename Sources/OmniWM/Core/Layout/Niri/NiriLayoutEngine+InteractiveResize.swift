@@ -424,7 +424,7 @@ extension NiriLayoutEngine {
         return changed
     }
 
-    private func projectedWidthBounds(
+    func projectedWidthBounds(
         for column: NiriContainer,
         workspaceId: WorkspaceDescriptor.ID
     ) -> (min: CGFloat, max: CGFloat?) {
@@ -445,7 +445,7 @@ extension NiriLayoutEngine {
         )
     }
 
-    private func projectedHeightBounds(
+    func projectedHeightBounds(
         for column: NiriContainer,
         workspaceId: WorkspaceDescriptor.ID
     ) -> (min: CGFloat, max: CGFloat?) {

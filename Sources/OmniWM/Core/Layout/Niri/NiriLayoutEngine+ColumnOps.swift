@@ -293,6 +293,14 @@ extension NiriLayoutEngine {
         }
     }
 
+    private func clampedSpan(
+        _ span: CGFloat,
+        to bounds: (min: CGFloat, max: CGFloat?)
+    ) -> CGFloat {
+        let lowerBounded = max(span, bounds.min)
+        return bounds.max.map { min(lowerBounded, $0) } ?? lowerBounded
+    }
+
     @discardableResult
     func balanceSizes(
         in workspaceId: WorkspaceDescriptor.ID,
@@ -302,14 +310,15 @@ extension NiriLayoutEngine {
         orientation: Monitor.Orientation
     ) -> Bool {
         assertSanctionedMutation()
-        let cols = columns(in: workspaceId)
-        guard !cols.isEmpty else { return false }
+        let columns = projectedColumns(in: workspaceId)
+        guard !columns.isEmpty else { return false }
 
         let resolvedWidth = resolvedContainerResetPrimarySpan(in: workspaceId)
         switch orientation {
         case .horizontal:
             let targetPixels = (workingFrame.width - gaps) * resolvedWidth.proportion - gaps
-            for column in cols {
+            for projectedColumn in columns {
+                let column = projectedColumn.column
                 column.width = .proportion(resolvedWidth.proportion)
                 column.isFullWidth = false
                 column.savedWidth = nil
@@ -317,9 +326,9 @@ extension NiriLayoutEngine {
                 column.hasManualSingleWindowWidthOverride = false
 
                 column.animateWidthTo(
-                    newWidth: column.clampedToWidthBounds(
+                    newWidth: clampedSpan(
                         targetPixels,
-                        contentInset: tabContentInset(for: column)
+                        to: projectedWidthBounds(for: column, workspaceId: workspaceId)
                     ),
                     clock: animationClock,
                     config: windowMovementAnimationConfig,
@@ -327,20 +336,24 @@ extension NiriLayoutEngine {
                     animated: motion.animationsEnabled
                 )
 
-                for window in column.windowNodes {
+                for window in projectedColumn.windows {
                     window.size = 1.0
                 }
             }
         case .vertical:
             let targetPixels = (workingFrame.height - gaps) * resolvedWidth.proportion - gaps
-            for column in cols {
+            for projectedColumn in columns {
+                let column = projectedColumn.column
                 column.height = .proportion(resolvedWidth.proportion)
                 column.isFullHeight = false
                 column.savedHeight = nil
                 column.hasManualSingleWindowHeightOverride = false
-                column.cachedHeight = column.clampedToHeightBounds(targetPixels)
+                column.cachedHeight = clampedSpan(
+                    targetPixels,
+                    to: projectedHeightBounds(for: column, workspaceId: workspaceId)
+                )
 
-                for window in column.windowNodes {
+                for window in projectedColumn.windows {
                     window.windowWidth = .auto(weight: 1)
                 }
             }

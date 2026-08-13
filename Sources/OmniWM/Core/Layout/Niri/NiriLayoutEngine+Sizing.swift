@@ -985,8 +985,7 @@ extension NiriLayoutEngine {
         }
     }
 
-    private func convertWidthsToAuto(in column: NiriContainer) {
-        let windows = column.windowNodes
+    private func convertWidthsToAuto(_ windows: [NiriWindow]) {
         guard !windows.isEmpty else { return }
 
         let widths = windows.map { max(1, $0.resolvedWidth ?? $0.frame?.width ?? $0.widthWeight) }
@@ -999,24 +998,33 @@ extension NiriLayoutEngine {
 
     private func availableWindowWidth(
         in column: NiriContainer,
+        projectedWindowCount: Int,
         workingFrame: CGRect
     ) -> CGFloat {
-        max(1, workingFrame.width - tabContentInset(for: column))
+        let contentInset = column.isTabbed && projectedWindowCount > 1
+            ? tabContentInset(for: column)
+            : 0
+        return max(1, workingFrame.width - contentInset)
     }
 
     private func setVerticalWindowWidth(
         _ window: NiriWindow,
         change: NiriSizeChange,
         in column: NiriContainer,
+        projectedWindows: [NiriWindow],
         workingFrame: CGRect,
         gaps: CGFloat
     ) {
         if window.windowWidth.isAuto {
-            convertWidthsToAuto(in: column)
+            convertWidthsToAuto(projectedWindows)
         }
 
         let currentWindowPixels = currentWindowWidth(window)
-        let availableWidth = availableWindowWidth(in: column, workingFrame: workingFrame)
+        let availableWidth = availableWindowWidth(
+            in: column,
+            projectedWindowCount: projectedWindows.count,
+            workingFrame: workingFrame
+        )
         var windowWidth = changedWindowSecondaryPixels(
             for: change,
             currentPixels: currentWindowPixels,
@@ -1028,7 +1036,7 @@ extension NiriLayoutEngine {
         if column.isTabbed {
             minWidthTaken = 0
         } else {
-            minWidthTaken = column.windowNodes
+            minWidthTaken = projectedWindows
                 .filter { $0 !== window }
                 .reduce(CGFloat(0)) { partial, otherWindow in
                     partial + max(1, otherWindow.constraints.minSize.width) + gaps
@@ -1054,8 +1062,7 @@ extension NiriLayoutEngine {
         }
     }
 
-    private func convertHeightsToAuto(in column: NiriContainer) {
-        let windows = column.windowNodes
+    private func convertHeightsToAuto(_ windows: [NiriWindow]) {
         guard !windows.isEmpty else { return }
 
         let heights = windows.map { max(1, $0.resolvedHeight ?? $0.frame?.height ?? $0.heightWeight) }
@@ -1075,13 +1082,19 @@ extension NiriLayoutEngine {
         orientation: Monitor.Orientation
     ) {
         assertSanctionedMutation()
-        guard let column = findColumn(containing: window, in: workspaceId) else { return }
+        guard !isExcludedFromProjection(window.token, in: workspaceId),
+              let column = findColumn(containing: window, in: workspaceId)
+        else {
+            return
+        }
+        let projectedWindows = projectedWindows(in: column, workspaceId: workspaceId)
         cancelInteractiveResize(for: column, in: workspaceId)
         if orientation == .vertical {
             setVerticalWindowWidth(
                 window,
                 change: change,
                 in: column,
+                projectedWindows: projectedWindows,
                 workingFrame: workingFrame,
                 gaps: gaps
             )
@@ -1089,7 +1102,7 @@ extension NiriLayoutEngine {
         }
 
         if window.height.isAuto {
-            convertHeightsToAuto(in: column)
+            convertHeightsToAuto(projectedWindows)
         }
 
         let currentWindowPixels = currentWindowHeight(window)
@@ -1104,7 +1117,7 @@ extension NiriLayoutEngine {
         if column.isTabbed {
             minHeightTaken = 0
         } else {
-            minHeightTaken = column.windowNodes
+            minHeightTaken = projectedWindows
                 .filter { $0 !== window }
                 .reduce(CGFloat(0)) { partial, otherWindow in
                     partial + max(1, otherWindow.constraints.minSize.height) + gaps
@@ -1127,11 +1140,16 @@ extension NiriLayoutEngine {
         orientation: Monitor.Orientation
     ) {
         assertSanctionedMutation()
-        guard let column = findColumn(containing: window, in: workspaceId) else { return }
+        guard !isExcludedFromProjection(window.token, in: workspaceId),
+              let column = findColumn(containing: window, in: workspaceId)
+        else {
+            return
+        }
+        let projectedWindows = projectedWindows(in: column, workspaceId: workspaceId)
         cancelInteractiveResize(for: column, in: workspaceId)
         if orientation == .vertical {
             if column.isTabbed {
-                for tile in column.windowNodes {
+                for tile in projectedWindows {
                     tile.windowWidth = .auto(weight: 1)
                 }
             } else {
@@ -1141,7 +1159,7 @@ extension NiriLayoutEngine {
         }
 
         if column.isTabbed {
-            for tile in column.windowNodes {
+            for tile in projectedWindows {
                 tile.height = .auto(weight: 1)
                 tile.savedHeight = nil
             }
@@ -1161,11 +1179,21 @@ extension NiriLayoutEngine {
     ) {
         assertSanctionedMutation()
         guard !presetWindowSecondarySpans.isEmpty else { return }
-        guard let column = findColumn(containing: window, in: workspaceId) else { return }
+        guard !isExcludedFromProjection(window.token, in: workspaceId),
+              let column = findColumn(containing: window, in: workspaceId)
+        else {
+            return
+        }
+        let projectedWindows = projectedWindows(in: column, workspaceId: workspaceId)
         cancelInteractiveResize(for: column, in: workspaceId)
         if orientation == .vertical {
+            let availableWidth = availableWindowWidth(
+                in: column,
+                projectedWindowCount: projectedWindows.count,
+                workingFrame: workingFrame
+            )
             if window.windowWidth.isAuto {
-                convertWidthsToAuto(in: column)
+                convertWidthsToAuto(projectedWindows)
             }
 
             let presetCount = presetWindowSecondarySpans.count
@@ -1183,7 +1211,7 @@ extension NiriLayoutEngine {
                     nextIndex = presetWindowSecondarySpans.firstIndex { preset in
                         current + 1 < resolvedPresetWindowSecondarySpan(
                             preset,
-                            availableSpan: availableWindowWidth(in: column, workingFrame: workingFrame),
+                            availableSpan: availableWidth,
                             gaps: gaps
                         )
                     } ?? 0
@@ -1191,7 +1219,7 @@ extension NiriLayoutEngine {
                     nextIndex = presetWindowSecondarySpans.lastIndex { preset in
                         resolvedPresetWindowSecondarySpan(
                             preset,
-                            availableSpan: availableWindowWidth(in: column, workingFrame: workingFrame),
+                            availableSpan: availableWidth,
                             gaps: gaps
                         ) + 1 < current
                     } ?? (presetCount - 1)
@@ -1206,7 +1234,7 @@ extension NiriLayoutEngine {
         }
 
         if window.height.isAuto {
-            convertHeightsToAuto(in: column)
+            convertHeightsToAuto(projectedWindows)
         }
 
         let presetCount = presetWindowSecondarySpans.count
