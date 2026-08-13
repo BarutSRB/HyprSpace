@@ -207,7 +207,15 @@ import QuartzCore
                 didMove = true
                 return
             }
+            let previousSelection = engine.selectedNode(in: wsId)
             guard let token = engine.moveFocus(direction: direction, in: wsId) else { return }
+            guard !controller.isManagedWindowSuppressedByMacOSHide(token) else {
+                engine.setSelectedNode(previousSelection, in: wsId)
+                controller.layoutRefreshController.requestLayoutCommandRelayout(
+                    affectedWorkspaceIds: [wsId]
+                )
+                return
+            }
             didMove = true
             if controller.workspaceManager.hiddenState(for: token) != nil {
                 commitGroupSelection(token, workspaceId: wsId, focusAfterLayout: true)
@@ -255,7 +263,8 @@ import QuartzCore
               let entry = controller.workspaceManager.entry(for: token),
               entry.workspaceId == workspaceId,
               entry.mode == .tiling,
-              entry.layoutReason == .standard
+              entry.layoutReason == .standard,
+              !controller.isManagedWindowSuppressedByMacOSHide(token)
         else {
             return .missing
         }
@@ -579,6 +588,7 @@ import QuartzCore
         return entry.workspaceId == workspaceId
             && entry.mode == .tiling
             && entry.layoutReason == .standard
+            && !controller.isManagedWindowSuppressedByMacOSHide(token)
             && !controller.isManagedWindowSuspendedForNativeFullscreen(token)
     }
 
@@ -1047,7 +1057,10 @@ import QuartzCore
             workspaceId: wsId,
             monitor: refreshInput.monitor,
             windows: refreshInput.windows,
-            preferredFocusToken: controller.workspaceManager.preferredFocusToken(in: wsId),
+            preferredFocusToken: controller.workspaceManager.preferredFocusToken(
+                in: wsId,
+                isSuppressed: controller.isManagedWindowSuppressedByMacOSHide
+            ),
             preferredHideSide: controller.layoutRefreshController.preferredHideSide(for: monitor),
             settings: controller.settings.resolvedDwindleSettings(for: monitor),
             isActiveWorkspace: refreshInput.isActiveWorkspace

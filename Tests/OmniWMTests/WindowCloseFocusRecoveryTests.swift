@@ -337,7 +337,8 @@ final class WindowCloseFocusRecoveryTests: XCTestCase {
             activeWorkspaceIsLocal: controller.activeWorkspace()?.id == fixture.localWorkspaceId,
             focusedWindowId: controller.workspaceManager.focusedToken?.windowId,
             preferredWindowId: controller.workspaceManager.preferredFocusToken(
-                in: fixture.localWorkspaceId
+                in: fixture.localWorkspaceId,
+                isSuppressed: { _ in false }
             )?.windowId,
             selectedWindowId: selectedWindowId,
             activeColumnIndex: viewport.activeColumnIndex,

@@ -74,9 +74,9 @@ final class FloatingMonitorRebindFocusTests: XCTestCase {
         XCTAssertEqual(manager.interactionMonitorId, fixture.targetMonitor.id)
         XCTAssertEqual(manager.previousInteractionMonitorId, fixture.sourceMonitor.id)
         XCTAssertEqual(manager.lastFloatingFocusedToken(in: fixture.sourceWorkspaceId), sourceFallback)
-        XCTAssertEqual(manager.resolveWorkspaceFocusToken(in: fixture.sourceWorkspaceId), sourceFallback)
+        XCTAssertEqual(resolvedFocus(in: fixture.sourceWorkspaceId, manager: manager), sourceFallback)
         XCTAssertEqual(manager.lastFloatingFocusedToken(in: fixture.targetWorkspaceId), moving)
-        XCTAssertEqual(manager.resolveWorkspaceFocusToken(in: fixture.targetWorkspaceId), moving)
+        XCTAssertEqual(resolvedFocus(in: fixture.targetWorkspaceId, manager: manager), moving)
         XCTAssertNil(manager.pendingFocusedToken)
         XCTAssertNil(controller.intentLedger.activeManagedRequest)
         XCTAssertTrue(fixture.focusRecorder.focusedTokens.isEmpty)
@@ -99,7 +99,50 @@ final class FloatingMonitorRebindFocusTests: XCTestCase {
             manager.activeWorkspace(on: fixture.targetMonitor.id)?.id,
             fixture.targetWorkspaceId
         )
-        XCTAssertEqual(manager.resolveWorkspaceFocusToken(in: fixture.targetWorkspaceId), moving)
+        XCTAssertEqual(resolvedFocus(in: fixture.targetWorkspaceId, manager: manager), moving)
+    }
+
+    func testFloatingRebindSourceFocusSkipsPIDHiddenFallbackBeforeLayoutReasonUpdates() throws {
+        let fixture = try makeFixture()
+        let controller = fixture.controller
+        defer { controller.deadlineWheel.stop() }
+        let manager = controller.workspaceManager
+        let hiddenFallback = addFloatingWindow(
+            pid: 489_012,
+            windowId: 1,
+            to: fixture.sourceWorkspaceId,
+            controller: controller
+        )
+        let visibleFallback = addFloatingWindow(
+            pid: 489_013,
+            windowId: 2,
+            to: fixture.sourceWorkspaceId,
+            controller: controller
+        )
+        let moving = addFloatingWindow(
+            pid: 489_014,
+            windowId: 3,
+            to: fixture.sourceWorkspaceId,
+            controller: controller
+        )
+
+        _ = manager.rememberFocus(visibleFallback, in: fixture.sourceWorkspaceId)
+        _ = manager.rememberFocus(hiddenFallback, in: fixture.sourceWorkspaceId)
+        controller.hiddenAppPIDs.insert(hiddenFallback.pid)
+        XCTAssertEqual(manager.layoutReason(for: hiddenFallback), .standard)
+
+        rebind(moving, fixture: fixture)
+
+        XCTAssertEqual(manager.workspace(for: moving), fixture.targetWorkspaceId)
+        XCTAssertEqual(manager.lastFloatingFocusedToken(in: fixture.sourceWorkspaceId), visibleFallback)
+        XCTAssertEqual(
+            manager.resolveWorkspaceFocusToken(
+                in: fixture.sourceWorkspaceId,
+                isSuppressed: controller.isManagedWindowSuppressedByMacOSHide
+            ),
+            visibleFallback
+        )
+        XCTAssertNotEqual(manager.lastFloatingFocusedToken(in: fixture.sourceWorkspaceId), hiddenFallback)
     }
 
     func testFloatingRebindRetargetsMatchingPendingFocusRequest() throws {
@@ -333,7 +376,7 @@ final class FloatingMonitorRebindFocusTests: XCTestCase {
         XCTAssertEqual(manager.focusedToken, focused)
         XCTAssertEqual(manager.interactionMonitorId, fixture.sourceMonitor.id)
         XCTAssertEqual(manager.lastFloatingFocusedToken(in: fixture.targetWorkspaceId), targetFallback)
-        XCTAssertEqual(manager.resolveWorkspaceFocusToken(in: fixture.targetWorkspaceId), targetFallback)
+        XCTAssertEqual(resolvedFocus(in: fixture.targetWorkspaceId, manager: manager), targetFallback)
         XCTAssertTrue(controller.surfaceReconciler.reconcileScheduled)
         let sourceProjectionAfter = projection(on: fixture.sourceMonitor, fixture: fixture)
         let targetProjectionAfter = projection(on: fixture.targetMonitor, fixture: fixture)
@@ -404,7 +447,7 @@ final class FloatingMonitorRebindFocusTests: XCTestCase {
             rememberedFloating
         )
         XCTAssertEqual(
-            manager.resolveWorkspaceFocusToken(in: fixture.sourceWorkspaceId),
+            resolvedFocus(in: fixture.sourceWorkspaceId, manager: manager),
             rememberedFloating
         )
         XCTAssertEqual(manager.invariantViolationCountsDump(), "clean")
@@ -638,7 +681,7 @@ final class FloatingMonitorRebindFocusTests: XCTestCase {
         XCTAssertEqual(manager.focusedToken, moving)
         XCTAssertEqual(manager.interactionMonitorId, fixture.sourceMonitor.id)
         XCTAssertEqual(manager.lastFloatingFocusedToken(in: fixture.targetWorkspaceId), targetFallback)
-        XCTAssertEqual(manager.resolveWorkspaceFocusToken(in: fixture.targetWorkspaceId), targetFallback)
+        XCTAssertEqual(resolvedFocus(in: fixture.targetWorkspaceId, manager: manager), targetFallback)
         XCTAssertTrue(fixture.focusRecorder.focusedTokens.isEmpty)
         XCTAssertNil(controller.layoutRefreshController.layoutState.activeRefresh)
         XCTAssertNil(controller.layoutRefreshController.layoutState.pendingRefresh)
@@ -789,6 +832,16 @@ final class FloatingMonitorRebindFocusTests: XCTestCase {
             iconResolver: controller.workspaceBarIconResolver,
             focusedToken: controller.workspaceManager.focusedToken,
             settings: controller.settings
+        )
+    }
+
+    private func resolvedFocus(
+        in workspaceId: WorkspaceDescriptor.ID,
+        manager: WorkspaceManager
+    ) -> WindowToken? {
+        manager.resolveWorkspaceFocusToken(
+            in: workspaceId,
+            isSuppressed: { _ in false }
         )
     }
 

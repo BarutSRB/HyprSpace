@@ -387,8 +387,12 @@ enum StructuralMutationOutcome: Equatable {
         guard let controller else { return }
         let viewportState = controller.workspaceManager.niriViewportState(for: workspaceId)
         if let selectedNodeId = viewportState.selectedNodeId,
-           let selectedWindow = controller.niriEngine?.findNode(by: selectedNodeId, in: workspaceId) as? NiriWindow,
-           controller.workspaceManager.entry(for: selectedWindow.token)?.workspaceId == workspaceId
+           let selectedWindow = controller.niriEngine?.findNode(
+               by: selectedNodeId,
+               in: workspaceId
+           ) as? NiriWindow,
+           controller.workspaceManager.entry(for: selectedWindow.token)?.workspaceId == workspaceId,
+           !controller.isManagedWindowSuppressedByMacOSHide(selectedWindow.token)
         {
             controller.focusWindow(selectedWindow.token)
         }
@@ -498,7 +502,10 @@ enum StructuralMutationOutcome: Equatable {
             monitor: refreshInput.monitor,
             windows: refreshInput.windows,
             viewportState: effectiveViewportState,
-            preferredFocusToken: controller.workspaceManager.preferredFocusToken(in: wsId),
+            preferredFocusToken: controller.workspaceManager.preferredFocusToken(
+                in: wsId,
+                isSuppressed: controller.isManagedWindowSuppressedByMacOSHide
+            ),
             hasCompletedInitialRefresh: controller.layoutRefreshController.layoutState.hasCompletedInitialRefresh,
             useScrollAnimationPath: useScrollAnimationPath,
             removalSeed: removalSeed,
@@ -643,9 +650,18 @@ enum StructuralMutationOutcome: Equatable {
             viewportNeedsRecalc: selection.viewportNeedsRecalc,
             snapshot: snapshot
         )
-        plan.niriRestorePlacements = pass.engine.persistedPlacements(in: pass.wsId)
+        if shouldPersistNiriRestorePlacements(in: pass.wsId) {
+            plan.niriRestorePlacements = pass.engine.persistedPlacements(in: pass.wsId)
+        }
 
         return plan
+    }
+
+    private func shouldPersistNiriRestorePlacements(in workspaceId: WorkspaceDescriptor.ID) -> Bool {
+        guard let controller else { return true }
+        return !controller.workspaceManager.tiledEntries(in: workspaceId).contains {
+            controller.isManagedWindowSuppressedByMacOSHide($0.token)
+        }
     }
 
     private func restoreInitialNiriPlacementsIfNeeded(
@@ -1465,6 +1481,7 @@ enum StructuralMutationOutcome: Equatable {
         else {
             var recovered = false
             if let lastFocused = controller.workspaceManager.lastFocusedToken(in: wsId),
+               !controller.isManagedWindowSuppressedByMacOSHide(lastFocused),
                let lastNode = engine.findNode(for: lastFocused, in: wsId)
             {
                 activateNode(
@@ -1477,8 +1494,10 @@ enum StructuralMutationOutcome: Equatable {
                     )
                 )
                 recovered = true
-            } else if let firstToken = controller.workspaceManager.tiledEntries(in: wsId).first?.token,
-                      let firstNode = engine.findNode(for: firstToken, in: wsId)
+            } else if let firstEntry = controller.workspaceManager.tiledEntries(in: wsId).first(where: {
+                !controller.isManagedWindowSuppressedByMacOSHide($0.token)
+            }),
+                let firstNode = engine.findNode(for: firstEntry.token, in: wsId)
             {
                 activateNode(
                     firstNode, in: wsId, state: &state,
@@ -1524,6 +1543,12 @@ enum StructuralMutationOutcome: Equatable {
             )
         }
         guard let newNode else { return false }
+        if let windowNode = newNode as? NiriWindow,
+           controller.isManagedWindowSuppressedByMacOSHide(windowNode.token)
+        {
+            requestLayoutCommandRelayout(in: wsId)
+            return false
+        }
         activateNode(
             newNode, in: wsId, state: &state,
             options: .init(
