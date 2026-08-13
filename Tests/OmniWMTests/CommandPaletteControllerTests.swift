@@ -5,6 +5,7 @@ import AppKit
 import ApplicationServices
 import Carbon
 @testable import OmniWM
+import SwiftUI
 import XCTest
 
 @MainActor
@@ -129,6 +130,63 @@ final class CommandPaletteControllerTests: XCTestCase {
         XCTAssertFalse(CommandPaletteController.allowsSummonRight(items[1]))
     }
 
+    func testWindowStatusTextDescribesSelectedHiddenWindowPrimaryAction() throws {
+        let (wmController, _, hiddenToken) = try makeWindowFixture()
+        let palette = CommandPaletteController(
+            motionPolicy: MotionPolicy(animationsEnabled: false)
+        )
+        let hiddenItem = try XCTUnwrap(
+            palette.buildWindowItems(from: wmController).first { $0.id == hiddenToken }
+        )
+
+        XCTAssertEqual(
+            CommandPaletteController.windowsStatusText(
+                selectedItem: hiddenItem,
+                isSummonRightAvailable: true
+            ),
+            "Return · Unhide & Focus"
+        )
+        XCTAssertEqual(
+            CommandPaletteController.windowsStatusText(
+                selectedItem: hiddenItem,
+                isSummonRightAvailable: false
+            ),
+            "Return · Unhide & Focus"
+        )
+    }
+
+    func testWindowStatusTextPreservesVisibleWindowGuidance() throws {
+        let (wmController, visibleToken, _) = try makeWindowFixture()
+        let palette = CommandPaletteController(
+            motionPolicy: MotionPolicy(animationsEnabled: false)
+        )
+        let visibleItem = try XCTUnwrap(
+            palette.buildWindowItems(from: wmController).first { $0.id == visibleToken }
+        )
+
+        XCTAssertEqual(
+            CommandPaletteController.windowsStatusText(
+                selectedItem: visibleItem,
+                isSummonRightAvailable: true
+            ),
+            "Enter jumps. Shift-Enter summons right."
+        )
+        XCTAssertEqual(
+            CommandPaletteController.windowsStatusText(
+                selectedItem: visibleItem,
+                isSummonRightAvailable: false
+            ),
+            "Enter jumps. Shift-Enter unavailable for this session."
+        )
+    }
+
+    func testHiddenBadgeDoesNotChangeCommandPaletteWindowRowHeight() {
+        let visibleHeight = commandPaletteWindowRowHeight(isAppHidden: false)
+        let hiddenHeight = commandPaletteWindowRowHeight(isAppHidden: true)
+
+        XCTAssertEqual(hiddenHeight, visibleHeight, accuracy: 0.5)
+    }
+
     private func modeNavigationTarget(
         currentMode: CommandPaletteMode,
         isMenuModeAvailable: Bool = true,
@@ -197,5 +255,27 @@ final class CommandPaletteControllerTests: XCTestCase {
         )
         controller.workspaceManager.setAppHidden(true, pid: hiddenToken.pid, source: .service)
         return (controller, visibleToken, hiddenToken)
+    }
+
+    private func commandPaletteWindowRowHeight(isAppHidden: Bool) -> CGFloat {
+        let token = WindowToken(pid: 92_003, windowId: isAppHidden ? 92_104 : 92_103)
+        let item = CommandPaletteWindowItem(
+            id: token,
+            handle: WindowHandle(id: token),
+            title: "Terminal",
+            appName: "Ghostty",
+            appIcon: nil,
+            workspaceName: "1",
+            isAppHidden: isAppHidden
+        )
+        let hostingView = NSHostingView(rootView: CommandPaletteWindowRow(
+            item: item,
+            isSelected: false,
+            isSummonRightAvailable: false,
+            onSelect: {}
+        ).frame(width: 620))
+
+        hostingView.layoutSubtreeIfNeeded()
+        return hostingView.fittingSize.height
     }
 }

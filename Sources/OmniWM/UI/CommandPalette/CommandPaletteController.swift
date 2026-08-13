@@ -426,7 +426,14 @@ final class CommandPaletteController: NSObject, NSWindowDelegate {
         !item.isAppHidden
     }
 
-    static func windowsStatusText(isSummonRightAvailable: Bool) -> String {
+    static func windowsStatusText(
+        selectedItem: CommandPaletteWindowItem?,
+        isSummonRightAvailable: Bool
+    ) -> String {
+        if selectedItem?.isAppHidden == true {
+            return "Return · Unhide & Focus"
+        }
+
         let summonText = if isSummonRightAvailable {
             "Shift-Enter summons right."
         } else {
@@ -1257,13 +1264,13 @@ private struct CommandPaletteView: View {
                                         item: item,
                                         isSelected: controller.selectedItemID == .window(item.id),
                                         isSummonRightAvailable: controller.isSummonRightAvailable
-                                            && CommandPaletteController.allowsSummonRight(item)
+                                            && CommandPaletteController.allowsSummonRight(item),
+                                        onSelect: {
+                                            controller.selectedItemID = .window(item.id)
+                                            controller.selectCurrent()
+                                        }
                                     )
                                     .id(CommandPaletteSelectionID.window(item.id))
-                                    .onTapGesture {
-                                        controller.selectedItemID = .window(item.id)
-                                        controller.selectCurrent()
-                                    }
                                 }
                             case .menu:
                                 ForEach(controller.filteredMenuItems) { item in
@@ -1331,6 +1338,7 @@ private struct CommandPaletteView: View {
         switch controller.selectedMode {
         case .windows:
             CommandPaletteController.windowsStatusText(
+                selectedItem: selectedWindowItem,
                 isSummonRightAvailable: controller.isSummonRightAvailable
             )
         case .menu:
@@ -1338,6 +1346,11 @@ private struct CommandPaletteView: View {
         case .clipboard:
             controller.clipboardStatusText
         }
+    }
+
+    private var selectedWindowItem: CommandPaletteWindowItem? {
+        guard case let .window(token)? = controller.selectedItemID else { return nil }
+        return controller.windows.first { $0.id == token }
     }
 
     private var isEmptyStateVisible: Bool {
@@ -1537,10 +1550,11 @@ private struct CommandPaletteClipboardDisabledView: View {
     }
 }
 
-private struct CommandPaletteWindowRow: View {
+struct CommandPaletteWindowRow: View {
     let item: CommandPaletteWindowItem
     let isSelected: Bool
     let isSummonRightAvailable: Bool
+    let onSelect: () -> Void
 
     private var summonHint: CommandPaletteController.InlineHint? {
         guard isSelected else { return nil }
@@ -1548,60 +1562,78 @@ private struct CommandPaletteWindowRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 12) {
-            if let icon = item.appIcon {
-                Image(nsImage: icon)
-                    .resizable()
-                    .frame(width: 32, height: 32)
-            } else {
-                Image(systemName: "app.fill")
-                    .resizable()
-                    .frame(width: 32, height: 32)
-                    .foregroundColor(.secondary)
-            }
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(item.title.isEmpty ? item.appName : item.title)
-                    .font(.system(size: 14, weight: .medium))
-                    .lineLimit(1)
-                Text(item.appName)
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
-                    .lineLimit(1)
-
-                if item.isAppHidden {
-                    Text("Hidden")
-                        .font(.system(size: 10, weight: .semibold))
+        Button(action: onSelect) {
+            HStack(spacing: 12) {
+                if let icon = item.appIcon {
+                    Image(nsImage: icon)
+                        .resizable()
+                        .frame(width: 32, height: 32)
+                } else {
+                    Image(systemName: "app.fill")
+                        .resizable()
+                        .frame(width: 32, height: 32)
                         .foregroundColor(.secondary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 1)
-                        .background(Color.secondary.opacity(0.16))
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(displayTitle)
+                        .font(.system(size: 14, weight: .medium))
+                        .lineLimit(1)
+                    Text(item.appName)
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                HStack(spacing: 8) {
+                    if let summonHint {
+                        Text(summonHint.title)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.secondary)
+                        CommandPaletteShortcutBadge(text: summonHint.shortcut)
+                    }
+
+                    if item.isAppHidden {
+                        AppHiddenStatusBadge()
+                    }
+
+                    Text(item.workspaceName)
+                        .font(.system(size: 11, weight: .medium))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color.secondary.opacity(0.18))
                         .clipShape(Capsule())
                 }
             }
-
-            Spacer()
-
-            HStack(spacing: 8) {
-                if let summonHint {
-                    Text(summonHint.title)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(.secondary)
-                    CommandPaletteShortcutBadge(text: summonHint.shortcut)
-                }
-
-                Text(item.workspaceName)
-                    .font(.system(size: 11, weight: .medium))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(Color.secondary.opacity(0.18))
-                    .clipShape(Capsule())
-            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .buttonStyle(.plain)
         .background(isSelected ? Color.accentColor.opacity(0.2) : Color.clear)
-        .contentShape(Rectangle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityValue(accessibilityValue)
+        .accessibilityHint(item.isAppHidden
+            ? "Unhides the app and focuses this window"
+            : "Focuses this window")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private var displayTitle: String {
+        item.title.isEmpty ? item.appName : item.title
+    }
+
+    private var accessibilityLabel: String {
+        displayTitle == item.appName ? item.appName : "\(displayTitle), \(item.appName)"
+    }
+
+    private var accessibilityValue: String {
+        let workspace = "Workspace \(item.workspaceName)"
+        return item.isAppHidden ? "App hidden, \(workspace)" : workspace
     }
 }
 

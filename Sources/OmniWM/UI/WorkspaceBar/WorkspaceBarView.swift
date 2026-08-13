@@ -632,7 +632,7 @@ private struct ScratchpadPillView: View {
     }
 }
 
-private enum WorkspaceBarWindowContext {
+enum WorkspaceBarWindowContext {
     case tiled
     case floating
 
@@ -643,6 +643,116 @@ private enum WorkspaceBarWindowContext {
         case .floating:
             "floating window"
         }
+    }
+}
+
+enum WorkspaceBarHiddenIndicatorStyle: Equatable {
+    case appHidden
+    case partiallyHidden
+}
+
+struct WorkspaceBarWindowPresentation {
+    let window: WorkspaceBarWindowItem
+    let context: WorkspaceBarWindowContext
+    let isFocused: Bool
+    let isInFocusedWorkspace: Bool
+
+    var hiddenIndicatorStyle: WorkspaceBarHiddenIndicatorStyle? {
+        if window.isAppHidden {
+            return .appHidden
+        }
+        if window.hasHiddenWindows {
+            return .partiallyHidden
+        }
+        return nil
+    }
+
+    var appliesHiddenTint: Bool {
+        window.isAppHidden
+    }
+
+    var iconOpacity: Double {
+        if window.isAppHidden {
+            return 0.9
+        }
+        if isFocused {
+            return 1.0
+        }
+        if isInFocusedWorkspace {
+            return 0.4
+        }
+        return 0.5
+    }
+
+    var accessibilityLabel: String {
+        if window.windowCount > 1 {
+            return "\(window.appName), \(window.windowCount) \(context.label)s"
+        }
+        return "\(window.appName) \(context.label)"
+    }
+
+    var accessibilityValue: String {
+        var values: [String] = []
+        if isFocused {
+            values.append("Focused")
+        }
+        if window.isAppHidden {
+            values.append(window.windowCount > 1 ? "All \(window.windowCount) windows hidden" : "App hidden")
+        } else if window.hasHiddenWindows {
+            values.append("\(window.hiddenWindowCount) of \(window.windowCount) windows hidden")
+        }
+        return values.joined(separator: ", ")
+    }
+
+    var accessibilityHint: String {
+        if window.windowCount > 1 {
+            return "Opens the window list"
+        }
+        return window.isAppHidden
+            ? "Unhides the app and focuses this window"
+            : "Focuses this window"
+    }
+
+    var help: String {
+        if window.windowCount == 1 {
+            return window.isAppHidden
+                ? "Unhide and focus \(window.appName)"
+                : "Focus \(window.appName) window"
+        }
+        if window.isAppHidden {
+            return "Show \(window.appName) windows — app hidden"
+        }
+        if window.hasHiddenWindows {
+            return "Show \(window.appName) windows — \(window.hiddenWindowCount) of \(window.windowCount) hidden"
+        }
+        return "Show \(window.appName) windows"
+    }
+}
+
+struct WorkspaceBarWindowListRowPresentation {
+    let window: WorkspaceBarWindowInfo
+
+    var accessibilityValue: String {
+        var values: [String] = []
+        if window.isFocused {
+            values.append("Focused")
+        }
+        if window.isAppHidden {
+            values.append("App hidden")
+        }
+        return values.joined(separator: ", ")
+    }
+
+    var accessibilityHint: String {
+        window.isAppHidden
+            ? "Unhides the app and focuses this window"
+            : "Focuses this window"
+    }
+
+    var help: String {
+        window.isAppHidden
+            ? "Unhide and focus \(window.title)"
+            : "Focus \(window.title)"
     }
 }
 
@@ -666,6 +776,12 @@ private struct WindowIconView: View {
     }
 
     var body: some View {
+        let presentation = WorkspaceBarWindowPresentation(
+            window: window,
+            context: context,
+            isFocused: isFocused,
+            isInFocusedWorkspace: isInFocusedWorkspace
+        )
         Button {
             if window.windowCount > 1 {
                 showingWindowList = true
@@ -673,30 +789,32 @@ private struct WindowIconView: View {
                 onFocusWindow(window.handle)
             }
         } label: {
-            ZStack(alignment: .topTrailing) {
-                AppIconImage(icon: window.icon)
-                    .frame(width: iconSize, height: iconSize)
-                    .opacity(opacity)
-                    .shadow(color: resolvedAccentColor.opacity(glowOpacity), radius: glowRadius)
-                    .accessibilityHidden(true)
-
-                if window.windowCount > 1 {
-                    WindowCountBadge(count: window.windowCount, iconSize: iconSize, textColor: textColor)
-                        .offset(x: iconSize * 0.2, y: -iconSize * 0.1)
+            AppIconImage(icon: window.icon)
+                .frame(width: iconSize, height: iconSize)
+                .overlay {
+                    if presentation.appliesHiddenTint {
+                        Color(nsColor: .systemRed)
+                            .opacity(0.32)
+                            .blendMode(.sourceAtop)
+                    }
                 }
-
-                if window.hasHiddenWindows {
-                    Image(systemName: "eye.slash.fill")
-                        .font(.system(size: max(7, iconSize * 0.32), weight: .bold))
-                        .foregroundStyle(textColor ?? .primary)
-                        .padding(2)
-                        .background(.regularMaterial, in: Circle())
-                        .offset(x: iconSize * 0.18, y: iconSize * 0.72)
-                        .accessibilityLabel("Hidden")
+                .opacity(presentation.iconOpacity)
+                .shadow(color: resolvedAccentColor.opacity(glowOpacity), radius: glowRadius)
+                .accessibilityHidden(true)
+                .overlay(alignment: .topTrailing) {
+                    if window.windowCount > 1 {
+                        WindowCountBadge(count: window.windowCount, iconSize: iconSize, textColor: textColor)
+                            .offset(x: iconSize * 0.2, y: -max(5, iconSize * 0.1))
+                    }
                 }
-            }
-            .frame(minWidth: max(16, iconSize + 4), minHeight: max(16, iconSize + 4))
-            .contentShape(Rectangle())
+                .overlay(alignment: .bottomTrailing) {
+                    if let hiddenIndicatorStyle = presentation.hiddenIndicatorStyle {
+                        WorkspaceBarHiddenIndicator(style: hiddenIndicatorStyle, iconSize: iconSize)
+                            .offset(x: iconSize * 0.2, y: max(5, iconSize * 0.1))
+                    }
+                }
+                .frame(minWidth: max(16, iconSize + 4), minHeight: max(16, iconSize + 4))
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .scaleEffect(scale)
@@ -717,21 +835,10 @@ private struct WindowIconView: View {
                 }
             )
         }
-        .accessibilityLabel(accessibilityLabel)
-        .accessibilityValue(accessibilityValue)
-        .help(window.hasHiddenWindows ? "\(window.appName) — Hidden" : window.appName)
-    }
-
-    private var opacity: Double {
-        if isFocused {
-            1.0
-        } else if window.isAppHidden {
-            0.3
-        } else if isInFocusedWorkspace {
-            0.4
-        } else {
-            0.5
-        }
+        .accessibilityLabel(presentation.accessibilityLabel)
+        .accessibilityValue(presentation.accessibilityValue)
+        .accessibilityHint(presentation.accessibilityHint)
+        .help(presentation.help)
     }
 
     private var scale: CGFloat {
@@ -751,24 +858,39 @@ private struct WindowIconView: View {
     private var glowOpacity: Double {
         isFocused ? 0.5 : 0
     }
+}
 
-    private var accessibilityLabel: String {
-        if window.windowCount > 1 {
-            "\(window.appName), \(window.windowCount) \(context.label)s"
-        } else {
-            "Focus \(window.appName) \(context.label)"
-        }
+@MainActor
+private struct WorkspaceBarHiddenIndicator: View {
+    let style: WorkspaceBarHiddenIndicatorStyle
+    let iconSize: CGFloat
+
+    private var badgeSize: CGFloat {
+        max(8, iconSize * 0.48)
     }
 
-    private var accessibilityValue: String {
-        var values: [String] = []
-        if isFocused {
-            values.append("Focused")
+    var body: some View {
+        Group {
+            switch style {
+            case .appHidden:
+                Image(systemName: "eye.slash.fill")
+                    .font(.system(size: max(6, iconSize * 0.3), weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: badgeSize, height: badgeSize)
+                    .background(Color(nsColor: .systemRed), in: Circle())
+            case .partiallyHidden:
+                Image(systemName: "eye.slash")
+                    .font(.system(size: max(6, iconSize * 0.3), weight: .semibold))
+                    .foregroundStyle(Color(nsColor: .systemRed))
+                    .frame(width: badgeSize, height: badgeSize)
+                    .background(.regularMaterial, in: Circle())
+                    .overlay {
+                        Circle()
+                            .strokeBorder(Color(nsColor: .systemRed).opacity(0.72), lineWidth: 0.75)
+                    }
+            }
         }
-        if window.hasHiddenWindows {
-            values.append(window.isAppHidden ? "Hidden" : "Contains hidden windows")
-        }
-        return values.joined(separator: ", ")
+        .accessibilityHidden(true)
     }
 }
 
@@ -855,6 +977,7 @@ private struct WindowListSheet: View {
             Divider()
 
             List(windows) { windowInfo in
+                let presentation = WorkspaceBarWindowListRowPresentation(window: windowInfo)
                 Button {
                     onFocusWindow(windowInfo.handle)
                 } label: {
@@ -868,16 +991,15 @@ private struct WindowListSheet: View {
                                 .foregroundColor(resolvedAccentColor)
                         }
                         if windowInfo.isAppHidden {
-                            Text("Hidden")
-                                .font(.caption2.weight(.semibold))
-                                .foregroundColor(resolvedSecondaryTextColor)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Color.secondary.opacity(0.16), in: Capsule())
+                            AppHiddenStatusBadge()
                         }
                     }
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(windowInfo.title)
+                .accessibilityValue(presentation.accessibilityValue)
+                .accessibilityHint(presentation.accessibilityHint)
+                .help(presentation.help)
             }
         }
         .frame(minWidth: 300, minHeight: 200)
