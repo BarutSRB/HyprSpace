@@ -130,6 +130,36 @@ final class DwindleExcludedProjectionTests: XCTestCase {
         XCTAssertTrue(engine.excludedTokens(in: workspaceId).isEmpty)
     }
 
+    func testSyncUsesVisibleFocusAsInsertionAnchorAndRestoresItAfterExcludedAddition() {
+        let engine = DwindleLayoutEngine()
+        let workspaceId = WorkspaceDescriptor.ID()
+        let first = WindowToken(pid: 1, windowId: 1)
+        let focused = WindowToken(pid: 2, windowId: 2)
+        let excluded = WindowToken(pid: 3, windowId: 3)
+        _ = engine.addWindow(token: first, to: workspaceId, activeWindowFrame: nil)
+        _ = engine.addWindow(token: focused, to: workspaceId, activeWindowFrame: nil)
+        _ = engine.calculateLayout(for: workspaceId, screen: screen)
+        engine.setSelectedNode(engine.findNode(for: first, in: workspaceId), in: workspaceId)
+        engine.setExcludedTokens([excluded], in: workspaceId)
+
+        XCTAssertTrue(
+            engine.syncWindows(
+                [first, focused, excluded],
+                in: workspaceId,
+                focusedToken: focused
+            ).isEmpty
+        )
+
+        XCTAssertEqual(engine.findNode(for: excluded, in: workspaceId)?.sibling()?.windowToken, focused)
+        XCTAssertEqual(engine.selectedNode(in: workspaceId)?.windowToken, focused)
+        XCTAssertEqual(engine.activeToken(in: workspaceId), focused)
+        XCTAssertEqual(engine.projectedActiveToken(in: workspaceId), focused)
+        XCTAssertEqual(
+            Set(engine.calculateLayout(for: workspaceId, screen: screen).keys),
+            [first, focused]
+        )
+    }
+
     func testHiddenMinimumConstraintDoesNotBlockVisibleResize() throws {
         let engine = DwindleLayoutEngine()
         let workspaceId = WorkspaceDescriptor.ID()

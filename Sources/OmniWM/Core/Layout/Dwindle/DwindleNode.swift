@@ -188,7 +188,8 @@ final class DwindleNode {
     var cachedFrame: CGRect?
     var cachedContentFrame: CGRect?
 
-    var cachedMinSize: CGSize?
+    var projectedVisibleLeafCount = 0
+    var projectedMinSize = CGSize(width: 1, height: 1)
 
     var frameAnimation: CubicRectAnimation?
 

@@ -1191,11 +1191,6 @@ import QuartzCore
         engine: DwindleLayoutEngine
     ) -> WorkspaceLayoutPlan {
         applyResolvedSettings(snapshot.settings, to: engine)
-        engine.setExcludedTokens(
-            snapshot.excludedTokens,
-            authoritativeTokens: Set(snapshot.windows.lazy.map(\.token)),
-            in: snapshot.workspaceId
-        )
 
         let frames = engine.calculateLayout(
             for: snapshot.workspaceId,
@@ -1232,11 +1227,6 @@ import QuartzCore
         targetTime: TimeInterval
     ) -> WorkspaceLayoutPlan {
         applyResolvedSettings(snapshot.settings, to: engine)
-        engine.setExcludedTokens(
-            snapshot.excludedTokens,
-            authoritativeTokens: Set(snapshot.windows.lazy.map(\.token)),
-            in: snapshot.workspaceId
-        )
 
         let baseFrames = engine.calculateLayout(
             for: snapshot.workspaceId,

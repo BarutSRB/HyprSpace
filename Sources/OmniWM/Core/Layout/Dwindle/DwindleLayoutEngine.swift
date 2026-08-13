@@ -126,19 +126,16 @@ final class DwindleLayoutEngine {
         authoritativeTokens: Set<WindowToken>? = nil,
         in workspaceId: WorkspaceDescriptor.ID
     ) {
+        guard isMutationSanctioned else {
+            assertionFailure("Dwindle projection exclusions changed outside a sanctioned WorldStore scope")
+            return
+        }
         let currentTokens = states[workspaceId]?.excludedTokens ?? []
         let resolvedTokens: Set<WindowToken>
         if let authoritativeTokens {
             resolvedTokens = excludedTokens.union(currentTokens.subtracting(authoritativeTokens))
         } else {
             resolvedTokens = excludedTokens
-        }
-        guard isMutationSanctioned else {
-            assert(
-                currentTokens == resolvedTokens,
-                "Dwindle projection exclusions changed outside a sanctioned WorldStore scope"
-            )
-            return
         }
         let state = ensureState(for: workspaceId)
         state.excludedTokens = resolvedTokens
@@ -547,6 +544,20 @@ final class DwindleLayoutEngine {
         )?.id
     }
 
+    private func reconcileProjectedSelection(
+        preferredToken: WindowToken?,
+        in state: DwindleWorkspaceState
+    ) {
+        if let preferredToken,
+           !state.excludedTokens.contains(preferredToken),
+           let preferredNode = state.leafByToken[preferredToken]
+        {
+            state.selectedNodeId = preferredNode.id
+            return
+        }
+        reconcileProjectedSelection(in: state)
+    }
+
     func activeTileMember(
         containing token: WindowToken,
         in workspaceId: WorkspaceDescriptor.ID
@@ -642,7 +653,6 @@ final class DwindleLayoutEngine {
         if state.pendingMovementFrameSeeds[token] == nil {
             state.pendingMovementFrameSeeds[token] = movementFrameSeed
         }
-        invalidateMinSizeCache(for: workspaceId)
         return true
     }
 
@@ -688,7 +698,6 @@ final class DwindleLayoutEngine {
         if state.pendingMovementFrameSeeds[token] == nil {
             state.pendingMovementFrameSeeds[token] = movementFrameSeed
         }
-        invalidateMinSizeCache(for: workspaceId)
         return true
     }
 
@@ -818,13 +827,8 @@ final class DwindleLayoutEngine {
             removeWindow(token: token, from: workspaceId)
         }
 
-        if let focusedToken,
-           states[workspaceId]?.excludedTokens.contains(focusedToken) != true,
-           let focusedNode = findNode(for: focusedToken, in: workspaceId)
-        {
-            states[workspaceId]?.selectedNodeId = focusedNode.id
-        } else if let state = states[workspaceId] {
-            reconcileProjectedSelection(in: state)
+        if let state = states[workspaceId] {
+            reconcileProjectedSelection(preferredToken: focusedToken, in: state)
         }
 
         let shouldBootstrapIncrementally = bootstrapScreen != nil
@@ -864,6 +868,10 @@ final class DwindleLayoutEngine {
             }
         }
 
+        if let state = states[workspaceId] {
+            reconcileProjectedSelection(preferredToken: focusedToken, in: state)
+        }
+
         return toRemove
     }
 
@@ -874,17 +882,18 @@ final class DwindleLayoutEngine {
     ) -> [WindowToken: CGRect] {
         guard let state = states[workspaceId] else { return [:] }
         let excludedTokens = state.excludedTokens
-        guard subtreeHasVisibleMember(state.root, excluding: excludedTokens) else {
-            return [:]
-        }
-
-        invalidateMinSizeCache(for: workspaceId)
+        prepareProjectedLayoutFacts(
+            for: state.root,
+            boundaryEdges: .all,
+            excludedTokens: excludedTokens
+        )
+        guard state.root.projectedVisibleLeafCount > 0 else { return [:] }
 
         var output: [WindowToken: CGRect] = [:]
         let tilingArea = screen
         let fullscreenArea = fullscreenScreen ?? screen
 
-        if visibleLeafCount(in: state.root, excluding: excludedTokens) == 1 {
+        if state.root.projectedVisibleLeafCount == 1 {
             if let leaf = firstVisibleLeaf(in: state.root, excluding: excludedTokens),
                let tile = leaf.tile,
                let active = visibleMember(in: tile, excluding: excludedTokens)
@@ -1085,8 +1094,8 @@ final class DwindleLayoutEngine {
 
             let first = node.firstChild()
             let second = node.secondChild()
-            let firstVisible = first.map { subtreeHasVisibleMember($0, excluding: excludedTokens) } ?? false
-            let secondVisible = second.map { subtreeHasVisibleMember($0, excluding: excludedTokens) } ?? false
+            let firstVisible = first?.projectedVisibleLeafCount ?? 0 > 0
+            let secondVisible = second?.projectedVisibleLeafCount ?? 0 > 0
 
             if firstVisible != secondVisible {
                 let visibleChild = firstVisible ? first : second
@@ -1106,16 +1115,8 @@ final class DwindleLayoutEngine {
             guard firstVisible, secondVisible, let first, let second else { return }
 
             let childEdges = splitChildBoundaryEdges(boundaryEdges, orientation: orientation)
-            let firstMin = computeProjectedMinSizeForSubtree(
-                first,
-                boundaryEdges: childEdges.first,
-                excludedTokens: excludedTokens
-            )
-            let secondMin = computeProjectedMinSizeForSubtree(
-                second,
-                boundaryEdges: childEdges.second,
-                excludedTokens: excludedTokens
-            )
+            let firstMin = first.projectedMinSize
+            let secondMin = second.projectedMinSize
 
             let (r1, r2) = splitRect(
                 rect,
@@ -1224,18 +1225,6 @@ final class DwindleLayoutEngine {
         return nil
     }
 
-    private func visibleLeafCount(
-        in node: DwindleNode,
-        excluding excludedTokens: Set<WindowToken>
-    ) -> Int {
-        if let tile = node.tile {
-            return visibleMember(in: tile, excluding: excludedTokens) == nil ? 0 : 1
-        }
-        return node.children.reduce(into: 0) { count, child in
-            count += visibleLeafCount(in: child, excluding: excludedTokens)
-        }
-    }
-
     private func firstVisibleLeaf(
         in node: DwindleNode,
         excluding excludedTokens: Set<WindowToken>
@@ -1249,6 +1238,118 @@ final class DwindleLayoutEngine {
             }
         }
         return nil
+    }
+
+    private func prepareProjectedLayoutFacts(
+        for node: DwindleNode,
+        boundaryEdges: ResizeEdge,
+        excludedTokens: Set<WindowToken>
+    ) {
+        prepareProjectedVisibilityFacts(for: node, excludedTokens: excludedTokens)
+        prepareProjectedMinSizeFacts(
+            for: node,
+            boundaryEdges: boundaryEdges,
+            excludedTokens: excludedTokens
+        )
+    }
+
+    @discardableResult
+    private func prepareProjectedVisibilityFacts(
+        for node: DwindleNode,
+        excludedTokens: Set<WindowToken>
+    ) -> Int {
+        if let tile = node.tile {
+            let count = visibleMember(in: tile, excluding: excludedTokens) == nil ? 0 : 1
+            node.projectedVisibleLeafCount = count
+            return count
+        }
+        var count = 0
+        for child in node.children {
+            count += prepareProjectedVisibilityFacts(for: child, excludedTokens: excludedTokens)
+        }
+        node.projectedVisibleLeafCount = count
+        return count
+    }
+
+    @discardableResult
+    private func prepareProjectedMinSizeFacts(
+        for node: DwindleNode,
+        boundaryEdges: ResizeEdge,
+        excludedTokens: Set<WindowToken>
+    ) -> CGSize {
+        guard node.projectedVisibleLeafCount > 0 else {
+            node.projectedMinSize = CGSize(width: 1, height: 1)
+            return node.projectedMinSize
+        }
+        switch node.kind {
+        case let .leaf(tile):
+            guard let tile else { return node.projectedMinSize }
+            node.projectedMinSize = projectedMinimumSize(
+                for: tile,
+                boundaryEdges: boundaryEdges,
+                excludedTokens: excludedTokens,
+                innerGap: settings.innerGap
+            )
+            return node.projectedMinSize
+
+        case let .split(orientation, _):
+            node.projectedMinSize = prepareProjectedSplitMinSizeFacts(
+                for: node,
+                orientation: orientation,
+                boundaryEdges: boundaryEdges,
+                excludedTokens: excludedTokens
+            )
+            return node.projectedMinSize
+        }
+    }
+
+    private func prepareProjectedSplitMinSizeFacts(
+        for node: DwindleNode,
+        orientation: DwindleOrientation,
+        boundaryEdges: ResizeEdge,
+        excludedTokens: Set<WindowToken>
+    ) -> CGSize {
+        guard let first = node.firstChild(), let second = node.secondChild() else {
+            return CGSize(width: 1, height: 1)
+        }
+        if first.projectedVisibleLeafCount == 0 {
+            return prepareProjectedMinSizeFacts(
+                for: second,
+                boundaryEdges: boundaryEdges,
+                excludedTokens: excludedTokens
+            )
+        }
+        if second.projectedVisibleLeafCount == 0 {
+            return prepareProjectedMinSizeFacts(
+                for: first,
+                boundaryEdges: boundaryEdges,
+                excludedTokens: excludedTokens
+            )
+        }
+
+        let childEdges = splitChildBoundaryEdges(boundaryEdges, orientation: orientation)
+        let firstMin = prepareProjectedMinSizeFacts(
+            for: first,
+            boundaryEdges: childEdges.first,
+            excludedTokens: excludedTokens
+        )
+        let secondMin = prepareProjectedMinSizeFacts(
+            for: second,
+            boundaryEdges: childEdges.second,
+            excludedTokens: excludedTokens
+        )
+        switch orientation {
+        case .horizontal:
+            return CGSize(
+                width: firstMin.width + secondMin.width,
+                height: max(firstMin.height, secondMin.height)
+            )
+        case .vertical:
+            return CGSize(
+                width: max(firstMin.width, secondMin.width),
+                height: firstMin.height + secondMin.height
+            )
+        }
     }
 
     private func computeProjectedMinSizeForSubtree(
@@ -1265,13 +1366,12 @@ final class DwindleLayoutEngine {
             else {
                 return CGSize(width: 1, height: 1)
             }
-            var minSize = minimumSize(for: tile, excluding: excludedTokens)
-            let inset = effectiveInnerGap / 2
-            if !boundaryEdges.contains(.left) { minSize.width += inset }
-            if !boundaryEdges.contains(.right) { minSize.width += inset }
-            if !boundaryEdges.contains(.top) { minSize.height += inset }
-            if !boundaryEdges.contains(.bottom) { minSize.height += inset }
-            return minSize
+            return projectedMinimumSize(
+                for: tile,
+                boundaryEdges: boundaryEdges,
+                excludedTokens: excludedTokens,
+                innerGap: effectiveInnerGap
+            )
 
         case let .split(orientation, _):
             guard let first = node.firstChild(), let second = node.secondChild() else {
@@ -1331,111 +1431,37 @@ final class DwindleLayoutEngine {
         }
     }
 
-    private func computeMinSizeForSubtree(
-        _ node: DwindleNode,
-        boundaryEdges: ResizeEdge,
-        cached: Bool
-    ) -> CGSize {
-        computeMinSizeForSubtree(
-            node,
-            boundaryEdges: boundaryEdges,
-            cached: cached,
-            innerGap: settings.innerGap
-        )
-    }
-
-    private func computeMinSizeForSubtree(
-        _ node: DwindleNode,
-        boundaryEdges: ResizeEdge,
-        cached: Bool,
-        innerGap: CGFloat
-    ) -> CGSize {
-        if cached, let cachedMin = node.cachedMinSize {
-            return cachedMin
-        }
-
-        let result: CGSize
-        switch node.kind {
-        case let .leaf(tile):
-            if let tile {
-                var minSize = minimumSize(for: tile)
-                let inset = innerGap / 2
-                if !boundaryEdges.contains(.left) { minSize.width += inset }
-                if !boundaryEdges.contains(.right) { minSize.width += inset }
-                if !boundaryEdges.contains(.top) { minSize.height += inset }
-                if !boundaryEdges.contains(.bottom) { minSize.height += inset }
-                result = minSize
-            } else {
-                result = CGSize(width: 1, height: 1)
-            }
-
-        case let .split(orientation, _):
-            guard let first = node.firstChild(), let second = node.secondChild() else {
-                result = CGSize(width: 1, height: 1)
-                break
-            }
-
-            let childEdges = splitChildBoundaryEdges(boundaryEdges, orientation: orientation)
-            let firstMin = computeMinSizeForSubtree(
-                first,
-                boundaryEdges: childEdges.first,
-                cached: cached,
-                innerGap: innerGap
-            )
-            let secondMin = computeMinSizeForSubtree(
-                second,
-                boundaryEdges: childEdges.second,
-                cached: cached,
-                innerGap: innerGap
-            )
-
-            switch orientation {
-            case .horizontal:
-                result = CGSize(
-                    width: firstMin.width + secondMin.width,
-                    height: max(firstMin.height, secondMin.height)
-                )
-            case .vertical:
-                result = CGSize(
-                    width: max(firstMin.width, secondMin.width),
-                    height: firstMin.height + secondMin.height
-                )
-            }
-        }
-
-        if cached {
-            node.cachedMinSize = result
-        }
-        return result
-    }
-
-    private func minimumSize(for tile: DwindleTile) -> CGSize {
-        var result = CGSize(width: 1, height: 1)
-        for member in tile.members {
-            let minimum = constraints(for: member.token).minSize
-            result.width = max(result.width, minimum.width)
-            result.height = max(result.height, minimum.height)
-        }
-        if tile.isGrouped {
-            result.width += tabRailWidth
-        }
-        return result
-    }
-
     private func minimumSize(
         for tile: DwindleTile,
         excluding excludedTokens: Set<WindowToken>
     ) -> CGSize {
         var result = CGSize(width: 1, height: 1)
+        var visibleCount = 0
         for member in tile.members where !excludedTokens.contains(member.token) {
+            visibleCount += 1
             let minimum = constraints(for: member.token).minSize
             result.width = max(result.width, minimum.width)
             result.height = max(result.height, minimum.height)
         }
-        if tile.members.count(where: { !excludedTokens.contains($0.token) }) > 1 {
+        if visibleCount > 1 {
             result.width += tabRailWidth
         }
         return result
+    }
+
+    private func projectedMinimumSize(
+        for tile: DwindleTile,
+        boundaryEdges: ResizeEdge,
+        excludedTokens: Set<WindowToken>,
+        innerGap: CGFloat
+    ) -> CGSize {
+        var minSize = minimumSize(for: tile, excluding: excludedTokens)
+        let inset = innerGap / 2
+        if !boundaryEdges.contains(.left) { minSize.width += inset }
+        if !boundaryEdges.contains(.right) { minSize.width += inset }
+        if !boundaryEdges.contains(.top) { minSize.height += inset }
+        if !boundaryEdges.contains(.bottom) { minSize.height += inset }
+        return minSize
     }
 
     private func tilingBoundaryEdges(of node: DwindleNode) -> ResizeEdge {
@@ -1530,18 +1556,6 @@ final class DwindleLayoutEngine {
             return split.splitRatio ?? settings.clampedRatio(ratio)
         }
         return min(max(ratio, range.lowerBound), range.upperBound)
-    }
-
-    private func invalidateMinSizeCache(for workspaceId: WorkspaceDescriptor.ID) {
-        guard let root = states[workspaceId]?.root else { return }
-        invalidateMinSizeCacheRecursive(root)
-    }
-
-    private func invalidateMinSizeCacheRecursive(_ node: DwindleNode) {
-        node.cachedMinSize = nil
-        for child in node.children {
-            invalidateMinSizeCacheRecursive(child)
-        }
     }
 
     private func splitRect(

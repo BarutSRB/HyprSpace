@@ -295,8 +295,14 @@ final class IPCQueryRouter {
         let monitor = controller.workspaceManager.monitor(for: entry.workspaceId)
         let appInfo = controller.appInfoCache.info(for: entry.pid)
         let hiddenState = controller.workspaceManager.hiddenState(for: entry.token)
+        let isAppHidden = controller.workspaceManager.isAppHidden(pid: entry.pid)
         let isScratchpad = controller.workspaceManager.isScratchpadToken(entry.token)
-        let isVisible = visibleWorkspaceIds.contains(entry.workspaceId) && hiddenState == nil
+        let isVisible = isWindowVisible(
+            entry,
+            visibleWorkspaceIds: visibleWorkspaceIds,
+            hiddenState: hiddenState,
+            isAppHidden: isAppHidden
+        )
 
         return IPCWindowQuerySnapshot(
             id: include("id", in: fields) ? windowIdentifier(entry.token) : nil,
@@ -314,6 +320,7 @@ final class IPCQueryRouter {
                 : nil,
             isFocused: include("is-focused", in: fields) ? (entry.token == focusedToken) : nil,
             isVisible: include("is-visible", in: fields) ? isVisible : nil,
+            isAppHidden: include("is-app-hidden", in: fields) ? isAppHidden : nil,
             isScratchpad: include("is-scratchpad", in: fields) ? isScratchpad : nil,
             hiddenReason: include("hidden-reason", in: fields) ? hiddenState.map(ipcHiddenReason(from:)) : nil
         )
@@ -422,8 +429,14 @@ final class IPCQueryRouter {
         }
 
         if selectors.visible == true {
-            let isHidden = controller.workspaceManager.hiddenState(for: entry.token) != nil
-            if !(visibleWorkspaceIds.contains(entry.workspaceId) && !isHidden) {
+            let hiddenState = controller.workspaceManager.hiddenState(for: entry.token)
+            let isAppHidden = controller.workspaceManager.isAppHidden(pid: entry.pid)
+            if !isWindowVisible(
+                entry,
+                visibleWorkspaceIds: visibleWorkspaceIds,
+                hiddenState: hiddenState,
+                isAppHidden: isAppHidden
+            ) {
                 return false
             }
         }
@@ -447,6 +460,17 @@ final class IPCQueryRouter {
         }
 
         return true
+    }
+
+    private func isWindowVisible(
+        _ entry: WindowState,
+        visibleWorkspaceIds: Set<WorkspaceDescriptor.ID>,
+        hiddenState: HiddenState?,
+        isAppHidden: Bool
+    ) -> Bool {
+        visibleWorkspaceIds.contains(entry.workspaceId)
+            && hiddenState == nil
+            && !isAppHidden
     }
 
     private func matchesWorkspaceQuery(

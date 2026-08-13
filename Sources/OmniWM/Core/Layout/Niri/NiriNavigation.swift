@@ -232,7 +232,8 @@ extension NiriLayoutEngine {
         orientation: Monitor.Orientation,
         animationConfig: SpringConfig? = nil,
         fromContainerIndex: Int? = nil,
-        previousActiveContainerPosition: CGFloat? = nil
+        previousActiveContainerPosition: CGFloat? = nil,
+        previousProjectedAnchor: NiriProjectedViewportAnchor? = nil
     ) {
         assertSanctionedMutation()
         if !projectionExclusions(in: workspaceId).isEmpty {
@@ -245,7 +246,8 @@ extension NiriLayoutEngine {
                 gaps: gaps,
                 orientation: orientation,
                 animationConfig: animationConfig,
-                fromContainerIndex: fromContainerIndex
+                fromContainerIndex: fromContainerIndex,
+                previousProjectedAnchor: previousProjectedAnchor
             )
             return
         }

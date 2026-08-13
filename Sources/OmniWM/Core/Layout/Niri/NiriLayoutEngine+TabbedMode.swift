@@ -49,55 +49,62 @@ extension NiriLayoutEngine {
             clearInteractiveResize()
         }
 
-        let windows = column.windowNodes
+        let windows = projectedWindows(in: column, workspaceId: workspaceId)
         guard !windows.isEmpty else {
             column.displayMode = mode
             return true
         }
 
-        let prevOrigin = tilesOrigin(column: column)
-
-        column.displayMode = mode
-        let newOrigin = tilesOrigin(column: column)
-        let originDelta = CGPoint(x: prevOrigin.x - newOrigin.x, y: prevOrigin.y - newOrigin.y)
-
-        column.displayMode = .normal
-        let tileOffsets = computeTileOffsets(
-            column: column,
-            gaps: gaps,
-            orientation: orientation
+        let prevOrigin = projectedTilesOrigin(
+            displayMode: column.displayMode,
+            visibleWindowCount: windows.count
         )
 
-        for (idx, window) in windows.enumerated() {
-            let previousSecondaryOrigin = switch orientation {
-            case .horizontal: prevOrigin.y
-            case .vertical: prevOrigin.x
-            }
-            var secondaryDelta = idx < tileOffsets.count ? tileOffsets[idx] : 0
-            secondaryDelta -= previousSecondaryOrigin
+        column.displayMode = mode
+        let newOrigin = projectedTilesOrigin(
+            displayMode: column.displayMode,
+            visibleWindowCount: windows.count
+        )
+        let originDelta = CGPoint(x: prevOrigin.x - newOrigin.x, y: prevOrigin.y - newOrigin.y)
 
-            if mode == .normal {
-                secondaryDelta *= -1
-            }
+        if windows.count > 1 {
+            let tileOffsets = projectedSecondaryOffsets(
+                for: windows,
+                effectiveTabbed: false,
+                gaps: gaps,
+                orientation: orientation
+            )
 
-            let delta = switch orientation {
-            case .horizontal:
-                CGPoint(x: originDelta.x, y: originDelta.y + secondaryDelta)
-            case .vertical:
-                CGPoint(x: originDelta.x + secondaryDelta, y: originDelta.y)
-            }
-            if delta.x != 0 || delta.y != 0 {
-                window.animateMoveFrom(
-                    displacement: delta,
-                    clock: animationClock,
-                    config: windowMovementAnimationConfig,
-                    displayRefreshRate: displayRefreshRate(in: workspaceId),
-                    animated: motion.animationsEnabled
-                )
+            for (idx, window) in windows.enumerated() {
+                let previousSecondaryOrigin = switch orientation {
+                case .horizontal: prevOrigin.y
+                case .vertical: prevOrigin.x
+                }
+                var secondaryDelta = idx < tileOffsets.count ? tileOffsets[idx] : 0
+                secondaryDelta -= previousSecondaryOrigin
+
+                if mode == .normal {
+                    secondaryDelta *= -1
+                }
+
+                let delta = switch orientation {
+                case .horizontal:
+                    CGPoint(x: originDelta.x, y: originDelta.y + secondaryDelta)
+                case .vertical:
+                    CGPoint(x: originDelta.x + secondaryDelta, y: originDelta.y)
+                }
+                if delta.x != 0 || delta.y != 0 {
+                    window.animateMoveFrom(
+                        displacement: delta,
+                        clock: animationClock,
+                        config: windowMovementAnimationConfig,
+                        displayRefreshRate: displayRefreshRate(in: workspaceId),
+                        animated: motion.animationsEnabled
+                    )
+                }
             }
         }
 
-        column.displayMode = mode
         let currentTarget = column.targetWidth ?? column.cachedWidth
         if currentTarget > 0 {
             let clampedTarget = column.clampedToWidthBounds(

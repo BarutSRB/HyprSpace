@@ -314,6 +314,7 @@ public enum IPCAutomationManifest {
         "manual-override",
         "is-focused",
         "is-visible",
+        "is-app-hidden",
         "is-scratchpad",
         "hidden-reason"
     ]
@@ -378,7 +379,10 @@ public enum IPCAutomationManifest {
                 .init(name: .workspace, summary: "Filter by workspace raw name, display name, or id."),
                 .init(name: .display, summary: "Filter by display name or display id."),
                 .init(name: .focused, summary: "Only include the focused managed window."),
-                .init(name: .visible, summary: "Only include windows on visible workspaces that are not hidden."),
+                .init(
+                    name: .visible,
+                    summary: "Only include windows on visible workspaces that are neither hidden nor owned by a hidden app."
+                ),
                 .init(name: .floating, summary: "Only include floating managed windows."),
                 .init(name: .scratchpad, summary: "Only include the scratchpad window."),
                 .init(name: .app, summary: "Filter by application display name."),

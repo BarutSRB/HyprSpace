@@ -6,7 +6,6 @@ import Foundation
 
 extension NiriLayoutEngine {
     private struct ColumnTransferResult {
-        let insertedTileIndex: Int
         let sourceBecameEmpty: Bool
         let sourceColumnIndexBeforeCleanup: Int
         let targetColumnIndexAfterInsert: Int
@@ -127,7 +126,6 @@ extension NiriLayoutEngine {
         }
 
         return ColumnTransferResult(
-            insertedTileIndex: insertedIndex,
             sourceBecameEmpty: sourceColumn.children.isEmpty,
             sourceColumnIndexBeforeCleanup: sourceColumnIndexBeforeCleanup,
             targetColumnIndexAfterInsert: columnIndex(of: targetColumn, in: workspaceId) ??
@@ -480,6 +478,19 @@ extension NiriLayoutEngine {
             gaps: gaps,
             orientation: orientation
         )
+        let previousGeometry = if projectionExclusions(in: workspaceId).isEmpty {
+            Optional<NiriProjectedGeometrySnapshot>.none
+        } else {
+            projectedGeometrySnapshot(
+                in: workspaceId,
+                workingFrame: workingFrame,
+                gaps: gaps,
+                orientation: orientation
+            )
+        }
+        let previousProjectedAnchor = previousGeometry.flatMap {
+            projectedViewportAnchor(state: state, geometry: $0, in: workspaceId)
+        }
         let sizeKeyPath = primarySizeKeyPath(for: orientation)
         let currentPosition = state.containerPosition(
             at: currentIdx,
@@ -506,63 +517,79 @@ extension NiriLayoutEngine {
         root.insertChild(column, at: targetIdx)
 
         let newCols = columns(in: workspaceId)
-        let positionAtOldIndex = state.containerPosition(
-            at: currentIdx,
-            containers: newCols,
-            gap: gaps,
-            sizeKeyPath: sizeKeyPath
-        )
-        let viewOffsetDelta = currentPosition - positionAtOldIndex
-        state.offsetViewport(by: viewOffsetDelta)
-
-        let newPosition = state.containerPosition(
-            at: targetIdx,
-            containers: newCols,
-            gap: gaps,
-            sizeKeyPath: sizeKeyPath
-        )
-        column.animateMoveFrom(
-            displacement: primaryDisplacement(
-                currentPosition - newPosition,
+        if let previousGeometry {
+            let currentGeometry = projectedGeometrySnapshot(
+                in: workspaceId,
+                workingFrame: workingFrame,
+                gaps: gaps,
                 orientation: orientation
-            ),
-            clock: animationClock,
-            config: windowMovementAnimationConfig,
-            displayRefreshRate: displayRefreshRate(in: workspaceId),
-            animated: motion.animationsEnabled
-        )
-
-        let othersOffset = nextPosition - currentPosition
-        if currentIdx < targetIdx {
-            for i in currentIdx ..< targetIdx {
-                let col = newCols[i]
-                if col.id != column.id {
-                    col.animateMoveFrom(
-                        displacement: primaryDisplacement(
-                            othersOffset,
-                            orientation: orientation
-                        ),
-                        clock: animationClock,
-                        config: windowMovementAnimationConfig,
-                        displayRefreshRate: displayRefreshRate(in: workspaceId),
-                        animated: motion.animationsEnabled
-                    )
-                }
-            }
+            )
+            animateProjectedColumns(
+                from: previousGeometry,
+                to: currentGeometry,
+                in: workspaceId,
+                motion: motion,
+                orientation: orientation
+            )
         } else {
-            for i in (targetIdx + 1) ... currentIdx {
-                let col = newCols[i]
-                if col.id != column.id {
-                    col.animateMoveFrom(
-                        displacement: primaryDisplacement(
-                            -othersOffset,
-                            orientation: orientation
-                        ),
-                        clock: animationClock,
-                        config: windowMovementAnimationConfig,
-                        displayRefreshRate: displayRefreshRate(in: workspaceId),
-                        animated: motion.animationsEnabled
-                    )
+            let positionAtOldIndex = state.containerPosition(
+                at: currentIdx,
+                containers: newCols,
+                gap: gaps,
+                sizeKeyPath: sizeKeyPath
+            )
+            let viewOffsetDelta = currentPosition - positionAtOldIndex
+            state.offsetViewport(by: viewOffsetDelta)
+
+            let newPosition = state.containerPosition(
+                at: targetIdx,
+                containers: newCols,
+                gap: gaps,
+                sizeKeyPath: sizeKeyPath
+            )
+            column.animateMoveFrom(
+                displacement: primaryDisplacement(
+                    currentPosition - newPosition,
+                    orientation: orientation
+                ),
+                clock: animationClock,
+                config: windowMovementAnimationConfig,
+                displayRefreshRate: displayRefreshRate(in: workspaceId),
+                animated: motion.animationsEnabled
+            )
+
+            let othersOffset = nextPosition - currentPosition
+            if currentIdx < targetIdx {
+                for i in currentIdx ..< targetIdx {
+                    let col = newCols[i]
+                    if col.id != column.id {
+                        col.animateMoveFrom(
+                            displacement: primaryDisplacement(
+                                othersOffset,
+                                orientation: orientation
+                            ),
+                            clock: animationClock,
+                            config: windowMovementAnimationConfig,
+                            displayRefreshRate: displayRefreshRate(in: workspaceId),
+                            animated: motion.animationsEnabled
+                        )
+                    }
+                }
+            } else {
+                for i in (targetIdx + 1) ... currentIdx {
+                    let col = newCols[i]
+                    if col.id != column.id {
+                        col.animateMoveFrom(
+                            displacement: primaryDisplacement(
+                                -othersOffset,
+                                orientation: orientation
+                            ),
+                            clock: animationClock,
+                            config: windowMovementAnimationConfig,
+                            displayRefreshRate: displayRefreshRate(in: workspaceId),
+                            animated: motion.animationsEnabled
+                        )
+                    }
                 }
             }
         }
@@ -576,7 +603,8 @@ extension NiriLayoutEngine {
             gaps: gaps,
             orientation: orientation,
             animationConfig: windowMovementAnimationConfig,
-            fromContainerIndex: currentIdx
+            fromContainerIndex: currentIdx,
+            previousProjectedAnchor: previousProjectedAnchor
         )
 
         return true
@@ -732,6 +760,18 @@ extension NiriLayoutEngine {
             gaps: gaps,
             orientation: orientation
         )
+        let hasProjectionExclusions = !projectionExclusions(in: workspaceId).isEmpty
+        let previousGeometry = projectedGeometrySnapshot(
+            in: workspaceId,
+            workingFrame: workingFrame,
+            gaps: gaps,
+            orientation: orientation
+        )
+        let previousProjectedAnchor = projectedViewportAnchor(
+            state: state,
+            geometry: previousGeometry,
+            in: workspaceId
+        )
         let cols = columns(in: workspaceId)
         let now = animationClock?.now() ?? CACurrentMediaTime()
         let previousActiveColumnIndex = state.activeColumnIndex
@@ -742,20 +782,15 @@ extension NiriLayoutEngine {
             gap: gaps,
             sizeKeyPath: sizeKeyPath
         )
-        let sourceTileIdx = currentColumn.windowNodes.firstIndex(where: { $0 === window }) ?? 0
-        let sourcePosition = state.containerPosition(
-            at: currentIdx,
-            containers: cols,
-            gap: gaps,
-            sizeKeyPath: sizeKeyPath
-        )
+        let sourcePosition = previousGeometry.column(containing: currentColumn)?.primaryPosition
+            ?? state.containerPosition(
+                at: currentIdx,
+                containers: cols,
+                gap: gaps,
+                sizeKeyPath: sizeKeyPath
+            )
         let sourceColRenderOffset = currentColumn.renderOffset(at: now)
-        let sourceTileOffset = computeTileOffset(
-            column: currentColumn,
-            tileIdx: sourceTileIdx,
-            gaps: gaps,
-            orientation: orientation
-        )
+        let sourceTileOffset = previousGeometry.secondaryOffset(of: window, in: currentColumn) ?? gaps
 
         let transfer = moveWindowToColumn(
             window,
@@ -769,32 +804,45 @@ extension NiriLayoutEngine {
         state.selectedNodeId = window.id
 
         if transfer.sourceBecameEmpty {
-            _ = animateColumnsForRemoval(
-                columnIndex: transfer.sourceColumnIndexBeforeCleanup,
-                in: workspaceId,
-                motion: motion,
-                state: &state,
-                gaps: gaps,
-                orientation: orientation
-            )
+            if !hasProjectionExclusions {
+                _ = animateColumnsForRemoval(
+                    columnIndex: transfer.sourceColumnIndexBeforeCleanup,
+                    in: workspaceId,
+                    motion: motion,
+                    state: &state,
+                    gaps: gaps,
+                    orientation: orientation
+                )
+            }
             cleanupEmptyColumn(currentColumn, in: workspaceId, state: &state)
         }
 
-        let newCols = columns(in: workspaceId)
-        let targetColIdx = columnIndex(of: targetColumn, in: workspaceId) ?? transfer.targetColumnIndexAfterInsert
-        let targetPosition = state.containerPosition(
-            at: targetColIdx,
-            containers: newCols,
-            gap: gaps,
-            sizeKeyPath: sizeKeyPath
-        )
-        let targetColRenderOffset = targetColumn.renderOffset()
-        let targetTileOffset = computeTileOffset(
-            column: targetColumn,
-            tileIdx: transfer.insertedTileIndex,
+        let currentGeometry = projectedGeometrySnapshot(
+            in: workspaceId,
+            workingFrame: workingFrame,
             gaps: gaps,
             orientation: orientation
         )
+        if hasProjectionExclusions {
+            animateProjectedColumns(
+                from: previousGeometry,
+                to: currentGeometry,
+                in: workspaceId,
+                motion: motion,
+                orientation: orientation
+            )
+        }
+        let newCols = columns(in: workspaceId)
+        let targetColIdx = columnIndex(of: targetColumn, in: workspaceId) ?? transfer.targetColumnIndexAfterInsert
+        let targetPosition = currentGeometry.column(containing: targetColumn)?.primaryPosition
+            ?? state.containerPosition(
+                at: targetColIdx,
+                containers: newCols,
+                gap: gaps,
+                sizeKeyPath: sizeKeyPath
+            )
+        let targetColRenderOffset = targetColumn.renderOffset(at: now)
+        let targetTileOffset = currentGeometry.secondaryOffset(of: window, in: targetColumn) ?? gaps
 
         let displacement = transferDisplacement(
             sourcePosition: sourcePosition,
@@ -823,7 +871,8 @@ extension NiriLayoutEngine {
             gaps: gaps,
             orientation: orientation,
             fromContainerIndex: previousActiveColumnIndex,
-            previousActiveContainerPosition: previousActiveColumnPosition
+            previousActiveContainerPosition: previousActiveColumnPosition,
+            previousProjectedAnchor: previousProjectedAnchor
         )
 
         return true
@@ -851,9 +900,7 @@ extension NiriLayoutEngine {
         let sourceColumnIdx = sourceProjectedColumn.durableIndex
         let targetColumnIdx = projectedColumns[targetProjectedIndex].durableIndex
         let cols = columns(in: workspaceId)
-        guard let window = sourceProjectedColumn.windows.last,
-              let sourceTileIdx = sourceColumn.windowNodes.firstIndex(where: { $0 === window })
-        else {
+        guard let window = sourceProjectedColumn.windows.last else {
             return false
         }
 
@@ -874,21 +921,24 @@ extension NiriLayoutEngine {
             gaps: gaps,
             orientation: orientation
         )
-        let sizeKeyPath = primarySizeKeyPath(for: orientation)
-        let now = animationClock?.now() ?? CACurrentMediaTime()
-        let sourcePosition = state.containerPosition(
-            at: sourceColumnIdx,
-            containers: cols,
-            gap: gaps,
-            sizeKeyPath: sizeKeyPath
-        )
-        let sourceColRenderOffset = sourceColumn.renderOffset(at: now)
-        let sourceTileOffset = computeTileOffset(
-            column: sourceColumn,
-            tileIdx: sourceTileIdx,
+        let hasProjectionExclusions = !projectionExclusions(in: workspaceId).isEmpty
+        let previousGeometry = projectedGeometrySnapshot(
+            in: workspaceId,
+            workingFrame: workingFrame,
             gaps: gaps,
             orientation: orientation
         )
+        let sizeKeyPath = primarySizeKeyPath(for: orientation)
+        let now = animationClock?.now() ?? CACurrentMediaTime()
+        let sourcePosition = previousGeometry.column(containing: sourceColumn)?.primaryPosition
+            ?? state.containerPosition(
+                at: sourceColumnIdx,
+                containers: cols,
+                gap: gaps,
+                sizeKeyPath: sizeKeyPath
+            )
+        let sourceColRenderOffset = sourceColumn.renderOffset(at: now)
+        let sourceTileOffset = previousGeometry.secondaryOffset(of: window, in: sourceColumn) ?? gaps
 
         let transfer = moveWindowToColumn(
             window,
@@ -899,32 +949,45 @@ extension NiriLayoutEngine {
         )
 
         if transfer.sourceBecameEmpty {
-            _ = animateColumnsForRemoval(
-                columnIndex: transfer.sourceColumnIndexBeforeCleanup,
-                in: workspaceId,
-                motion: motion,
-                state: &state,
-                gaps: gaps,
-                orientation: orientation
-            )
+            if !hasProjectionExclusions {
+                _ = animateColumnsForRemoval(
+                    columnIndex: transfer.sourceColumnIndexBeforeCleanup,
+                    in: workspaceId,
+                    motion: motion,
+                    state: &state,
+                    gaps: gaps,
+                    orientation: orientation
+                )
+            }
             cleanupEmptyColumn(sourceColumn, in: workspaceId, state: &state)
         }
 
-        let newCols = columns(in: workspaceId)
-        let targetColIdx = columnIndex(of: targetColumn, in: workspaceId) ?? targetColumnIdx
-        let targetPosition = state.containerPosition(
-            at: targetColIdx,
-            containers: newCols,
-            gap: gaps,
-            sizeKeyPath: sizeKeyPath
-        )
-        let targetColRenderOffset = targetColumn.renderOffset(at: now)
-        let targetTileOffset = computeTileOffset(
-            column: targetColumn,
-            tileIdx: transfer.insertedTileIndex,
+        let currentGeometry = projectedGeometrySnapshot(
+            in: workspaceId,
+            workingFrame: workingFrame,
             gaps: gaps,
             orientation: orientation
         )
+        if hasProjectionExclusions {
+            animateProjectedColumns(
+                from: previousGeometry,
+                to: currentGeometry,
+                in: workspaceId,
+                motion: motion,
+                orientation: orientation
+            )
+        }
+        let newCols = columns(in: workspaceId)
+        let targetColIdx = columnIndex(of: targetColumn, in: workspaceId) ?? targetColumnIdx
+        let targetPosition = currentGeometry.column(containing: targetColumn)?.primaryPosition
+            ?? state.containerPosition(
+                at: targetColIdx,
+                containers: newCols,
+                gap: gaps,
+                sizeKeyPath: sizeKeyPath
+            )
+        let targetColRenderOffset = targetColumn.renderOffset(at: now)
+        let targetTileOffset = currentGeometry.secondaryOffset(of: window, in: targetColumn) ?? gaps
 
         let displacement = transferDisplacement(
             sourcePosition: sourcePosition,
@@ -972,23 +1035,25 @@ extension NiriLayoutEngine {
             gaps: gaps,
             orientation: orientation
         )
-        let sizeKeyPath = primarySizeKeyPath(for: orientation)
-        let now = animationClock?.now() ?? CACurrentMediaTime()
-        let cols = columns(in: workspaceId)
-        let sourceTileIdx = sourceColumn.windowNodes.firstIndex(where: { $0 === window }) ?? 0
-        let sourcePosition = state.containerPosition(
-            at: sourceColumnIdx,
-            containers: cols,
-            gap: gaps,
-            sizeKeyPath: sizeKeyPath
-        )
-        let sourceColRenderOffset = sourceColumn.renderOffset(at: now)
-        let sourceTileOffset = computeTileOffset(
-            column: sourceColumn,
-            tileIdx: sourceTileIdx,
+        let hasProjectionExclusions = !projectionExclusions(in: workspaceId).isEmpty
+        let previousGeometry = projectedGeometrySnapshot(
+            in: workspaceId,
+            workingFrame: workingFrame,
             gaps: gaps,
             orientation: orientation
         )
+        let sizeKeyPath = primarySizeKeyPath(for: orientation)
+        let now = animationClock?.now() ?? CACurrentMediaTime()
+        let cols = columns(in: workspaceId)
+        let sourcePosition = previousGeometry.column(containing: sourceColumn)?.primaryPosition
+            ?? state.containerPosition(
+                at: sourceColumnIdx,
+                containers: cols,
+                gap: gaps,
+                sizeKeyPath: sizeKeyPath
+            )
+        let sourceColRenderOffset = sourceColumn.renderOffset(at: now)
+        let sourceTileOffset = previousGeometry.secondaryOffset(of: window, in: sourceColumn) ?? gaps
         let replacementSelectionId = visibleWindows.dropFirst().first?.id
         let selectedExpelledWindow = state.selectedNodeId == window.id
 
@@ -1003,7 +1068,9 @@ extension NiriLayoutEngine {
             in: workspaceId
         )
 
-        if let newColIdx = columnIndex(of: newColumn, in: workspaceId) {
+        if !hasProjectionExclusions,
+           let newColIdx = columnIndex(of: newColumn, in: workspaceId)
+        {
             animateColumnsForAddition(
                 columnIndex: newColIdx,
                 in: workspaceId,
@@ -1015,14 +1082,30 @@ extension NiriLayoutEngine {
             )
         }
 
+        let currentGeometry = projectedGeometrySnapshot(
+            in: workspaceId,
+            workingFrame: workingFrame,
+            gaps: gaps,
+            orientation: orientation
+        )
+        if hasProjectionExclusions {
+            animateProjectedColumns(
+                from: previousGeometry,
+                to: currentGeometry,
+                in: workspaceId,
+                motion: motion,
+                orientation: orientation
+            )
+        }
         let newCols = columns(in: workspaceId)
         if let newColIdx = columnIndex(of: newColumn, in: workspaceId) {
-            let targetPosition = state.containerPosition(
-                at: newColIdx,
-                containers: newCols,
-                gap: gaps,
-                sizeKeyPath: sizeKeyPath
-            )
+            let targetPosition = currentGeometry.column(containing: newColumn)?.primaryPosition
+                ?? state.containerPosition(
+                    at: newColIdx,
+                    containers: newCols,
+                    gap: gaps,
+                    sizeKeyPath: sizeKeyPath
+                )
             let targetColRenderOffset = newColumn.renderOffset(at: now)
             let displacement = transferDisplacement(
                 sourcePosition: sourcePosition,
@@ -1076,24 +1159,31 @@ extension NiriLayoutEngine {
             gaps: gaps,
             orientation: orientation
         )
+        let hasProjectionExclusions = !projectionExclusions(in: workspaceId).isEmpty
+        let previousGeometry = projectedGeometrySnapshot(
+            in: workspaceId,
+            workingFrame: workingFrame,
+            gaps: gaps,
+            orientation: orientation
+        )
+        let previousProjectedAnchor = projectedViewportAnchor(
+            state: state,
+            geometry: previousGeometry,
+            in: workspaceId
+        )
         let sizeKeyPath = primarySizeKeyPath(for: orientation)
         let now = animationClock?.now() ?? CACurrentMediaTime()
         let cols = columns(in: workspaceId)
 
-        let sourceTileIdx = currentColumn.windowNodes.firstIndex(where: { $0 === window }) ?? 0
-        let sourcePosition = state.containerPosition(
-            at: currentColIdx,
-            containers: cols,
-            gap: gaps,
-            sizeKeyPath: sizeKeyPath
-        )
+        let sourcePosition = previousGeometry.column(containing: currentColumn)?.primaryPosition
+            ?? state.containerPosition(
+                at: currentColIdx,
+                containers: cols,
+                gap: gaps,
+                sizeKeyPath: sizeKeyPath
+            )
         let sourceColRenderOffset = currentColumn.renderOffset(at: now)
-        let sourceTileOffset = computeTileOffset(
-            column: currentColumn,
-            tileIdx: sourceTileIdx,
-            gaps: gaps,
-            orientation: orientation
-        )
+        let sourceTileOffset = previousGeometry.secondaryOffset(of: window, in: currentColumn) ?? gaps
 
         let wasTabbed = currentColumn.displayMode == .tabbed
         currentColumn.adjustActiveTileIdxForRemoval(of: window)
@@ -1112,7 +1202,9 @@ extension NiriLayoutEngine {
         resetMovedWindowColumnLocalSizing(window)
         window.isHiddenInTabbedMode = false
 
-        if let newColIdx = columnIndex(of: newColumn, in: workspaceId) {
+        if !hasProjectionExclusions,
+           let newColIdx = columnIndex(of: newColumn, in: workspaceId)
+        {
             animateColumnsForAddition(
                 columnIndex: newColIdx,
                 in: workspaceId,
@@ -1124,14 +1216,30 @@ extension NiriLayoutEngine {
             )
         }
 
+        let currentGeometry = projectedGeometrySnapshot(
+            in: workspaceId,
+            workingFrame: workingFrame,
+            gaps: gaps,
+            orientation: orientation
+        )
+        if hasProjectionExclusions {
+            animateProjectedColumns(
+                from: previousGeometry,
+                to: currentGeometry,
+                in: workspaceId,
+                motion: motion,
+                orientation: orientation
+            )
+        }
         let newCols = columns(in: workspaceId)
         if let newColIdx = columnIndex(of: newColumn, in: workspaceId) {
-            let targetPosition = state.containerPosition(
-                at: newColIdx,
-                containers: newCols,
-                gap: gaps,
-                sizeKeyPath: sizeKeyPath
-            )
+            let targetPosition = currentGeometry.column(containing: newColumn)?.primaryPosition
+                ?? state.containerPosition(
+                    at: newColIdx,
+                    containers: newCols,
+                    gap: gaps,
+                    sizeKeyPath: sizeKeyPath
+                )
             let targetColRenderOffset = newColumn.renderOffset(at: now)
 
             let displacement = transferDisplacement(
@@ -1168,7 +1276,8 @@ extension NiriLayoutEngine {
             state: &state,
             workingFrame: workingFrame,
             gaps: gaps,
-            orientation: orientation
+            orientation: orientation,
+            previousProjectedAnchor: previousProjectedAnchor
         )
 
         return true
@@ -1183,7 +1292,8 @@ extension NiriLayoutEngine {
         gaps: CGFloat,
         orientation: Monitor.Orientation,
         animationConfig: SpringConfig? = nil,
-        fromContainerIndex: Int? = nil
+        fromContainerIndex: Int? = nil,
+        previousProjectedAnchor: NiriProjectedViewportAnchor? = nil
     ) {
         if let firstWindow = projectedWindows(in: column, workspaceId: workspaceId).first {
             ensureSelectionVisible(
@@ -1195,7 +1305,8 @@ extension NiriLayoutEngine {
                 gaps: gaps,
                 orientation: orientation,
                 animationConfig: animationConfig,
-                fromContainerIndex: fromContainerIndex
+                fromContainerIndex: fromContainerIndex,
+                previousProjectedAnchor: previousProjectedAnchor
             )
         }
     }

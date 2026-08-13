@@ -211,6 +211,179 @@ final class NiriProjectionCommandTests: XCTestCase {
         )
     }
 
+    func testProjectedTransferMatchesEquivalentVisibleViewportAndAnimation() throws {
+        let projected = makeColumnFixture(includeHidden: true)
+        let baseline = makeColumnFixture(includeHidden: false)
+        configureColumnSpans(projected.engine, workspaceId: projected.workspaceId, width: 420)
+        configureColumnSpans(baseline.engine, workspaceId: baseline.workspaceId, width: 420)
+        installProjection(projected)
+        installProjection(baseline)
+        let animationTime = CACurrentMediaTime()
+        projected.engine.animationClock = AnimationClock(time: animationTime)
+        baseline.engine.animationClock = AnimationClock(time: animationTime)
+        var projectedState = ViewportState(activeColumnIndex: 2, selectedNodeId: projected.b.id)
+        var baselineState = ViewportState(activeColumnIndex: 1, selectedNodeId: baseline.b.id)
+        projectedState.jumpOffset(to: 75)
+        baselineState.jumpOffset(to: 75)
+
+        XCTAssertTrue(
+            projected.engine.consumeOrExpelWindow(
+                projected.b,
+                direction: .left,
+                in: projected.workspaceId,
+                motion: .enabled,
+                state: &projectedState,
+                workingFrame: workingFrame,
+                gaps: gap,
+                orientation: .horizontal,
+                allowEdgeWrap: false
+            )
+        )
+        XCTAssertTrue(
+            baseline.engine.consumeOrExpelWindow(
+                baseline.b,
+                direction: .left,
+                in: baseline.workspaceId,
+                motion: .enabled,
+                state: &baselineState,
+                workingFrame: workingFrame,
+                gaps: gap,
+                orientation: .horizontal,
+                allowEdgeWrap: false
+            )
+        )
+
+        XCTAssertEqual(projectedState.viewOffset, baselineState.viewOffset, accuracy: 0.001)
+        XCTAssertEqual(projectedState.activeColumnIndex, baselineState.activeColumnIndex)
+        XCTAssertEqual(
+            try XCTUnwrap(projected.b.moveXAnimation).fromOffset,
+            try XCTUnwrap(baseline.b.moveXAnimation).fromOffset,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            projected.engine.columns(in: projected.workspaceId).map { $0.windowNodes.map(\.token) },
+            [[projected.b.token, projected.a.token], [try XCTUnwrap(projected.hidden?.token)]]
+        )
+    }
+
+    func testProjectedColumnMoveMatchesEquivalentVisibleViewportAndAnimation() throws {
+        let projected = makeColumnFixture(includeHidden: true)
+        let baseline = makeColumnFixture(includeHidden: false)
+        configureColumnSpans(projected.engine, workspaceId: projected.workspaceId, width: 420)
+        configureColumnSpans(baseline.engine, workspaceId: baseline.workspaceId, width: 420)
+        installProjection(projected)
+        installProjection(baseline)
+        let projectedAColumn = try XCTUnwrap(
+            projected.engine.findColumn(containing: projected.a, in: projected.workspaceId)
+        )
+        let projectedBColumn = try XCTUnwrap(
+            projected.engine.findColumn(containing: projected.b, in: projected.workspaceId)
+        )
+        let baselineAColumn = try XCTUnwrap(
+            baseline.engine.findColumn(containing: baseline.a, in: baseline.workspaceId)
+        )
+        let baselineBColumn = try XCTUnwrap(
+            baseline.engine.findColumn(containing: baseline.b, in: baseline.workspaceId)
+        )
+        let hiddenColumn = try XCTUnwrap(
+            projected.hidden.flatMap { projected.engine.findColumn(containing: $0, in: projected.workspaceId) }
+        )
+        let animationTime = CACurrentMediaTime()
+        projected.engine.animationClock = AnimationClock(time: animationTime)
+        baseline.engine.animationClock = AnimationClock(time: animationTime)
+        var projectedState = ViewportState(activeColumnIndex: 2, selectedNodeId: projected.b.id)
+        var baselineState = ViewportState(activeColumnIndex: 1, selectedNodeId: baseline.b.id)
+        projectedState.jumpOffset(to: -40)
+        baselineState.jumpOffset(to: -40)
+
+        XCTAssertTrue(
+            projected.engine.moveColumn(
+                projectedBColumn,
+                direction: .left,
+                in: projected.workspaceId,
+                motion: .enabled,
+                state: &projectedState,
+                workingFrame: workingFrame,
+                gaps: gap,
+                orientation: .horizontal
+            )
+        )
+        XCTAssertTrue(
+            baseline.engine.moveColumn(
+                baselineBColumn,
+                direction: .left,
+                in: baseline.workspaceId,
+                motion: .enabled,
+                state: &baselineState,
+                workingFrame: workingFrame,
+                gaps: gap,
+                orientation: .horizontal
+            )
+        )
+
+        XCTAssertEqual(projectedState.viewOffset, baselineState.viewOffset, accuracy: 0.001)
+        XCTAssertEqual(projectedState.activeColumnIndex, baselineState.activeColumnIndex)
+        XCTAssertEqual(
+            try XCTUnwrap(projectedBColumn.moveAnimation).fromOffset,
+            try XCTUnwrap(baselineBColumn.moveAnimation).fromOffset,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(projectedAColumn.moveAnimation).fromOffset,
+            try XCTUnwrap(baselineAColumn.moveAnimation).fromOffset,
+            accuracy: 0.001
+        )
+        XCTAssertNil(hiddenColumn.moveAnimation)
+    }
+
+    func testProjectedSingletonTabbedToggleDoesNotCreatePhantomAnimation() throws {
+        let fixture = makeColumnFixture(includeHidden: true)
+        let hidden = try XCTUnwrap(fixture.hidden)
+        let column = try XCTUnwrap(
+            fixture.engine.findColumn(containing: fixture.a, in: fixture.workspaceId)
+        )
+        var state = ViewportState(selectedNodeId: fixture.a.id)
+        XCTAssertTrue(consume(
+            hidden,
+            into: column,
+            engine: fixture.engine,
+            workspaceId: fixture.workspaceId,
+            state: &state
+        ))
+        let before = fixture.engine.calculateLayoutWithVisibility(
+            state: state,
+            workspaceId: fixture.workspaceId,
+            monitorFrame: workingFrame,
+            gaps: (horizontal: gap, vertical: gap),
+            orientation: .horizontal,
+            excludedTokens: [hidden.token]
+        )
+
+        XCTAssertTrue(
+            fixture.engine.setColumnDisplay(
+                .tabbed,
+                for: column,
+                in: fixture.workspaceId,
+                motion: .enabled,
+                orientation: .horizontal,
+                gaps: gap
+            )
+        )
+        let after = fixture.engine.calculateLayoutWithVisibility(
+            state: state,
+            workspaceId: fixture.workspaceId,
+            monitorFrame: workingFrame,
+            gaps: (horizontal: gap, vertical: gap),
+            orientation: .horizontal,
+            excludedTokens: [hidden.token]
+        )
+
+        XCTAssertEqual(before.frames[fixture.a.token], after.frames[fixture.a.token])
+        XCTAssertFalse(fixture.a.hasMoveAnimationsRunning)
+        XCTAssertFalse(hidden.hasMoveAnimationsRunning)
+        XCTAssertEqual(column.displayMode, .tabbed)
+    }
+
     func testProjectedTabbedFallbackHasNoSingleTabInsetAndRejectsInactiveHit() throws {
         let engine = NiriLayoutEngine()
         engine.singleWindowFit = SingleWindowFit(mode: .containerPrimarySpan)

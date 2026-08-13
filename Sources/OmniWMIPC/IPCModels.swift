@@ -4,7 +4,7 @@
 import Foundation
 
 public enum OmniWMIPCProtocol {
-    public static let version = 10
+    public static let version = 11
 }
 
 public struct IPCRequestEnvelope: Decodable, Sendable {
@@ -2267,6 +2267,7 @@ public struct IPCWindowQuerySnapshot: Codable, Equatable, Sendable {
     public let manualOverride: IPCManualWindowOverride?
     public let isFocused: Bool?
     public let isVisible: Bool?
+    public let isAppHidden: Bool?
     public let isScratchpad: Bool?
     public let hiddenReason: IPCHiddenReason?
 
@@ -2283,6 +2284,7 @@ public struct IPCWindowQuerySnapshot: Codable, Equatable, Sendable {
         manualOverride: IPCManualWindowOverride? = nil,
         isFocused: Bool? = nil,
         isVisible: Bool? = nil,
+        isAppHidden: Bool? = nil,
         isScratchpad: Bool? = nil,
         hiddenReason: IPCHiddenReason? = nil
     ) {
@@ -2298,6 +2300,7 @@ public struct IPCWindowQuerySnapshot: Codable, Equatable, Sendable {
         self.manualOverride = manualOverride
         self.isFocused = isFocused
         self.isVisible = isVisible
+        self.isAppHidden = isAppHidden
         self.isScratchpad = isScratchpad
         self.hiddenReason = hiddenReason
     }

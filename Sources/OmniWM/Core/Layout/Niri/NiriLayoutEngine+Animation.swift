@@ -406,52 +406,40 @@ extension NiriLayoutEngine {
         return anyRunning
     }
 
-    func computeTileOffset(
-        column: NiriContainer,
-        tileIdx: Int,
-        gaps: CGFloat,
+    func animateProjectedColumns(
+        from previous: NiriProjectedGeometrySnapshot,
+        to current: NiriProjectedGeometrySnapshot,
+        in workspaceId: WorkspaceDescriptor.ID,
+        motion: MotionSnapshot,
         orientation: Monitor.Orientation
-    ) -> CGFloat {
-        let windows = column.windowNodes
-        guard tileIdx >= 0, tileIdx < windows.count else { return 0 }
-        guard !column.isTabbed else { return gaps }
-
-        var offset: CGFloat = gaps
-        guard tileIdx > 0 else { return offset }
-        for i in 0 ..< tileIdx {
-            let span = switch orientation {
-            case .horizontal: windows[i].resolvedHeight ?? windows[i].frame?.height ?? 0
-            case .vertical: windows[i].resolvedWidth ?? windows[i].frame?.width ?? 0
+    ) {
+        for geometry in current.columns {
+            let column = geometry.projectedColumn.column
+            guard motion.animationsEnabled else {
+                column.animateMoveFrom(
+                    displacement: .zero,
+                    clock: animationClock,
+                    config: windowMovementAnimationConfig,
+                    displayRefreshRate: displayRefreshRate(in: workspaceId),
+                    animated: false
+                )
+                continue
             }
-            offset += span
-            offset += gaps
-        }
-        return offset
-    }
-
-    func computeTileOffsets(
-        column: NiriContainer,
-        gaps: CGFloat,
-        orientation: Monitor.Orientation
-    ) -> [CGFloat] {
-        let windows = column.windowNodes
-        guard !windows.isEmpty else { return [] }
-
-        var offsets: [CGFloat] = [gaps]
-        var position: CGFloat = gaps
-        for i in 0 ..< windows.count - 1 {
-            let span = switch orientation {
-            case .horizontal: windows[i].resolvedHeight ?? windows[i].frame?.height ?? 0
-            case .vertical: windows[i].resolvedWidth ?? windows[i].frame?.width ?? 0
+            guard let previousGeometry = previous.column(containing: column) else { continue }
+            let displacement = switch orientation {
+            case .horizontal:
+                CGPoint(x: previousGeometry.primaryPosition - geometry.primaryPosition, y: 0)
+            case .vertical:
+                CGPoint(x: 0, y: previousGeometry.primaryPosition - geometry.primaryPosition)
             }
-            position += span + gaps
-            offsets.append(position)
+            guard displacement != .zero else { continue }
+            column.animateMoveFrom(
+                displacement: displacement,
+                clock: animationClock,
+                config: windowMovementAnimationConfig,
+                displayRefreshRate: displayRefreshRate(in: workspaceId),
+                animated: motion.animationsEnabled
+            )
         }
-        return offsets
-    }
-
-    func tilesOrigin(column: NiriContainer) -> CGPoint {
-        let xOffset = column.isTabbed ? renderStyle.tabIndicatorWidth : 0
-        return CGPoint(x: xOffset, y: 0)
     }
 }

@@ -326,6 +326,8 @@ Some apps (Ghostty, browsers) destroy and recreate windows during internal opera
     private(set) var focus = FocusSessionSnapshot()
     private(set) var viewports: [WorkspaceDescriptor.ID: ViewportState] = [:]
     private(set) var scratchpadToken: WindowToken?
+    private(set) var hiddenAppPIDs: Set<pid_t> = []
+    private var appVisibilityGenerationByPID: [pid_t: UInt64] = [:]
     private(set) var monitorSessions: [Monitor.ID: MonitorSession] = [:]
     private(set) var spaceTopology = SpaceTopology()
     private(set) var niriEngine: NiriLayoutEngine?      // layout engines are
@@ -346,6 +348,8 @@ Some apps (Ghostty, browsers) destroy and recreate windows during internal opera
 
 **Reads vs. writes.** `WorldStore` exposes a large read-accessor surface (`entry(for:)`, `windows(in:)`, `focus`, …) that delegates to the private `WindowModel`. Every *mutator* is guarded by `assertInCommit` (`commitDepth > 0`), so nothing can mutate the world outside a commit.
 
+**macOS application visibility.** App hiding is PID-scoped world state, owned by `WorldStore.hiddenAppPIDs` and changed only by `.hiddenApplicationsChanged` commits. `appVisibilityGenerationByPID` advances on every visibility transition or explicit invalidation so delayed reveal intents can reject stale work. This state is orthogonal to per-window `LayoutReason` (`standard` / `nativeFullscreen`) and `HiddenState` (workspace parking, layout-transient hiding, or scratchpad): hiding an app masks its windows from layout projection without destroying their durable layout identity or fullscreen state.
+
 **Engine mutation sanction.** The two layout engines are private to the world. They may only be mutated when `isEngineMutationSanctioned` is true — i.e. inside `commit`. Callers not already inside a commit enter one through the `WorkspaceManager` scope wrappers: `withEngineMutationScope { … }` for ad-hoc engine mutations, and `withBatchedLayoutBuild { … }` for plan-building (Stage 3), which calls into the engines (`syncWindows`/`removeWindows`/`restoreInitialPlacements`) inside a single `layout_build` commit. `commit` sets each engine's `isMutationSanctioned` flag and the engines assert on any out-of-scope mutation.
 
 **Staleness machinery (`InvalidationMarks`).** Because plan-building is asynchronous (Stage 3 `await`s between workspaces), a plan can be built against a world that a newer commit has already moved past. `WorldStore` tracks per-domain seq watermarks (`workspace` / `layout` / `focus` / `fullscreen`) via `noteInvalidation(...)`. The effector stamps each plan with a `plannedSeq` and calls `isSeqCurrent(plannedSeq, for:domains:)` before applying; a plan built before a relevant mutation is dropped rather than applied stale.
@@ -365,7 +369,7 @@ Some apps (Ghostty, browsers) destroy and recreate windows during internal opera
 | `fullRescan` | Startup/global fallback, app launch/rebind recovery, space/wake/display inventory | Global or scope-limited enumeration + relayout |
 | `relayout` | Config change, app termination, window created, frame changed | Recompute from current state (debounced) |
 | `immediateRelayout` | Commands, gestures, workspace switch | Synchronous relayout |
-| `visibilityRefresh` | App hidden/unhidden | Show/hide only |
+| `visibilityRefresh` | App hidden/unhidden | Reproject active affected layouts while preserving durable layout topology |
 | `windowRemoval` | Window destroyed | Remove + relayout + focus recovery |
 
 **Inventory scope and authority.** Startup, app-rule reevaluation, and incomplete scoped evidence retain the global inventory path. App launch and identity/binding recovery enumerate only the affected app PIDs. Active-Space changes enumerate the newly active native Spaces plus exact managed windows previously or currently known on those Spaces. If a fullscreen Space disappears between the baseline and stable topology, its previously mapped managed windows remain exact scoped targets, but the vanished Space itself is not queried and the scan does not widen to every window owned by those PIDs. Wake, unlock, and display changes apply each first usable topology sample immediately for frame-write safety by carrying forward known membership without issuing per-window membership queries, while deferring native-fullscreen lifecycle reconciliation. A matching second sample performs one membership-query pass, preserves last-known membership when a private query is inconclusive, and reconciles fullscreen state before issuing one coalesced scoped inventory. For each requested native Space, `SLSCopyWindowsWithOptionsAndTags` supplies raw membership. OmniWM deduplicates those IDs and performs one initial bulk WindowServer detail query; targeted reconciliation can issue additional bulk queries for preserved managed IDs and AX-discovered dependency windows. AX work is limited to selected application roots, although each selected root still enumerates `kAXWindows` and resolves WindowServer IDs before filtering.
@@ -392,9 +396,9 @@ The reconciler is *not* called from inside `WorldStore.commit`; it reads current
 
 When OmniWM activates an app or focuses a window, macOS emits an AX focus-changed event — an *echo* of our own action. Without bookkeeping, the system can't tell that echo apart from the user genuinely clicking another window. The Intent subsystem (`Core/Intent/`) solves this.
 
-- **`IntentLedger`** is a `@MainActor` ring buffer (capacity 256) of `Intent` records. `IntentKind` has exactly five cases: `activateApp`, `focusPolicyLease`, `focusWindow`, `replacementFocus`, `sameAppCloseProbe`. Each record carries the global intake `seq` at issue time, a lifecycle `phase` (`pending`/`confirmed`/`superseded`/`expired`/`cancelled`), and retry state.
+- **`IntentLedger`** is a `@MainActor` ring buffer (capacity 256) of `Intent` records. `IntentKind` has exactly six cases: `activateApp`, `appRevealFocus`, `focusPolicyLease`, `focusWindow`, `replacementFocus`, `sameAppCloseProbe`. `appRevealFocus` carries the exact window-handle identity, app-visibility generation, focus watermark and fingerprint, plus a normal-window or scratchpad destination so unhide completion cannot focus stale state. Each record carries the global intake `seq` at issue time, a lifecycle `phase` (`pending`/`confirmed`/`superseded`/`expired`/`cancelled`), and retry state.
 - **`classifyFocusObservation(token:)`** returns an `EchoClassification`: `.echoOf(intent)` when an open intent targets the token, `.lateEcho(intent)` when a recently-retired intent (within a 1-second window) matches, otherwise `.external`. The consumer is `AXEventHandler`, which treats `.echoOf`/`.lateEcho` as confirmation of our pending request and only processes `.external` as a genuine user focus change.
-- **`DeadlineWheel`** is a main-actor timing wheel keyed by `IntentID`: it arms a single `Task` that sleeps until the nearest deadline, then posts `.intentExpired(intentId:)` back into `EventIntake` (it does not fire callbacks). `AXEventHandler.handleIntentExpired` decides what to do — e.g. a still-active `focusWindow` intent drives a focus *retry* rather than expiring. Activation-settle deadlines are 100ms. The `DeadlineWheel` serves focus/activation/lease intents only; AX frame-write retries are a separate mechanism (see [4.9](#49-accessibility-layer)).
+- **`DeadlineWheel`** is a main-actor timing wheel keyed by `IntentID`: it arms a single `Task` that sleeps until the nearest deadline, then posts `.intentExpired(intentId:)` back into `EventIntake` (it does not fire callbacks). `AXEventHandler.handleIntentExpired` decides what to do — e.g. a still-active `focusWindow` intent drives a focus *retry* rather than expiring. Activation-settle deadlines are 100ms; an `appRevealFocus` intent expires after 2 seconds. The `DeadlineWheel` serves focus/activation/lease/reveal intents only; AX frame-write retries are a separate mechanism (see [4.9](#49-accessibility-layer)).
 - **`FactResolver`** gathers the one fact that can't be read on the main actor cheaply: the focused window of an activating app. It reads `kAXFocusedWindow` (+ fullscreen flag) off-main on the app's AX thread, then re-enters the pipeline via `EventIntake.post(.activationFactsResolved(...))`.
 
 ### 3.8 Layout Engines as Pure State Machines
@@ -472,6 +476,7 @@ WorkspaceManager
     ├── viewports: [WorkspaceID: ViewportState] Niri scroll/selection per workspace
     ├── monitorSessions: [MonitorID: MonitorSession]   visible workspace per monitor
     ├── scratchpadToken: WindowToken?
+    ├── hiddenAppPIDs + visibility generations    PID-scoped macOS app visibility
     ├── spaceTopology: SpaceTopology
     └── niriEngine / dwindleEngine  (private)   layout trees, mutation-gated
 ```
@@ -957,7 +962,7 @@ CLIRenderer displays the result
 | `IntentLedger` | Ring buffer of focus/activation `Intent`s; `classifyFocusObservation` returns `echoOf`/`lateEcho`/`external`. |
 | `DeadlineWheel` | Main-actor timing wheel; posts `.intentExpired` back into the intake. Drives intent settle/expiry, not frame retries. |
 | `WMEvent` | The typed, exhaustive event consumed by `WorldStore.commit`. |
-| `WorldStore` | The single synchronous writer. Owns `WindowModel`, focus, viewports, monitor sessions, space topology, and both engines (all private). |
+| `WorldStore` | The single synchronous writer. Owns `WindowModel`, focus, viewports, monitor sessions, PID-scoped app visibility and generations, space topology, and both engines (all private). |
 | `commit` | `WorldStore.commit(_:…)` — normalize → reduce → resolve → invariants; bumps `seq`. The only mutation path. |
 | `withEngineMutationScope` | `WorkspaceManager` wrapper that runs an engine mutation inside its own `commit`; `withBatchedLayoutBuild` is the plan-building variant. |
 | `ActionPlan` | Pure output of `StateReducer.reduce` — per-domain state deltas + a `ViewportPlan` + notes. |

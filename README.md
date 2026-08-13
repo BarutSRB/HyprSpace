@@ -673,6 +673,7 @@ Quickly search windows, app menus, or clipboard history from one shared palette:
 - Menu results always show keyboard shortcuts when available
 - `Up` / `Down` move the selection
 - `Enter` activates the selected result
+- Windows from macOS-hidden apps remain searchable with a Hidden badge; selecting one unhides its app and focuses that exact window
 - `Shift + Enter` summons the selected window to the right when available
 - `Escape` dismisses the palette
 
@@ -706,6 +707,7 @@ A visual indicator showing your workspaces:
 - Displays open apps per workspace
 - Click to switch workspaces or jump to that app
 - If dedupe option is on click the app icon to get a popup with list of all its windows to jump to
+- Marks macOS-hidden windows with an eye-slash badge; selecting a hidden window unhides its app and focuses that exact window
 - Configure position, height, and appearance in Settings
 - Exclude individual apps or choose alternate app icons across all monitors in Settings
 

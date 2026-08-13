@@ -163,7 +163,7 @@ Turning **Enable IPC** on starts the server immediately and creates the Unix soc
 
 ## IPC Protocol
 
-**Protocol version:** 10
+**Protocol version:** 11
 
 ### Socket & Authorization
 
@@ -425,7 +425,7 @@ Selectors filter query results. Value selectors take an argument; boolean select
 | Selector | Description |
 |----------|-------------|
 | `--focused` | Only the focused item |
-| `--visible` | Only visible items |
+| `--visible` | Only visible items; windows also require a visible workspace, no window hidden state, and an app that is not hidden |
 | `--floating` | Only floating windows |
 | `--scratchpad` | Only the scratchpad window |
 | `--current` | Only the current/interaction item |
@@ -437,7 +437,9 @@ Use `--fields` with a comma-separated list to limit returned fields.
 
 Field tokens are part of the CLI contract. Returned JSON still uses the payload schema's field names, so the selected token may not be byte-for-byte identical to the JSON key. For example, `window-counts` selects the workspace payload's `counts` field.
 
-**Window fields:** `id`, `pid`, `workspace`, `display`, `app`, `title`, `frame`, `mode`, `layout-reason`, `manual-override`, `is-focused`, `is-visible`, `is-scratchpad`, `hidden-reason`
+**Window fields:** `id`, `pid`, `workspace`, `display`, `app`, `title`, `frame`, `mode`, `layout-reason`, `manual-override`, `is-focused`, `is-visible`, `is-app-hidden`, `is-scratchpad`, `hidden-reason`
+
+For windows, `is-visible` is true only when the workspace is visible, the window has no `hidden-reason`, and its macOS application is not hidden. `is-app-hidden` exposes the PID-scoped macOS hide state independently of `layout-reason` and `hidden-reason`; selecting `is-app-hidden` returns the JSON field `isAppHidden`.
 
 **Workspace fields:** `id`, `raw-name`, `display-name`, `number`, `layout`, `display`, `is-focused`, `is-visible`, `is-current`, `window-counts`, `focused-window-id`
 
@@ -776,7 +778,7 @@ Completions are context-aware: query names, selectors, field names, command path
 
 ```json
 {
-  "version": 10,
+  "version": 11,
   "id": "<uuid>",
   "kind": "<ping|version|command|query|rule|workspace|window|subscribe>",
   "authorizationToken": "<token>",
@@ -879,7 +881,7 @@ Workspace requests use this flat wire shape. For `move-to-monitor`, `force` is o
 
 ```json
 {
-  "version": 10,
+  "version": 11,
   "id": "<request-id>",
   "ok": true,
   "kind": "<ping|version|command|query|rule|workspace|window|subscribe>",
@@ -896,7 +898,7 @@ Authorization, protocol, validation, and routing failures keep the originating r
 
 ```json
 {
-  "version": 10,
+  "version": 11,
   "id": "<request-id>",
   "ok": false,
   "kind": "query",
@@ -913,7 +915,7 @@ Events are sent on subscription connections after the initial response.
 
 ```json
 {
-  "version": 10,
+  "version": 11,
   "id": "<event-id>",
   "kind": "event",
   "channel": "focus",

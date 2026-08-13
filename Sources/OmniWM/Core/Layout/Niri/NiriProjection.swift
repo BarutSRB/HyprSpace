@@ -262,7 +262,8 @@ extension NiriLayoutEngine {
         gaps: CGFloat,
         orientation: Monitor.Orientation,
         animationConfig: SpringConfig?,
-        fromContainerIndex: Int?
+        fromContainerIndex: Int?,
+        previousProjectedAnchor: NiriProjectedViewportAnchor? = nil
     ) {
         let projectedColumns = projectedColumns(in: workspaceId)
         guard !projectedColumns.isEmpty,
@@ -297,12 +298,13 @@ extension NiriLayoutEngine {
                 in: workspaceId
             )
             projectedState.activeColumnIndex = currentProjectedIndex
-            let oldActivePosition = projectedState.containerPosition(
-                at: currentProjectedIndex,
-                containers: containers,
-                gap: gaps,
-                sizeKeyPath: sizeKeyPath
-            )
+            let oldActivePosition = previousProjectedAnchor?.primaryPosition
+                ?? projectedState.containerPosition(
+                    at: currentProjectedIndex,
+                    containers: containers,
+                    gap: gaps,
+                    sizeKeyPath: sizeKeyPath
+                )
             let newActivePosition = projectedState.containerPosition(
                 at: targetProjectedIndex,
                 containers: containers,
@@ -314,9 +316,10 @@ extension NiriLayoutEngine {
             projectedState.activatePrevColumnOnRemoval = nil
             projectedState.viewOffsetToRestore = nil
 
-            let projectedFromIndex = fromContainerIndex.flatMap { durableIndex in
-                projectedColumns.firstIndex(where: { $0.durableIndex == durableIndex })
-            }
+            let projectedFromIndex = previousProjectedAnchor?.projectedIndex
+                ?? fromContainerIndex.flatMap { durableIndex in
+                    projectedColumns.firstIndex(where: { $0.durableIndex == durableIndex })
+                }
             let settings = effectiveSettings(in: workspaceId)
             projectedState.ensureContainerVisible(
                 containerIndex: targetProjectedIndex,

@@ -4,6 +4,7 @@
 import ApplicationServices
 import Foundation
 @testable import OmniWM
+import OmniWMIPC
 import XCTest
 
 @MainActor
@@ -11,6 +12,55 @@ final class MacOSHiddenAppTests: XCTestCase {
     func testOnlyHideVisibilityRefreshRecoversFocus() {
         XCTAssertTrue(RefreshReason.appHidden.recoversFocusAfterVisibilityChange)
         XCTAssertFalse(RefreshReason.appUnhidden.recoversFocusAfterVisibilityChange)
+    }
+
+    func testIPCWindowVisibilityExposesOrthogonalAppHiddenState() throws {
+        let controller = makeController()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        _ = controller.workspaceManager.focusWorkspace(named: "1")
+        let hiddenToken = addWindow(
+            pid: 880_031,
+            windowId: 880_131,
+            to: workspaceId,
+            controller: controller
+        )
+        let visibleToken = addWindow(
+            pid: 880_032,
+            windowId: 880_132,
+            to: workspaceId,
+            controller: controller
+        )
+        controller.workspaceManager.setAppHidden(true, pid: hiddenToken.pid, source: .ax)
+        let router = IPCQueryRouter(controller: controller, appVersion: nil, sessionToken: "hidden-app-tests")
+
+        let windows = router.windowsResult(IPCQueryRequest(name: .windows)).windows
+        let hiddenWindow = try XCTUnwrap(windows.first { $0.pid == hiddenToken.pid })
+        let visibleWindow = try XCTUnwrap(windows.first { $0.pid == visibleToken.pid })
+
+        XCTAssertEqual(hiddenWindow.layoutReason, .standard)
+        XCTAssertEqual(hiddenWindow.isVisible, false)
+        XCTAssertEqual(hiddenWindow.isAppHidden, true)
+        XCTAssertNil(hiddenWindow.hiddenReason)
+        XCTAssertEqual(visibleWindow.isVisible, true)
+        XCTAssertEqual(visibleWindow.isAppHidden, false)
+        let hiddenWindowJSON = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(hiddenWindow)) as? [String: Any]
+        )
+        XCTAssertEqual(hiddenWindowJSON["isAppHidden"] as? Bool, true)
+
+        let visibleWindows = router.windowsResult(
+            IPCQueryRequest(
+                name: .windows,
+                selectors: IPCQuerySelectors(visible: true),
+                fields: ["pid", "is-visible", "is-app-hidden"]
+            )
+        ).windows
+        XCTAssertEqual(visibleWindows.compactMap(\.pid), [visibleToken.pid])
+        XCTAssertEqual(visibleWindows.first?.isVisible, true)
+        XCTAssertEqual(visibleWindows.first?.isAppHidden, false)
+        XCTAssertTrue(IPCAutomationManifest.windowFieldCatalog.contains("is-app-hidden"))
     }
 
     func testLayoutRefreshInputRetainsAndMarksMacOSHiddenAppWindows() throws {
