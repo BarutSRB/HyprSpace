@@ -158,58 +158,7 @@ import QuartzCore
         var delayedVerificationScheduled: Bool = false
     }
 
-    struct LayoutState {
-        struct ClosingAnimation {
-            let windowId: Int
-            let axRef: AXWindowRef
-            let fromFrame: CGRect
-            let displacement: CGPoint
-            let animation: SpringAnimation
-
-            func progress(at time: TimeInterval) -> Double {
-                animation.value(at: time)
-            }
-
-            func isComplete(at time: TimeInterval) -> Bool {
-                animation.isComplete(at: time)
-            }
-
-            func currentFrame(at time: TimeInterval) -> CGRect {
-                let clamped = min(max(progress(at: time), 0), 1)
-                let offset = CGPoint(
-                    x: displacement.x * CGFloat(clamped),
-                    y: displacement.y * CGFloat(clamped)
-                )
-                return fromFrame.offsetBy(dx: offset.x, dy: offset.y)
-            }
-        }
-
-        var activeRefreshTask: Task<Void, Never>?
-        var activeRefresh: ScheduledRefresh?
-        var pendingRefresh: ScheduledRefresh?
-        var isImmediateLayoutInProgress: Bool = false
-        var isIncrementalRefreshInProgress: Bool = false
-        var activeFullEnumerationCount: Int = 0
-        var displayLinksByDisplay: [CGDirectDisplayID: CADisplayLink] = [:]
-        var lastDisplayLinkTimestampByDisplay: [CGDirectDisplayID: CFTimeInterval] = [:]
-        var lastParkAuditTime: CFTimeInterval = 0
-        var trailingAuditTask: Task<Void, Never>?
-        var refreshRateByDisplay: [CGDirectDisplayID: Double] = [:]
-        var closingAnimationsByDisplay: [CGDirectDisplayID: [Int: ClosingAnimation]] = [:]
-        var screenChangeObserver: NSObjectProtocol?
-        var hasCompletedInitialRefresh: Bool = false
-        var didExecuteEffectPlan: Bool = false
-        var refreshGeneration: UInt64 = 0
-        var pendingDebounceTask: Task<Void, Never>?
-        var missingConfirmationTask: Task<Void, Never>?
-        var pendingMissingConfirmationScope: RescanScope?
-        var consecutiveMissCountByHandle: [WindowHandle: Int] = [:]
-        var inventoryStabilityBarrierActive = false
-        var inventoryStabilityHoldFullRescans = false
-        var inventoryStabilityHeldFullRescan: ScheduledRefresh?
-    }
-
-    var layoutState = LayoutState()
+    var layoutState = LayoutRefreshState()
     private var layoutBuildMetrics = LayoutBuildMetrics()
     private var activeFrameContext: RefreshFrameContext?
     private var nextPendingRevealTransactionId: UInt64 = 1
@@ -460,7 +409,8 @@ import QuartzCore
 
     func startWindowCloseAnimation(entry: WindowState, monitor: Monitor) {
         guard controller?.motionPolicy.animationsEnabled != false else { return }
-        guard controller != nil else { return }
+        guard let controller else { return }
+        guard !controller.workspaceManager.isAppHidden(entry.token) else { return }
         guard let frame = fastFrame(for: entry.token, axRef: entry.axRef) else { return }
 
         let displacement = CGPoint(x: 0, y: -12)
@@ -477,7 +427,8 @@ import QuartzCore
 
         var animations = layoutState.closingAnimationsByDisplay[monitor.displayId] ?? [:]
         guard animations[entry.windowId] == nil else { return }
-        animations[entry.windowId] = LayoutState.ClosingAnimation(
+        animations[entry.windowId] = LayoutRefreshState.ClosingAnimation(
+            pid: entry.pid,
             windowId: entry.windowId,
             axRef: entry.axRef,
             fromFrame: frame,
@@ -488,6 +439,20 @@ import QuartzCore
 
         if let displayLink = getOrCreateDisplayLink(for: monitor.displayId) {
             displayLink.add(to: .main, forMode: .common)
+        }
+    }
+
+    func cancelFrameAnimations(forPID pid: pid_t) {
+        let displayIds = Array(layoutState.closingAnimationsByDisplay.keys)
+        for displayId in displayIds {
+            guard let animations = layoutState.closingAnimationsByDisplay[displayId] else { continue }
+            let remaining = animations.filter { $0.value.pid != pid }
+            if remaining.isEmpty {
+                layoutState.closingAnimationsByDisplay.removeValue(forKey: displayId)
+                stopDisplayLinkIfIdle(for: displayId)
+            } else {
+                layoutState.closingAnimationsByDisplay[displayId] = remaining
+            }
         }
     }
 
@@ -539,9 +504,12 @@ import QuartzCore
             return
         }
 
-        var remaining: [Int: LayoutState.ClosingAnimation] = [:]
+        var remaining: [Int: LayoutRefreshState.ClosingAnimation] = [:]
 
         for (windowId, animation) in animations {
+            if controller?.workspaceManager.isAppHidden(pid: animation.pid) == true {
+                continue
+            }
             if animation.isComplete(at: targetTime) {
                 _ = AXWindowService.setFrame(
                     animation.axRef,
@@ -635,6 +603,15 @@ import QuartzCore
         suppressWindowActivation: Bool = false
     ) -> AcceptedSeq? {
         guard let controller else { return nil }
+        guard plan.sessionPatch.plannedSeq == 0
+            || controller.workspaceManager.isSeqCurrent(
+                plan.sessionPatch.plannedSeq,
+                for: plan.workspaceId,
+                domains: .layoutCommit.union(.focusCommit)
+            )
+        else {
+            return nil
+        }
 
         controller.withRuntimeFrameJobCancellationSuppressed {
             applySessionPatch(plan.sessionPatch)
@@ -857,7 +834,7 @@ import QuartzCore
 
         let monitorSnapshot = buildMonitorSnapshot(for: monitor, orientation: orientation)
         let entries = controller.workspaceManager.tiledEntries(in: workspaceId).filter {
-            !controller.isManagedWindowSuppressedByMacOSHide($0.token)
+            !controller.workspaceManager.isAppHidden($0.token)
         }
         let windows = buildWindowSnapshots(
             for: entries,
@@ -870,6 +847,7 @@ import QuartzCore
             workspaceId: workspaceId,
             monitor: monitorSnapshot,
             windows: windows,
+            plannedSeq: controller.workspaceManager.worldSeq,
             isActiveWorkspace: isActiveWorkspace
         )
     }
@@ -1944,8 +1922,7 @@ import QuartzCore
             }
         } else {
             for entry in trackedEntries
-                where controller.hiddenAppPIDs.contains(entry.pid)
-                || controller.workspaceManager.layoutReason(for: entry.token) == .macosHiddenApp
+                where controller.workspaceManager.isAppHidden(pid: entry.pid)
                 || (
                     controller.workspaceManager.layoutReason(for: entry.token) == .nativeFullscreen
                         && !nativeFullscreenRetirementKeys.contains(entry.token)

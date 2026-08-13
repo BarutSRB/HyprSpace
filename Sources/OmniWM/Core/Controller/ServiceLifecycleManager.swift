@@ -238,6 +238,7 @@ final class ServiceLifecycleManager {
         setupAppActivationObserver()
         setupAppDeactivationObserver()
         setupAppHideObservers()
+        reconcileHiddenApplications()
         setupSleepWakeObservation()
         controller.workspaceManager.onGapsChanged = { [weak self] in
             self?.handleGapsChanged()
@@ -371,6 +372,17 @@ final class ServiceLifecycleManager {
     func handleAppTerminated(pid: pid_t) {
         guard let controller else { return }
         let allEntries = controller.workspaceManager.allEntries()
+        if controller.workspaceManager.isAppHidden(pid: pid) {
+            let entries = allEntries.filter { $0.pid == pid }
+            controller.axManager.setMacOSAppHidden(
+                false,
+                pid: pid,
+                entries: entries.map { (pid: $0.pid, windowId: $0.windowId) }
+            )
+            controller.workspaceManager.setAppHidden(false, pid: pid, source: .service)
+        } else {
+            controller.workspaceManager.invalidateAppVisibility(for: pid, source: .service)
+        }
         let dependentTargetPIDs = controller.axEventHandler.fullRescanTargetPIDsDepending(
             onTerminatedPID: pid,
             entries: allEntries
@@ -427,6 +439,7 @@ final class ServiceLifecycleManager {
 
     func handleUnlockDetected() {
         guard let controller else { return }
+        reconcileHiddenApplications()
         scheduleStableTopologyInventory(reason: .unlock)
         controller.mouseEventHandler.requestMultitouchRevalidation(.unlock)
     }
@@ -434,6 +447,7 @@ final class ServiceLifecycleManager {
     func handleSystemWake() {
         guard let controller else { return }
         _ = controller.workspaceManager.recordReconcileEvent(.systemWake(source: .service))
+        reconcileHiddenApplications()
         controller.workspaceBarManager.cleanup()
         scheduleStableTopologyInventory(reason: .unlock)
         controller.mouseEventHandler.requestMultitouchRevalidation(.wake)
@@ -656,6 +670,21 @@ final class ServiceLifecycleManager {
         controller.hasStartedServices = false
         cancelStableTopologyInventory()
 
+        let hiddenPIDs = controller.workspaceManager.hiddenAppPIDs
+        let trackedPIDs = Set(controller.workspaceManager.allEntries().map(\.pid))
+        for pid in trackedPIDs.subtracting(hiddenPIDs) {
+            controller.workspaceManager.invalidateAppVisibility(for: pid, source: .service)
+        }
+        for pid in hiddenPIDs {
+            let entries = controller.workspaceManager.entries(forPid: pid)
+            controller.axManager.setMacOSAppHidden(
+                false,
+                pid: pid,
+                entries: entries.map { (pid: $0.pid, windowId: $0.windowId) }
+            )
+        }
+        controller.workspaceManager.replaceHiddenAppPIDs([], source: .service)
+
         controller.eventIntake.close()
         controller.factResolver.stop()
         controller.deadlineWheel.stop()
@@ -722,6 +751,22 @@ final class ServiceLifecycleManager {
         permissionCheckerTask?.cancel()
         permissionCheckerTask = nil
         controller.reconcileEnabledAndHotkeysState()
+    }
+
+    private func reconcileHiddenApplications() {
+        guard let controller else { return }
+        let hiddenPIDs = Set(
+            NSWorkspace.shared.runningApplications.lazy
+                .filter { !$0.isTerminated && $0.isHidden }
+                .map(\.processIdentifier)
+        )
+        let previousPIDs = controller.workspaceManager.hiddenAppPIDs
+        for pid in previousPIDs.subtracting(hiddenPIDs) {
+            controller.axEventHandler.handleAppUnhidden(pid: pid, source: .service)
+        }
+        for pid in hiddenPIDs.subtracting(previousPIDs) {
+            controller.axEventHandler.handleAppHidden(pid: pid, source: .service)
+        }
     }
 
     private func clearPendingManagedFocus(_ controller: WMController) {

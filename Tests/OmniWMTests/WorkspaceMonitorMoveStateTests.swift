@@ -833,7 +833,7 @@ final class WorkspaceMonitorMoveStateTests: XCTestCase {
             ).status,
             .executed
         )
-        manager.setLayoutReason(.macosHiddenApp, for: token)
+        manager.setAppHidden(true, pid: token.pid, source: .ax)
         XCTAssertEqual(manager.floatingState(for: token)?.referenceMonitorId, fixture.center.id)
         var outcomes: [WorkspaceMonitorMoveOutcome] = []
         manager.onDeferredWorkspaceMonitorMove = { outcomes.append($0) }
@@ -842,11 +842,11 @@ final class WorkspaceMonitorMoveStateTests: XCTestCase {
 
         XCTAssertNotNil(manager.descriptor(for: workspaceId)?.runtimeMonitorOverride)
         XCTAssertEqual(manager.monitorForWorkspace(workspaceId)?.id, fixture.center.id)
-        XCTAssertEqual(manager.entry(for: token)?.layoutReason, .macosHiddenApp)
+        XCTAssertTrue(manager.isAppHidden(token))
         XCTAssertTrue(manager.pendingRuntimeMonitorOverrideClearWorkspaceIds.contains(workspaceId))
         XCTAssertTrue(outcomes.isEmpty)
 
-        XCTAssertTrue(manager.restoreFromNativeState(for: token))
+        manager.setAppHidden(false, pid: token.pid, source: .ax)
 
         XCTAssertNil(manager.descriptor(for: workspaceId)?.runtimeMonitorOverride)
         XCTAssertEqual(manager.monitorForWorkspace(workspaceId)?.id, fixture.left.id)

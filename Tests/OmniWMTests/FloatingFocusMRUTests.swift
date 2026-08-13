@@ -186,10 +186,7 @@ final class FloatingFocusMRUTests: XCTestCase {
         in workspaceId: WorkspaceDescriptor.ID,
         manager: WorkspaceManager
     ) -> WindowToken? {
-        manager.resolveWorkspaceFocusToken(
-            in: workspaceId,
-            isSuppressed: { _ in false }
-        )
+        manager.resolveWorkspaceFocusToken(in: workspaceId)
     }
 
     private func makeManager() -> WorkspaceManager {

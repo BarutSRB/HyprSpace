@@ -5,9 +5,17 @@ import Foundation
 
 @MainActor
 extension AXEventHandler {
-    func handleAppHidden(pid: pid_t) {
+    func handleAppHidden(pid: pid_t, source: WMEventSource = .ax) {
         guard let controller else { return }
-        controller.hiddenAppPIDs.insert(pid)
+        guard !controller.workspaceManager.isAppHidden(pid: pid) else { return }
+        let entries = controller.workspaceManager.entries(forPid: pid)
+        controller.layoutRefreshController.cancelFrameAnimations(forPID: pid)
+        controller.axManager.setMacOSAppHidden(
+            true,
+            pid: pid,
+            entries: entries.map { (pid: $0.pid, windowId: $0.windowId) }
+        )
+        controller.workspaceManager.setAppHidden(true, pid: pid, source: source)
 
         if let activeRequest = controller.intentLedger.activeManagedRequest,
            activeRequest.token.pid == pid
@@ -26,21 +34,21 @@ extension AXEventHandler {
             )
         }
 
-        for entry in controller.workspaceManager.entries(forPid: pid) {
-            controller.workspaceManager.setLayoutReason(.macosHiddenApp, for: entry.token)
-        }
         controller.layoutRefreshController.requestVisibilityRefresh(reason: .appHidden)
+        controller.surfaceReconciler.noteWorldChanged()
     }
 
-    func handleAppUnhidden(pid: pid_t) {
+    func handleAppUnhidden(pid: pid_t, source: WMEventSource = .ax) {
         guard let controller else { return }
-        controller.hiddenAppPIDs.remove(pid)
-
-        for entry in controller.workspaceManager.entries(forPid: pid) {
-            if controller.workspaceManager.layoutReason(for: entry.token) == .macosHiddenApp {
-                controller.workspaceManager.restoreFromNativeState(for: entry.token)
-            }
-        }
+        guard controller.workspaceManager.isAppHidden(pid: pid) else { return }
+        let entries = controller.workspaceManager.entries(forPid: pid)
+        controller.workspaceManager.setAppHidden(false, pid: pid, source: source)
+        controller.axManager.setMacOSAppHidden(
+            false,
+            pid: pid,
+            entries: entries.map { (pid: $0.pid, windowId: $0.windowId) }
+        )
         controller.layoutRefreshController.requestVisibilityRefresh(reason: .appUnhidden)
+        controller.surfaceReconciler.noteWorldChanged()
     }
 }

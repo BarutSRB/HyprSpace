@@ -24,6 +24,7 @@ struct ActivationFacts: Sendable {
     let focusedWindow: FocusedWindowFact?
     let sameAppFocusCausality: SameAppFocusCausality?
     let callbackGeneration: UInt64?
+    let appVisibilityGeneration: UInt64
     let focusedAdmissionRetryExecution: FocusedAdmissionRetryExecution?
 
     init(
@@ -35,6 +36,7 @@ struct ActivationFacts: Sendable {
         focusedWindow: FocusedWindowFact?,
         sameAppFocusCausality: SameAppFocusCausality? = nil,
         callbackGeneration: UInt64? = nil,
+        appVisibilityGeneration: UInt64 = 0,
         focusedAdmissionRetryExecution: FocusedAdmissionRetryExecution? = nil
     ) {
         self.pid = pid
@@ -45,6 +47,7 @@ struct ActivationFacts: Sendable {
         self.focusedWindow = focusedWindow
         self.sameAppFocusCausality = sameAppFocusCausality
         self.callbackGeneration = callbackGeneration
+        self.appVisibilityGeneration = appVisibilityGeneration
         self.focusedAdmissionRetryExecution = focusedAdmissionRetryExecution
     }
 }
@@ -64,6 +67,8 @@ final class FactResolver {
         let requestedAtSeq: UInt64
         let sameAppFocusCausality: SameAppFocusCausality?
         let callbackGeneration: UInt64?
+        let appVisibilityGeneration: UInt64
+        let resolverGeneration: UInt64
         let focusedAdmissionRetryExecution: FocusedAdmissionRetryExecution?
     }
 
@@ -74,6 +79,7 @@ final class FactResolver {
     private var inFlightActivationPids: Set<pid_t> = []
     private var pendingActivationRequestsByPid: [pid_t: ActivationFactRequest] = [:]
     private var inFlightConstraintTokens: Set<WindowToken> = []
+    private var resolverGeneration: UInt64 = 0
 
     @discardableResult
     func resolveActivationFacts(
@@ -83,6 +89,7 @@ final class FactResolver {
         observationGeneration: UInt64,
         sameAppFocusCausality: SameAppFocusCausality? = nil,
         callbackGeneration: UInt64? = nil,
+        appVisibilityGeneration: UInt64 = 0,
         focusedAdmissionRetryExecution: FocusedAdmissionRetryExecution? = nil
     ) -> Bool {
         let request = ActivationFactRequest(
@@ -93,6 +100,8 @@ final class FactResolver {
             requestedAtSeq: EventIntake.currentSeq(),
             sameAppFocusCausality: sameAppFocusCausality,
             callbackGeneration: callbackGeneration,
+            appVisibilityGeneration: appVisibilityGeneration,
+            resolverGeneration: resolverGeneration,
             focusedAdmissionRetryExecution: focusedAdmissionRetryExecution
         )
         return resolveActivationFacts(request)
@@ -112,6 +121,7 @@ final class FactResolver {
                         focusedWindow: factProvider(request.pid),
                         sameAppFocusCausality: request.sameAppFocusCausality,
                         callbackGeneration: request.callbackGeneration,
+                        appVisibilityGeneration: request.appVisibilityGeneration,
                         focusedAdmissionRetryExecution: request.focusedAdmissionRetryExecution
                     )
                 )
@@ -148,6 +158,7 @@ final class FactResolver {
         _ request: ActivationFactRequest,
         focusedWindow: FocusedWindowFact?
     ) {
+        guard request.resolverGeneration == resolverGeneration else { return }
         inFlightActivationPids.remove(request.pid)
         EventIntake.post(
             .activationFactsResolved(
@@ -160,6 +171,7 @@ final class FactResolver {
                     focusedWindow: focusedWindow,
                     sameAppFocusCausality: request.sameAppFocusCausality,
                     callbackGeneration: request.callbackGeneration,
+                    appVisibilityGeneration: request.appVisibilityGeneration,
                     focusedAdmissionRetryExecution: request.focusedAdmissionRetryExecution
                 )
             )
@@ -171,11 +183,13 @@ final class FactResolver {
 
     func resolveWindowConstraints(token: WindowToken, axRef: AXWindowRef) {
         guard inFlightConstraintTokens.insert(token).inserted else { return }
+        let generation = resolverGeneration
         nonisolated(unsafe) let thread = AppAXContext.contexts[token.pid]?.axThread ?? sharedResolverThread()
         Task { @MainActor in
             let constraints = try? await thread.runInLoop { _ in
                 AXWindowService.sizeConstraints(axRef)
             }
+            guard generation == resolverGeneration else { return }
             inFlightConstraintTokens.remove(token)
             guard let constraints else { return }
             EventIntake.post(
@@ -185,7 +199,10 @@ final class FactResolver {
     }
 
     func stop() {
+        resolverGeneration &+= 1
+        inFlightActivationPids.removeAll()
         pendingActivationRequestsByPid.removeAll()
+        inFlightConstraintTokens.removeAll()
         guard let thread = resolverThread else { return }
         resolverThread = nil
         thread.runInLoopAsync { _ in

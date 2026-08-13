@@ -7,13 +7,15 @@ import Foundation
 extension LayoutRefreshController {
     func applyPositionPlans(_ plans: [WindowPositionPlan]) {
         guard let controller, !plans.isEmpty else { return }
+        let plans = plans.filter { !controller.workspaceManager.isAppHidden(pid: $0.entry.pid) }
+        guard !plans.isEmpty else { return }
 
         let requiresVisibleAXTokens = controller.axManager.cancelParkFrameJobs(
             plans.map { (pid: $0.entry.pid, windowId: $0.entry.windowId) },
             reason: "revealed"
         )
         controller.axManager.applyPositionsViaSkyLight(
-            plans.map { (windowId: $0.entry.windowId, frame: $0.frame) },
+            plans.map { (pid: $0.entry.pid, windowId: $0.entry.windowId, frame: $0.frame) },
             allowInactive: true
         )
         let visibleFrames = plans.compactMap { plan -> AXFrameApplicationTarget? in
@@ -36,6 +38,11 @@ extension LayoutRefreshController {
         animationTick: Bool
     ) {
         guard let controller, !plans.isEmpty else { return }
+        let plans = plans.filter { !controller.workspaceManager.isAppHidden(pid: $0.entry.pid) }
+        guard !plans.isEmpty else { return }
+        let movablePlans = movablePlans.filter {
+            !controller.workspaceManager.isAppHidden(pid: $0.entry.pid)
+        }
 
         if animationTick {
             for plan in plans {
@@ -49,7 +56,7 @@ extension LayoutRefreshController {
 
         if !movablePlans.isEmpty {
             controller.axManager.applyPositionsViaSkyLight(
-                movablePlans.map { (windowId: $0.entry.windowId, frame: $0.frame) },
+                movablePlans.map { (pid: $0.entry.pid, windowId: $0.entry.windowId, frame: $0.frame) },
                 allowInactive: true
             )
         }

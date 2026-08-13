@@ -633,8 +633,6 @@ final class IPCQueryRouter {
         switch reason {
         case .standard:
             .standard
-        case .macosHiddenApp:
-            .macosHiddenApp
         case .nativeFullscreen:
             .nativeFullscreen
         }

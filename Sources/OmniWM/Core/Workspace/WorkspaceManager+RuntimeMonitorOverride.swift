@@ -104,6 +104,7 @@ extension WorkspaceManager {
             return true
         }
         if hasNativeFullscreenRecord(in: workspaceId)
+            || entries(in: workspaceId).contains(where: { isAppHidden(pid: $0.pid) })
             || entries(in: workspaceId).contains(where: { $0.layoutReason != .standard })
         {
             return true
@@ -118,6 +119,7 @@ extension WorkspaceManager {
         guard transfersManagedFocus, let managedFocusedEntry else { return false }
         return visibleWorkspaces[sourceMonitorId] != workspaceId
             || interactionMonitorId != sourceMonitorId
+            || isAppHidden(pid: managedFocusedEntry.pid)
             || managedFocusedEntry.layoutReason != .standard
             || managedFocusedEntry.hiddenState != nil
             || scratchpadToken() == managedFocusedEntry.token

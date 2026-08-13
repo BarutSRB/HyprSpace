@@ -128,7 +128,7 @@ final class FloatingMonitorRebindFocusTests: XCTestCase {
 
         _ = manager.rememberFocus(visibleFallback, in: fixture.sourceWorkspaceId)
         _ = manager.rememberFocus(hiddenFallback, in: fixture.sourceWorkspaceId)
-        controller.hiddenAppPIDs.insert(hiddenFallback.pid)
+        controller.workspaceManager.setAppHidden(true, pid: hiddenFallback.pid, source: .ax)
         XCTAssertEqual(manager.layoutReason(for: hiddenFallback), .standard)
 
         rebind(moving, fixture: fixture)
@@ -136,10 +136,7 @@ final class FloatingMonitorRebindFocusTests: XCTestCase {
         XCTAssertEqual(manager.workspace(for: moving), fixture.targetWorkspaceId)
         XCTAssertEqual(manager.lastFloatingFocusedToken(in: fixture.sourceWorkspaceId), visibleFallback)
         XCTAssertEqual(
-            manager.resolveWorkspaceFocusToken(
-                in: fixture.sourceWorkspaceId,
-                isSuppressed: controller.isManagedWindowSuppressedByMacOSHide
-            ),
+            manager.resolveWorkspaceFocusToken(in: fixture.sourceWorkspaceId),
             visibleFallback
         )
         XCTAssertNotEqual(manager.lastFloatingFocusedToken(in: fixture.sourceWorkspaceId), hiddenFallback)
@@ -839,10 +836,7 @@ final class FloatingMonitorRebindFocusTests: XCTestCase {
         in workspaceId: WorkspaceDescriptor.ID,
         manager: WorkspaceManager
     ) -> WindowToken? {
-        manager.resolveWorkspaceFocusToken(
-            in: workspaceId,
-            isSuppressed: { _ in false }
-        )
+        manager.resolveWorkspaceFocusToken(in: workspaceId)
     }
 
     private func addFloatingWindow(

@@ -132,10 +132,12 @@ enum EventNormalizer {
             )
 
         case .activeSpaceChanged,
+             .appVisibilityInvalidated,
              .floatingStateChanged,
              .focusFallbackRemembered,
              .focusForgotten,
              .focusRemembered,
+             .hiddenApplicationsChanged,
              .interactionMonitorChanged,
              .layoutOperationPerformed,
              .managedFocusCancelled,

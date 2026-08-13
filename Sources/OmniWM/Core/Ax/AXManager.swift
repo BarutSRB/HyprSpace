@@ -204,6 +204,7 @@ final class AXManager {
 
     /// Window IDs belonging to inactive workspaces — checked LIVE in applyFramesParallel.
     private(set) var inactiveWorkspaceWindowIds: Set<Int> = []
+    private(set) var macOSHiddenAppPIDs: Set<pid_t> = []
 
     private var skyLightLivePositionByWindowId: [Int: CGPoint] = [:]
 
@@ -1905,8 +1906,14 @@ final class AXManager {
     private func framesAllowedToWrite(
         _ frames: [AXFrameApplicationTarget]
     ) -> [AXFrameApplicationTarget] {
-        guard let interactionPolicyForWindowId else { return frames }
-        return frames.filter { interactionPolicyForWindowId($0.windowId).mayWriteFrame }
+        if let interactionPolicyForWindowId {
+            return frames.filter {
+                !macOSHiddenAppPIDs.contains($0.pid)
+                    && interactionPolicyForWindowId($0.windowId).mayWriteFrame
+            }
+        }
+        guard !macOSHiddenAppPIDs.isEmpty else { return frames }
+        return frames.filter { !macOSHiddenAppPIDs.contains($0.pid) }
     }
 
     func pendingParkFrameRequest(for windowId: Int) -> AXFrameApplicationRequest? {
@@ -2324,6 +2331,35 @@ final class AXManager {
         }
     }
 
+    func setMacOSAppHidden(
+        _ hidden: Bool,
+        pid: pid_t,
+        entries: [(pid: pid_t, windowId: Int)]
+    ) {
+        let entries = uniqueFrameEntries(entries)
+        let windowIds = entries.lazy.filter { $0.pid == pid }.map(\.windowId)
+        if hidden {
+            macOSHiddenAppPIDs.insert(pid)
+            AppAXContext.setMacOSAppHidden(true, pid: pid, windowIds: Array(windowIds))
+            var deliveries: [AXFrameTerminalDelivery] = []
+            for (_, windowId) in entries {
+                deliveries.append(contentsOf: frameLedger.suppressFrameWrite(windowId: windowId))
+                cancelPendingFrameRetry(for: windowId)
+                clearSkyLightLivePosition(for: windowId)
+            }
+            cancelParkFrameJobs(entries, reason: "app-hidden")
+            for delivery in deliveries {
+                delivery.deliver()
+            }
+        } else {
+            macOSHiddenAppPIDs.remove(pid)
+            AppAXContext.setMacOSAppHidden(false, pid: pid, windowIds: Array(windowIds))
+            for (_, windowId) in entries {
+                clearSkyLightLivePosition(for: windowId)
+            }
+        }
+    }
+
     private func uniqueFrameEntries(_ entries: [(pid: pid_t, windowId: Int)]) -> [(pid: pid_t, windowId: Int)] {
         var uniqueEntries: [(pid: pid_t, windowId: Int)] = []
         uniqueEntries.reserveCapacity(entries.count)
@@ -2337,17 +2373,18 @@ final class AXManager {
     }
 
     func applyPositionsViaSkyLight(
-        _ positions: [(windowId: Int, frame: CGRect)],
+        _ positions: [(pid: pid_t, windowId: Int, frame: CGRect)],
         allowInactive: Bool = false
     ) {
-        var filtered = allowInactive
-            ? positions
-            : positions.filter { !inactiveWorkspaceWindowIds.contains($0.windowId) }
-        if let interactionPolicyForWindowId {
-            filtered = filtered.filter { interactionPolicyForWindowId($0.windowId).mayWriteFrame }
+        let filtered = positions.filter {
+            (allowInactive || !inactiveWorkspaceWindowIds.contains($0.windowId))
+                && !macOSHiddenAppPIDs.contains($0.pid)
+                && (interactionPolicyForWindowId?($0.windowId).mayWriteFrame ?? true)
         }
         guard !filtered.isEmpty else { return }
-        SkyLight.shared.batchMoveWindows(Self.windowServerPositions(filtered))
+        SkyLight.shared.batchMoveWindows(
+            Self.windowServerPositions(filtered.map { (windowId: $0.windowId, frame: $0.frame) })
+        )
     }
 
     static func windowServerPositions(
@@ -2563,6 +2600,7 @@ final class AXManager {
         }
         pendingFrameRetryTasksByWindowId.removeAll()
         pendingFrameRetryGenerationByWindowId.removeAll()
+        macOSHiddenAppPIDs.removeAll()
 
         let deliveries = frameLedger.cancelAllPendingFrameState()
         for delivery in deliveries {

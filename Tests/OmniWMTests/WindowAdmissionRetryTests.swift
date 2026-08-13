@@ -1028,6 +1028,44 @@ final class WindowAdmissionRetryTests: XCTestCase {
         controller.axEventHandler.cancelCreatedWindowRetry(windowId: unrelatedWindowId)
     }
 
+    func testStoppedResolverDropsOldActivationCompletionAfterRestart() async {
+        let controller = WindowAdmissionTestSupport.controller()
+        let pid: pid_t = 467_331
+        let gate = FocusedFactReadGate()
+        let readStarted = expectation(description: "Deferred fact read started")
+        let readFinished = expectation(description: "Deferred fact read finished")
+        controller.factResolver.deferredFactProvider = { _ in
+            readStarted.fulfill()
+            await gate.wait()
+            readFinished.fulfill()
+            return nil
+        }
+        controller.eventIntake.open(sink: controller.eventInterpreter)
+        XCTAssertTrue(
+            controller.factResolver.resolveActivationFacts(
+                pid: pid,
+                source: .workspaceDidActivateApplication,
+                origin: .external,
+                observationGeneration: 1
+            )
+        )
+        await fulfillment(of: [readStarted], timeout: 2)
+
+        controller.factResolver.stop()
+        controller.eventIntake.close()
+        controller.eventIntake.open(sink: controller.eventInterpreter)
+        let reopenedSeq = controller.eventIntake.lastSeq
+        gate.release()
+        await fulfillment(of: [readFinished], timeout: 2)
+        await Task.yield()
+        controller.eventIntake.drainNow()
+
+        XCTAssertEqual(controller.eventIntake.lastSeq, reopenedSeq)
+        controller.factResolver.stop()
+        controller.eventIntake.close()
+        controller.factResolver.deferredFactProvider = nil
+    }
+
     func testRetryOwnershipCountersRemainMonotonicAcrossReset() throws {
         let controller = WindowAdmissionTestSupport.controller()
         let firstWindowId: UInt32 = 467_420

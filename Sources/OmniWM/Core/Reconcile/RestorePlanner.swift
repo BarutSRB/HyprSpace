@@ -109,11 +109,13 @@ struct RestorePlanner {
         case .systemSleep:
             plan.notes.append("restore_refresh=system_sleep")
         case .floatingGeometryUpdated,
+             .appVisibilityInvalidated,
              .floatingStateChanged,
              .focusFallbackRemembered,
              .focusForgotten,
              .focusLeaseChanged,
              .focusRemembered,
+             .hiddenApplicationsChanged,
              .hiddenStateChanged,
              .interactionMonitorChanged,
              .layoutOperationPerformed,

@@ -501,11 +501,9 @@ enum StructuralMutationOutcome: Equatable {
             workspaceId: wsId,
             monitor: refreshInput.monitor,
             windows: refreshInput.windows,
+            plannedSeq: refreshInput.plannedSeq,
             viewportState: effectiveViewportState,
-            preferredFocusToken: controller.workspaceManager.preferredFocusToken(
-                in: wsId,
-                isSuppressed: controller.isManagedWindowSuppressedByMacOSHide
-            ),
+            preferredFocusToken: controller.workspaceManager.preferredFocusToken(in: wsId),
             hasCompletedInitialRefresh: controller.layoutRefreshController.layoutState.hasCompletedInitialRefresh,
             useScrollAnimationPath: useScrollAnimationPath,
             removalSeed: removalSeed,
@@ -570,7 +568,8 @@ enum StructuralMutationOutcome: Equatable {
             monitor: snapshot.monitor,
             sessionPatch: WorkspaceSessionPatch(
                 workspaceId: snapshot.workspaceId,
-                viewportState: nil
+                viewportState: nil,
+                plannedSeq: snapshot.plannedSeq
             ),
             diff: diff,
             isAnimationTick: animationTime != nil,
@@ -1223,7 +1222,8 @@ enum StructuralMutationOutcome: Equatable {
             sessionPatch: WorkspaceSessionPatch(
                 workspaceId: pass.wsId,
                 viewportState: state,
-                rememberedFocusToken: rememberedFocusToken
+                rememberedFocusToken: rememberedFocusToken,
+                plannedSeq: snapshot.plannedSeq
             ),
             diff: diff,
             animationDirectives: directives,

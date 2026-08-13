@@ -1057,10 +1057,8 @@ import QuartzCore
             workspaceId: wsId,
             monitor: refreshInput.monitor,
             windows: refreshInput.windows,
-            preferredFocusToken: controller.workspaceManager.preferredFocusToken(
-                in: wsId,
-                isSuppressed: controller.isManagedWindowSuppressedByMacOSHide
-            ),
+            plannedSeq: refreshInput.plannedSeq,
+            preferredFocusToken: controller.workspaceManager.preferredFocusToken(in: wsId),
             preferredHideSide: controller.layoutRefreshController.preferredHideSide(for: monitor),
             settings: controller.settings.resolvedDwindleSettings(for: monitor),
             isActiveWorkspace: refreshInput.isActiveWorkspace
@@ -1145,7 +1143,8 @@ import QuartzCore
             monitor: snapshot.monitor,
             sessionPatch: WorkspaceSessionPatch(
                 workspaceId: snapshot.workspaceId,
-                rememberedFocusToken: rememberedFocusToken
+                rememberedFocusToken: rememberedFocusToken,
+                plannedSeq: snapshot.plannedSeq
             ),
             diff: diff,
             animationDirectives: directives,
@@ -1180,7 +1179,8 @@ import QuartzCore
             workspaceId: snapshot.workspaceId,
             monitor: snapshot.monitor,
             sessionPatch: WorkspaceSessionPatch(
-                workspaceId: snapshot.workspaceId
+                workspaceId: snapshot.workspaceId,
+                plannedSeq: snapshot.plannedSeq
             ),
             diff: diff,
             isActiveWorkspace: snapshot.isActiveWorkspace
@@ -1220,7 +1220,8 @@ import QuartzCore
             workspaceId: snapshot.workspaceId,
             monitor: snapshot.monitor,
             sessionPatch: WorkspaceSessionPatch(
-                workspaceId: snapshot.workspaceId
+                workspaceId: snapshot.workspaceId,
+                plannedSeq: snapshot.plannedSeq
             ),
             diff: diff,
             isAnimationTick: true,

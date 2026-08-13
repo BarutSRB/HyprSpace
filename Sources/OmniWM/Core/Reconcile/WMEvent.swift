@@ -170,6 +170,16 @@ enum WMEvent: Equatable {
         placements: [WindowToken: PersistedNiriPlacement],
         source: WMEventSource
     )
+    case hiddenApplicationsChanged(
+        pids: Set<pid_t>,
+        affectedWorkspaceIds: Set<WorkspaceDescriptor.ID>,
+        source: WMEventSource
+    )
+    case appVisibilityInvalidated(
+        pid: pid_t,
+        affectedWorkspaceIds: Set<WorkspaceDescriptor.ID>,
+        source: WMEventSource
+    )
     case hiddenStateChanged(
         token: WindowToken,
         workspaceId: WorkspaceDescriptor.ID,
@@ -377,12 +387,14 @@ enum WMEvent: Equatable {
         case let .managedFocusCancelled(token, _, _, _):
             token
         case .activeSpaceChanged,
+             .appVisibilityInvalidated,
              .focusFallbackRemembered,
              .focusForgotten,
              .focusLeaseChanged,
              .focusRemembered,
              .interactionMonitorChanged,
              .layoutOperationPerformed,
+             .hiddenApplicationsChanged,
              .nativeFullscreenPlaceholderSelected,
              .niriPlacementsResolved,
              .nonManagedFocusChanged,
@@ -417,6 +429,8 @@ enum WMEvent: Equatable {
              let .manualLayoutOverrideChanged(_, _, _, source),
              let .windowAdmissionHintsChanged(_, _, _, source),
              let .niriPlacementsResolved(_, source),
+             let .hiddenApplicationsChanged(_, _, source),
+             let .appVisibilityInvalidated(_, _, source),
              let .hiddenStateChanged(_, _, _, _, source),
              let .nativeFullscreenTransition(_, _, _, _, source),
              let .managedReplacementMetadataChanged(_, _, _, _, source),
@@ -473,6 +487,10 @@ enum WMEvent: Equatable {
             "window_admission_hints_changed token=\(token) workspace=\(workspaceId.uuidString) initial_niri_container_primary_span=\(admissionHints.initialNiriContainerPrimarySpan.map { String($0) } ?? "nil")"
         case let .niriPlacementsResolved(placements, _):
             "niri_placements_resolved count=\(placements.count)"
+        case let .hiddenApplicationsChanged(pids, affectedWorkspaceIds, _):
+            "hidden_applications_changed pids=\(pids.count) workspaces=\(affectedWorkspaceIds.count)"
+        case let .appVisibilityInvalidated(pid, affectedWorkspaceIds, _):
+            "app_visibility_invalidated pid=\(pid) workspaces=\(affectedWorkspaceIds.count)"
         case let .hiddenStateChanged(token, workspaceId, _, hiddenState, _):
             "hidden_state_changed token=\(token) workspace=\(workspaceId.uuidString) hidden=\(hiddenState != nil)"
         case let .nativeFullscreenTransition(token, workspaceId, _, change, _):

@@ -130,7 +130,6 @@ public enum IPCHiddenReason: String, Codable, Equatable, Sendable {
 
 public enum IPCLayoutReason: String, Codable, Equatable, Sendable {
     case standard
-    case macosHiddenApp = "macos-hidden-app"
     case nativeFullscreen = "native-fullscreen"
 }
 

@@ -30,6 +30,7 @@ struct WorkspaceRefreshInput {
     let workspaceId: WorkspaceDescriptor.ID
     let monitor: LayoutMonitorSnapshot
     let windows: [LayoutWindowSnapshot]
+    let plannedSeq: UInt64
     let isActiveWorkspace: Bool
 }
 
@@ -43,6 +44,7 @@ struct NiriWorkspaceSnapshot {
     let workspaceId: WorkspaceDescriptor.ID
     let monitor: LayoutMonitorSnapshot
     let windows: [LayoutWindowSnapshot]
+    let plannedSeq: UInt64
     let viewportState: ViewportState
     let preferredFocusToken: WindowToken?
     let hasCompletedInitialRefresh: Bool
@@ -58,6 +60,7 @@ struct DwindleWorkspaceSnapshot {
     let workspaceId: WorkspaceDescriptor.ID
     let monitor: LayoutMonitorSnapshot
     let windows: [LayoutWindowSnapshot]
+    let plannedSeq: UInt64
     let preferredFocusToken: WindowToken?
     let preferredHideSide: HideSide
     let settings: ResolvedDwindleSettings

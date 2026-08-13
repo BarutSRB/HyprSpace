@@ -8,6 +8,7 @@ import Foundation
 final class LockedWindowIdSet: @unchecked Sendable {
     private let lock = NSLock()
     private var ids: Set<Int> = []
+    private var hardSuppressed = false
 
     func insert(_ id: Int) {
         lock.lock()
@@ -24,7 +25,19 @@ final class LockedWindowIdSet: @unchecked Sendable {
     func contains(_ id: Int) -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        return ids.contains(id)
+        return hardSuppressed || ids.contains(id)
+    }
+
+    func setHardSuppressed(_ hardSuppressed: Bool) {
+        lock.lock()
+        self.hardSuppressed = hardSuppressed
+        lock.unlock()
+    }
+
+    func isHardSuppressed() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return hardSuppressed
     }
 
     func moveIfPresent(from oldId: Int, to newId: Int) {
@@ -257,7 +270,7 @@ final class AppAXContext {
     private let frameWriteGenerations = LockedWindowGenerationMap()
     private let parkFrameWriteGenerations = LockedWindowGenerationMap()
     private let windowBindingEpoch = LockedGenerationEpoch()
-    let suppressedFrameWindowIds = LockedWindowIdSet()
+    private let frameWriteSuppression = LockedWindowIdSet()
     private let axObserver: ThreadGuardedValue<AXObserver?>
     private let focusedWindowObserver: ThreadGuardedValue<AXObserver?>
     private let subscribedWindows: ThreadGuardedValue<[Int: AppAXWindowSubscription]>
@@ -267,6 +280,7 @@ final class AppAXContext {
     let callbackGeneration: UInt64
 
     @MainActor static var contexts: [pid_t: AppAXContext] = [:]
+    @MainActor private static var macOSHiddenPIDs: Set<pid_t> = []
     @MainActor private static var inFlightCreations: [pid_t: (
         generation: UInt64,
         task: Task<AppAXContext?, Error>
@@ -326,6 +340,7 @@ final class AppAXContext {
                 return nil
             }
             if let context {
+                context.setMacOSAppHidden(macOSHiddenPIDs.contains(pid), for: [])
                 contexts[pid] = context
             }
             return context
@@ -345,6 +360,22 @@ final class AppAXContext {
         for (_, context) in contexts {
             context.destroy()
         }
+        macOSHiddenPIDs.removeAll()
+    }
+
+    @MainActor
+    static func setMacOSAppHidden(_ hidden: Bool, pid: pid_t, windowIds: [Int]) {
+        if hidden {
+            macOSHiddenPIDs.insert(pid)
+        } else {
+            macOSHiddenPIDs.remove(pid)
+        }
+        contexts[pid]?.setMacOSAppHidden(hidden, for: windowIds)
+    }
+
+    @MainActor
+    static func isMacOSAppHidden(pid: pid_t) -> Bool {
+        macOSHiddenPIDs.contains(pid)
     }
 
     @MainActor
@@ -1738,20 +1769,20 @@ final class AppAXContext {
     func prepareWindowRebind(from oldWindowId: Int, to newWindowId: Int) {
         frameWriteGenerations.invalidateAndMoveValue(from: oldWindowId, to: newWindowId)
         parkFrameWriteGenerations.invalidateAndMoveValue(from: oldWindowId, to: newWindowId)
-        suppressedFrameWindowIds.moveIfPresent(from: oldWindowId, to: newWindowId)
+        frameWriteSuppression.moveIfPresent(from: oldWindowId, to: newWindowId)
         _ = windowBindingEpoch.advance()
     }
 
     func prepareWindowRemoval(for windowId: Int) {
         frameWriteGenerations.invalidateAndRemove(windowId)
         parkFrameWriteGenerations.invalidateAndRemove(windowId)
-        suppressedFrameWindowIds.remove(windowId)
+        frameWriteSuppression.remove(windowId)
     }
 
     func retainFrameState(only windowIds: Set<Int>) {
         frameWriteGenerations.retainOnly(windowIds)
         parkFrameWriteGenerations.retainOnly(windowIds)
-        suppressedFrameWindowIds.retainOnly(windowIds)
+        frameWriteSuppression.retainOnly(windowIds)
     }
 
     nonisolated static func acceptsRefreshedFrameElement(
@@ -1834,14 +1865,22 @@ final class AppAXContext {
         guard !windowIds.isEmpty else { return }
         for windowId in windowIds {
             _ = frameWriteGenerations.nextGeneration(for: windowId)
-            suppressedFrameWindowIds.insert(windowId)
+            frameWriteSuppression.insert(windowId)
         }
     }
 
     func unsuppressFrameWrites(for windowIds: [Int]) {
         guard !windowIds.isEmpty else { return }
         for windowId in windowIds {
-            suppressedFrameWindowIds.remove(windowId)
+            frameWriteSuppression.remove(windowId)
+        }
+    }
+
+    func setMacOSAppHidden(_ hidden: Bool, for windowIds: [Int]) {
+        frameWriteSuppression.setHardSuppressed(hidden)
+        for windowId in windowIds {
+            _ = frameWriteGenerations.nextGeneration(for: windowId)
+            _ = parkFrameWriteGenerations.nextGeneration(for: windowId)
         }
     }
 
@@ -1852,7 +1891,8 @@ final class AppAXContext {
         setFrameBatch(
             frames,
             generations: frameWriteGenerations,
-            suppression: suppressedFrameWindowIds,
+            suppression: frameWriteSuppression,
+            hardSuppression: nil,
             forceVerification: false,
             completion: completion
         )
@@ -1866,6 +1906,7 @@ final class AppAXContext {
             frames,
             generations: parkFrameWriteGenerations,
             suppression: nil,
+            hardSuppression: frameWriteSuppression,
             forceVerification: true,
             completion: completion
         )
@@ -1875,6 +1916,7 @@ final class AppAXContext {
         _ frames: [AXFrameApplicationRequest],
         generations: LockedWindowGenerationMap,
         suppression: LockedWindowIdSet?,
+        hardSuppression: LockedWindowIdSet?,
         forceVerification: Bool,
         completion: @escaping @MainActor ([AXFrameApplyResult]) -> Void
     ) {
@@ -1977,7 +2019,9 @@ final class AppAXContext {
                     )
                     continue
                 }
-                if suppression?.contains(request.windowId) == true {
+                if hardSuppression?.isHardSuppressed() == true
+                    || suppression?.contains(request.windowId) == true
+                {
                     results.append(
                         AXFrameApplyResult(
                             requestId: request.requestId,

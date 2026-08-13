@@ -966,10 +966,7 @@ final class WorkspaceNavigationHandler {
         controller.reassignManagedWindow(token, to: targetWorkspaceId)
         guard workspaceManager.workspace(for: token) == targetWorkspaceId else { return false }
 
-        _ = workspaceManager.resolveAndSetWorkspaceFocusToken(
-            in: sourceWorkspaceId,
-            isSuppressed: controller.isManagedWindowSuppressedByMacOSHide
-        )
+        _ = workspaceManager.resolveAndSetWorkspaceFocusToken(in: sourceWorkspaceId)
 
         if let matchingRequest {
             guard let retargetedRequest = controller.intentLedger.retargetManagedRequest(

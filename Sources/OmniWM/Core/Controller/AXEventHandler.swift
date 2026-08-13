@@ -1609,6 +1609,7 @@ final class AXEventHandler {
     ) -> Bool {
         guard let controller else { return false }
         guard controller.hasStartedServices else { return false }
+        guard !controller.workspaceManager.isAppHidden(pid: pid) else { return false }
         if let causalObservationGeneration,
            causalObservationGeneration != latestActivationObservationGeneration
         {
@@ -1699,6 +1700,7 @@ final class AXEventHandler {
             observationGeneration: observationGeneration,
             sameAppFocusCausality: focusCausality,
             callbackGeneration: callbackGeneration,
+            appVisibilityGeneration: controller.workspaceManager.appVisibilityGeneration(for: pid),
             focusedAdmissionRetryExecution: focusedAdmissionRetryExecution
         )
     }
@@ -1716,6 +1718,10 @@ final class AXEventHandler {
         }
         guard let controller, controller.hasStartedServices else { return }
         guard facts.observationGeneration == latestActivationObservationGeneration else { return }
+        guard facts.appVisibilityGeneration
+            == controller.workspaceManager.appVisibilityGeneration(for: facts.pid)
+        else { return }
+        guard !controller.workspaceManager.isAppHidden(pid: facts.pid) else { return }
         if let callbackGeneration = facts.callbackGeneration {
             guard AppAXContext.contexts[facts.pid]?.callbackGeneration == callbackGeneration else { return }
         }

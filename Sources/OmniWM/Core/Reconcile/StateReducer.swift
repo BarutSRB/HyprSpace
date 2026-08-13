@@ -126,6 +126,30 @@ enum StateReducer {
         case let .niriPlacementsResolved(placements, _):
             plan.notes = ["niri_placements=\(placements.count)"]
 
+        case let .hiddenApplicationsChanged(pids, affectedWorkspaceIds, _):
+            var focusSession = currentSnapshot.focusSession
+            if let pendingToken = focusSession.pendingManagedFocus.token,
+               pids.contains(pendingToken.pid)
+            {
+                focusSession.pendingManagedFocus = .empty
+            }
+            if let focusedToken = focusSession.focusedToken,
+               pids.contains(focusedToken.pid)
+            {
+                focusSession.isNonManagedFocusActive = true
+                focusSession.nonManagedFocusToken = nil
+            }
+            if let nonManagedFocusToken = focusSession.nonManagedFocusToken,
+               pids.contains(nonManagedFocusToken.pid)
+            {
+                focusSession.nonManagedFocusToken = nil
+            }
+            setFocusSession(focusSession, current: currentSnapshot.focusSession, plan: &plan)
+            plan.notes = ["hidden_apps=\(pids.count)", "workspaces=\(affectedWorkspaceIds.count)"]
+
+        case let .appVisibilityInvalidated(pid, affectedWorkspaceIds, _):
+            plan.notes = ["app_visibility_invalidated=\(pid)", "workspaces=\(affectedWorkspaceIds.count)"]
+
         case let .layoutOperationPerformed(_, operation, _):
             plan.notes = ["layout_op=\(operation.summary)"]
 

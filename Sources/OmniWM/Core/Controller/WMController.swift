@@ -187,7 +187,6 @@ final class WMController {
     )
 
     var isTransferringWindow: Bool = false
-    var hiddenAppPIDs: Set<pid_t> = []
 
     @ObservationIgnored
     private(set) lazy var mouseEventHandler = MouseEventHandler(controller: self)
@@ -677,8 +676,7 @@ final class WMController {
     }
 
     func isManagedWindowSuppressedByMacOSHide(_ token: WindowToken) -> Bool {
-        hiddenAppPIDs.contains(token.pid)
-            || workspaceManager.layoutReason(for: token) == .macosHiddenApp
+        workspaceManager.isAppHidden(token)
     }
 
     func isManagedWindowSuspendedForNativeFullscreen(_ token: WindowToken) -> Bool {
@@ -1603,10 +1601,7 @@ final class WMController {
     ) -> WindowToken? {
         let explicitCandidates = [
             workspaceManager.lastFocusedToken(in: workspaceId),
-            workspaceManager.preferredFocusToken(
-                in: workspaceId,
-                isSuppressed: isManagedWindowSuppressedByMacOSHide
-            ),
+            workspaceManager.preferredFocusToken(in: workspaceId),
             workspaceManager.lastFloatingFocusedToken(in: workspaceId),
             workspaceManager.focusedToken
         ]
@@ -1644,11 +1639,7 @@ final class WMController {
             return
         }
 
-        _ = workspaceManager.resolveAndSetWorkspaceFocusToken(
-            in: workspaceId,
-            onMonitor: monitorId,
-            isSuppressed: isManagedWindowSuppressedByMacOSHide
-        )
+        _ = workspaceManager.resolveAndSetWorkspaceFocusToken(in: workspaceId, onMonitor: monitorId)
     }
 
     func cleanupScratchpadWindowResources(for token: WindowToken) {
@@ -2943,8 +2934,7 @@ final class WMController {
     func resolveAndSetWorkspaceFocusToken(for workspaceId: WorkspaceDescriptor.ID) -> WindowToken? {
         workspaceManager.resolveAndSetWorkspaceFocusToken(
             in: workspaceId,
-            onMonitor: workspaceManager.monitorId(for: workspaceId),
-            isSuppressed: isManagedWindowSuppressedByMacOSHide
+            onMonitor: workspaceManager.monitorId(for: workspaceId)
         )
     }
 
@@ -3005,11 +2995,7 @@ final class WMController {
             }
         }
 
-        _ = workspaceManager.resolveAndSetWorkspaceFocusToken(
-            in: workspaceId,
-            onMonitor: monitorId,
-            isSuppressed: isManagedWindowSuppressedByMacOSHide
-        )
+        _ = workspaceManager.resolveAndSetWorkspaceFocusToken(in: workspaceId, onMonitor: monitorId)
     }
 
     @discardableResult
@@ -3105,8 +3091,7 @@ final class WMController {
 
         guard let nextFocusToken = workspaceManager.resolveAndSetWorkspaceFocusToken(
             in: workspaceId,
-            onMonitor: workspaceManager.monitorId(for: workspaceId),
-            isSuppressed: isManagedWindowSuppressedByMacOSHide
+            onMonitor: workspaceManager.monitorId(for: workspaceId)
         ) else {
             return
         }

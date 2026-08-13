@@ -2535,6 +2535,45 @@ final class RuntimeArchitectureTests: XCTestCase {
     }
 
     @MainActor
+    func testLayoutPlanRejectsStaleFocusSeqBeforeApplyingEffects() throws {
+        let controller = Self.controller()
+        let workspaceId = try XCTUnwrap(controller.workspaceManager.workspaceId(for: "1", createIfMissing: true))
+        let monitor = try XCTUnwrap(controller.workspaceManager.monitor(for: workspaceId))
+        let firstToken = controller.workspaceManager.addWindow(
+            AXWindowRef(element: AXUIElementCreateApplication(765_007), windowId: 765_107),
+            pid: 765_007,
+            windowId: 765_107,
+            to: workspaceId
+        )
+        let secondToken = controller.workspaceManager.addWindow(
+            AXWindowRef(element: AXUIElementCreateApplication(765_008), windowId: 765_108),
+            pid: 765_008,
+            windowId: 765_108,
+            to: workspaceId
+        )
+        let plannedSeq = controller.workspaceManager.worldSeq
+        _ = controller.workspaceManager.beginManagedFocusRequest(firstToken, in: workspaceId, requestId: 7)
+
+        let accepted = controller.layoutRefreshController.executeLayoutPlanReturningAcceptedSeq(
+            WorkspaceLayoutPlan(
+                workspaceId: workspaceId,
+                monitor: Self.layoutMonitorSnapshot(monitor),
+                sessionPatch: WorkspaceSessionPatch(
+                    workspaceId: workspaceId,
+                    rememberedFocusToken: secondToken,
+                    plannedSeq: plannedSeq
+                ),
+                diff: WorkspaceLayoutDiff(),
+                animationDirectives: [.activateWindow(token: secondToken)]
+            )
+        )
+
+        XCTAssertNil(accepted)
+        XCTAssertEqual(controller.workspaceManager.pendingFocusedToken, firstToken)
+        XCTAssertNotEqual(controller.workspaceManager.lastFocusedToken(in: workspaceId), secondToken)
+    }
+
+    @MainActor
     func testOverviewLayoutPlanSuppressesWindowActivationDirective() throws {
         let controller = Self.controller()
         let workspaceId = try XCTUnwrap(
@@ -4503,10 +4542,7 @@ final class RuntimeArchitectureTests: XCTestCase {
         XCTAssertEqual(controller.workspaceManager.lastFocusedToken(in: workspaceId), tiled)
         XCTAssertEqual(controller.workspaceManager.lastFloatingFocusedToken(in: workspaceId), floating)
         XCTAssertEqual(
-            controller.workspaceManager.resolveWorkspaceFocusToken(
-                in: workspaceId,
-                isSuppressed: { _ in false }
-            ),
+            controller.workspaceManager.resolveWorkspaceFocusToken(in: workspaceId),
             floating
         )
     }
@@ -4658,10 +4694,7 @@ final class RuntimeArchitectureTests: XCTestCase {
         XCTAssertEqual(controller.workspaceManager.lastFocusedToken(in: workspaceId), tiled)
         XCTAssertEqual(controller.workspaceManager.lastFloatingFocusedToken(in: workspaceId), floating)
         XCTAssertEqual(
-            controller.workspaceManager.resolveWorkspaceFocusToken(
-                in: workspaceId,
-                isSuppressed: { _ in false }
-            ),
+            controller.workspaceManager.resolveWorkspaceFocusToken(in: workspaceId),
             floating
         )
     }

@@ -57,6 +57,8 @@ final class WorldStore {
     private(set) var focus = FocusSessionSnapshot()
     private(set) var viewports: [WorkspaceDescriptor.ID: ViewportState] = [:]
     private(set) var scratchpadToken: WindowToken?
+    private(set) var hiddenAppPIDs: Set<pid_t> = []
+    private var appVisibilityGenerationByPID: [pid_t: UInt64] = [:]
     private(set) var monitorSessions: [Monitor.ID: MonitorSession] = [:]
     private(set) var spaceTopology = SpaceTopology()
     private(set) var niriEngine: NiriLayoutEngine?
@@ -298,6 +300,17 @@ final class WorldStore {
                 model.setRestoreIntent(restoreIntent, for: token)
             }
 
+        case let .hiddenApplicationsChanged(pids, _, _):
+            guard phase == .beforePlan else { return }
+            for pid in hiddenAppPIDs.symmetricDifference(pids) {
+                appVisibilityGenerationByPID[pid, default: 0] &+= 1
+            }
+            hiddenAppPIDs = pids
+
+        case let .appVisibilityInvalidated(pid, _, _):
+            guard phase == .beforePlan else { return }
+            appVisibilityGenerationByPID[pid, default: 0] &+= 1
+
         case let .hiddenStateChanged(token, _, _, hiddenState, _):
             guard phase == .beforePlan else { return }
             model.setHiddenState(hiddenState, for: token)
@@ -465,6 +478,14 @@ extension WorldStore {
 
     func hiddenState(for token: WindowToken) -> HiddenState? {
         model.hiddenState(for: token)
+    }
+
+    func isAppHidden(pid: pid_t) -> Bool {
+        hiddenAppPIDs.contains(pid)
+    }
+
+    func appVisibilityGeneration(for pid: pid_t) -> UInt64 {
+        appVisibilityGenerationByPID[pid] ?? 0
     }
 
     func isHiddenInCorner(_ token: WindowToken) -> Bool {
