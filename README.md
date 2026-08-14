@@ -273,6 +273,9 @@
       <a href="https://github.com/adelin-b" title="Adelin Berard">
         <img src="https://github.com/adelin-b.png?size=96" width="72" alt="Adelin Berard">
       </a>
+      <a href="https://github.com/aislingheart" title="Aisling">
+        <img src="https://github.com/aislingheart.png?size=96" width="72" alt="Aisling">
+      </a>
       <a href="https://github.com/albertilagan" title="Albert Ilagan">
         <img src="https://github.com/albertilagan.png?size=96" width="72" alt="Albert Ilagan">
       </a>
@@ -287,6 +290,9 @@
       </a>
       <a href="https://github.com/balazshevesi" title="Balazs Hevesi">
         <img src="https://github.com/balazshevesi.png?size=96" width="72" alt="Balazs Hevesi">
+      </a>
+      <a href="https://github.com/bps" title="Brian Smyth">
+        <img src="https://github.com/bps.png?size=96" width="72" alt="Brian Smyth">
       </a>
       <a href="https://github.com/chen259456754" title="chen259456754">
         <img src="https://github.com/chen259456754.png?size=96" width="72" alt="chen259456754">
