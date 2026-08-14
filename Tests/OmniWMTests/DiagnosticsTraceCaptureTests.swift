@@ -57,6 +57,7 @@ final class DiagnosticsTraceCaptureTests: XCTestCase {
             "== OmniWM Diagnostics ==",
             "== Active Issues ==",
             "== Space Topology ==",
+            "== Native Fullscreen Placeholders ==",
             "== Multitouch Source ==",
             "== AX Frame State ==",
             "== Settings (TOML) =="

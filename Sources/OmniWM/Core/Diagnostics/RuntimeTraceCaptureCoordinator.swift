@@ -281,6 +281,7 @@ final class RuntimeTraceCaptureCoordinator {
         diagnosticsDirectory: URL = OmniWMStoragePaths.live.diagnosticsDirectory,
         recorders: [any RuntimeTraceRecording] = [
             AppVisibilityTrace.shared,
+            NativeFullscreenPlaceholderTrace.shared,
             WindowAdmissionTrace.shared,
             RawAXNotificationTrace.shared,
             FrameApplyTrace.shared,

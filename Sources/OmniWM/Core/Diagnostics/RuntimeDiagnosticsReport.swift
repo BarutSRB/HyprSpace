@@ -19,6 +19,10 @@ enum RuntimeDiagnosticsReport {
             section("Input / Hotkey Health", InputDiagnostics.inputHealth(controller).formatted()),
             section("Multitouch Source", InputDiagnostics.multitouchHealth(controller)),
             section("Owned Windows / Surface", InputDiagnostics.ownedSurfaces(controller).formatted()),
+            section(
+                "Native Fullscreen Placeholders",
+                NativeFullscreenPlaceholderDiagnosticsSnapshot.capture(controller).formatted()
+            ),
             section("Interaction Monitor Writes", InteractionMonitorWriteRecorder.shared.dump()),
             section("Reconcile Snapshot", controller.workspaceManager.reconcileSnapshotDump()),
             section("Reconcile Trace", controller.workspaceManager.reconcileTraceDump(limit: traceLimit)),

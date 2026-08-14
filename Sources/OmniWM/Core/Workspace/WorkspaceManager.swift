@@ -2575,8 +2575,9 @@ final class WorkspaceManager {
     @discardableResult
     private func upsertNativeFullscreenRecord(_ record: NativeFullscreenRecord) -> NativeFullscreenRecord {
         var record = record
+        let previousRecord = nativeFullscreenRecordsByOriginalToken[record.originalToken]
         var transitionChanged = false
-        if let previous = nativeFullscreenRecordsByOriginalToken[record.originalToken] {
+        if let previous = previousRecord {
             if previous.transition != record.transition {
                 transitionChanged = true
                 nativeFullscreenTransitionGenerationCounter += 1
@@ -2602,6 +2603,18 @@ final class WorkspaceManager {
         }
         nativeFullscreenRecordsByOriginalToken[record.originalToken] = record
         nativeFullscreenOriginalTokenByCurrentToken[record.currentToken] = record.originalToken
+        if previousRecord != record {
+            NativeFullscreenPlaceholderTrace.record(
+                NativeFullscreenPlaceholderTrace.makeRecord(
+                    .recordUpsert,
+                    originalToken: record.originalToken,
+                    currentToken: record.currentToken,
+                    workspaceId: record.workspaceId,
+                    transition: .init(record.transition),
+                    generation: record.transitionGeneration
+                )
+            )
+        }
         if transitionChanged {
             updateNativeFullscreenTransitionTimeout(for: record)
         }
@@ -2627,6 +2640,16 @@ final class WorkspaceManager {
             clearNonManagedFocusTarget(matching: record.currentToken)
         }
         noteInvalidation(workspaceId: record.workspaceId, domains: [.workspace, .layout, .focus, .fullscreen])
+        NativeFullscreenPlaceholderTrace.record(
+            NativeFullscreenPlaceholderTrace.makeRecord(
+                .recordRemoved,
+                originalToken: record.originalToken,
+                currentToken: record.currentToken,
+                workspaceId: record.workspaceId,
+                transition: .init(record.transition),
+                generation: record.transitionGeneration
+            )
+        )
         return record
     }
 

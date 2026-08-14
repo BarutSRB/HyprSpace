@@ -201,6 +201,67 @@ final class SurfaceReconciler {
         Set(nativeFullscreenSlotsByWorkspace.keys)
     }
 
+    func nativeFullscreenDiagnosticsSnapshot() -> NativeFullscreenSurfaceDiagnosticsSnapshot {
+        var acceptedSlots: [NativeFullscreenAcceptedSlotDiagnostics] = []
+        acceptedSlots.reserveCapacity(nativeFullscreenSlotsByWorkspace.values.reduce(0) { $0 + $1.slots.count })
+        for (workspaceId, projection) in nativeFullscreenSlotsByWorkspace {
+            for (originalToken, slot) in projection.slots {
+                acceptedSlots.append(
+                    NativeFullscreenAcceptedSlotDiagnostics(
+                        originalToken: originalToken,
+                        currentToken: slot.currentToken,
+                        workspaceId: workspaceId,
+                        displayId: projection.displayId,
+                        frame: slot.frame,
+                        visible: slot.visible,
+                        workingFrame: projection.displayContext.workingFrame,
+                        scale: projection.displayContext.scale
+                    )
+                )
+            }
+        }
+        let descriptors = nativeFullscreenDescriptorsByOriginalToken.values.sorted {
+            ($0.originalToken.pid, $0.originalToken.windowId)
+                < ($1.originalToken.pid, $1.originalToken.windowId)
+        }
+        var appliedCounts: [WindowToken: Int] = [:]
+        for applied in appliedScene.placeholders {
+            appliedCounts[applied.originalToken, default: 0] += 1
+        }
+        return NativeFullscreenSurfaceDiagnosticsSnapshot(
+            descriptors: descriptors,
+            acceptedProjections: nativeFullscreenSlotsByWorkspace.map { workspaceId, projection in
+                NativeFullscreenAcceptedProjectionDiagnostics(
+                    workspaceId: workspaceId,
+                    displayId: projection.displayId,
+                    workingFrame: projection.displayContext.workingFrame,
+                    scale: projection.displayContext.scale,
+                    slotCount: projection.slots.count
+                )
+            }
+            .sorted { $0.workspaceId.uuidString < $1.workspaceId.uuidString },
+            acceptedSlots: acceptedSlots.sorted {
+                ($0.originalToken.pid, $0.originalToken.windowId, $0.workspaceId.uuidString)
+                    < ($1.originalToken.pid, $1.originalToken.windowId, $1.workspaceId.uuidString)
+            },
+            applied: appliedScene.placeholders,
+            resolutions: descriptors.map { descriptor in
+                let previous = appliedScene.placeholders.first { $0.originalToken == descriptor.originalToken }
+                return NativeFullscreenSurfaceResolutionDiagnostics(
+                    originalToken: descriptor.originalToken,
+                    reason: controller.map {
+                        nativeFullscreenResolutionReason(
+                            descriptor,
+                            previous: previous,
+                            controller: $0
+                        )
+                    } ?? .controllerUnavailable
+                )
+            },
+            appliedDuplicateOriginalTokens: appliedCounts.compactMap { $0.value > 1 ? $0.key : nil }
+        )
+    }
+
     init(controller: WMController) {
         self.controller = controller
     }
@@ -248,19 +309,52 @@ final class SurfaceReconciler {
     ) {
         guard let controller else { return }
         guard controller.hasStartedServices else {
+            traceIncomingProjectionDiscarded(
+                slots,
+                workspaceId: workspaceId,
+                displayId: displayId,
+                displayContext: displayContext,
+                reason: .servicesStopped
+            )
             nativeFullscreenSlotsByWorkspace.removeValue(forKey: workspaceId)
             return
         }
         guard controller.workspaceManager.descriptor(for: workspaceId) != nil else {
+            traceIncomingProjectionDiscarded(
+                slots,
+                workspaceId: workspaceId,
+                displayId: displayId,
+                displayContext: displayContext,
+                reason: .workspaceMissing
+            )
             nativeFullscreenSlotsByWorkspace.removeValue(forKey: workspaceId)
             return
         }
-        guard controller.workspaceManager.monitor(for: workspaceId)?.displayId == displayId else { return }
+        guard controller.workspaceManager.monitor(for: workspaceId)?.displayId == displayId else {
+            traceIncomingProjectionDiscarded(
+                slots,
+                workspaceId: workspaceId,
+                displayId: displayId,
+                displayContext: displayContext,
+                reason: .displayMismatch
+            )
+            return
+        }
 
+        let traceIsActive = NativeFullscreenPlaceholderTrace.isActive
+        let previousProjection = traceIsActive ? nativeFullscreenSlotsByWorkspace[workspaceId] : nil
         nativeFullscreenSlotsByWorkspace[workspaceId] = AcceptedNativeFullscreenSlotProjection(
             displayId: displayId,
             displayContext: displayContext,
             slots: slots
+        )
+        traceProjectionAcceptedIfSignificant(
+            slots,
+            previous: previousProjection,
+            isActive: traceIsActive,
+            workspaceId: workspaceId,
+            displayId: displayId,
+            displayContext: displayContext
         )
 
         var needsManagerApply = false
@@ -278,6 +372,12 @@ final class SurfaceReconciler {
             guard next != previous else { continue }
 
             appliedScene.placeholders[index] = next
+            traceSurfaceAppliedIfSignificant(
+                next,
+                previous: previous,
+                descriptor: descriptor,
+                controller: controller
+            )
             if previous.visible,
                next.visible,
                (previous.frame != next.frame || previous.displayContext != next.displayContext)
@@ -328,7 +428,15 @@ final class SurfaceReconciler {
                 controller.workspaceManager.descriptor(for: $0) == nil
             }
             for workspaceId in staleWorkspaceIds {
-                nativeFullscreenSlotsByWorkspace.removeValue(forKey: workspaceId)
+                if let removed = nativeFullscreenSlotsByWorkspace.removeValue(forKey: workspaceId) {
+                    traceIncomingProjectionDiscarded(
+                        removed.slots,
+                        workspaceId: workspaceId,
+                        displayId: removed.displayId,
+                        displayContext: removed.displayContext,
+                        reason: .workspaceMissing
+                    )
+                }
             }
         }
         var desired = SurfaceDerivation.derive(world: world)
@@ -340,11 +448,20 @@ final class SurfaceReconciler {
             let previous = appliedScene.placeholders.first {
                 $0.originalToken == descriptor.originalToken
             }
-            return resolvedNativeFullscreenPlaceholder(
+            let resolved = resolvedNativeFullscreenPlaceholder(
                 descriptor,
                 previous: previous,
                 controller: controller
             )
+            if resolved != previous {
+                traceSurfaceAppliedIfSignificant(
+                    resolved,
+                    previous: previous,
+                    descriptor: descriptor,
+                    controller: controller
+                )
+            }
+            return resolved
         }
         let refreshCornerRadii = desired.border.map {
             !controller.axManager.hasPendingFrameWrite(for: $0.windowId)
@@ -520,5 +637,161 @@ final class SurfaceReconciler {
             selected: selected,
             visible: false
         )
+    }
+
+    private func traceProjectionAcceptedIfSignificant(
+        _ slots: [WindowToken: NativeFullscreenSlotProjection],
+        previous: AcceptedNativeFullscreenSlotProjection?,
+        isActive: Bool,
+        workspaceId: WorkspaceDescriptor.ID,
+        displayId: CGDirectDisplayID,
+        displayContext: NativeFullscreenCardDisplayContext
+    ) {
+        guard isActive else { return }
+        if let previous,
+           previous.displayId == displayId,
+           previous.displayContext == displayContext,
+           previous.slots.count == slots.count,
+           slots.allSatisfy({ originalToken, slot in
+               guard let prior = previous.slots[originalToken] else { return false }
+               return prior.currentToken == slot.currentToken && prior.visible == slot.visible
+           })
+        {
+            return
+        }
+        guard !slots.isEmpty else {
+            NativeFullscreenPlaceholderTrace.record(
+                NativeFullscreenPlaceholderTrace.makeRecord(
+                    .projectionAccepted,
+                    workspaceId: workspaceId,
+                    displayId: displayId,
+                    workingFrame: displayContext.workingFrame,
+                    scale: displayContext.scale,
+                    reason: .accepted
+                )
+            )
+            return
+        }
+        for (originalToken, slot) in slots {
+            NativeFullscreenPlaceholderTrace.record(
+                NativeFullscreenPlaceholderTrace.makeRecord(
+                    .projectionAccepted,
+                    originalToken: originalToken,
+                    currentToken: slot.currentToken,
+                    workspaceId: workspaceId,
+                    displayId: displayId,
+                    slotFrame: slot.frame,
+                    workingFrame: displayContext.workingFrame,
+                    scale: displayContext.scale,
+                    visible: slot.visible,
+                    reason: .accepted
+                )
+            )
+        }
+    }
+
+    private func traceIncomingProjectionDiscarded(
+        _ slots: [WindowToken: NativeFullscreenSlotProjection],
+        workspaceId: WorkspaceDescriptor.ID,
+        displayId: CGDirectDisplayID,
+        displayContext: NativeFullscreenCardDisplayContext,
+        reason: NativeFullscreenPlaceholderTrace.Reason
+    ) {
+        guard NativeFullscreenPlaceholderTrace.isActive else { return }
+        guard !slots.isEmpty else {
+            NativeFullscreenPlaceholderTrace.record(
+                NativeFullscreenPlaceholderTrace.makeRecord(
+                    .projectionDiscarded,
+                    workspaceId: workspaceId,
+                    displayId: displayId,
+                    workingFrame: displayContext.workingFrame,
+                    scale: displayContext.scale,
+                    reason: reason
+                )
+            )
+            return
+        }
+        for (originalToken, slot) in slots {
+            NativeFullscreenPlaceholderTrace.record(
+                NativeFullscreenPlaceholderTrace.makeRecord(
+                    .projectionDiscarded,
+                    originalToken: originalToken,
+                    currentToken: slot.currentToken,
+                    workspaceId: workspaceId,
+                    displayId: displayId,
+                    slotFrame: slot.frame,
+                    workingFrame: displayContext.workingFrame,
+                    scale: displayContext.scale,
+                    visible: slot.visible,
+                    reason: reason
+                )
+            )
+        }
+    }
+
+    private func traceSurfaceAppliedIfSignificant(
+        _ applied: NativeFullscreenPlaceholderUpdate,
+        previous: NativeFullscreenPlaceholderUpdate?,
+        descriptor: NativeFullscreenPlaceholderUpdate,
+        controller: WMController
+    ) {
+        guard NativeFullscreenPlaceholderTrace.isActive else { return }
+        if let previous,
+           previous.currentToken == applied.currentToken,
+           previous.workspaceId == applied.workspaceId,
+           previous.selected == applied.selected,
+           previous.visible == applied.visible
+        {
+            return
+        }
+        NativeFullscreenPlaceholderTrace.record(
+            NativeFullscreenPlaceholderTrace.makeRecord(
+                .surfaceApplied,
+                originalToken: applied.originalToken,
+                currentToken: applied.currentToken,
+                workspaceId: applied.workspaceId,
+                slotFrame: applied.frame,
+                visible: applied.visible,
+                selected: applied.selected,
+                reason: nativeFullscreenResolutionReason(
+                    descriptor,
+                    previous: previous,
+                    controller: controller
+                )
+            )
+        )
+    }
+
+    private func nativeFullscreenResolutionReason(
+        _ descriptor: NativeFullscreenPlaceholderUpdate,
+        previous: NativeFullscreenPlaceholderUpdate?,
+        controller: WMController
+    ) -> NativeFullscreenPlaceholderTrace.Reason {
+        let workspaceManager = controller.workspaceManager
+        guard let record = workspaceManager.nativeFullscreenRecord(originalToken: descriptor.originalToken) else {
+            return .recordMissing
+        }
+        guard record.workspaceId == descriptor.workspaceId else { return .recordWorkspaceMismatch }
+        let currentToken = record.currentToken
+        guard record.transition == .suspended else { return .transitionPending }
+        guard workspaceManager.layoutReason(for: currentToken) == .nativeFullscreen else {
+            return .layoutNotNativeFullscreen
+        }
+        let descriptorIsCurrent = descriptor.currentToken == currentToken
+        let lifecycleVisible = descriptorIsCurrent ? descriptor.visible : previous?.visible == true
+        guard lifecycleVisible else {
+            return descriptorIsCurrent ? .descriptorHidden : .descriptorStale
+        }
+        guard let projection = nativeFullscreenSlotsByWorkspace[descriptor.workspaceId] else {
+            return previous?.visible == true ? .projectionMissingRetained : .projectionMissingHidden
+        }
+        guard workspaceManager.monitor(for: descriptor.workspaceId)?.displayId == projection.displayId else {
+            return .displayMismatch
+        }
+        guard let slot = projection.slots[descriptor.originalToken] else { return .slotMissing }
+        guard slot.currentToken == currentToken else {
+            return previous?.visible == true ? .slotTokenMismatchRetained : .slotTokenMismatchHidden
+        }
+        return slot.visible ? .accepted : .slotHidden
     }
 }

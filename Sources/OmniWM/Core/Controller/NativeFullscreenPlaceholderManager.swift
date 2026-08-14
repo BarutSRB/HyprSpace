@@ -150,6 +150,15 @@ final class NativeFullscreenPlaceholderManager {
         windowsByOriginalToken[originalToken].map(ObjectIdentifier.init)
     }
 
+    func diagnosticsSnapshot() -> [NativeFullscreenPanelDiagnostics] {
+        windowsByOriginalToken.values
+            .map { $0.diagnosticsSnapshot() }
+            .sorted {
+                ($0.originalToken.pid, $0.originalToken.windowId)
+                    < ($1.originalToken.pid, $1.originalToken.windowId)
+            }
+    }
+
     func removeAll() {
         for token in Array(windowsByOriginalToken.keys) {
             destroyPanel(originalToken: token)
@@ -167,6 +176,17 @@ final class NativeFullscreenPlaceholderManager {
             self?.onActivate?(originalToken)
         }
         windowsByOriginalToken[placeholder.originalToken] = window
+        NativeFullscreenPlaceholderTrace.record(
+            NativeFullscreenPlaceholderTrace.makeRecord(
+                .panelCreated,
+                originalToken: placeholder.originalToken,
+                currentToken: placeholder.currentToken,
+                workspaceId: placeholder.workspaceId,
+                slotFrame: placeholder.frame,
+                visible: false,
+                windowNumber: window.windowNumber
+            )
+        )
         return window
     }
 
@@ -186,6 +206,8 @@ private final class NativeFullscreenPlaceholderWindow: NSPanel {
     private let placeholderView: NativeFullscreenPlaceholderView
     private let originalToken: WindowToken
     private let surfaceId: String
+    private var currentToken: WindowToken?
+    private var workspaceId: WorkspaceDescriptor.ID?
     private var slotFrame = CGRect.zero
     private var displayContext: NativeFullscreenCardDisplayContext?
     private var cardMode: NativeFullscreenCardMode?
@@ -246,6 +268,8 @@ private final class NativeFullscreenPlaceholderWindow: NSPanel {
         _ update: NativeFullscreenPlaceholderUpdate,
         forceOrdering: Bool
     ) {
+        currentToken = update.currentToken
+        workspaceId = update.workspaceId
         slotFrame = update.frame
         displayContext = update.displayContext
         descriptorVisible = update.visible
@@ -265,9 +289,57 @@ private final class NativeFullscreenPlaceholderWindow: NSPanel {
 
     func destroy() {
         cancelCaptureExclusionRetry(resetsAttempts: true)
+        NativeFullscreenPlaceholderTrace.record(
+            NativeFullscreenPlaceholderTrace.makeRecord(
+                .panelDestroyed,
+                originalToken: originalToken,
+                currentToken: currentToken,
+                workspaceId: workspaceId,
+                slotFrame: slotFrame,
+                cardFrame: appliedCardFrame,
+                visible: isVisible,
+                mode: cardMode.map(NativeFullscreenPlaceholderTrace.Mode.init),
+                windowNumber: windowNumber
+            )
+        )
         SurfaceCoordinator.shared.unregister(id: surfaceId)
         orderOut(nil)
         close()
+    }
+
+    func diagnosticsSnapshot() -> NativeFullscreenPanelDiagnostics {
+        let panelWindowNumber = windowNumber
+        let registryCaptureEligible = panelWindowNumber > 0
+            ? SurfaceCoordinator.shared.isCaptureEligible(windowNumber: panelWindowNumber)
+            : nil
+        let skyLightCaptureExcluded = UInt32(exactly: panelWindowNumber).flatMap {
+            SkyLight.shared.isExcludedFromScreencaptureWindowSelection($0)
+        }
+        return NativeFullscreenPanelDiagnostics(
+            originalToken: originalToken,
+            currentToken: currentToken,
+            workspaceId: workspaceId,
+            slotFrame: slotFrame,
+            displayContext: displayContext,
+            cardFrame: appliedCardFrame,
+            windowFrame: frame,
+            cardMode: cardMode,
+            descriptorVisible: descriptorVisible,
+            appliedVisible: appliedVisible,
+            windowVisible: isVisible,
+            windowNumber: panelWindowNumber,
+            level: level.rawValue,
+            orderedIndex: orderedIndex,
+            onActiveSpace: isOnActiveSpace,
+            collectionBehavior: collectionBehavior.rawValue,
+            registeredWindowNumber: registeredWindowNumber,
+            registryCaptureEligible: registryCaptureEligible,
+            skyLightCaptureExcluded: skyLightCaptureExcluded,
+            excludedWindowNumber: excludedWindowNumber,
+            captureRetryIndex: captureExclusionRetryIndex,
+            captureRetryPending: captureExclusionRetryTask != nil,
+            captureRetryExhausted: captureExclusionRetryExhausted
+        )
     }
 
     private func reconcileGeometry(forceOrdering: Bool) {
@@ -285,13 +357,43 @@ private final class NativeFullscreenPlaceholderWindow: NSPanel {
             return
         }
 
-        cardMode = layout.mode
+        if cardMode != layout.mode {
+            cardMode = layout.mode
+            NativeFullscreenPlaceholderTrace.record(
+                NativeFullscreenPlaceholderTrace.makeRecord(
+                    .panelModeChanged,
+                    originalToken: originalToken,
+                    currentToken: currentToken,
+                    workspaceId: workspaceId,
+                    slotFrame: slotFrame,
+                    cardFrame: layout.frame,
+                    visible: isVisible,
+                    mode: .init(layout.mode),
+                    windowNumber: windowNumber
+                )
+            )
+        }
         placeholderView.setMode(layout.mode)
         applyCardFrame(layout.frame)
 
         if !isVisible || forceOrdering {
+            let wasVisible = isVisible
             orderBack(nil)
             appliedVisible = true
+            NativeFullscreenPlaceholderTrace.record(
+                NativeFullscreenPlaceholderTrace.makeRecord(
+                    wasVisible ? .panelOrdered : .panelShown,
+                    originalToken: originalToken,
+                    currentToken: currentToken,
+                    workspaceId: workspaceId,
+                    slotFrame: slotFrame,
+                    cardFrame: appliedCardFrame,
+                    visible: isVisible,
+                    mode: cardMode.map(NativeFullscreenPlaceholderTrace.Mode.init),
+                    windowNumber: windowNumber,
+                    reason: isVisible ? .accepted : .orderingFailed
+                )
+            )
             ensureCaptureExclusion(schedulesRetry: true)
         } else {
             appliedVisible = true
@@ -307,6 +409,19 @@ private final class NativeFullscreenPlaceholderWindow: NSPanel {
             setFrame(nextFrame, display: false)
         }
         appliedCardFrame = nextFrame
+        NativeFullscreenPlaceholderTrace.record(
+            NativeFullscreenPlaceholderTrace.makeRecord(
+                sizeChanged ? .panelResized : .panelMoved,
+                originalToken: originalToken,
+                currentToken: currentToken,
+                workspaceId: workspaceId,
+                slotFrame: slotFrame,
+                cardFrame: nextFrame,
+                visible: isVisible,
+                mode: cardMode.map(NativeFullscreenPlaceholderTrace.Mode.init),
+                windowNumber: windowNumber
+            )
+        )
         if sizeChanged {
             placeholderView.needsDisplay = true
         }
@@ -320,11 +435,37 @@ private final class NativeFullscreenPlaceholderWindow: NSPanel {
         placeholderView.cancelInteraction()
         if appliedVisible || isVisible {
             orderOut(nil)
+            NativeFullscreenPlaceholderTrace.record(
+                NativeFullscreenPlaceholderTrace.makeRecord(
+                    .panelHidden,
+                    originalToken: originalToken,
+                    currentToken: currentToken,
+                    workspaceId: workspaceId,
+                    slotFrame: slotFrame,
+                    cardFrame: appliedCardFrame,
+                    visible: false,
+                    windowNumber: windowNumber,
+                    reason: descriptorVisible ? .geometryRejected : .descriptorHidden
+                )
+            )
         }
         appliedVisible = false
     }
 
     private func activate() {
+        NativeFullscreenPlaceholderTrace.record(
+            NativeFullscreenPlaceholderTrace.makeRecord(
+                .activationRequested,
+                originalToken: originalToken,
+                currentToken: currentToken,
+                workspaceId: workspaceId,
+                slotFrame: slotFrame,
+                cardFrame: appliedCardFrame,
+                visible: isVisible,
+                mode: cardMode.map(NativeFullscreenPlaceholderTrace.Mode.init),
+                windowNumber: windowNumber
+            )
+        )
         onActivate?(originalToken)
     }
 
@@ -358,10 +499,33 @@ private final class NativeFullscreenPlaceholderWindow: NSPanel {
             return
         }
         let windowId = UInt32(panelWindowNumber)
+        NativeFullscreenPlaceholderTrace.record(
+            NativeFullscreenPlaceholderTrace.makeRecord(
+                .captureAttempt,
+                originalToken: originalToken,
+                currentToken: currentToken,
+                workspaceId: workspaceId,
+                visible: appliedVisible,
+                windowNumber: panelWindowNumber,
+                retryIndex: captureExclusionRetryIndex
+            )
+        )
         if SkyLight.shared.excludeFromScreencaptureWindowSelection(windowId),
            SkyLight.shared.isExcludedFromScreencaptureWindowSelection(windowId) != false
         {
             excludedWindowNumber = panelWindowNumber
+            NativeFullscreenPlaceholderTrace.record(
+                NativeFullscreenPlaceholderTrace.makeRecord(
+                    .captureExcluded,
+                    originalToken: originalToken,
+                    currentToken: currentToken,
+                    workspaceId: workspaceId,
+                    visible: appliedVisible,
+                    windowNumber: panelWindowNumber,
+                    reason: .accepted,
+                    retryIndex: captureExclusionRetryIndex
+                )
+            )
             cancelCaptureExclusionRetry(resetsAttempts: false)
         } else if schedulesRetry {
             scheduleCaptureExclusionRetry()
@@ -374,12 +538,35 @@ private final class NativeFullscreenPlaceholderWindow: NSPanel {
             if !captureExclusionRetryExhausted {
                 FallbackFiringRecorder.shared.note(.capture, "nativeFullscreenPlaceholderExclusionRetryExhausted")
                 captureExclusionRetryExhausted = true
+                NativeFullscreenPlaceholderTrace.record(
+                    NativeFullscreenPlaceholderTrace.makeRecord(
+                        .captureRetryExhausted,
+                        originalToken: originalToken,
+                        currentToken: currentToken,
+                        workspaceId: workspaceId,
+                        visible: appliedVisible,
+                        windowNumber: windowNumber,
+                        reason: .captureFailed,
+                        retryIndex: captureExclusionRetryIndex
+                    )
+                )
             }
             return
         }
 
         let delay = Self.captureExclusionRetryDelays[captureExclusionRetryIndex]
         captureExclusionRetryIndex += 1
+        NativeFullscreenPlaceholderTrace.record(
+            NativeFullscreenPlaceholderTrace.makeRecord(
+                .captureRetryScheduled,
+                originalToken: originalToken,
+                currentToken: currentToken,
+                workspaceId: workspaceId,
+                visible: appliedVisible,
+                windowNumber: windowNumber,
+                retryIndex: captureExclusionRetryIndex
+            )
+        )
         captureExclusionRetryTask = Task { @MainActor [weak self] in
             do {
                 try await Task.sleep(for: delay)
@@ -394,7 +581,20 @@ private final class NativeFullscreenPlaceholderWindow: NSPanel {
     }
 
     private func cancelCaptureExclusionRetry(resetsAttempts: Bool) {
-        captureExclusionRetryTask?.cancel()
+        if let captureExclusionRetryTask {
+            captureExclusionRetryTask.cancel()
+            NativeFullscreenPlaceholderTrace.record(
+                NativeFullscreenPlaceholderTrace.makeRecord(
+                    .captureRetryCancelled,
+                    originalToken: originalToken,
+                    currentToken: currentToken,
+                    workspaceId: workspaceId,
+                    visible: appliedVisible,
+                    windowNumber: windowNumber,
+                    retryIndex: captureExclusionRetryIndex
+                )
+            )
+        }
         captureExclusionRetryTask = nil
         if resetsAttempts {
             captureExclusionRetryIndex = 0

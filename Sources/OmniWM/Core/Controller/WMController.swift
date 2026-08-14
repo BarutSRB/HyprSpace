@@ -3256,19 +3256,83 @@ extension WMController {
     }
 
     func activateNativeFullscreenPlaceholder(_ originalToken: WindowToken) {
-        guard let record = workspaceManager.nativeFullscreenRecord(originalToken: originalToken),
-              record.transition == .suspended
-        else { return }
-        let currentToken = record.currentToken
-        guard let entry = workspaceManager.entry(for: currentToken) else { return }
-        guard !isManagedWindowSuppressedByMacOSHide(currentToken) else { return }
-        guard workspaceManager.showsNativeFullscreenPlaceholder(for: currentToken) else { return }
-        guard !isLockScreenActive else { return }
-        if hasStartedServices {
-            guard !isFrontmostAppLockScreen() else { return }
+        guard let record = workspaceManager.nativeFullscreenRecord(originalToken: originalToken) else {
+            NativeFullscreenPlaceholderTrace.record(
+                NativeFullscreenPlaceholderTrace.makeRecord(
+                    .activationRejected,
+                    originalToken: originalToken,
+                    reason: .recordLookupFailed
+                )
+            )
+            return
         }
+        guard record.transition == .suspended else {
+            NativeFullscreenPlaceholderTrace.record(
+                NativeFullscreenPlaceholderTrace.makeRecord(
+                    .activationRejected,
+                    originalToken: originalToken,
+                    currentToken: record.currentToken,
+                    workspaceId: record.workspaceId,
+                    transition: .init(record.transition),
+                    generation: record.transitionGeneration,
+                    reason: .transitionPending
+                )
+            )
+            return
+        }
+        let currentToken = record.currentToken
+        guard let entry = workspaceManager.entry(for: currentToken) else {
+            traceNativeFullscreenActivationRejected(record, reason: .entryMissing)
+            return
+        }
+        guard !isManagedWindowSuppressedByMacOSHide(currentToken) else {
+            traceNativeFullscreenActivationRejected(record, reason: .appHidden)
+            return
+        }
+        guard workspaceManager.showsNativeFullscreenPlaceholder(for: currentToken) else {
+            traceNativeFullscreenActivationRejected(record, reason: .placeholderUnavailable)
+            return
+        }
+        guard !isLockScreenActive else {
+            traceNativeFullscreenActivationRejected(record, reason: .lockScreen)
+            return
+        }
+        if hasStartedServices {
+            guard !isFrontmostAppLockScreen() else {
+                traceNativeFullscreenActivationRejected(record, reason: .lockScreen)
+                return
+            }
+        }
+        NativeFullscreenPlaceholderTrace.record(
+            NativeFullscreenPlaceholderTrace.makeRecord(
+                .activationResolved,
+                originalToken: originalToken,
+                currentToken: currentToken,
+                workspaceId: record.workspaceId,
+                transition: .init(record.transition),
+                generation: record.transitionGeneration,
+                reason: .accepted
+            )
+        )
         selectNativeFullscreenPlaceholder(entry)
         performWindowFronting(pid: entry.pid, windowId: entry.windowId, axRef: entry.axRef)
+    }
+
+    private func traceNativeFullscreenActivationRejected(
+        _ record: WorkspaceManager.NativeFullscreenRecord,
+        reason: NativeFullscreenPlaceholderTrace.Reason
+    ) {
+        NativeFullscreenPlaceholderTrace.record(
+            NativeFullscreenPlaceholderTrace.makeRecord(
+                .activationRejected,
+                originalToken: record.originalToken,
+                currentToken: record.currentToken,
+                workspaceId: record.workspaceId,
+                transition: .init(record.transition),
+                generation: record.transitionGeneration,
+                reason: reason
+            )
+        )
     }
 
     @discardableResult

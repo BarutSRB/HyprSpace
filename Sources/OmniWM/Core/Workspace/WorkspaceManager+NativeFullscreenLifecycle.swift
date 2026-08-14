@@ -75,8 +75,14 @@ extension WorkspaceManager {
     }
 
     func cancelNativeFullscreenTransitionTimeouts() {
-        for task in nativeFullscreenTransitionTimeoutTasks.values {
+        for (originalToken, task) in nativeFullscreenTransitionTimeoutTasks {
             task.cancel()
+            NativeFullscreenPlaceholderTrace.record(
+                NativeFullscreenPlaceholderTrace.makeRecord(
+                    .deadlineCancelled,
+                    originalToken: originalToken
+                )
+            )
         }
         nativeFullscreenTransitionTimeoutTasks.removeAll()
     }
@@ -95,19 +101,48 @@ extension WorkspaceManager {
         nativeFullscreenTransitionTimeoutTasks[originalToken] = Task { @MainActor [weak self] in
             try? await Task.sleep(for: Self.nativeFullscreenTransitionTimeout)
             guard let self, !Task.isCancelled else { return }
-            guard self.nativeFullscreenRecordsByOriginalToken[originalToken]?.transitionGeneration == generation else {
+            guard let record = self.nativeFullscreenRecordsByOriginalToken[originalToken],
+                  record.transitionGeneration == generation
+            else {
                 return
             }
             self.nativeFullscreenTransitionTimeoutTasks.removeValue(forKey: originalToken)
+            NativeFullscreenPlaceholderTrace.record(
+                NativeFullscreenPlaceholderTrace.makeRecord(
+                    .deadlineFired,
+                    originalToken: originalToken,
+                    currentToken: record.currentToken,
+                    workspaceId: record.workspaceId,
+                    transition: .init(record.transition),
+                    generation: generation
+                )
+            )
             _ = self.expireNativeFullscreenTransition(
                 originalToken: originalToken,
                 generation: generation
             )
         }
+        NativeFullscreenPlaceholderTrace.record(
+            NativeFullscreenPlaceholderTrace.makeRecord(
+                .deadlineScheduled,
+                originalToken: originalToken,
+                currentToken: record.currentToken,
+                workspaceId: record.workspaceId,
+                transition: .init(record.transition),
+                generation: generation
+            )
+        )
     }
 
     func cancelNativeFullscreenTransitionTimeout(originalToken: WindowToken) {
-        nativeFullscreenTransitionTimeoutTasks.removeValue(forKey: originalToken)?.cancel()
+        guard let task = nativeFullscreenTransitionTimeoutTasks.removeValue(forKey: originalToken) else { return }
+        task.cancel()
+        NativeFullscreenPlaceholderTrace.record(
+            NativeFullscreenPlaceholderTrace.makeRecord(
+                .deadlineCancelled,
+                originalToken: originalToken
+            )
+        )
     }
 }
 
