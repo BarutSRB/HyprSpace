@@ -121,8 +121,9 @@ final class WMController {
     @ObservationIgnored
     lazy var nativeFullscreenPlaceholderManager: NativeFullscreenPlaceholderManager = {
         let manager = NativeFullscreenPlaceholderManager()
-        manager.onActivate = { [weak self] token in
-            self?.activateNativeFullscreenPlaceholder(token)
+        manager.appInfoCache = appInfoCache
+        manager.onActivate = { [weak self] originalToken in
+            self?.activateNativeFullscreenPlaceholder(originalToken)
         }
         return manager
     }()
@@ -3073,8 +3074,8 @@ final class WMController {
         in workspaceId: WorkspaceDescriptor.ID,
         preferredRecoveryToken: WindowToken? = nil
     ) {
-        guard !shouldSuppressManagedFocusRecovery else { return }
-        guard !workspaceManager.hasPendingNativeFullscreenTransition else { return }
+        guard !shouldSuppressManagedFocusRecovery(in: workspaceId) else { return }
+        guard !workspaceManager.hasPendingNativeFullscreenTransition(in: workspaceId) else { return }
 
         if let pendingFocusedToken = workspaceManager.pendingFocusedToken,
            workspaceManager.pendingFocusedWorkspaceId == workspaceId,
@@ -3198,9 +3199,9 @@ extension WMController {
         ownedWindowRegistry.contains(windowNumber: windowNumber)
     }
 
-    var shouldSuppressManagedFocusRecovery: Bool {
-        workspaceManager.isNonManagedFocusActive
-            && (hasFrontmostOwnedWindow || workspaceManager.nonManagedFocusToken != nil)
+    func shouldSuppressManagedFocusRecovery(in _: WorkspaceDescriptor.ID) -> Bool {
+        guard workspaceManager.isNonManagedFocusActive else { return false }
+        return hasFrontmostOwnedWindow || workspaceManager.nonManagedFocusToken != nil
     }
 
     func performWindowFronting(
@@ -3254,10 +3255,14 @@ extension WMController {
         performWindowFronting(pid: entry.pid, windowId: entry.windowId, axRef: entry.axRef)
     }
 
-    func activateNativeFullscreenPlaceholder(_ token: WindowToken) {
-        guard let entry = workspaceManager.entry(for: token) else { return }
-        guard !isManagedWindowSuppressedByMacOSHide(token) else { return }
-        guard workspaceManager.layoutReason(for: token) == .nativeFullscreen else { return }
+    func activateNativeFullscreenPlaceholder(_ originalToken: WindowToken) {
+        guard let record = workspaceManager.nativeFullscreenRecord(originalToken: originalToken),
+              record.transition == .suspended
+        else { return }
+        let currentToken = record.currentToken
+        guard let entry = workspaceManager.entry(for: currentToken) else { return }
+        guard !isManagedWindowSuppressedByMacOSHide(currentToken) else { return }
+        guard workspaceManager.showsNativeFullscreenPlaceholder(for: currentToken) else { return }
         guard !isLockScreenActive else { return }
         if hasStartedServices {
             guard !isFrontmostAppLockScreen() else { return }
@@ -3349,7 +3354,9 @@ extension WMController {
             return
         }
         if isManagedWindowSuspendedForNativeFullscreen(token) {
-            selectNativeFullscreenPlaceholder(entry)
+            if workspaceManager.showsNativeFullscreenPlaceholder(for: token) {
+                selectNativeFullscreenPlaceholder(entry)
+            }
             return
         }
         if deferInactiveDwindleGroupFocus(entry, origin: origin) {

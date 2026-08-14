@@ -171,6 +171,9 @@ final class SpaceTracker {
         let managed = SkyLight.shared.managedSpaces()
         guard !managed.isEmpty else { return nil }
 
+        let monitors = controller.workspaceManager.monitors
+        guard !monitors.isEmpty else { return nil }
+
         var topology = SpaceTopology()
         topology.displays = managed.map {
             SpaceTopology.DisplaySpaces(
@@ -181,27 +184,15 @@ final class SpaceTracker {
         }
         topology.fullscreenSpaceIds = managed.reduce(into: Set<UInt64>()) { $0.formUnion($1.fullscreenSpaceIds) }
         topology.activeSpaceId = SkyLight.shared.activeSpace() ?? 0
+        topology = topology.normalizingDisplayIdentifiers(using: monitors)
         guard let sample = NativeSpaceTopologySample(topology: topology) else { return nil }
-        let monitors = controller.workspaceManager.monitors
-        guard !monitors.isEmpty else { return nil }
         let displayUUIDs = Set(monitors.compactMap(\.displayUUID))
         let expectedDisplayUUIDs = displayUUIDs.count == monitors.count
             ? displayUUIDs
             : nil
-        var displayUUIDAliases: [String: String] = [:]
-        for monitor in monitors {
-            guard let displayUUID = monitor.displayUUID else { continue }
-            displayUUIDAliases[String(monitor.displayId)] = displayUUID
-        }
-        if let mainMonitor = monitors.first(where: \.isMain),
-           let displayUUID = mainMonitor.displayUUID
-        {
-            displayUUIDAliases["Main"] = displayUUID
-        }
         return sample.matchesExpectedDisplays(
             count: monitors.count,
-            displayUUIDs: expectedDisplayUUIDs,
-            displayUUIDAliases: displayUUIDAliases
+            displayUUIDs: expectedDisplayUUIDs
         ) ? sample : nil
     }
 

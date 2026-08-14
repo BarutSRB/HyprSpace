@@ -35,8 +35,10 @@ final class WorkspaceManager {
     private let world = WorldStore()
     private let restorePlanner = RestorePlanner()
     let animationDriver = AnimationDriver()
-    private var nativeFullscreenRecordsByOriginalToken: [WindowToken: NativeFullscreenRecord] = [:]
-    private var nativeFullscreenOriginalTokenByCurrentToken: [WindowToken: WindowToken] = [:]
+    var nativeFullscreenRecordsByOriginalToken: [WindowToken: NativeFullscreenRecord] = [:]
+    var nativeFullscreenOriginalTokenByCurrentToken: [WindowToken: WindowToken] = [:]
+    var nativeFullscreenTransitionGenerationCounter = 0
+    var nativeFullscreenTransitionTimeoutTasks: [WindowToken: Task<Void, Never>] = [:]
     var pendingRuntimeMonitorOverrideClearWorkspaceIds: Set<WorkspaceDescriptor.ID> = []
     var isDrainingPendingRuntimeMonitorOverrideClears = false
     private lazy var persistedRestoreCatalogStore = PersistedRestoreCatalogStore(
@@ -903,14 +905,6 @@ final class WorkspaceManager {
         world.focus.isNonManagedFocusActive
     }
 
-    var isAppFullscreenActive: Bool {
-        nativeFullscreenRecordsByOriginalToken.values.contains { $0.transition == .suspended }
-    }
-
-    var hasNativeFullscreenLifecycleContext: Bool {
-        !nativeFullscreenRecordsByOriginalToken.isEmpty
-    }
-
     func scratchpadToken() -> WindowToken? {
         world.scratchpadToken
     }
@@ -927,12 +921,6 @@ final class WorkspaceManager {
 
     func isScratchpadToken(_ token: WindowToken) -> Bool {
         world.scratchpadToken == token
-    }
-
-    var hasPendingNativeFullscreenTransition: Bool {
-        nativeFullscreenRecordsByOriginalToken.values.contains {
-            $0.transition == .enterRequested
-        }
     }
 
     @discardableResult
@@ -968,30 +956,6 @@ final class WorkspaceManager {
             notifySessionStateChanged()
         }
         drainPendingRuntimeMonitorOverrideClears()
-        return changed
-    }
-
-    @discardableResult
-    func selectNativeFullscreenPlaceholder(
-        _ token: WindowToken,
-        in workspaceId: WorkspaceDescriptor.ID,
-        onMonitor monitorId: Monitor.ID? = nil
-    ) -> Bool {
-        let normalizedMonitorId = monitorId.flatMap { self.monitor(byId: $0)?.id } ?? self.monitorId(for: workspaceId)
-        var changed = rememberFocus(token, in: workspaceId)
-        if let normalizedMonitorId {
-            changed = updateInteractionMonitor(normalizedMonitorId, preservePrevious: true, notify: false) || changed
-        }
-        changed = applyFocusReconcileEvent(
-            .nativeFullscreenPlaceholderSelected(
-                token: token,
-                workspaceId: workspaceId,
-                source: .workspaceManager
-            )
-        ) || changed
-        if changed {
-            notifySessionStateChanged()
-        }
         return changed
     }
 
@@ -1124,10 +1088,17 @@ final class WorkspaceManager {
     }
 
     func nativeFullscreenRecord(for token: WindowToken) -> NativeFullscreenRecord? {
-        guard let originalToken = nativeFullscreenOriginalToken(for: token) else {
+        guard let originalToken = nativeFullscreenOriginalToken(forCurrentToken: token),
+              let record = nativeFullscreenRecordsByOriginalToken[originalToken],
+              record.currentToken == token
+        else {
             return nil
         }
-        return nativeFullscreenRecordsByOriginalToken[originalToken]
+        return record
+    }
+
+    func nativeFullscreenRecord(originalToken: WindowToken) -> NativeFullscreenRecord? {
+        nativeFullscreenRecordsByOriginalToken[originalToken]
     }
 
     func hasNativeFullscreenRecord(in workspaceId: WorkspaceDescriptor.ID) -> Bool {
@@ -1141,14 +1112,14 @@ final class WorkspaceManager {
         _ token: WindowToken,
         in workspaceId: WorkspaceDescriptor.ID
     ) -> Bool {
+        let existing = nativeFullscreenRecord(for: token)
+        guard existing != nil || nativeFullscreenRecordsByOriginalToken[token] == nil else { return false }
         var changed = rememberFocus(token, in: workspaceId)
-        let originalToken = nativeFullscreenOriginalToken(for: token) ?? token
-        let existing = nativeFullscreenRecordsByOriginalToken[originalToken]
+        let originalToken = existing?.originalToken ?? token
         var record = existing ?? NativeFullscreenRecord(
             originalToken: originalToken,
             currentToken: token,
             workspaceId: workspaceId,
-            exitRequestedByCommand: false,
             transition: .enterRequested
         )
 
@@ -1158,10 +1129,6 @@ final class WorkspaceManager {
         }
         if record.workspaceId != workspaceId {
             record.workspaceId = workspaceId
-            changed = true
-        }
-        if record.exitRequestedByCommand {
-            record.exitRequestedByCommand = false
             changed = true
         }
         if record.transition != .enterRequested {
@@ -1176,18 +1143,21 @@ final class WorkspaceManager {
     }
 
     @discardableResult
-    func markNativeFullscreenSuspended(_ token: WindowToken) -> Bool {
+    func markNativeFullscreenSuspended(
+        _ token: WindowToken,
+        ownsNonManagedFocus: Bool = true
+    ) -> Bool {
         guard let entry = entry(for: token) else { return false }
 
-        var changed = rememberFocus(token, in: entry.workspaceId)
+        let existing = nativeFullscreenRecord(for: token)
+        guard existing != nil || nativeFullscreenRecordsByOriginalToken[token] == nil else { return false }
+        var changed = ownsNonManagedFocus ? rememberFocus(token, in: entry.workspaceId) : false
         let workspaceId = workspace(for: token) ?? entry.workspaceId
-        let originalToken = nativeFullscreenOriginalToken(for: token) ?? token
-        let existing = nativeFullscreenRecordsByOriginalToken[originalToken]
+        let originalToken = existing?.originalToken ?? token
         var record = existing ?? NativeFullscreenRecord(
             originalToken: originalToken,
             currentToken: token,
             workspaceId: workspaceId,
-            exitRequestedByCommand: false,
             transition: .suspended
         )
 
@@ -1197,10 +1167,6 @@ final class WorkspaceManager {
         }
         if record.workspaceId != workspaceId {
             record.workspaceId = workspaceId
-            changed = true
-        }
-        if record.exitRequestedByCommand {
-            record.exitRequestedByCommand = false
             changed = true
         }
         if record.transition != .suspended {
@@ -1215,19 +1181,19 @@ final class WorkspaceManager {
             setLayoutReason(.nativeFullscreen, for: token)
             changed = true
         }
-        changed = enterNonManagedFocus() || changed
+        if ownsNonManagedFocus {
+            changed = enterNonManagedFocus(target: token) || changed
+        }
         return changed
     }
 
     @discardableResult
-    func requestNativeFullscreenExit(
-        _ token: WindowToken,
-        initiatedByCommand: Bool
-    ) -> Bool {
+    func requestNativeFullscreenExit(_ token: WindowToken) -> Bool {
         let existing = nativeFullscreenRecord(for: token)
         if existing == nil, entry(for: token) == nil {
             return false
         }
+        guard existing != nil || nativeFullscreenRecordsByOriginalToken[token] == nil else { return false }
 
         let originalToken = existing?.originalToken ?? token
         let workspaceId = existing?.workspaceId ?? workspace(for: token)
@@ -1237,7 +1203,6 @@ final class WorkspaceManager {
             originalToken: originalToken,
             currentToken: token,
             workspaceId: workspaceId,
-            exitRequestedByCommand: initiatedByCommand,
             transition: .exitRequested
         )
 
@@ -1248,10 +1213,6 @@ final class WorkspaceManager {
         }
         if record.workspaceId != workspaceId {
             record.workspaceId = workspaceId
-            changed = true
-        }
-        if record.exitRequestedByCommand != initiatedByCommand {
-            record.exitRequestedByCommand = initiatedByCommand
             changed = true
         }
         if record.transition != .exitRequested {
@@ -1266,54 +1227,28 @@ final class WorkspaceManager {
     }
 
     @discardableResult
-    func restoreNativeFullscreenRecord(for token: WindowToken) -> Bool {
+    func restoreNativeFullscreenRecord(
+        for token: WindowToken,
+        clearsNonManagedFocusOwner: Bool = true
+    ) -> Bool {
         let record = nativeFullscreenRecord(for: token)
         let resolvedToken = record?.currentToken ?? token
         if let record {
-            _ = removeNativeFullscreenRecord(originalToken: record.originalToken)
+            _ = removeNativeFullscreenRecord(
+                originalToken: record.originalToken,
+                clearsNonManagedFocusOwner: clearsNonManagedFocusOwner
+            )
         }
         let restored = restoreFromNativeState(
             for: resolvedToken,
             drainPendingRuntimeMonitorOverrides: false
         )
-        _ = exitNonManagedFocus()
+        if clearsNonManagedFocusOwner, record == nil, nonManagedFocusToken == resolvedToken {
+            _ = exitNonManagedFocus()
+            clearNonManagedFocusTarget(matching: resolvedToken)
+        }
         drainPendingRuntimeMonitorOverrideClears()
         return restored
-    }
-
-    func reconcileNativeFullscreenWithTopology() {
-        let topology = world.spaceTopology
-        guard topology.isPopulated else { return }
-        for entry in world.allEntries() where entry.mode == .tiling {
-            reconcileNativeFullscreenWithTopology(for: entry.token)
-        }
-    }
-
-    @discardableResult
-    func reconcileNativeFullscreenWithTopology(for token: WindowToken) -> Bool {
-        let topology = world.spaceTopology
-        guard topology.isPopulated,
-              let entry = entry(for: token),
-              entry.mode == .tiling,
-              entry.windowId > 0,
-              let spaceId = topology.spaceForWindow(entry.windowId)
-        else {
-            return false
-        }
-
-        let onFullscreenSpace = topology.isFullscreenSpace(spaceId)
-        let isSuspended = entry.layoutReason == .nativeFullscreen
-        if onFullscreenSpace, !isSuspended, topology.isCurrentSpace(spaceId) {
-            return markNativeFullscreenSuspended(entry.token)
-        }
-        if !onFullscreenSpace, isSuspended {
-            return restoreNativeFullscreenRecord(for: entry.token)
-        }
-        return false
-    }
-
-    func isWindowOnObservedNativeFullscreenSpace(_ windowId: Int) -> Bool {
-        world.spaceTopology.isWindowOnFullscreenSpace(windowId)
     }
 
     func nativeFullscreenCommandTarget(frontmostToken: WindowToken?) -> WindowToken? {
@@ -1570,7 +1505,8 @@ final class WorkspaceManager {
 
     var renderableFocusToken: WindowToken? {
         if world.focus.isNonManagedFocusActive {
-            return world.focus.nonManagedFocusToken
+            guard let token = world.focus.nonManagedFocusToken else { return nil }
+            return isNativeFullscreenSuspended(token) ? nil : token
         }
         return world.focus.focusedToken
     }
@@ -1579,8 +1515,12 @@ final class WorkspaceManager {
         guard let current = world.focus.nonManagedFocusToken else { return }
         if let token, current != token { return }
         if let pid, current.pid != pid { return }
+        let clearsNativeFullscreenOwner = activeNativeFullscreenFocusOwnerToken == current
         if applyFocusReconcileEvent(.nonManagedFocusTargetChanged(target: nil, source: .workspaceManager)) {
             notifySessionStateChanged()
+        }
+        if clearsNativeFullscreenOwner {
+            _ = exitNonManagedFocus()
         }
     }
 
@@ -2060,7 +2000,7 @@ final class WorkspaceManager {
             )
             return existingEntry.token
         }
-        if let originalToken = nativeFullscreenOriginalToken(for: token),
+        if let originalToken = nativeFullscreenOriginalToken(forCurrentToken: token),
            var record = nativeFullscreenRecordsByOriginalToken[originalToken],
            record.currentToken == token,
            record.workspaceId != workspace
@@ -2106,7 +2046,7 @@ final class WorkspaceManager {
             return nil
         }
 
-        if let originalToken = nativeFullscreenOriginalToken(for: oldToken),
+        if let originalToken = nativeFullscreenOriginalToken(forCurrentToken: oldToken),
            var record = nativeFullscreenRecordsByOriginalToken[originalToken]
         {
             record.currentToken = newToken
@@ -2479,6 +2419,7 @@ final class WorkspaceManager {
     @discardableResult
     private func removeTrackedWindow(_ entry: WindowState) -> WindowState {
         let previousFocus = world.focus
+        let removesNativeFullscreenFocusOwner = activeNativeFullscreenFocusOwnerToken == entry.token
         recordReconcileEvent(
             .windowRemoved(
                 token: entry.token,
@@ -2487,6 +2428,9 @@ final class WorkspaceManager {
             )
         )
         _ = removeNativeFullscreenRecord(containing: entry.token)
+        if removesNativeFullscreenFocusOwner {
+            _ = exitNonManagedFocus()
+        }
         let focusChanged = auxiliaryFocusStateChanged(from: previousFocus)
         let scratchpadChanged = clearScratchpadToken(matching: entry.token, notify: false)
         if focusChanged || scratchpadChanged {
@@ -2500,7 +2444,7 @@ final class WorkspaceManager {
     func setWorkspace(for token: WindowToken, to workspace: WorkspaceDescriptor.ID) {
         let previousWorkspace = world.workspace(for: token)
         guard previousWorkspace != workspace else { return }
-        if let originalToken = nativeFullscreenOriginalToken(for: token),
+        if let originalToken = nativeFullscreenOriginalToken(forCurrentToken: token),
            var record = nativeFullscreenRecordsByOriginalToken[originalToken],
            record.currentToken == token,
            record.workspaceId != workspace
@@ -2603,19 +2547,43 @@ final class WorkspaceManager {
         guard layoutReason(for: token) == .nativeFullscreen else { return false }
         guard let record = nativeFullscreenRecord(for: token) else { return false }
         guard record.currentToken == token else { return false }
-        return record.transition != .enterRequested
+        return record.transition == .suspended
     }
 
-    private func nativeFullscreenOriginalToken(for token: WindowToken) -> WindowToken? {
-        if nativeFullscreenRecordsByOriginalToken[token] != nil {
-            return token
-        }
+    private func nativeFullscreenOriginalToken(forCurrentToken token: WindowToken) -> WindowToken? {
         return nativeFullscreenOriginalTokenByCurrentToken[token]
     }
 
     @discardableResult
+    func expireNativeFullscreenTransition(originalToken: WindowToken, generation: Int) -> Bool {
+        guard var record = nativeFullscreenRecordsByOriginalToken[originalToken],
+              record.transitionGeneration == generation
+        else { return false }
+        switch record.transition {
+        case .suspended:
+            return false
+        case .enterRequested:
+            _ = removeNativeFullscreenRecord(originalToken: originalToken)
+            return true
+        case .exitRequested:
+            record.transition = .suspended
+            upsertNativeFullscreenRecord(record)
+            return true
+        }
+    }
+
+    @discardableResult
     private func upsertNativeFullscreenRecord(_ record: NativeFullscreenRecord) -> NativeFullscreenRecord {
+        var record = record
+        var transitionChanged = false
         if let previous = nativeFullscreenRecordsByOriginalToken[record.originalToken] {
+            if previous.transition != record.transition {
+                transitionChanged = true
+                nativeFullscreenTransitionGenerationCounter += 1
+                record.transitionGeneration = nativeFullscreenTransitionGenerationCounter
+            } else {
+                record.transitionGeneration = previous.transitionGeneration
+            }
             nativeFullscreenOriginalTokenByCurrentToken.removeValue(forKey: previous.currentToken)
             if previous != record {
                 noteInvalidation(workspaceId: previous.workspaceId, domains: [.workspace, .layout, .focus, .fullscreen])
@@ -2627,26 +2595,44 @@ final class WorkspaceManager {
                 }
             }
         } else {
+            transitionChanged = true
+            nativeFullscreenTransitionGenerationCounter += 1
+            record.transitionGeneration = nativeFullscreenTransitionGenerationCounter
             noteInvalidation(workspaceId: record.workspaceId, domains: [.workspace, .layout, .focus, .fullscreen])
         }
         nativeFullscreenRecordsByOriginalToken[record.originalToken] = record
         nativeFullscreenOriginalTokenByCurrentToken[record.currentToken] = record.originalToken
+        if transitionChanged {
+            updateNativeFullscreenTransitionTimeout(for: record)
+        }
         return record
     }
 
     @discardableResult
-    private func removeNativeFullscreenRecord(originalToken: WindowToken) -> NativeFullscreenRecord? {
+    private func removeNativeFullscreenRecord(
+        originalToken: WindowToken,
+        clearsNonManagedFocusOwner: Bool = true
+    ) -> NativeFullscreenRecord? {
         guard let record = nativeFullscreenRecordsByOriginalToken.removeValue(forKey: originalToken) else {
             return nil
         }
+        let clearsFocusTarget = clearsNonManagedFocusOwner && nonManagedFocusToken == record.currentToken
+        let exitsNonManagedFocus = clearsFocusTarget && isNonManagedFocusActive
         nativeFullscreenOriginalTokenByCurrentToken.removeValue(forKey: record.currentToken)
+        cancelNativeFullscreenTransitionTimeout(originalToken: originalToken)
+        if exitsNonManagedFocus {
+            _ = exitNonManagedFocus()
+        }
+        if clearsFocusTarget {
+            clearNonManagedFocusTarget(matching: record.currentToken)
+        }
         noteInvalidation(workspaceId: record.workspaceId, domains: [.workspace, .layout, .focus, .fullscreen])
         return record
     }
 
     @discardableResult
     private func removeNativeFullscreenRecord(containing token: WindowToken) -> NativeFullscreenRecord? {
-        guard let originalToken = nativeFullscreenOriginalToken(for: token) else {
+        guard let originalToken = nativeFullscreenOriginalToken(forCurrentToken: token) else {
             return nil
         }
         return removeNativeFullscreenRecord(originalToken: originalToken)
@@ -3793,11 +3779,6 @@ final class WorkspaceManager {
 
     var spaceTopology: SpaceTopology {
         world.spaceTopology
-    }
-
-    func commitSpaceTopology(_ topology: SpaceTopology) {
-        guard topology != world.spaceTopology else { return }
-        recordReconcileEvent(.spaceTopologyChanged(topology: topology, source: .service))
     }
 
     @discardableResult

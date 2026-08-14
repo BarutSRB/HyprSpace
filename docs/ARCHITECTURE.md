@@ -382,7 +382,7 @@ Scoped reconciliation reduces application-root enumeration and full AX-fact work
 
 **Plan-building runs inside a commit.** `buildRelayoutEffectPlan` calls `NiriLayoutHandler.layoutWithNiriEngine` (and the Dwindle equivalent), which run `syncWindows`/`removeWindows`/`restoreInitialPlacements` on the engines inside `workspaceManager.withBatchedLayoutBuild` — a single synchronous `layout_build` commit that also stamps each plan's `plannedSeq`. The layout engines return raw `[WindowToken: CGRect]` frame maps; the handlers wrap those into a `WorkspaceLayoutPlan` → `WorkspaceLayoutDiff` → `EffectPlan` (`Core/Layout/LayoutBoundary.swift`).
 
-**Frame application.** `executeEffectPlan` hands each plan's diff to `LayoutDiffExecutor`, which calls `AXManager.applyFramesParallel`. After an accepted layout plan it calls `surfaceReconciler.noteWorldChanged()` to hand off to Stage 4.
+**Frame application.** `executeEffectPlan` hands each plan's diff to `LayoutDiffExecutor`, which calls `AXManager.applyFramesParallel`. Only after the plan's sequence is accepted, its workspace-scoped `nativeFullscreenSlots` projection is handed directly to `SurfaceReconciler`; settled plans also schedule the normal Stage 4 scene reconciliation.
 
 ### 3.6 Stage 4 — Surface Reconciliation
 
@@ -391,6 +391,8 @@ Auxiliary UI — the focus border, per-monitor workspace bars, shared Niri/Dwind
 1. State-mutating paths call `surfaceReconciler.noteWorldChanged()` (or `noteRestackOccurred()`). These are coalesced into a single `CFRunLoopPerformBlock` drain on the main run loop.
 2. On drain, `runReconcile` builds a fresh `WorldView` (a read-only facade over the world), and `SurfaceDerivation.derive` produces a `DesiredSurfaceScene` (optional border, tab rails, placeholders, bars).
 3. The desired scene is diffed (by value equality) against the last applied scene; only changed surfaces are touched, routed to `BorderSurfaceApplier`, `WorkspaceBarManager.apply(_:)`, `TabRailManager`, and `NativeFullscreenPlaceholderManager`.
+
+Native-fullscreen cards have a split projection. `WorldView` derives stable lifecycle/content descriptors from every fullscreen record, including hidden descriptors retained through workspace switches and temporary entry loss. Niri and Dwindle attach exact rendered slot frames and layout visibility to each accepted `WorkspaceLayoutDiff`: Niri uses its current frame map plus `hiddenHandles`; Dwindle uses its interpolated frame map and active group member. `SurfaceReconciler` joins the two by `record.originalToken`, validates the current token, and moves an existing card only when accepted visible geometry changes. This avoids rereading engine side effects and keeps rejected plans away from AppKit.
 
 The reconciler is *not* called from inside `WorldStore.commit`; it reads current state at drain time through a freshly constructed `WorldView`, not a captured commit snapshot.
 
@@ -745,18 +747,20 @@ OmniWM **requires** the macOS "Displays have separate Spaces" setting to be ON (
 **Native fullscreen** is now derived from facts, not inferred from AX element lifecycle:
 
 - The old AX **destroy/recreate inference** (speculative-preserve heuristics, recreate-before-admission, timeout cleanup) was fully removed.
-- The `NativeFullscreenAvailability` enum and the `isAppFullscreenActive` *stored boolean* were removed. `NativeFullscreenRecord` now holds only `originalToken`, `currentToken`, `workspaceId`, `exitRequestedByCommand`, and `transition`.
+- The `NativeFullscreenAvailability` enum and the `isAppFullscreenActive` *stored boolean* were removed. `NativeFullscreenRecord` holds `originalToken`, `currentToken`, `workspaceId`, `transition`, and a transition generation used to reject stale deadlines.
 - `WorkspaceManager.isAppFullscreenActive` is a **computed property** derived from the records: `nativeFullscreenRecordsByOriginalToken.values.contains { $0.transition == .suspended }`.
 
-Native fullscreen is co-driven by two observed facts: (1) SkyLight fullscreen-space membership (`SpaceTracker.reconcileNativeFullscreenWithTopology`) and (2) the AX-observed `focusedWindow.isFullscreen` at activation (`AXEventHandler`). When a managed window enters native fullscreen its management is suspended (`markNativeFullscreenSuspended`) and `SurfaceReconciler` derives an "In macOS Full Screen" placeholder panel (`NativeFullscreenPlaceholderManager`); on exit the record is removed and management restored.
+Native fullscreen is co-driven by two observed facts: (1) SkyLight fullscreen-space membership (`SpaceTracker.reconcileNativeFullscreenWithTopology`) and (2) the AX-observed `focusedWindow.isFullscreen` at activation (`AXEventHandler`). Topology/inventory suspension is focus-neutral; actual AX activation or card selection sets the record's current token as the exact non-managed focus owner. Rekeys transfer that owner, restoring one record cannot clear another, and managed-focus confirmation or definitive owner removal clears it. Enter/exit requests use generation-checked, record-owned deadlines that are canceled on completion, removal, and service stop.
+
+When management is suspended, `NativeFullscreenPlaceholderManager` retains one nonactivating, normal-level panel keyed by `record.originalToken`. The panel is only a fixed-size regular or compact status card, drawn by one Core Graphics/Core Text view; wallpaper and layout hit testing remain available elsewhere in the reserved slot. Geometry-only ticks move the card without rebuilding content or redrawing. Cards order out during inactive workspaces, fullscreen Spaces, transitions, invalid layout visibility, and temporary entry loss; they are destroyed only with the record or service. Activation resolves `record.currentToken` at action time. The card is excluded from ScreenCaptureKit and the screenshot window picker.
 
 ### 4.11 Surface System
 
 **Directories:** `Sources/OmniWM/Core/Surface/`, `Sources/OmniWM/Core/Border/`
 
-`WorldView` is a read-only `@MainActor` facade wrapping a single `WMController`. It exposes exactly the state `SurfaceDerivation` needs (renderable focus token, fullscreen flags, monitors, space topology, border config, per-window observed/pending frames) plus helpers that build tab-rail infos, bar surfaces, and native-fullscreen placeholders. It holds no mutable state and is constructed fresh per reconcile pass.
+`WorldView` is a read-only `@MainActor` facade wrapping a single `WMController`. It exposes exactly the state `SurfaceDerivation` needs (renderable focus token, scoped fullscreen-transition queries, monitors, space topology, border config, per-window observed/pending frames) plus helpers that build tab-rail infos, bar surfaces, and native-fullscreen descriptors. It holds no mutable state and is constructed fresh per reconcile pass.
 
-`SurfaceDerivation.derive(world:)` is a pure transform `WorldView → DesiredSurfaceScene`. The border-eligibility gate in `deriveBorder` is the load-bearing logic: border config enabled, target not an owned OmniWM surface, no pending native-fullscreen transition, not suppressed/fullscreen, workspace visible, valid frame.
+`SurfaceDerivation.derive(world:)` is a pure transform `WorldView → DesiredSurfaceScene`. The border-eligibility gate in `deriveBorder` is the load-bearing logic: border config enabled, target not an owned OmniWM surface, no native-fullscreen transition for the target workspace, not suppressed/fullscreen, workspace visible, valid frame. Unrelated fullscreen records no longer suppress borders or focus recovery on other workspaces.
 
 **The focus border** is no longer an `NSWindow` managed by a dedicated controller. It is a derived surface applied by `BorderSurfaceApplier`, which drives a `BorderWindow` — a private **SkyLight/CGS server-side window** (created via `SkyLight.createBorderWindow`, drawn into a `CGContext`), positioned one level *below* the target window via `transactionMoveAndOrder(.below)`, and registered with `SurfaceCoordinator` by CGS window *number*. Because that ordering is applied at CGS level 3, the border window sits above the level-0 app window it rings, and its shape is the full target rect (only the ring is painted) — so at creation it opts out of the screenshot window picker by setting the `IgnoreForScreencaptureWindowSelection` CGS property, which `/usr/sbin/screencapture` reads to skip a window and select the one beneath it. Without it, `Cmd+Shift+4` ▸ `Space` selects the border instead of the focused window and captures an empty ring (#544, #150). The property is invisible to full-screen captures and screen recording.
 
@@ -772,6 +776,7 @@ Native fullscreen is co-driven by two observed facts: (1) SkyLight fullscreen-sp
 - **`SwipeTracker`** — accumulates trackpad deltas over a 150ms window and projects an inertial throw target that a spring snaps to.
 - **`AnimationClock`** — a monotonic accumulating clock over `CACurrentMediaTime`, held by the engines and `WMController`.
 - **`MotionPolicy`** — a `@MainActor @Observable` single boolean (`animationsEnabled`) seeded from settings; it gates OmniWM-authored animations.
+- **Native-fullscreen slot cards** — consume the same accepted Niri rendered frames or Dwindle interpolated frames as managed windows. Their fixed-size panel normally performs only an origin move per display-link tick; mode/size changes are thresholded and redraw once.
 
 The per-frame **display link** is owned by `LayoutRefreshController` (not by `Animation/`); see [3.9](#39-the-ungated-animation-tier).
 
@@ -988,7 +993,7 @@ CLIRenderer displays the result
 | `SurfaceCoordinator` / `SurfaceScene` | Registry + policy store for OmniWM-owned surfaces (hit-testing, capture exclusion, focus-recovery suppression). |
 | `SpaceTopology` | Pure value model of the macOS Spaces layout (per-display spaces, current/fullscreen spaces, window→space map). |
 | `SpaceTracker` | Stateless transform that rebuilds `SpaceTopology` from read-only SkyLight queries and commits it. |
-| `NativeFullscreenRecord` | Per-window record (`originalToken`, `currentToken`, `workspaceId`, `exitRequestedByCommand`, `transition`) from which `isAppFullscreenActive` is derived. |
+| `NativeFullscreenRecord` | Per-window record (`originalToken`, `currentToken`, `workspaceId`, `transition`, `transitionGeneration`) from which lifecycle, exact focus ownership, and deadlines are derived. |
 | `AnimationDriver` | Owns per-workspace viewport scroll motion (gesture/spring). |
 | `SpringConfig` | Spring parameters; presets are all the same critically-damped curve. |
 | `MotionPolicy` | Settings-backed gate for OmniWM-authored animations. |

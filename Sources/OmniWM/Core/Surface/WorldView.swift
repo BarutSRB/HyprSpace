@@ -38,12 +38,12 @@ struct WorldView {
         controller.workspaceManager.systemModalFocusToken
     }
 
-    var hasPendingNativeFullscreenTransition: Bool {
-        controller.workspaceManager.hasPendingNativeFullscreenTransition
+    func hasPendingNativeFullscreenTransition(for token: WindowToken) -> Bool {
+        controller.workspaceManager.hasPendingNativeFullscreenTransition(for: token)
     }
 
-    var isAppFullscreenActive: Bool {
-        controller.workspaceManager.isAppFullscreenActive
+    func hasPendingNativeFullscreenTransition(in workspaceId: WorkspaceDescriptor.ID) -> Bool {
+        controller.workspaceManager.hasPendingNativeFullscreenTransition(in: workspaceId)
     }
 
     var spaceTopology: SpaceTopology {
@@ -119,42 +119,41 @@ struct WorldView {
     func nativeFullscreenPlaceholders() -> [NativeFullscreenPlaceholderUpdate] {
         let workspaceManager = controller.workspaceManager
         var updates: [NativeFullscreenPlaceholderUpdate] = []
-        for monitor in workspaceManager.monitors {
-            guard let workspace = workspaceManager.activeWorkspaceOrFirst(on: monitor.id) else { continue }
-            for entry in workspaceManager.entries(in: workspace.id) {
-                guard entry.layoutReason == .nativeFullscreen,
-                      !workspaceManager.isAppHidden(pid: entry.pid),
-                      workspaceManager.showsNativeFullscreenPlaceholder(for: entry.token),
-                      !workspaceManager.isHiddenInCorner(entry.token),
-                      let frame = placeholderFrame(for: entry.token),
-                      frame.width > 1, frame.height > 1
-                else { continue }
-                let appInfo = controller.appInfoCache.info(for: entry.pid)
-                updates.append(
-                    NativeFullscreenPlaceholderUpdate(
-                        token: entry.token,
-                        workspaceId: workspace.id,
-                        frame: frame,
-                        selected: workspaceManager.focusedToken == entry.token
-                            || workspaceManager.pendingFocusedToken == entry.token,
-                        appName: appInfo?.name,
-                        icon: appInfo?.icon
-                    )
+        for record in workspaceManager.nativeFullscreenRecordsByOriginalToken.values {
+            let entry = workspaceManager.entry(for: record.currentToken)
+            updates.append(
+                NativeFullscreenPlaceholderUpdate(
+                    originalToken: record.originalToken,
+                    currentToken: record.currentToken,
+                    workspaceId: record.workspaceId,
+                    frame: .zero,
+                    displayContext: nil,
+                    selected: workspaceManager.focusedToken == record.currentToken
+                        || workspaceManager.pendingFocusedToken == record.currentToken,
+                    visible: record.transition == .suspended
+                        && entry?.layoutReason == .nativeFullscreen
+                        && entry.map(isPlaceholderDescriptorVisible(entry:)) == true
                 )
-            }
+            )
+        }
+        updates.sort {
+            ($0.originalToken.pid, $0.originalToken.windowId) < ($1.originalToken.pid, $1.originalToken.windowId)
         }
         return updates
     }
 
-    private func placeholderFrame(for token: WindowToken) -> CGRect? {
-        guard let workspaceId = controller.workspaceManager.entry(for: token)?.workspaceId else { return nil }
-        switch controller.workspaceManager.activeLayoutKind(for: workspaceId) {
-        case .niri:
-            guard let node = controller.niriEngine?.findNode(for: token, in: workspaceId) else { return nil }
-            return node.renderedFrame ?? node.frame
-        case .dwindle:
-            return controller.dwindleEngine?.findNode(for: token, in: workspaceId)?.cachedFrame
-        }
+    private func isPlaceholderDescriptorVisible(entry: WindowState) -> Bool {
+        let workspaceManager = controller.workspaceManager
+        guard isWorkspaceVisible(entry.workspaceId),
+              !workspaceManager.isAppHidden(pid: entry.pid),
+              !workspaceManager.isHiddenInCorner(entry.token)
+        else { return false }
+        guard spaceTopology.isPopulated,
+              let monitor = workspaceManager.monitor(for: entry.workspaceId),
+              let displayUUID = monitor.displayUUID,
+              spaceTopology.isDisplayShowingFullscreenSpace(displayUUID) == false
+        else { return false }
+        return true
     }
 
     func borderFrame(for entry: WindowState) -> CGRect? {

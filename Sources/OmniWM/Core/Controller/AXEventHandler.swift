@@ -2433,14 +2433,20 @@ final class AXEventHandler {
             return false
         }
 
-        if let record = controller.workspaceManager.nativeFullscreenRecord(for: token) {
-            guard record.currentToken == token else { return false }
-        } else if !shouldPreserveNativeFullscreenDestroy(entry) {
+        let record = controller.workspaceManager.nativeFullscreenRecord(for: token)
+        guard record == nil ? shouldPreserveNativeFullscreenDestroy(entry) : record?.currentToken == token else {
             return false
         }
+        let ownsNonManagedFocus = record == nil || controller.workspaceManager.nonManagedFocusToken == token
 
-        _ = controller.workspaceManager.markNativeFullscreenSuspended(entry.token)
-        clearManagedFocusState(matching: token, workspaceId: entry.workspaceId)
+        clearManagedFocusState(
+            matching: token,
+            workspaceId: entry.workspaceId,
+            preservesNonManagedFocusTarget: ownsNonManagedFocus
+        )
+        _ = controller.workspaceManager.markNativeFullscreenSuspended(
+            entry.token, ownsNonManagedFocus: ownsNonManagedFocus
+        )
         requestNativeFullscreenRelayout(for: token, fallback: entry.workspaceId)
         return true
     }
@@ -3833,32 +3839,6 @@ final class AXEventHandler {
         controller.workspaceManager.clearNonManagedFocusTarget(pid: pid)
     }
 
-    func clearManagedFocusState(
-        matching token: WindowToken,
-        workspaceId: WorkspaceDescriptor.ID?
-    ) {
-        guard let controller else { return }
-
-        controller.intentLedger.discardPendingFocus(token)
-        let canceledRequest = controller.intentLedger.cancelManagedRequest(
-            matching: token,
-            workspaceId: workspaceId
-        )
-        if let canceledRequest {
-            _ = controller.workspaceManager.cancelManagedFocusRequest(
-                matching: token,
-                workspaceId: workspaceId,
-                requestId: canceledRequest.requestId
-            )
-        } else {
-            _ = controller.workspaceManager.cancelCurrentManagedFocusRequest(
-                matching: token,
-                workspaceId: workspaceId
-            )
-        }
-        controller.workspaceManager.clearNonManagedFocusTarget(matching: token)
-    }
-
     private func continueManagedFocusRequest(
         _ request: ManagedFocusRequest,
         source: ActivationEventSource,
@@ -3942,6 +3922,35 @@ final class AXEventHandler {
 }
 
 extension AXEventHandler {
+    func clearManagedFocusState(
+        matching token: WindowToken,
+        workspaceId: WorkspaceDescriptor.ID?,
+        preservesNonManagedFocusTarget: Bool = false
+    ) {
+        guard let controller else { return }
+
+        controller.intentLedger.discardPendingFocus(token)
+        let canceledRequest = controller.intentLedger.cancelManagedRequest(
+            matching: token,
+            workspaceId: workspaceId
+        )
+        if let canceledRequest {
+            _ = controller.workspaceManager.cancelManagedFocusRequest(
+                matching: token,
+                workspaceId: workspaceId,
+                requestId: canceledRequest.requestId
+            )
+        } else {
+            _ = controller.workspaceManager.cancelCurrentManagedFocusRequest(
+                matching: token,
+                workspaceId: workspaceId
+            )
+        }
+        if !preservesNonManagedFocusTarget {
+            controller.workspaceManager.clearNonManagedFocusTarget(matching: token)
+        }
+    }
+
     private func liveCreateSpace(
         for windowId: UInt32,
         spaceIdsForWindow: (UInt32) -> [UInt64] = { SkyLight.shared.spacesForWindow($0) }

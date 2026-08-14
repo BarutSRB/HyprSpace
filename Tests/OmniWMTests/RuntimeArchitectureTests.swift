@@ -1816,6 +1816,7 @@ final class RuntimeArchitectureTests: XCTestCase {
         let token = WindowToken(pid: 100, windowId: 42)
         let monitorId = Monitor.ID(displayId: 2)
         let previousMonitorId = Monitor.ID(displayId: 1)
+        let nativeFullscreenOwner = WindowToken(pid: 200, windowId: 84)
         let snapshot = Self.snapshot(
             pendingManagedFocus: PendingManagedFocusSnapshot(
                 token: token,
@@ -1823,6 +1824,8 @@ final class RuntimeArchitectureTests: XCTestCase {
                 monitorId: previousMonitorId,
                 requestId: 7
             ),
+            isNonManagedFocusActive: true,
+            nonManagedFocusToken: nativeFullscreenOwner,
             interactionMonitorId: previousMonitorId
         )
 
@@ -1852,8 +1855,11 @@ final class RuntimeArchitectureTests: XCTestCase {
         )
 
         XCTAssertFalse(mismatch.mutatesRuntimeState)
+        XCTAssertEqual(snapshot.focusSession.nonManagedFocusToken, nativeFullscreenOwner)
         XCTAssertEqual(match.focusSession?.focusedToken, token)
         XCTAssertEqual(match.focusSession?.pendingManagedFocus, .empty)
+        XCTAssertEqual(match.focusSession?.isNonManagedFocusActive, false)
+        XCTAssertNil(match.focusSession?.nonManagedFocusToken)
         XCTAssertEqual(match.focusSession?.interactionMonitorId, monitorId)
         XCTAssertEqual(match.focusSession?.previousInteractionMonitorId, previousMonitorId)
     }
@@ -2707,7 +2713,7 @@ final class RuntimeArchitectureTests: XCTestCase {
         )
         let engine = try XCTUnwrap(controller.niriEngine)
         XCTAssertNil(engine.findNode(for: firstToken, in: workspaceId))
-        XCTAssertFalse(controller.shouldSuppressManagedFocusRecovery)
+        XCTAssertFalse(controller.shouldSuppressManagedFocusRecovery(in: workspaceId))
         controller.layoutRefreshController.resetState()
         controller.layoutRefreshController.layoutState.hasCompletedInitialRefresh = true
 
@@ -5280,6 +5286,36 @@ final class RuntimeArchitectureTests: XCTestCase {
     }
 
     @MainActor
+    func testNativeFullscreenTransientDestroyDoesNotPublishOwnerLoss() throws {
+        let controller = Self.controller()
+        let workspaceId = try XCTUnwrap(controller.workspaceManager.workspaceId(for: "1", createIfMissing: true))
+        _ = controller.workspaceManager.focusWorkspace(named: "1")
+        controller.niriLayoutHandler.enableNiriLayout()
+        let token = controller.workspaceManager.addWindow(
+            AXWindowRef(element: AXUIElementCreateApplication(930_003), windowId: 930_103),
+            pid: 930_003,
+            windowId: 930_103,
+            to: workspaceId
+        )
+        _ = controller.niriEngine?.addWindow(token: token, to: workspaceId, afterSelection: nil)
+        XCTAssertTrue(controller.workspaceManager.markNativeFullscreenSuspended(token))
+        var publishedOwnerLoss = false
+        controller.workspaceManager.onSessionStateChanged = {
+            if !controller.workspaceManager.isNonManagedFocusActive
+                || controller.workspaceManager.nonManagedFocusToken != token
+            {
+                publishedOwnerLoss = true
+            }
+        }
+
+        controller.axEventHandler.handleRemoved(token: token)
+
+        XCTAssertFalse(publishedOwnerLoss)
+        XCTAssertEqual(controller.workspaceManager.activeNativeFullscreenFocusOwnerToken, token)
+        XCTAssertEqual(controller.workspaceManager.nativeFullscreenRecord(for: token)?.transition, .suspended)
+    }
+
+    @MainActor
     func testNativeFullscreenSpaceObservationSuspendsBeforeFocusObservation() throws {
         let controller = Self.controller()
         let ws = try XCTUnwrap(controller.workspaceManager.workspaceId(for: "1", createIfMissing: true))
@@ -5979,6 +6015,8 @@ final class RuntimeArchitectureTests: XCTestCase {
     private static func snapshot(
         focusedToken: WindowToken? = nil,
         pendingManagedFocus: PendingManagedFocusSnapshot = .empty,
+        isNonManagedFocusActive: Bool = false,
+        nonManagedFocusToken: WindowToken? = nil,
         systemModalFocusToken: WindowToken? = nil,
         interactionMonitorId: Monitor.ID? = nil,
         previousInteractionMonitorId: Monitor.ID? = nil,
@@ -5992,7 +6030,8 @@ final class RuntimeArchitectureTests: XCTestCase {
                 focusedToken: focusedToken,
                 pendingManagedFocus: pendingManagedFocus,
                 focusLease: nil,
-                isNonManagedFocusActive: false,
+                isNonManagedFocusActive: isNonManagedFocusActive,
+                nonManagedFocusToken: nonManagedFocusToken,
                 systemModalFocusToken: systemModalFocusToken,
                 interactionMonitorId: interactionMonitorId,
                 previousInteractionMonitorId: previousInteractionMonitorId

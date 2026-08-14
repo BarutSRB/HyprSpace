@@ -115,6 +115,45 @@ final class DwindleGroupVisibilityTests: XCTestCase {
         XCTAssertEqual(settling.visibilityChanges.count, 1)
     }
 
+    func testLayoutDiffProjectsOnlyActiveSuspendedGroupMemberAsVisible() throws {
+        let fixture = makeGroupedFixture()
+        let firstOriginalToken = WindowToken(pid: 101, windowId: 201)
+        let secondOriginalToken = WindowToken(pid: 102, windowId: 202)
+        let activeFrame = CGRect(x: 0.26, y: 0.26, width: 999.74, height: 799.74)
+        let diff = fixture.handler.layoutDiff(
+            windows: [
+                snapshot(
+                    fixture.first,
+                    layoutReason: .nativeFullscreen,
+                    originalToken: firstOriginalToken
+                ),
+                snapshot(
+                    fixture.second,
+                    layoutReason: .nativeFullscreen,
+                    originalToken: secondOriginalToken
+                )
+            ],
+            frames: [fixture.second: activeFrame],
+            engine: fixture.engine,
+            workspaceId: fixture.workspaceId,
+            preferredHideSide: .left,
+            canRestoreHiddenWorkspaceWindows: true,
+            scale: 2,
+            reassertHidden: false,
+            pendingParkWindowIds: []
+        )
+
+        XCTAssertTrue(diff.frameChanges.isEmpty)
+        XCTAssertEqual(diff.nativeFullscreenSlots.count, 2)
+        let inactive = try XCTUnwrap(diff.nativeFullscreenSlots[firstOriginalToken])
+        XCTAssertEqual(inactive.frame, .zero)
+        XCTAssertFalse(inactive.visible)
+        let active = try XCTUnwrap(diff.nativeFullscreenSlots[secondOriginalToken])
+        XCTAssertEqual(active.currentToken, fixture.second)
+        XCTAssertEqual(active.frame, activeFrame.roundedToPhysicalPixels(scale: 2))
+        XCTAssertTrue(active.visible)
+    }
+
     private func makeGroupedFixture() -> (
         handler: DwindleLayoutHandler,
         engine: DwindleLayoutEngine,
@@ -136,7 +175,9 @@ final class DwindleGroupVisibilityTests: XCTestCase {
 
     private func snapshot(
         _ token: WindowToken,
-        hiddenSide: HideSide? = nil
+        hiddenSide: HideSide? = nil,
+        layoutReason: LayoutReason = .standard,
+        originalToken: WindowToken? = nil
     ) -> LayoutWindowSnapshot {
         LayoutWindowSnapshot(
             token: token,
@@ -148,7 +189,8 @@ final class DwindleGroupVisibilityTests: XCTestCase {
                     reason: .layoutTransient($0)
                 )
             },
-            layoutReason: .standard
+            layoutReason: layoutReason,
+            nativeFullscreenOriginalToken: originalToken
         )
     }
 }

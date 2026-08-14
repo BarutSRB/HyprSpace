@@ -9,6 +9,21 @@ struct LayoutWindowSnapshot {
     let constraints: WindowSizeConstraints
     let hiddenState: HiddenState?
     let layoutReason: LayoutReason
+    let nativeFullscreenOriginalToken: WindowToken?
+
+    init(
+        token: WindowToken,
+        constraints: WindowSizeConstraints,
+        hiddenState: HiddenState?,
+        layoutReason: LayoutReason,
+        nativeFullscreenOriginalToken: WindowToken? = nil
+    ) {
+        self.token = token
+        self.constraints = constraints
+        self.hiddenState = hiddenState
+        self.layoutReason = layoutReason
+        self.nativeFullscreenOriginalToken = nativeFullscreenOriginalToken
+    }
 
     var isNativeFullscreenSuspended: Bool {
         layoutReason == .nativeFullscreen
@@ -105,6 +120,12 @@ struct LayoutDeferredHide {
     let revealToken: WindowToken
 }
 
+struct NativeFullscreenSlotProjection: Equatable {
+    let currentToken: WindowToken
+    let frame: CGRect
+    let visible: Bool
+}
+
 // `frameChanges` imply active, restore-eligible windows for this pass.
 // `visibilityChanges` are reserved for explicit hide/show transitions.
 struct WorkspaceLayoutDiff {
@@ -112,6 +133,7 @@ struct WorkspaceLayoutDiff {
     var visibilityChanges: [LayoutVisibilityChange] = []
     var restoreChanges: [LayoutRestoreChange] = []
     var deferredHides: [LayoutDeferredHide] = []
+    var nativeFullscreenSlots: [WindowToken: NativeFullscreenSlotProjection] = [:]
 }
 
 struct WorkspaceSessionPatch {

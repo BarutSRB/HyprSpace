@@ -620,4 +620,53 @@ final class NiriScrollVisibilityTests: XCTestCase {
         XCTAssertEqual(shownToken, token)
         XCTAssertEqual(withFrame.frameChanges.count, 1)
     }
+
+    func testLayoutDiffProjectsEverySuspendedSlotWithExactVisibility() throws {
+        let handler = NiriLayoutHandler(controller: nil)
+        let engine = NiriLayoutEngine()
+        let workspaceId = WorkspaceDescriptor.ID()
+        let visibleToken = WindowToken(pid: 31, windowId: 41)
+        let hiddenToken = WindowToken(pid: 32, windowId: 42)
+        let visibleOriginalToken = WindowToken(pid: 31, windowId: 401)
+        let hiddenOriginalToken = WindowToken(pid: 32, windowId: 402)
+        let visibleFrame = CGRect(x: 100.5, y: 200.5, width: 320, height: 240)
+        let hiddenFrame = CGRect(x: -320, y: 200.5, width: 320, height: 240)
+        let windows = [
+            LayoutWindowSnapshot(
+                token: visibleToken,
+                constraints: .unconstrained,
+                hiddenState: nil,
+                layoutReason: .nativeFullscreen,
+                nativeFullscreenOriginalToken: visibleOriginalToken
+            ),
+            LayoutWindowSnapshot(
+                token: hiddenToken,
+                constraints: .unconstrained,
+                hiddenState: nil,
+                layoutReason: .nativeFullscreen,
+                nativeFullscreenOriginalToken: hiddenOriginalToken
+            )
+        ]
+
+        let diff = handler.layoutDiff(
+            windows: windows,
+            frames: [visibleToken: visibleFrame, hiddenToken: hiddenFrame],
+            hiddenHandles: [hiddenToken: .left],
+            engine: engine,
+            workspaceId: workspaceId,
+            canRestoreHiddenWorkspaceWindows: true,
+            reassertHidden: false
+        )
+
+        XCTAssertTrue(diff.frameChanges.isEmpty)
+        XCTAssertEqual(diff.nativeFullscreenSlots.count, 2)
+        let visible = try XCTUnwrap(diff.nativeFullscreenSlots[visibleOriginalToken])
+        XCTAssertEqual(visible.currentToken, visibleToken)
+        XCTAssertEqual(visible.frame, visibleFrame)
+        XCTAssertTrue(visible.visible)
+        let hidden = try XCTUnwrap(diff.nativeFullscreenSlots[hiddenOriginalToken])
+        XCTAssertEqual(hidden.currentToken, hiddenToken)
+        XCTAssertEqual(hidden.frame, hiddenFrame)
+        XCTAssertFalse(hidden.visible)
+    }
 }

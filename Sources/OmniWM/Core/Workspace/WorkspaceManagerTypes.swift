@@ -47,6 +47,6 @@ struct WorkspaceNativeFullscreenRecord: Equatable {
     let originalToken: WindowToken
     var currentToken: WindowToken
     var workspaceId: WorkspaceDescriptor.ID
-    var exitRequestedByCommand: Bool
     var transition: WorkspaceNativeFullscreenTransition
+    var transitionGeneration: Int = 0
 }

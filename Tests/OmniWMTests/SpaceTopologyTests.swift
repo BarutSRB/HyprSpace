@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Copyright (C) 2026 BarutSRB — https://github.com/BarutSRB/OmniWM
 
+import CoreGraphics
 @testable import OmniWM
 import XCTest
 
@@ -35,6 +36,71 @@ final class SpaceTopologyTests: XCTestCase {
         XCTAssertFalse(topology.isWindowOnKnownInactiveSpace(13))
     }
 
+    func testIsDisplayShowingFullscreenSpace() {
+        var topology = twoDisplayTopology()
+        XCTAssertEqual(topology.isDisplayShowingFullscreenSpace("primary"), false)
+        XCTAssertEqual(topology.isDisplayShowingFullscreenSpace("secondary"), false)
+        XCTAssertNil(topology.isDisplayShowingFullscreenSpace("unknown"))
+
+        topology.displays[1].currentSpaceId = 4
+        XCTAssertEqual(topology.isDisplayShowingFullscreenSpace("secondary"), true)
+        XCTAssertEqual(topology.isDisplayShowingFullscreenSpace("primary"), false)
+    }
+
+    func testIsDisplayShowingFullscreenSpaceCanonicalizesUUIDCase() {
+        let lowercasedUUID = "123e4567-e89b-12d3-a456-426614174000"
+        let topology = SpaceTopology(
+            displays: [
+                SpaceTopology.DisplaySpaces(
+                    displayIdentifier: lowercasedUUID,
+                    spaceIds: [5],
+                    currentSpaceId: 5
+                )
+            ],
+            activeSpaceId: 5,
+            fullscreenSpaceIds: [5],
+            windowSpace: [:]
+        )
+
+        XCTAssertEqual(topology.isDisplayShowingFullscreenSpace(lowercasedUUID.uppercased()), true)
+    }
+
+    func testNormalizingDisplayIdentifiersResolvesMainAndNumericAliases() {
+        let mainUUID = "11111111-1111-4111-8111-111111111111"
+        let secondaryUUID = "22222222-2222-4222-8222-222222222222"
+        let mainDisplayId = CGMainDisplayID()
+        let secondaryDisplayId: CGDirectDisplayID = mainDisplayId == 42 ? 43 : 42
+        let monitors = [
+            makeMonitor(
+                displayId: mainDisplayId,
+                frame: CGRect(x: 0, y: 0, width: 1200, height: 800),
+                displayUUID: mainUUID
+            ),
+            makeMonitor(
+                displayId: secondaryDisplayId,
+                frame: CGRect(x: 1200, y: 0, width: 1200, height: 800),
+                displayUUID: secondaryUUID
+            )
+        ]
+        let topology = SpaceTopology(
+            displays: [
+                .init(displayIdentifier: "Main", spaceIds: [1], currentSpaceId: 1),
+                .init(
+                    displayIdentifier: String(secondaryDisplayId),
+                    spaceIds: [2],
+                    currentSpaceId: 2
+                )
+            ],
+            activeSpaceId: 1,
+            fullscreenSpaceIds: [2],
+            windowSpace: [:]
+        ).normalizingDisplayIdentifiers(using: monitors)
+
+        XCTAssertEqual(topology.displays.map(\.displayIdentifier), [mainUUID, secondaryUUID])
+        XCTAssertEqual(topology.isDisplayShowingFullscreenSpace(mainUUID), false)
+        XCTAssertEqual(topology.isDisplayShowingFullscreenSpace(secondaryUUID), true)
+    }
+
     func testSelectWindowSpacePrefersCurrentNonFullscreen() {
         let topology = twoDisplayTopology()
         XCTAssertEqual(topology.selectWindowSpace(from: [4, 2, 3]), 3)
@@ -66,5 +132,21 @@ final class SpaceTopologyTests: XCTestCase {
         let topology = twoDisplayTopology()
         XCTAssertNil(topology.selectWindowSpace(from: []))
         XCTAssertNil(topology.selectWindowSpace(from: [0]))
+    }
+
+    private func makeMonitor(
+        displayId: CGDirectDisplayID,
+        frame: CGRect,
+        displayUUID: String
+    ) -> Monitor {
+        Monitor(
+            id: .init(displayId: displayId),
+            displayId: displayId,
+            frame: frame,
+            visibleFrame: frame,
+            hasNotch: false,
+            name: String(displayId),
+            displayUUID: displayUUID
+        )
     }
 }

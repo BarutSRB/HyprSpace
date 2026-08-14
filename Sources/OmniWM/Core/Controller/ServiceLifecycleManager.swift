@@ -199,6 +199,7 @@ final class ServiceLifecycleManager {
             controller.syncMonitorsToNiriEngine()
         }
         controller.hasStartedServices = true
+        controller.workspaceManager.resumeNativeFullscreenTransitionTimeouts()
         controller.reconcileEnabledAndHotkeysState()
         controller.eventIntake.open(sink: controller.eventInterpreter)
         controller.layoutRefreshController.setup()
@@ -728,6 +729,7 @@ final class ServiceLifecycleManager {
         controller.eventIntake.close()
         controller.factResolver.stop()
         controller.deadlineWheel.stop()
+        controller.workspaceManager.cancelNativeFullscreenTransitionTimeouts()
         controller.intentLedger.reset()
         clearPendingManagedFocus(controller)
         controller.axManager.onAppLaunched = nil

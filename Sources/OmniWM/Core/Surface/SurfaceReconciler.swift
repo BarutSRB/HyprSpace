@@ -115,12 +115,12 @@ enum SurfaceDerivation {
         guard config.enabled else { return nil }
         guard let token = world.renderableFocusToken else { return nil }
         guard !world.isOwnedWindow(windowId: token.windowId) else { return nil }
-        guard !world.hasPendingNativeFullscreenTransition else { return nil }
+        guard !world.hasPendingNativeFullscreenTransition(for: token) else { return nil }
         guard world.systemModalFocusToken != token else { return nil }
 
         if let entry = world.entry(for: token) {
             guard world.suppressedFocusToken != token,
-                  !world.isAppFullscreenActive,
+                  !world.hasPendingNativeFullscreenTransition(in: entry.workspaceId),
                   !world.isWindowFullscreenInLayout(token),
                   world.isManagedWindowDisplayable(entry.token),
                   world.isWorkspaceVisible(entry.workspaceId),
@@ -176,6 +176,12 @@ enum SurfaceDerivation {
     }
 }
 
+private struct AcceptedNativeFullscreenSlotProjection {
+    let displayId: CGDirectDisplayID
+    let displayContext: NativeFullscreenCardDisplayContext
+    let slots: [WindowToken: NativeFullscreenSlotProjection]
+}
+
 @MainActor
 final class SurfaceReconciler {
     private weak var controller: WMController?
@@ -183,7 +189,17 @@ final class SurfaceReconciler {
     private(set) var forceOrderingOnNextReconcile = false
     private let borderApplier = BorderSurfaceApplier()
     private let parkingEdgeMaskManager = ParkingEdgeMaskManager()
+    private var nativeFullscreenDescriptorsByOriginalToken: [
+        WindowToken: NativeFullscreenPlaceholderUpdate
+    ] = [:]
+    private var nativeFullscreenSlotsByWorkspace: [
+        WorkspaceDescriptor.ID: AcceptedNativeFullscreenSlotProjection
+    ] = [:]
     private(set) var appliedScene = DesiredSurfaceScene.empty
+
+    var nativeFullscreenProjectedWorkspaceIds: Set<WorkspaceDescriptor.ID> {
+        Set(nativeFullscreenSlotsByWorkspace.keys)
+    }
 
     init(controller: WMController) {
         self.controller = controller
@@ -224,6 +240,59 @@ final class SurfaceReconciler {
         appliedScene.border = outcome.didApply ? desiredBorder : nil
     }
 
+    func applyAcceptedNativeFullscreenSlots(
+        _ slots: [WindowToken: NativeFullscreenSlotProjection],
+        workspaceId: WorkspaceDescriptor.ID,
+        displayId: CGDirectDisplayID,
+        displayContext: NativeFullscreenCardDisplayContext
+    ) {
+        guard let controller else { return }
+        guard controller.hasStartedServices else {
+            nativeFullscreenSlotsByWorkspace.removeValue(forKey: workspaceId)
+            return
+        }
+        guard controller.workspaceManager.descriptor(for: workspaceId) != nil else {
+            nativeFullscreenSlotsByWorkspace.removeValue(forKey: workspaceId)
+            return
+        }
+        guard controller.workspaceManager.monitor(for: workspaceId)?.displayId == displayId else { return }
+
+        nativeFullscreenSlotsByWorkspace[workspaceId] = AcceptedNativeFullscreenSlotProjection(
+            displayId: displayId,
+            displayContext: displayContext,
+            slots: slots
+        )
+
+        var needsManagerApply = false
+        for index in appliedScene.placeholders.indices {
+            let previous = appliedScene.placeholders[index]
+            guard previous.workspaceId == workspaceId,
+                  let descriptor = nativeFullscreenDescriptorsByOriginalToken[previous.originalToken]
+            else { continue }
+
+            let next = resolvedNativeFullscreenPlaceholder(
+                descriptor,
+                previous: previous,
+                controller: controller
+            )
+            guard next != previous else { continue }
+
+            appliedScene.placeholders[index] = next
+            if previous.visible,
+               next.visible,
+               (previous.frame != next.frame || previous.displayContext != next.displayContext)
+            {
+                controller.nativeFullscreenPlaceholderManager.moveForAnimation(next)
+            } else if previous.visible != next.visible {
+                needsManagerApply = true
+            }
+        }
+
+        if needsManagerApply {
+            controller.nativeFullscreenPlaceholderManager.apply(appliedScene.placeholders)
+        }
+    }
+
     func handleVerifiedFrameApplySuccess(_ result: AXFrameApplyResult) {
         guard let controller else { return }
         let token = WindowToken(pid: result.pid, windowId: result.windowId)
@@ -236,6 +305,8 @@ final class SurfaceReconciler {
         forceOrderingOnNextReconcile = false
         borderApplier.cleanup()
         parkingEdgeMaskManager.removeAll()
+        nativeFullscreenDescriptorsByOriginalToken.removeAll()
+        nativeFullscreenSlotsByWorkspace.removeAll()
         appliedScene = .empty
     }
 
@@ -250,7 +321,31 @@ final class SurfaceReconciler {
         forceOrderingOnNextReconcile = false
         guard let controller else { return }
         let world = WorldView(controller: controller)
-        let desired = SurfaceDerivation.derive(world: world)
+        if !world.hasStartedServices {
+            nativeFullscreenSlotsByWorkspace.removeAll(keepingCapacity: true)
+        } else {
+            let staleWorkspaceIds = nativeFullscreenSlotsByWorkspace.keys.filter {
+                controller.workspaceManager.descriptor(for: $0) == nil
+            }
+            for workspaceId in staleWorkspaceIds {
+                nativeFullscreenSlotsByWorkspace.removeValue(forKey: workspaceId)
+            }
+        }
+        var desired = SurfaceDerivation.derive(world: world)
+        nativeFullscreenDescriptorsByOriginalToken.removeAll(keepingCapacity: true)
+        for descriptor in desired.placeholders {
+            nativeFullscreenDescriptorsByOriginalToken[descriptor.originalToken] = descriptor
+        }
+        desired.placeholders = desired.placeholders.map { descriptor in
+            let previous = appliedScene.placeholders.first {
+                $0.originalToken == descriptor.originalToken
+            }
+            return resolvedNativeFullscreenPlaceholder(
+                descriptor,
+                previous: previous,
+                controller: controller
+            )
+        }
         let refreshCornerRadii = desired.border.map {
             !controller.axManager.hasPendingFrameWrite(for: $0.windowId)
         } ?? true
@@ -283,8 +378,8 @@ final class SurfaceReconciler {
         if desired.tabRails != appliedScene.tabRails || forceOrdering {
             controller.tabRailManager.updateRails(desired.tabRails, forceOrdering: forceOrdering)
         }
-        if desired.placeholders != appliedScene.placeholders {
-            controller.nativeFullscreenPlaceholderManager.apply(desired.placeholders)
+        if desired.placeholders != appliedScene.placeholders || forceOrdering {
+            controller.nativeFullscreenPlaceholderManager.apply(desired.placeholders, forceOrdering: forceOrdering)
         }
         parkingEdgeMaskManager.apply(desired.parkingEdgeMasks)
         appliedScene = desired
@@ -292,5 +387,138 @@ final class SurfaceReconciler {
             appliedScene.border = nil
         }
         return borderOutcome
+    }
+
+    private func resolvedNativeFullscreenPlaceholder(
+        _ descriptor: NativeFullscreenPlaceholderUpdate,
+        previous: NativeFullscreenPlaceholderUpdate?,
+        controller: WMController
+    ) -> NativeFullscreenPlaceholderUpdate {
+        let workspaceManager = controller.workspaceManager
+        guard let record = workspaceManager.nativeFullscreenRecord(originalToken: descriptor.originalToken),
+              record.originalToken == descriptor.originalToken,
+              record.workspaceId == descriptor.workspaceId
+        else {
+            return hiddenNativeFullscreenPlaceholder(
+                descriptor,
+                currentToken: descriptor.currentToken,
+                selected: descriptor.selected,
+                previous: previous
+            )
+        }
+
+        let currentToken = record.currentToken
+        let selected = workspaceManager.focusedToken == currentToken
+            || workspaceManager.pendingFocusedToken == currentToken
+        guard record.transition == .suspended,
+              workspaceManager.layoutReason(for: currentToken) == .nativeFullscreen
+        else {
+            return hiddenNativeFullscreenPlaceholder(
+                descriptor,
+                currentToken: currentToken,
+                selected: selected,
+                previous: previous
+            )
+        }
+        let descriptorIsCurrent = descriptor.currentToken == currentToken
+        let lifecycleVisible = if descriptorIsCurrent {
+            descriptor.visible
+        } else {
+            previous?.visible == true
+        }
+
+        guard lifecycleVisible else {
+            return hiddenNativeFullscreenPlaceholder(
+                descriptor,
+                currentToken: currentToken,
+                selected: selected,
+                previous: previous
+            )
+        }
+
+        guard let projection = nativeFullscreenSlotsByWorkspace[descriptor.workspaceId] else {
+            return retainedNativeFullscreenPlaceholder(
+                descriptor,
+                currentToken: currentToken,
+                selected: selected,
+                previous: previous
+            )
+        }
+        guard workspaceManager.monitor(for: descriptor.workspaceId)?.displayId == projection.displayId else {
+            return hiddenNativeFullscreenPlaceholder(
+                descriptor,
+                currentToken: currentToken,
+                selected: selected,
+                previous: previous
+            )
+        }
+        guard let slot = projection.slots[descriptor.originalToken] else {
+            return hiddenNativeFullscreenPlaceholder(
+                descriptor,
+                currentToken: currentToken,
+                selected: selected,
+                previous: previous
+            )
+        }
+        guard slot.currentToken == currentToken else {
+            return retainedNativeFullscreenPlaceholder(
+                descriptor,
+                currentToken: currentToken,
+                selected: selected,
+                previous: previous
+            )
+        }
+
+        return NativeFullscreenPlaceholderUpdate(
+            originalToken: descriptor.originalToken,
+            currentToken: currentToken,
+            workspaceId: descriptor.workspaceId,
+            frame: slot.frame,
+            displayContext: projection.displayContext,
+            selected: selected,
+            visible: slot.visible
+        )
+    }
+
+    private func retainedNativeFullscreenPlaceholder(
+        _ descriptor: NativeFullscreenPlaceholderUpdate,
+        currentToken: WindowToken,
+        selected: Bool,
+        previous: NativeFullscreenPlaceholderUpdate?
+    ) -> NativeFullscreenPlaceholderUpdate {
+        guard let previous, previous.visible else {
+            return hiddenNativeFullscreenPlaceholder(
+                descriptor,
+                currentToken: currentToken,
+                selected: selected,
+                previous: previous
+            )
+        }
+        return NativeFullscreenPlaceholderUpdate(
+            originalToken: descriptor.originalToken,
+            currentToken: currentToken,
+            workspaceId: descriptor.workspaceId,
+            frame: previous.frame,
+            displayContext: previous.displayContext,
+            selected: selected,
+            visible: true
+        )
+    }
+
+    private func hiddenNativeFullscreenPlaceholder(
+        _ descriptor: NativeFullscreenPlaceholderUpdate,
+        currentToken: WindowToken,
+        selected: Bool,
+        previous: NativeFullscreenPlaceholderUpdate?
+    ) -> NativeFullscreenPlaceholderUpdate {
+        NativeFullscreenPlaceholderUpdate(
+            originalToken: descriptor.originalToken,
+            currentToken: currentToken,
+            workspaceId: descriptor.workspaceId,
+            frame: previous?.frame ?? .zero,
+            displayContext: previous?.displayContext,
+            selected: selected,
+            visible: false
+        )
     }
 }

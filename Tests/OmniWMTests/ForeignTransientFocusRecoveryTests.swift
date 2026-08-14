@@ -134,6 +134,139 @@ final class ForeignTransientFocusRecoveryTests: XCTestCase {
         XCTAssertNil(fixture.controller.workspaceManager.pendingFocusedToken)
     }
 
+    func testNativeFullscreenOwnerSuppressesAutomaticRecoveryGlobally() throws {
+        let fixture = try makeFixture(prefix: "OmniWMFullscreenOwnerRecoveryScopeTests")
+        let ownerWorkspaceId = try XCTUnwrap(
+            fixture.controller.workspaceManager.workspaceId(for: "2", createIfMissing: true)
+        )
+        let ownerToken = fixture.controller.workspaceManager.addWindow(
+            WindowAdmissionTestSupport.axRef(
+                for: WindowToken(pid: 559_010, windowId: 559_212)
+            ),
+            pid: 559_010,
+            windowId: 559_212,
+            to: ownerWorkspaceId
+        )
+
+        XCTAssertTrue(fixture.controller.workspaceManager.markNativeFullscreenSuspended(ownerToken))
+        XCTAssertEqual(
+            fixture.controller.workspaceManager.activeNativeFullscreenFocusOwnerToken,
+            ownerToken
+        )
+        XCTAssertTrue(fixture.controller.shouldSuppressManagedFocusRecovery(in: ownerWorkspaceId))
+        XCTAssertTrue(fixture.controller.shouldSuppressManagedFocusRecovery(in: fixture.workspaceId))
+    }
+
+    func testUnrelatedNativeFullscreenTransitionDoesNotSuppressManagedBorder() throws {
+        let fixture = try makeFixture(prefix: "OmniWMFullscreenBorderScopeTests")
+        let otherWorkspaceId = try XCTUnwrap(
+            fixture.controller.workspaceManager.workspaceId(for: "2", createIfMissing: true)
+        )
+        let otherToken = fixture.controller.workspaceManager.addWindow(
+            WindowAdmissionTestSupport.axRef(
+                for: WindowToken(pid: 559_011, windowId: 559_213)
+            ),
+            pid: 559_011,
+            windowId: 559_213,
+            to: otherWorkspaceId
+        )
+        let frame = CGRect(x: 120, y: 90, width: 800, height: 600)
+        let world = WorldView(controller: fixture.controller, borderFrameResolver: { windowId in
+            windowId == fixture.mainToken.windowId ? frame : nil
+        })
+
+        XCTAssertTrue(
+            fixture.controller.workspaceManager.requestNativeFullscreenEnter(
+                otherToken,
+                in: otherWorkspaceId
+            )
+        )
+        XCTAssertNotNil(SurfaceDerivation.deriveBorder(world: world))
+
+        let sameWorkspaceToken = fixture.controller.workspaceManager.addWindow(
+            WindowAdmissionTestSupport.axRef(
+                for: WindowToken(pid: 559_012, windowId: 559_214)
+            ),
+            pid: 559_012,
+            windowId: 559_214,
+            to: fixture.workspaceId
+        )
+        XCTAssertTrue(
+            fixture.controller.workspaceManager.requestNativeFullscreenEnter(
+                sameWorkspaceToken,
+                in: fixture.workspaceId
+            )
+        )
+        XCTAssertNil(SurfaceDerivation.deriveBorder(world: world))
+    }
+
+    func testExitRequestedPlaceholderCannotReclaimNonManagedFocus() async throws {
+        let fixture = try makeFixture(prefix: "OmniWMFullscreenExitActivationTests")
+        let manager = fixture.controller.workspaceManager
+        XCTAssertTrue(manager.markNativeFullscreenSuspended(fixture.mainToken))
+        XCTAssertTrue(manager.requestNativeFullscreenExit(fixture.mainToken))
+        XCTAssertTrue(manager.exitNonManagedFocus())
+        manager.clearNonManagedFocusTarget(matching: fixture.mainToken)
+        XCTAssertFalse(manager.isNonManagedFocusActive)
+        XCTAssertNil(manager.nonManagedFocusToken)
+        XCTAssertFalse(
+            manager.selectNativeFullscreenPlaceholder(
+                fixture.mainToken,
+                in: fixture.workspaceId
+            )
+        )
+
+        fixture.controller.activateNativeFullscreenPlaceholder(fixture.mainToken)
+        _ = fixture.controller.windowActionHandler.focusWindowFromBar(token: fixture.mainToken)
+        await WindowAdmissionTestSupport.drainLayoutRefreshes(fixture.controller)
+
+        XCTAssertFalse(manager.isNonManagedFocusActive)
+        XCTAssertNil(manager.nonManagedFocusToken)
+        XCTAssertTrue(fixture.recorder.operations.isEmpty)
+    }
+
+    func testPlaceholderActivationUsesStableOriginalTokenAfterWindowIdReuse() throws {
+        let fixture = try makeFixture(prefix: "OmniWMFullscreenStableActivationTests")
+        let manager = fixture.controller.workspaceManager
+        let originalToken = WindowToken(pid: fixture.mainToken.pid, windowId: 559_215)
+        _ = manager.addWindow(
+            WindowAdmissionTestSupport.axRef(for: originalToken),
+            pid: originalToken.pid,
+            windowId: originalToken.windowId,
+            to: fixture.workspaceId
+        )
+        XCTAssertTrue(manager.markNativeFullscreenSuspended(originalToken))
+
+        let replacementToken = WindowToken(pid: originalToken.pid, windowId: 559_216)
+        XCTAssertNotNil(
+            manager.rekeyWindow(
+                from: originalToken,
+                to: replacementToken,
+                newAXRef: WindowAdmissionTestSupport.axRef(for: replacementToken)
+            )
+        )
+        XCTAssertTrue(manager.markNativeFullscreenSuspended(fixture.mainToken))
+        XCTAssertNotNil(
+            manager.rekeyWindow(
+                from: fixture.mainToken,
+                to: originalToken,
+                newAXRef: WindowAdmissionTestSupport.axRef(for: originalToken)
+            )
+        )
+
+        fixture.controller.activateNativeFullscreenPlaceholder(originalToken)
+
+        XCTAssertEqual(manager.nonManagedFocusToken, replacementToken)
+        XCTAssertEqual(
+            fixture.recorder.operations,
+            [
+                "activate:\(replacementToken.pid)",
+                "focus:\(replacementToken.pid):\(replacementToken.windowId)",
+                "raise"
+            ]
+        )
+    }
+
     private func assertConcreteTargetSuppressesAXWindowCreatedRelayout(
         tracked: Bool
     ) async throws {

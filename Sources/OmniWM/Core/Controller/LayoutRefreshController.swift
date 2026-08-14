@@ -553,6 +553,15 @@ import QuartzCore
             diffExecutor.execute(plan)
             controller.workspaceManager.setNiriRestorePlacements(plan.niriRestorePlacements)
         }
+        controller.surfaceReconciler.applyAcceptedNativeFullscreenSlots(
+            plan.diff.nativeFullscreenSlots,
+            workspaceId: plan.workspaceId,
+            displayId: plan.monitor.displayId,
+            displayContext: NativeFullscreenCardDisplayContext(
+                workingFrame: plan.monitor.workingFrame,
+                scale: plan.monitor.scale
+            )
+        )
         applyAnimationDirectives(
             plan.animationDirectives,
             workspaceId: plan.workspaceId,
@@ -705,6 +714,15 @@ import QuartzCore
             }
 
             let hiddenState = controller.workspaceManager.hiddenState(for: entry.token)
+            let nativeFullscreenOriginalToken: WindowToken? = if layoutReason == .nativeFullscreen,
+                                                                 let record = controller.workspaceManager
+                                                                 .nativeFullscreenRecord(for: entry.token),
+                                                                 record.currentToken == entry.token
+            {
+                record.originalToken
+            } else {
+                nil
+            }
 
             snapshots.append(
                 LayoutWindowSnapshot(
@@ -716,7 +734,8 @@ import QuartzCore
                         cappedAxes: neighborAxes
                     ),
                     hiddenState: hiddenState,
-                    layoutReason: layoutReason
+                    layoutReason: layoutReason,
+                    nativeFullscreenOriginalToken: nativeFullscreenOriginalToken
                 )
             )
         }
@@ -816,8 +835,8 @@ import QuartzCore
                 startDwindleAnimation(for: workspaceId, monitor: monitor)
             case let .activateWindow(token):
                 guard !suppressWindowActivation,
-                      !controller.shouldSuppressManagedFocusRecovery,
-                      !controller.workspaceManager.hasPendingNativeFullscreenTransition,
+                      !controller.shouldSuppressManagedFocusRecovery(in: workspaceId),
+                      !controller.workspaceManager.hasPendingNativeFullscreenTransition(in: workspaceId),
                       focusSeqAccepted
                 else { continue }
                 if let workspaceId = controller.workspaceManager.workspace(for: token) {
@@ -1335,10 +1354,9 @@ import QuartzCore
         effects.visibility = .init()
 
         if recoverFocus,
-           !controller.workspaceManager.isAppFullscreenActive,
-           !controller.workspaceManager.hasPendingNativeFullscreenTransition,
-           !controller.shouldSuppressManagedFocusRecovery,
            let focusedWorkspaceId = controller.activeWorkspace()?.id,
+           !controller.workspaceManager.hasPendingNativeFullscreenTransition(in: focusedWorkspaceId),
+           !controller.shouldSuppressManagedFocusRecovery(in: focusedWorkspaceId),
            layoutWorkspaceIds.contains(focusedWorkspaceId)
         {
             effects.focusValidationWorkspaceIds = [focusedWorkspaceId]
@@ -1393,17 +1411,13 @@ import QuartzCore
         }
 
         let activeWorkspaceIds = currentActiveWorkspaceIds()
-        let focusValidationWorkspaceIds: [WorkspaceDescriptor.ID]
-        if controller.workspaceManager.isAppFullscreenActive
-            || controller.workspaceManager.hasPendingNativeFullscreenTransition
-            || controller.shouldSuppressManagedFocusRecovery
-        {
-            focusValidationWorkspaceIds = []
-        } else {
-            focusValidationWorkspaceIds = focusedWorkspacesToRecover
-                .intersection(activeWorkspaceIds)
-                .sorted { $0.uuidString < $1.uuidString }
-        }
+        let focusValidationWorkspaceIds = focusedWorkspacesToRecover
+            .intersection(activeWorkspaceIds)
+            .filter {
+                !controller.workspaceManager.hasPendingNativeFullscreenTransition(in: $0)
+                    && !controller.shouldSuppressManagedFocusRecovery(in: $0)
+            }
+            .sorted { $0.uuidString < $1.uuidString }
 
         let focusValidationPreferredTokens = workspacePlans.reduce(
             into: [WorkspaceDescriptor.ID: WindowToken]()
@@ -1701,7 +1715,10 @@ import QuartzCore
                     ruleEffects = restoredEntry.ruleEffects
                     admissionHints = restoredEntry.admissionHints
                 } else if appFullscreen {
-                    _ = controller.workspaceManager.markNativeFullscreenSuspended(existingEntry.token)
+                    _ = controller.workspaceManager.markNativeFullscreenSuspended(
+                        existingEntry.token,
+                        ownsNonManagedFocus: false
+                    )
                     let existingAssignment = controller.workspaceAssignment(pid: pid, windowId: winId)
                     wsForWindow = existingAssignment ?? defaultWorkspace
                     ruleEffects = decision.ruleEffects
@@ -2040,10 +2057,9 @@ import QuartzCore
         var effects = EffectPlanEffects()
         effects.visibility = .init()
 
-        if !controller.workspaceManager.isAppFullscreenActive,
-           !controller.workspaceManager.hasPendingNativeFullscreenTransition,
-           !controller.shouldSuppressManagedFocusRecovery,
-           let focusValidationWorkspaceId
+        if let focusValidationWorkspaceId,
+           !controller.workspaceManager.hasPendingNativeFullscreenTransition(in: focusValidationWorkspaceId),
+           !controller.shouldSuppressManagedFocusRecovery(in: focusValidationWorkspaceId)
         {
             effects.focusValidationWorkspaceIds = [focusValidationWorkspaceId]
         }

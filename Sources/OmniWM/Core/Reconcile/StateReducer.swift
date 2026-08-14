@@ -237,7 +237,7 @@ enum StateReducer {
             )
 
         case let .managedFocusConfirmed(token, workspaceId, monitorId, requestId, _):
-            var focusSession = managedFocusConfirmed(
+            let confirmation = managedFocusConfirmed(
                 from: currentSnapshot.focusSession,
                 token: token,
                 workspaceId: workspaceId,
@@ -245,10 +245,13 @@ enum StateReducer {
                 requestId: requestId,
                 mode: currentSnapshot.windows.first(where: { $0.token == token })?.mode
             )
-            if focusSession.suppressedFocusToken == token {
-                focusSession.suppressedFocusToken = nil
+            var focusSession = confirmation.focusSession
+            if confirmation.accepted {
+                if focusSession.suppressedFocusToken == token {
+                    focusSession.suppressedFocusToken = nil
+                }
+                focusSession.nonManagedFocusToken = nil
             }
-            focusSession.nonManagedFocusToken = nil
             setFocusSession(focusSession, current: currentSnapshot.focusSession, plan: &plan)
 
         case let .managedFocusCancelled(token, workspaceId, requestId, _):
@@ -334,6 +337,7 @@ enum StateReducer {
             var focusSession = currentSnapshot.focusSession
             focusSession.focusedToken = token
             focusSession.isNonManagedFocusActive = true
+            focusSession.nonManagedFocusToken = token
             focusSession.clearPendingManagedFocus()
             setFocusSession(focusSession, current: currentSnapshot.focusSession, plan: &plan)
 
@@ -490,21 +494,21 @@ enum StateReducer {
         monitorId: Monitor.ID?,
         requestId: UInt64?,
         mode: TrackedWindowMode?
-    ) -> FocusSessionSnapshot {
+    ) -> (focusSession: FocusSessionSnapshot, accepted: Bool) {
         var focusSession = focusSession
         if let requestId {
             guard focusSession.pendingManagedFocus.requestId == requestId,
                   focusSession.pendingManagedFocus.token == token,
                   focusSession.pendingManagedFocus.workspaceId == workspaceId
             else {
-                return focusSession
+                return (focusSession, false)
             }
         } else if focusSession.pendingManagedFocus != .empty {
             guard focusSession.pendingManagedFocus.requestId == nil,
                   focusSession.pendingManagedFocus.token == token,
                   focusSession.pendingManagedFocus.workspaceId == workspaceId
             else {
-                return focusSession
+                return (focusSession, false)
             }
         }
         focusSession.focusedToken = token
@@ -521,7 +525,7 @@ enum StateReducer {
             focusSession.interactionMonitorId = monitorId
         }
         focusSession.isNonManagedFocusActive = false
-        return focusSession
+        return (focusSession, true)
     }
 
     private static func managedFocusCancelled(
@@ -621,6 +625,10 @@ enum StateReducer {
         }
         if focusSession.suppressedFocusToken == token {
             focusSession.suppressedFocusToken = nil
+        }
+        if focusSession.nonManagedFocusToken == token {
+            focusSession.nonManagedFocusToken = nil
+            focusSession.isNonManagedFocusActive = false
         }
         focusSession.clearRememberedFocus(token, workspaceId: workspaceId)
         return focusSession

@@ -659,6 +659,351 @@ final class WorkspaceMonitorMoveStateTests: XCTestCase {
         XCTAssertEqual(manager.entry(for: token), initialEntry)
     }
 
+    func testNativeFullscreenEnterExpiryRemovesRecord() throws {
+        let fixture = makeFixture(assignments: [("1", 0)])
+        let manager = fixture.manager
+        let workspaceId = try XCTUnwrap(manager.workspaceId(named: "1"))
+        let token = addWindow(
+            pid: 971_001,
+            windowId: 971_101,
+            workspaceId: workspaceId,
+            manager: manager
+        )
+
+        XCTAssertTrue(manager.requestNativeFullscreenEnter(token, in: workspaceId))
+        XCTAssertTrue(manager.enterNonManagedFocus(target: token))
+        let generation = try XCTUnwrap(manager.nativeFullscreenRecord(for: token)?.transitionGeneration)
+
+        XCTAssertTrue(manager.expireNativeFullscreenTransition(originalToken: token, generation: generation))
+        XCTAssertNil(manager.nativeFullscreenRecord(for: token))
+        XCTAssertEqual(manager.entry(for: token)?.layoutReason, .standard)
+        XCTAssertFalse(manager.hasPendingNativeFullscreenTransition)
+        XCTAssertFalse(manager.isNonManagedFocusActive)
+        XCTAssertNil(manager.nonManagedFocusToken)
+    }
+
+    func testNativeFullscreenTransitionExpiryRespectsGeneration() throws {
+        let fixture = makeFixture(assignments: [("1", 0)])
+        let manager = fixture.manager
+        let workspaceId = try XCTUnwrap(manager.workspaceId(named: "1"))
+        let token = addWindow(
+            pid: 971_002,
+            windowId: 971_102,
+            workspaceId: workspaceId,
+            manager: manager
+        )
+
+        XCTAssertTrue(manager.requestNativeFullscreenEnter(token, in: workspaceId))
+        let enterGeneration = try XCTUnwrap(manager.nativeFullscreenRecord(for: token)?.transitionGeneration)
+
+        XCTAssertTrue(manager.markNativeFullscreenSuspended(token))
+        let suspendedGeneration = try XCTUnwrap(manager.nativeFullscreenRecord(for: token)?.transitionGeneration)
+        XCTAssertNotEqual(enterGeneration, suspendedGeneration)
+
+        XCTAssertFalse(manager.expireNativeFullscreenTransition(originalToken: token, generation: enterGeneration))
+        XCTAssertEqual(manager.nativeFullscreenRecord(for: token)?.transition, .suspended)
+
+        XCTAssertTrue(manager.requestNativeFullscreenExit(token))
+        let exitGeneration = try XCTUnwrap(manager.nativeFullscreenRecord(for: token)?.transitionGeneration)
+        XCTAssertNotEqual(suspendedGeneration, exitGeneration)
+
+        XCTAssertFalse(manager.expireNativeFullscreenTransition(originalToken: token, generation: suspendedGeneration))
+        XCTAssertEqual(manager.nativeFullscreenRecord(for: token)?.transition, .exitRequested)
+
+        XCTAssertTrue(manager.expireNativeFullscreenTransition(originalToken: token, generation: exitGeneration))
+        XCTAssertEqual(manager.nativeFullscreenRecord(for: token)?.transition, .suspended)
+        XCTAssertEqual(manager.entry(for: token)?.layoutReason, .nativeFullscreen)
+    }
+
+    func testNativeFullscreenTransitionTimeoutOwnershipFollowsRecordState() throws {
+        let fixture = makeFixture(assignments: [("1", 0)])
+        let manager = fixture.manager
+        let workspaceId = try XCTUnwrap(manager.workspaceId(named: "1"))
+        let token = addWindow(
+            pid: 971_008,
+            windowId: 971_108,
+            workspaceId: workspaceId,
+            manager: manager
+        )
+
+        XCTAssertTrue(manager.requestNativeFullscreenEnter(token, in: workspaceId))
+        XCTAssertEqual(manager.nativeFullscreenTransitionTimeoutCount, 1)
+
+        XCTAssertTrue(manager.markNativeFullscreenSuspended(token, ownsNonManagedFocus: false))
+        XCTAssertEqual(manager.nativeFullscreenTransitionTimeoutCount, 0)
+
+        XCTAssertTrue(manager.requestNativeFullscreenExit(token))
+        XCTAssertEqual(manager.nativeFullscreenTransitionTimeoutCount, 1)
+        manager.cancelNativeFullscreenTransitionTimeouts()
+        XCTAssertEqual(manager.nativeFullscreenTransitionTimeoutCount, 0)
+        manager.resumeNativeFullscreenTransitionTimeouts()
+        XCTAssertEqual(manager.nativeFullscreenTransitionTimeoutCount, 1)
+
+        XCTAssertTrue(manager.restoreNativeFullscreenRecord(for: token))
+        XCTAssertEqual(manager.nativeFullscreenTransitionTimeoutCount, 0)
+    }
+
+    func testNativeFullscreenTransitionQueriesAreScopedAndIncludeExit() throws {
+        let fixture = makeFixture(assignments: [("1", 0), ("2", 1)])
+        let manager = fixture.manager
+        let firstWorkspaceId = try XCTUnwrap(manager.workspaceId(named: "1"))
+        let secondWorkspaceId = try XCTUnwrap(manager.workspaceId(named: "2"))
+        let firstToken = addWindow(
+            pid: 971_003,
+            windowId: 971_103,
+            workspaceId: firstWorkspaceId,
+            manager: manager
+        )
+        let secondToken = addWindow(
+            pid: 971_004,
+            windowId: 971_104,
+            workspaceId: secondWorkspaceId,
+            manager: manager
+        )
+
+        XCTAssertTrue(manager.requestNativeFullscreenEnter(firstToken, in: firstWorkspaceId))
+        XCTAssertTrue(manager.hasPendingNativeFullscreenTransition)
+        XCTAssertTrue(manager.hasPendingNativeFullscreenTransition(for: firstToken))
+        XCTAssertTrue(manager.hasPendingNativeFullscreenTransition(in: firstWorkspaceId))
+        XCTAssertFalse(manager.hasPendingNativeFullscreenTransition(for: secondToken))
+        XCTAssertFalse(manager.hasPendingNativeFullscreenTransition(in: secondWorkspaceId))
+
+        XCTAssertTrue(manager.markNativeFullscreenSuspended(firstToken, ownsNonManagedFocus: false))
+        XCTAssertFalse(manager.hasPendingNativeFullscreenTransition)
+        XCTAssertTrue(manager.requestNativeFullscreenExit(firstToken))
+        XCTAssertTrue(manager.hasPendingNativeFullscreenTransition)
+        XCTAssertTrue(manager.hasPendingNativeFullscreenTransition(for: firstToken))
+        XCTAssertTrue(manager.hasPendingNativeFullscreenTransition(in: firstWorkspaceId))
+        XCTAssertFalse(manager.showsNativeFullscreenPlaceholder(for: firstToken))
+    }
+
+    func testNativeFullscreenFocusOwnershipIsExactAcrossMultipleRecords() throws {
+        let fixture = makeFixture(assignments: [("1", 0), ("2", 1)])
+        let manager = fixture.manager
+        let firstWorkspaceId = try XCTUnwrap(manager.workspaceId(named: "1"))
+        let secondWorkspaceId = try XCTUnwrap(manager.workspaceId(named: "2"))
+        let firstToken = addWindow(
+            pid: 971_005,
+            windowId: 971_105,
+            workspaceId: firstWorkspaceId,
+            manager: manager
+        )
+        let secondToken = addWindow(
+            pid: 971_006,
+            windowId: 971_106,
+            workspaceId: secondWorkspaceId,
+            manager: manager
+        )
+
+        XCTAssertTrue(manager.markNativeFullscreenSuspended(firstToken, ownsNonManagedFocus: false))
+        XCTAssertFalse(manager.isNonManagedFocusActive)
+        XCTAssertNil(manager.nonManagedFocusToken)
+        XCTAssertTrue(
+            manager.selectNativeFullscreenPlaceholder(
+                firstToken,
+                in: firstWorkspaceId,
+                onMonitor: fixture.left.id
+            )
+        )
+        XCTAssertEqual(manager.activeNativeFullscreenFocusOwnerToken, firstToken)
+        XCTAssertTrue(manager.markNativeFullscreenSuspended(secondToken))
+        XCTAssertTrue(manager.isNonManagedFocusActive)
+        XCTAssertEqual(manager.nonManagedFocusToken, secondToken)
+        XCTAssertEqual(manager.activeNativeFullscreenFocusOwnerToken, secondToken)
+        XCTAssertNil(manager.renderableFocusToken)
+
+        XCTAssertTrue(manager.restoreNativeFullscreenRecord(for: firstToken))
+        XCTAssertTrue(manager.isNonManagedFocusActive)
+        XCTAssertEqual(manager.nonManagedFocusToken, secondToken)
+        XCTAssertEqual(manager.activeNativeFullscreenFocusOwnerToken, secondToken)
+
+        XCTAssertTrue(manager.restoreNativeFullscreenRecord(for: secondToken))
+        XCTAssertFalse(manager.isNonManagedFocusActive)
+        XCTAssertNil(manager.nonManagedFocusToken)
+    }
+
+    func testManagedFocusConfirmationClearsNativeFullscreenOwner() throws {
+        let fixture = makeFixture(assignments: [("1", 0), ("2", 1)])
+        let manager = fixture.manager
+        let fullscreenWorkspaceId = try XCTUnwrap(manager.workspaceId(named: "1"))
+        let managedWorkspaceId = try XCTUnwrap(manager.workspaceId(named: "2"))
+        let fullscreenToken = addWindow(
+            pid: 971_009,
+            windowId: 971_109,
+            workspaceId: fullscreenWorkspaceId,
+            manager: manager
+        )
+        let managedToken = addWindow(
+            pid: 971_010,
+            windowId: 971_110,
+            workspaceId: managedWorkspaceId,
+            manager: manager
+        )
+
+        XCTAssertTrue(manager.markNativeFullscreenSuspended(fullscreenToken))
+        XCTAssertEqual(manager.activeNativeFullscreenFocusOwnerToken, fullscreenToken)
+        XCTAssertTrue(
+            manager.setManagedFocus(
+                managedToken,
+                in: managedWorkspaceId,
+                onMonitor: fixture.center.id
+            )
+        )
+        XCTAssertFalse(manager.isNonManagedFocusActive)
+        XCTAssertNil(manager.nonManagedFocusToken)
+        XCTAssertEqual(manager.renderableFocusToken, managedToken)
+    }
+
+    func testTopologyDrivenNativeFullscreenSuspensionIsFocusNeutral() throws {
+        let fixture = makeFixture(assignments: [("1", 0), ("2", 1)])
+        let manager = fixture.manager
+        let fullscreenWorkspaceId = try XCTUnwrap(manager.workspaceId(named: "1"))
+        let managedWorkspaceId = try XCTUnwrap(manager.workspaceId(named: "2"))
+        let fullscreenToken = addWindow(
+            pid: 971_011,
+            windowId: 971_111,
+            workspaceId: fullscreenWorkspaceId,
+            manager: manager
+        )
+        let managedToken = addWindow(
+            pid: 971_012,
+            windowId: 971_112,
+            workspaceId: managedWorkspaceId,
+            manager: manager
+        )
+        XCTAssertTrue(
+            manager.setManagedFocus(
+                managedToken,
+                in: managedWorkspaceId,
+                onMonitor: fixture.center.id
+            )
+        )
+        XCTAssertNil(manager.lastFocusedToken(in: fullscreenWorkspaceId))
+        manager.commitSpaceTopology(
+            SpaceTopology(
+                displays: [
+                    .init(displayIdentifier: "left", spaceIds: [1], currentSpaceId: 1),
+                    .init(displayIdentifier: "center", spaceIds: [2], currentSpaceId: 2)
+                ],
+                activeSpaceId: 2,
+                fullscreenSpaceIds: [1],
+                windowSpace: [fullscreenToken.windowId: 1]
+            )
+        )
+
+        XCTAssertTrue(manager.reconcileNativeFullscreenWithTopology(for: fullscreenToken))
+        XCTAssertEqual(manager.nativeFullscreenRecord(for: fullscreenToken)?.transition, .suspended)
+        XCTAssertFalse(manager.isNonManagedFocusActive)
+        XCTAssertNil(manager.nonManagedFocusToken)
+        XCTAssertEqual(manager.focusedToken, managedToken)
+        XCTAssertEqual(manager.renderableFocusToken, managedToken)
+        XCTAssertNil(manager.lastFocusedToken(in: fullscreenWorkspaceId))
+    }
+
+    func testTopologyDrivenNativeFullscreenRestorePreservesExactFocusOwner() throws {
+        let fixture = makeFixture(assignments: [("1", 0)])
+        let manager = fixture.manager
+        let workspaceId = try XCTUnwrap(manager.workspaceId(named: "1"))
+        let token = addWindow(
+            pid: 971_013,
+            windowId: 971_113,
+            workspaceId: workspaceId,
+            manager: manager
+        )
+        XCTAssertTrue(manager.markNativeFullscreenSuspended(token))
+        XCTAssertEqual(manager.activeNativeFullscreenFocusOwnerToken, token)
+        manager.commitSpaceTopology(
+            SpaceTopology(
+                displays: [
+                    .init(displayIdentifier: "left", spaceIds: [1, 2], currentSpaceId: 1)
+                ],
+                activeSpaceId: 1,
+                fullscreenSpaceIds: [2],
+                windowSpace: [token.windowId: 1]
+            )
+        )
+
+        XCTAssertTrue(manager.reconcileNativeFullscreenWithTopology(for: token))
+        XCTAssertNil(manager.nativeFullscreenRecord(for: token))
+        XCTAssertEqual(manager.layoutReason(for: token), .standard)
+        XCTAssertTrue(manager.isNonManagedFocusActive)
+        XCTAssertEqual(manager.nonManagedFocusToken, token)
+    }
+
+    func testNativeFullscreenOwnerRekeysAndDefinitiveRemovalClearsMode() throws {
+        let fixture = makeFixture(assignments: [("1", 0)])
+        let manager = fixture.manager
+        let workspaceId = try XCTUnwrap(manager.workspaceId(named: "1"))
+        let originalToken = addWindow(
+            pid: 971_007,
+            windowId: 971_107,
+            workspaceId: workspaceId,
+            manager: manager
+        )
+        let replacementToken = WindowToken(pid: originalToken.pid, windowId: 971_108)
+
+        XCTAssertTrue(manager.markNativeFullscreenSuspended(originalToken))
+        XCTAssertNotNil(
+            manager.rekeyWindow(
+                from: originalToken,
+                to: replacementToken,
+                newAXRef: AXWindowRef(
+                    element: AXUIElementCreateApplication(replacementToken.pid),
+                    windowId: replacementToken.windowId
+                )
+            )
+        )
+        XCTAssertEqual(manager.nonManagedFocusToken, replacementToken)
+        XCTAssertEqual(manager.nativeFullscreenRecord(for: replacementToken)?.currentToken, replacementToken)
+
+        XCTAssertNotNil(manager.removeWindow(pid: replacementToken.pid, windowId: replacementToken.windowId))
+        XCTAssertFalse(manager.isNonManagedFocusActive)
+        XCTAssertNil(manager.nonManagedFocusToken)
+        XCTAssertNil(manager.nativeFullscreenRecord(for: replacementToken))
+    }
+
+    func testReusedOriginalTokenCannotMutateRekeyedFullscreenRecord() throws {
+        let fixture = makeFixture(assignments: [("1", 0), ("2", 1)])
+        let manager = fixture.manager
+        let firstWorkspaceId = try XCTUnwrap(manager.workspaceId(named: "1"))
+        let secondWorkspaceId = try XCTUnwrap(manager.workspaceId(named: "2"))
+        let originalToken = addWindow(
+            pid: 971_014,
+            windowId: 971_114,
+            workspaceId: firstWorkspaceId,
+            manager: manager
+        )
+        let replacementToken = WindowToken(pid: originalToken.pid, windowId: 971_115)
+        XCTAssertTrue(manager.markNativeFullscreenSuspended(originalToken))
+        XCTAssertNotNil(
+            manager.rekeyWindow(
+                from: originalToken,
+                to: replacementToken,
+                newAXRef: AXWindowRef(
+                    element: AXUIElementCreateApplication(replacementToken.pid),
+                    windowId: replacementToken.windowId
+                )
+            )
+        )
+        let reusedToken = addWindow(
+            pid: originalToken.pid,
+            windowId: originalToken.windowId,
+            workspaceId: secondWorkspaceId,
+            manager: manager
+        )
+
+        XCTAssertEqual(reusedToken, originalToken)
+        XCTAssertFalse(manager.requestNativeFullscreenEnter(reusedToken, in: secondWorkspaceId))
+        XCTAssertFalse(manager.markNativeFullscreenSuspended(reusedToken))
+        XCTAssertNil(manager.nativeFullscreenRecord(for: reusedToken))
+        XCTAssertEqual(manager.nativeFullscreenRecord(for: replacementToken)?.currentToken, replacementToken)
+        XCTAssertEqual(manager.nativeFullscreenRecord(for: replacementToken)?.workspaceId, firstWorkspaceId)
+        XCTAssertNil(manager.lastFocusedToken(in: secondWorkspaceId))
+
+        XCTAssertNotNil(manager.removeWindow(pid: reusedToken.pid, windowId: reusedToken.windowId))
+        XCTAssertNotNil(manager.nativeFullscreenRecord(for: replacementToken))
+    }
+
     func testConfigurationReapplyDefersExitRequestedNativeFullscreenUntilRestore() throws {
         let fixture = makeFixture(assignments: [("1", 0), ("2", 1), ("3", 2)])
         let manager = fixture.manager
@@ -679,7 +1024,7 @@ final class WorkspaceMonitorMoveStateTests: XCTestCase {
             .executed
         )
         XCTAssertTrue(manager.markNativeFullscreenSuspended(token))
-        XCTAssertTrue(manager.requestNativeFullscreenExit(token, initiatedByCommand: true))
+        XCTAssertTrue(manager.requestNativeFullscreenExit(token))
         XCTAssertEqual(manager.nativeFullscreenRecord(for: token)?.transition, .exitRequested)
         var outcomes: [WorkspaceMonitorMoveOutcome] = []
         manager.onDeferredWorkspaceMonitorMove = { outcomes.append($0) }

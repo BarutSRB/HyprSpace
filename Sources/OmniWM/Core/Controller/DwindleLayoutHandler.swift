@@ -1279,10 +1279,25 @@ import QuartzCore
         let excludedTokens = engine.excludedTokens(in: workspaceId)
         for window in windows {
             let token = window.token
-            if excludedTokens.contains(token) {
+            if window.isNativeFullscreenSuspended {
+                if let originalToken = window.nativeFullscreenOriginalToken {
+                    let roundedFrame = frames[token]?.roundedToPhysicalPixels(scale: effectiveScale)
+                    let validFrame = roundedFrame.map {
+                        !$0.isNull && !$0.isInfinite && $0.width > 1 && $0.height > 1
+                    } == true
+                    diff.nativeFullscreenSlots[originalToken] =
+                        NativeFullscreenSlotProjection(
+                            currentToken: token,
+                            frame: validFrame ? roundedFrame ?? .zero : .zero,
+                            visible: canRestoreHiddenWorkspaceWindows
+                                && !excludedTokens.contains(token)
+                                && engine.activeTileMember(containing: token, in: workspaceId) == token
+                                && validFrame
+                        )
+                }
                 continue
             }
-            if window.isNativeFullscreenSuspended {
+            if excludedTokens.contains(token) {
                 continue
             }
             let previousOffscreenSide = window.hiddenState?.offscreenSide
@@ -1332,7 +1347,6 @@ import QuartzCore
                 )
             )
         }
-
         return diff
     }
 

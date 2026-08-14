@@ -1202,9 +1202,9 @@ final class MouseEventHandler {
         guard controller.focusPolicyEngine.evaluate(.focusFollowsMouse).allowsFocusChange else {
             return
         }
-        guard !controller.workspaceManager.isNonManagedFocusActive,
-              !controller.workspaceManager.hasPendingNativeFullscreenTransition,
-              !controller.workspaceManager.isAppFullscreenActive
+        guard !nonManagedFocusBlocksFocusFollowsMouse,
+              !hasPendingNativeFullscreenTransition(at: location),
+              !isPointerDisplayShowingFullscreenSpace(at: location)
         else {
             return
         }
@@ -1224,6 +1224,37 @@ final class MouseEventHandler {
 
         state.lastFocusFollowsMouseTime = now
         activateFocusFollowsMouseTarget(target)
+    }
+
+    private var nonManagedFocusBlocksFocusFollowsMouse: Bool {
+        guard let workspaceManager = controller?.workspaceManager,
+              workspaceManager.isNonManagedFocusActive
+        else {
+            return false
+        }
+        return workspaceManager.activeNativeFullscreenFocusOwnerToken == nil
+    }
+
+    private func hasPendingNativeFullscreenTransition(at location: CGPoint) -> Bool {
+        guard let workspaceManager = controller?.workspaceManager else { return false }
+        guard let monitor = location.monitorApproximation(in: workspaceManager.monitors),
+              let workspace = workspaceManager.activeWorkspaceOrFirst(on: monitor.id)
+        else {
+            return workspaceManager.hasPendingNativeFullscreenTransition
+        }
+        return workspaceManager.hasPendingNativeFullscreenTransition(in: workspace.id)
+    }
+
+    private func isPointerDisplayShowingFullscreenSpace(at location: CGPoint) -> Bool {
+        guard let controller else { return false }
+        let workspaceManager = controller.workspaceManager
+        guard workspaceManager.hasNativeFullscreenLifecycleContext else { return false }
+        let topology = workspaceManager.spaceTopology
+        guard topology.isPopulated,
+              let monitor = location.monitorApproximation(in: workspaceManager.monitors),
+              let displayUUID = monitor.displayUUID
+        else { return true }
+        return topology.isDisplayShowingFullscreenSpace(displayUUID) ?? true
     }
 
     private func resolveFocusFollowsMouseTarget(

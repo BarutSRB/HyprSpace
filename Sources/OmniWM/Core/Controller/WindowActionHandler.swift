@@ -619,8 +619,11 @@ final class WindowActionHandler {
 
         switch payload.destination {
         case .window:
-            if controller.isManagedWindowSuspendedForNativeFullscreen(handle.id) {
-                controller.activateNativeFullscreenPlaceholder(handle.id)
+            if let originalToken = suspendedNativeFullscreenOriginalToken(
+                for: handle.id,
+                controller: controller
+            ) {
+                controller.activateNativeFullscreenPlaceholder(originalToken)
                 return finish(true)
             }
             return finish(navigateToWindowInternal(token: handle.id, workspaceId: payload.workspaceId))
@@ -1028,7 +1031,30 @@ final class WindowActionHandler {
 
     @discardableResult
     func focusWindowFromBar(handle: WindowHandle) -> Bool {
-        return navigateToExplicitlySelectedWindow(handle: handle)
+        let navigated = navigateToExplicitlySelectedWindow(handle: handle)
+        if navigated,
+           let controller,
+           let originalToken = suspendedNativeFullscreenOriginalToken(
+               for: handle.id,
+               controller: controller
+           )
+        {
+            controller.activateNativeFullscreenPlaceholder(originalToken)
+        }
+        return navigated
+    }
+
+    private func suspendedNativeFullscreenOriginalToken(
+        for currentToken: WindowToken,
+        controller: WMController
+    ) -> WindowToken? {
+        guard controller.workspaceManager.showsNativeFullscreenPlaceholder(for: currentToken),
+              let record = controller.workspaceManager.nativeFullscreenRecord(for: currentToken),
+              record.transition == .suspended
+        else {
+            return nil
+        }
+        return record.originalToken
     }
 
     func runningAppsWithWindows() -> [RunningAppInfo] {

@@ -232,7 +232,7 @@ final class CGSPhantomEventGuardTests: XCTestCase {
         XCTAssertFalse(
             WorldView(controller: controller)
                 .nativeFullscreenPlaceholders()
-                .contains(where: { $0.token == targetToken })
+                .contains(where: { $0.currentToken == targetToken })
         )
         XCTAssertNotEqual(controller.workspaceManager.focusedToken, targetToken)
         XCTAssertNotEqual(controller.workspaceManager.pendingFocusedToken, targetToken)
@@ -342,7 +342,7 @@ final class CGSPhantomEventGuardTests: XCTestCase {
         XCTAssertFalse(
             WorldView(controller: controller)
                 .nativeFullscreenPlaceholders()
-                .contains(where: { $0.token == targetToken })
+                .contains(where: { $0.currentToken == targetToken })
         )
         XCTAssertNotEqual(controller.workspaceManager.focusedToken, targetToken)
         XCTAssertNotEqual(controller.workspaceManager.pendingFocusedToken, targetToken)
