@@ -747,17 +747,21 @@ struct OverviewLayoutCalculator {
         switch direction {
         case .left:
             let leftWindows = visibleWindows.filter {
-                $0.overviewFrame.midX < currentWindow.overviewFrame.midX &&
+                $0.workspaceId == currentWindow.workspaceId &&
+                    $0.overviewFrame.midX < currentWindow.overviewFrame.midX &&
                     abs($0.overviewFrame.midY - currentWindow.overviewFrame.midY) < currentWindow.overviewFrame.height
             }.sorted { $0.overviewFrame.midX > $1.overviewFrame.midX }
-            return leftWindows.first?.handle ?? findWrappedPrevious(in: visibleWindows, from: currentIndex)
+            return leftWindows.first?.handle
+                ?? findRowWrappedWindow(in: visibleWindows, of: currentWindow, movingLeft: true)
 
         case .right:
             let rightWindows = visibleWindows.filter {
-                $0.overviewFrame.midX > currentWindow.overviewFrame.midX &&
+                $0.workspaceId == currentWindow.workspaceId &&
+                    $0.overviewFrame.midX > currentWindow.overviewFrame.midX &&
                     abs($0.overviewFrame.midY - currentWindow.overviewFrame.midY) < currentWindow.overviewFrame.height
             }.sorted { $0.overviewFrame.midX < $1.overviewFrame.midX }
-            return rightWindows.first?.handle ?? findWrappedNext(in: visibleWindows, from: currentIndex)
+            return rightWindows.first?.handle
+                ?? findRowWrappedWindow(in: visibleWindows, of: currentWindow, movingLeft: false)
 
         case .up:
             let upWindows = visibleWindows.filter {
@@ -799,6 +803,24 @@ struct OverviewLayoutCalculator {
             }
             return downWindows.first?.handle
         }
+    }
+
+    /// Wraps Left/Right navigation inside the current window's workspace row so
+    /// edge navigation never escapes into another workspace's row. A row with a
+    /// single visible window keeps the current selection. The geometric neighbor
+    /// search in `findNextWindow` is scoped to the same row.
+    private static func findRowWrappedWindow(
+        in windows: [OverviewWindowItem],
+        of currentWindow: OverviewWindowItem,
+        movingLeft: Bool
+    ) -> WindowHandle? {
+        let rowWindows = windows.filter { $0.workspaceId == currentWindow.workspaceId }
+        guard let rowIndex = rowWindows.firstIndex(where: { $0.handle == currentWindow.handle }) else {
+            return currentWindow.handle
+        }
+        return movingLeft
+            ? findWrappedPrevious(in: rowWindows, from: rowIndex)
+            : findWrappedNext(in: rowWindows, from: rowIndex)
     }
 
     private static func findWrappedNext(in windows: [OverviewWindowItem], from index: Int) -> WindowHandle? {
