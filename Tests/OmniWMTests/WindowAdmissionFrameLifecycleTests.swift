@@ -778,6 +778,35 @@ final class WindowAdmissionFrameLifecycleTests: XCTestCase {
         XCTAssertFalse(controller.axEventHandler.isAdmissionQuarantined(windowId: windowId, axRef: axRef))
     }
 
+    func testPositionSetterFailureDoesNotAdoptFullscreenFrameAsObservedMinimum() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let pid: pid_t = 467_310
+        let windowId = 467_413
+        let axRef = AXWindowRef(element: AXUIElementCreateApplication(pid), windowId: windowId)
+        let token = controller.workspaceManager.addWindow(
+            axRef,
+            pid: pid,
+            windowId: windowId,
+            to: workspaceId
+        )
+        let refusal = AXFrameTerminalRefusal(
+            pid: pid,
+            windowId: windowId,
+            targetFrame: CGRect(x: 16, y: 16, width: 2_528, height: 1_378),
+            observedFrame: CGRect(x: 0, y: 0, width: 2_560, height: 1_388),
+            failureReason: .positionWriteFailed(.failure)
+        )
+
+        controller.axEventHandler.handleTerminalFrameRefusal(refusal)
+
+        XCTAssertNotNil(controller.workspaceManager.entry(for: token))
+        XCTAssertNil(controller.workspaceManager.observedMinSize(for: token))
+        XCTAssertFalse(controller.axEventHandler.isAdmissionQuarantined(windowId: windowId, axRef: axRef))
+    }
+
     func testRepeatedDegenerateTerminalRefusalRemovesAndQuarantinesIncarnation() throws {
         let controller = WindowAdmissionTestSupport.controller()
         let workspaceId = try XCTUnwrap(

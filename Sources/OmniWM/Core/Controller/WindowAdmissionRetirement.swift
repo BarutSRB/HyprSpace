@@ -164,13 +164,10 @@ extension AXEventHandler {
         _ refusal: AXFrameTerminalRefusal,
         controller: WMController
     ) -> WindowState? {
+        guard isAdmissionRefusal(refusal.failureReason) else { return nil }
         guard WMController.isMeaningfulAdmissionFrame(refusal.targetFrame),
               !WMController.isMeaningfulAdmissionFrame(refusal.observedFrame)
         else {
-            controller.adoptObservedSizeAfterTerminalFrameRefusal(refusal)
-            return nil
-        }
-        guard isAdmissionRefusal(refusal.failureReason) else {
             controller.adoptObservedSizeAfterTerminalFrameRefusal(refusal)
             return nil
         }
