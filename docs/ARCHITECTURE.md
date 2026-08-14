@@ -156,8 +156,27 @@ The application starts in `Sources/OmniWMApp/OmniWMApp.swift`:
 @main OmniWMApp (SwiftUI App)
   └─ @NSApplicationDelegateAdaptor → AppDelegate
        └─ applicationDidFinishLaunching()
-            └─ bootstrapApplication() → finishBootstrap()
+            └─ bootstrapApplication()
+                 ├─ conflict found / scan unavailable → warning → retry or quit
+                 └─ clear process snapshot → finishBootstrap()
 ```
+
+Before `finishBootstrap()` builds the runtime object graph, `bootstrapApplication()` takes a one-shot snapshot of the current user's
+GUI applications and processes. Another active window manager that could issue window operations at the same time,
+a second OmniWM instance, or an incomplete process inventory blocks startup to prevent conflicting window mutations.
+The warning can rescan after the interfering app or service is stopped, but there is no bypass and no background
+conflict monitoring after bootstrap succeeds.
+
+The potentially interfering resident-manager catalog includes Glide, komorebi for Mac, parket, Tangrid, TrimWM,
+and Yashiki in addition to the initially supported managers. Dedicated IPC/CLI clients are excluded because they
+cannot manage windows without their resident server; if a product shares one executable between its server and
+client, a transient command can briefly match and **Check Again** clears it after the command exits.
+
+[PaperWM.spoon](https://github.com/mogenson/PaperWM.spoon) runs inside the generic Hammerspoon process, so the
+exact-identity gate cannot detect it without blocking unrelated Hammerspoon configurations. Hammerspoon and `skhd`
+are therefore not conflicts by themselves, and configuration-dependent hotkey contention is outside this startup
+gate. Resident managers already running when the snapshot is taken remain detectable; launches after a successful
+snapshot are outside scope.
 
 ### Boot Object Graph
 
@@ -605,7 +624,7 @@ Focus management is split across several objects (there is no single coordinator
 6. FactResolver gathers the focused-window fact off-main, re-enters the intake.
 7. AXEventHandler.handleActivationFactsResolved:
      intentLedger.classifyFocusObservation(token) → .echoOf
-     → treat as confirmation, not a competing external focus.
+     → treat as confirmation, not an unrelated external focus change.
 8. workspaceManager.confirmManagedFocus commits .managedFocusConfirmed;
    intentLedger.confirmManagedRequest cancels the deadline.
 ```

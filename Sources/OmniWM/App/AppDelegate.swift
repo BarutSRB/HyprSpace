@@ -93,7 +93,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func bootstrapApplication() {
-        finishBootstrap()
+        let checker = LaunchConflictChecker()
+        LaunchConflictGate.run(
+            scan: checker.scan,
+            present: presentLaunchConflictAlert,
+            onClear: finishBootstrap,
+            onQuit: { NSApplication.shared.terminate(nil) }
+        )
     }
 
     func finishBootstrap() {
@@ -252,6 +258,41 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             NotificationCenter.default.removeObserver(monitorSetupScreenObserver)
             self.monitorSetupScreenObserver = nil
         }
+    }
+
+    private func presentLaunchConflictAlert(
+        reason: LaunchConflictBlockReason
+    ) -> LaunchConflictGateAction {
+        let previousApplication = NSWorkspace.shared.frontmostApplication.flatMap { application in
+            application.processIdentifier == getpid() ? nil : application
+        }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        switch reason {
+        case let .conflicts(conflicts):
+            alert.messageText = "Conflicting Window Managers Detected"
+            alert.informativeText =
+                "OmniWM has not started. Quit these window managers or stop their background services, "
+                    + "then click Check Again:\n\n"
+                    + conflicts.map { "• \($0.displayName)" }.joined(separator: "\n")
+        case .scanUnavailable:
+            alert.messageText = "Couldn’t Check Running Processes"
+            alert.informativeText =
+                "OmniWM has not started because it could not safely inspect every running process. "
+                    + "Click Check Again to retry, or quit OmniWM."
+        }
+        alert.addButton(withTitle: "Check Again")
+        alert.addButton(withTitle: "Quit OmniWM")
+        alert.buttons.last?.keyEquivalent = "\u{1b}"
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        let action: LaunchConflictGateAction = alert.runModal() == .alertFirstButtonReturn ? .checkAgain : .quit
+        if action == .checkAgain {
+            NSApplication.shared.deactivate()
+            if let previousApplication, !previousApplication.isTerminated {
+                previousApplication.activate(options: [])
+            }
+        }
+        return action
     }
 
     private func presentInfoAlert(title: String, message: String) {
