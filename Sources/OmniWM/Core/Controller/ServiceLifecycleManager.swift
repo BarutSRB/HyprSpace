@@ -199,25 +199,28 @@ final class ServiceLifecycleManager {
             controller.syncMonitorsToNiriEngine()
         }
         controller.hasStartedServices = true
-        controller.workspaceManager.resumeNativeFullscreenTransitionTimeouts()
         controller.reconcileEnabledAndHotkeysState()
         controller.eventIntake.open(sink: controller.eventInterpreter)
         controller.layoutRefreshController.setup()
-        controller.axEventHandler.setup()
-        controller.axManager.installWorkspaceObservers()
         controller.axManager.onAppLaunched = { [weak controller] app in
             controller?.refreshUnavailableWorkspaceBarIconOverride(
                 bundleId: app.bundleIdentifier
             )
             EventIntake.post(.appLaunched(pid: app.processIdentifier))
         }
-        for app in NSWorkspace.shared.runningApplications {
+        controller.axManager.onAppTerminated = { pid in
+            EventIntake.post(.appTerminated(pid: pid))
+        }
+        controller.axManager.installWorkspaceObservers()
+        let runningApplications = NSWorkspace.shared.runningApplications.filter { !$0.isTerminated }
+        reconcileStoppedApplicationTerminationsAndResumeTimeouts(
+            liveApplicationPIDs: Set(runningApplications.lazy.map(\.processIdentifier))
+        )
+        controller.axEventHandler.setup()
+        for app in runningApplications {
             controller.refreshUnavailableWorkspaceBarIconOverride(
                 bundleId: app.bundleIdentifier
             )
-        }
-        controller.axManager.onAppTerminated = { pid in
-            EventIntake.post(.appTerminated(pid: pid))
         }
         controller.axManager.onTerminalFrameRefusal = { [weak controller] refusal in
             controller?.axEventHandler.handleTerminalFrameRefusal(refusal)
@@ -427,6 +430,19 @@ final class ServiceLifecycleManager {
                 affectedWorkspaceIds: affectedWorkspaces
             )
         }
+    }
+
+    func reconcileStoppedApplicationTerminationsAndResumeTimeouts(liveApplicationPIDs: Set<pid_t>) {
+        guard let controller else { return }
+        let trackedPIDs = Set(controller.workspaceManager.allEntries().lazy.map(\.pid))
+        let terminatedPIDs = trackedPIDs.subtracting(liveApplicationPIDs).sorted()
+        if !terminatedPIDs.isEmpty {
+            for pid in terminatedPIDs {
+                _ = controller.eventIntake.enqueue(.appTerminated(pid: pid))
+            }
+            controller.eventIntake.drainNow()
+        }
+        controller.workspaceManager.resumeNativeFullscreenTransitionTimeouts()
     }
 
     func handleGapsChanged() {

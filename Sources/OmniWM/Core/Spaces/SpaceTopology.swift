@@ -57,12 +57,19 @@ struct SpaceTopology: Equatable, Sendable {
 
     func isDisplayShowingFullscreenSpace(_ displayIdentifier: String) -> Bool? {
         let displayIdentifier = DisplayUUID.canonical(displayIdentifier) ?? displayIdentifier
-        guard let display = displays.first(where: {
-            (DisplayUUID.canonical($0.displayIdentifier) ?? $0.displayIdentifier) == displayIdentifier
-        }) else {
-            return nil
+        var currentSpaceId: UInt64?
+        for display in displays {
+            let candidate = DisplayUUID.canonical(display.displayIdentifier) ?? display.displayIdentifier
+            guard candidate == displayIdentifier else { continue }
+            guard currentSpaceId == nil else { return nil }
+            currentSpaceId = display.currentSpaceId
         }
-        return fullscreenSpaceIds.contains(display.currentSpaceId)
+        guard let currentSpaceId else { return nil }
+        return fullscreenSpaceIds.contains(currentSpaceId)
+    }
+
+    func isDisplayShowingFullscreenSpace(on monitor: Monitor) -> Bool? {
+        isDisplayShowingFullscreenSpace(monitor.displayUUID ?? String(monitor.displayId))
     }
 
     func normalizingDisplayIdentifiers(using monitors: [Monitor]) -> SpaceTopology {
@@ -82,8 +89,8 @@ struct SpaceTopology: Equatable, Sendable {
             } else {
                 monitor = nil
             }
-            if let displayUUID = monitor?.displayUUID {
-                topology.displays[index].displayIdentifier = displayUUID
+            if let monitor {
+                topology.displays[index].displayIdentifier = monitor.displayUUID ?? String(monitor.displayId)
             }
         }
         return topology

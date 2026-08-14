@@ -124,6 +124,12 @@ final class EventInterpreter: EventIntakeSink {
                 modifiers: payload.modifiers
             )
 
+        case let .nativeFullscreenTransitionExpired(originalToken, generation):
+            _ = controller.workspaceManager.expireNativeFullscreenTransition(
+                originalToken: originalToken,
+                generation: generation
+            )
+
         case .systemSleep:
             _ = controller.workspaceManager.recordReconcileEvent(.systemSleep(source: .service))
             controller.mouseEventHandler.suspendMultitouchForSleep()

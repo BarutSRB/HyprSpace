@@ -101,6 +101,60 @@ final class SpaceTopologyTests: XCTestCase {
         XCTAssertEqual(topology.isDisplayShowingFullscreenSpace(secondaryUUID), true)
     }
 
+    func testNormalizingAmbiguousUUIDMonitorsUsesRuntimeIdentifiers() {
+        let duplicateUUID = "33333333-3333-4333-8333-333333333333"
+        let mainDisplayId = CGMainDisplayID()
+        let secondaryDisplayId: CGDirectDisplayID = mainDisplayId == 52 ? 53 : 52
+        let monitors = Monitor.discardingAmbiguousDisplayUUIDs(in: [
+            makeMonitor(
+                displayId: mainDisplayId,
+                frame: CGRect(x: 0, y: 0, width: 1200, height: 800),
+                displayUUID: duplicateUUID
+            ),
+            makeMonitor(
+                displayId: secondaryDisplayId,
+                frame: CGRect(x: 1200, y: 0, width: 1200, height: 800),
+                displayUUID: duplicateUUID
+            )
+        ])
+        XCTAssertTrue(monitors.allSatisfy { $0.displayUUID == nil })
+
+        let topology = SpaceTopology(
+            displays: [
+                .init(displayIdentifier: "Main", spaceIds: [1], currentSpaceId: 1),
+                .init(
+                    displayIdentifier: String(secondaryDisplayId),
+                    spaceIds: [2],
+                    currentSpaceId: 2
+                )
+            ],
+            activeSpaceId: 1,
+            fullscreenSpaceIds: [2],
+            windowSpace: [:]
+        ).normalizingDisplayIdentifiers(using: monitors)
+
+        XCTAssertEqual(
+            topology.displays.map(\.displayIdentifier),
+            [String(mainDisplayId), String(secondaryDisplayId)]
+        )
+        XCTAssertEqual(topology.isDisplayShowingFullscreenSpace(on: monitors[0]), false)
+        XCTAssertEqual(topology.isDisplayShowingFullscreenSpace(on: monitors[1]), true)
+    }
+
+    func testIsDisplayShowingFullscreenSpaceRejectsAmbiguousIdentifier() {
+        let topology = SpaceTopology(
+            displays: [
+                .init(displayIdentifier: "duplicate", spaceIds: [1], currentSpaceId: 1),
+                .init(displayIdentifier: "duplicate", spaceIds: [2], currentSpaceId: 2)
+            ],
+            activeSpaceId: 1,
+            fullscreenSpaceIds: [2],
+            windowSpace: [:]
+        )
+
+        XCTAssertNil(topology.isDisplayShowingFullscreenSpace("duplicate"))
+    }
+
     func testSelectWindowSpacePrefersCurrentNonFullscreen() {
         let topology = twoDisplayTopology()
         XCTAssertEqual(topology.selectWindowSpace(from: [4, 2, 3]), 3)
@@ -137,7 +191,7 @@ final class SpaceTopologyTests: XCTestCase {
     private func makeMonitor(
         displayId: CGDirectDisplayID,
         frame: CGRect,
-        displayUUID: String
+        displayUUID: String?
     ) -> Monitor {
         Monitor(
             id: .init(displayId: displayId),

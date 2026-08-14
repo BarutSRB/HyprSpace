@@ -44,6 +44,61 @@ final class NativeFullscreenSlotProjectionTests: XCTestCase {
         XCTAssertTrue(panel.frameSynchronized)
     }
 
+    func testUUIDLessMonitorUsesRuntimeDisplayIdentity() throws {
+        let fixture = try makeFixture(displayUUID: nil)
+        fixture.controller.surfaceReconciler.reconcileNow()
+        let frame = CGRect(x: 120, y: 80, width: 640, height: 480)
+
+        fixture.controller.surfaceReconciler.applyAcceptedNativeFullscreenSlots(
+            [
+                fixture.token: NativeFullscreenSlotProjection(
+                    currentToken: fixture.token,
+                    frame: frame,
+                    visible: true
+                )
+            ],
+            workspaceId: fixture.workspaceId,
+            displayId: fixture.monitor.displayId,
+            displayContext: displayContext(for: fixture.monitor)
+        )
+
+        let visible = try XCTUnwrap(fixture.controller.surfaceReconciler.appliedScene.placeholders.first)
+        XCTAssertTrue(visible.visible)
+        let visiblePanel = try XCTUnwrap(
+            fixture.controller.nativeFullscreenPlaceholderManager.diagnosticsSnapshot().first
+        )
+        XCTAssertTrue(visiblePanel.descriptorVisible)
+        XCTAssertTrue(visiblePanel.appliedVisible)
+        let visibleLifecycle = try XCTUnwrap(
+            fixture.controller.workspaceManager.nativeFullscreenLifecycleDiagnosticsSnapshot().records.first
+        )
+        XCTAssertNil(visibleLifecycle.displayUUID)
+        XCTAssertEqual(visibleLifecycle.displayShowingFullscreen, false)
+
+        fixture.controller.workspaceManager.commitSpaceTopology(
+            SpaceTopology(
+                displays: [
+                    .init(
+                        displayIdentifier: String(fixture.monitor.displayId),
+                        spaceIds: [1],
+                        currentSpaceId: 1
+                    )
+                ],
+                activeSpaceId: 1,
+                fullscreenSpaceIds: [1],
+                windowSpace: [:]
+            )
+        )
+        fixture.controller.surfaceReconciler.reconcileNow()
+
+        let hidden = try XCTUnwrap(fixture.controller.surfaceReconciler.appliedScene.placeholders.first)
+        XCTAssertFalse(hidden.visible)
+        let hiddenLifecycle = try XCTUnwrap(
+            fixture.controller.workspaceManager.nativeFullscreenLifecycleDiagnosticsSnapshot().records.first
+        )
+        XCTAssertEqual(hiddenLifecycle.displayShowingFullscreen, true)
+    }
+
     func testMissingProjectionReasonMatchesHiddenAppliedState() throws {
         let fixture = try makeFixture()
 
@@ -472,6 +527,7 @@ final class NativeFullscreenSlotProjectionTests: XCTestCase {
 
     private func makeFixture(
         suspend: Bool = true,
+        displayUUID: String? = "98101981-0198-4198-8198-101981019810",
         file: StaticString = #filePath,
         line: UInt = #line
     ) throws -> (
@@ -503,7 +559,7 @@ final class NativeFullscreenSlotProjectionTests: XCTestCase {
             visibleFrame: CGRect(x: 0, y: 0, width: 1440, height: 860),
             hasNotch: false,
             name: "Native Fullscreen Projection",
-            displayUUID: "98101981-0198-4198-8198-101981019810"
+            displayUUID: displayUUID
         )
         controller.workspaceManager.applyMonitorConfigurationChange([monitor])
         let workspaceId = try XCTUnwrap(
@@ -516,7 +572,7 @@ final class NativeFullscreenSlotProjectionTests: XCTestCase {
             SpaceTopology(
                 displays: [
                     .init(
-                        displayIdentifier: try XCTUnwrap(monitor.displayUUID),
+                        displayIdentifier: monitor.displayUUID ?? String(monitor.displayId),
                         spaceIds: [1],
                         currentSpaceId: 1
                     )

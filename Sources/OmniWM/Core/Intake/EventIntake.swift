@@ -26,6 +26,7 @@ enum IntakeEvent: Sendable {
     case mouseDragged(button: MouseEventHandler.MouseButton, location: CGPoint)
     case mouseMoved(location: CGPoint, modifiersRawValue: UInt64, windowIdUnderPointer: Int?)
     case mouseScroll(MouseScrollIntake)
+    case nativeFullscreenTransitionExpired(originalToken: WindowToken, generation: Int)
     case systemSleep
     case systemWake
     case windowConstraintsResolved(WindowConstraintsFact)

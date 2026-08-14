@@ -1251,10 +1251,9 @@ final class MouseEventHandler {
         guard workspaceManager.hasNativeFullscreenLifecycleContext else { return false }
         let topology = workspaceManager.spaceTopology
         guard topology.isPopulated,
-              let monitor = location.monitorApproximation(in: workspaceManager.monitors),
-              let displayUUID = monitor.displayUUID
+              let monitor = location.monitorApproximation(in: workspaceManager.monitors)
         else { return true }
-        return topology.isDisplayShowingFullscreenSpace(displayUUID) ?? true
+        return topology.isDisplayShowingFullscreenSpace(on: monitor) ?? true
     }
 
     private func resolveFocusFollowsMouseTarget(

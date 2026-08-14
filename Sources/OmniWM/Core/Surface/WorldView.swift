@@ -150,8 +150,7 @@ struct WorldView {
         else { return false }
         guard spaceTopology.isPopulated,
               let monitor = workspaceManager.monitor(for: entry.workspaceId),
-              let displayUUID = monitor.displayUUID,
-              spaceTopology.isDisplayShowingFullscreenSpace(displayUUID) == false
+              spaceTopology.isDisplayShowingFullscreenSpace(on: monitor) == false
         else { return false }
         return true
     }

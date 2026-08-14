@@ -101,23 +101,7 @@ extension WorkspaceManager {
         nativeFullscreenTransitionTimeoutTasks[originalToken] = Task { @MainActor [weak self] in
             try? await Task.sleep(for: Self.nativeFullscreenTransitionTimeout)
             guard let self, !Task.isCancelled else { return }
-            guard let record = self.nativeFullscreenRecordsByOriginalToken[originalToken],
-                  record.transitionGeneration == generation
-            else {
-                return
-            }
-            self.nativeFullscreenTransitionTimeoutTasks.removeValue(forKey: originalToken)
-            NativeFullscreenPlaceholderTrace.record(
-                NativeFullscreenPlaceholderTrace.makeRecord(
-                    .deadlineFired,
-                    originalToken: originalToken,
-                    currentToken: record.currentToken,
-                    workspaceId: record.workspaceId,
-                    transition: .init(record.transition),
-                    generation: generation
-                )
-            )
-            _ = self.expireNativeFullscreenTransition(
+            _ = self.postNativeFullscreenTransitionExpiry(
                 originalToken: originalToken,
                 generation: generation
             )
@@ -129,6 +113,32 @@ extension WorkspaceManager {
                 currentToken: record.currentToken,
                 workspaceId: record.workspaceId,
                 transition: .init(record.transition),
+                generation: generation
+            )
+        )
+    }
+
+    @discardableResult
+    func postNativeFullscreenTransitionExpiry(originalToken: WindowToken, generation: Int) -> Bool {
+        guard let record = nativeFullscreenRecordsByOriginalToken[originalToken],
+              record.transitionGeneration == generation
+        else {
+            return false
+        }
+        nativeFullscreenTransitionTimeoutTasks.removeValue(forKey: originalToken)
+        NativeFullscreenPlaceholderTrace.record(
+            NativeFullscreenPlaceholderTrace.makeRecord(
+                .deadlineFired,
+                originalToken: originalToken,
+                currentToken: record.currentToken,
+                workspaceId: record.workspaceId,
+                transition: .init(record.transition),
+                generation: generation
+            )
+        )
+        return EventIntake.post(
+            .nativeFullscreenTransitionExpired(
+                originalToken: originalToken,
                 generation: generation
             )
         )

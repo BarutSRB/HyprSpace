@@ -285,6 +285,182 @@ final class EventIntakeReplayTests: XCTestCase {
         XCTAssertEqual(deltas, [8, -2])
     }
 
+    @MainActor
+    func testNativeFullscreenTimeoutPostsBeforeApplyingExpiry() throws {
+        let controller = WindowAdmissionTestSupport.controller(prefix: "OmniWMNativeFullscreenExpiryPostingTests")
+        let sink = RecordingSink()
+        controller.hasStartedServices = true
+        controller.eventIntake.open(sink: sink)
+        defer {
+            controller.workspaceManager.cancelNativeFullscreenTransitionTimeouts()
+            controller.eventIntake.close()
+        }
+
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let token = WindowToken(pid: 981_401, windowId: 981_402)
+        _ = WindowAdmissionTestSupport.track(token, in: workspaceId, controller: controller)
+        XCTAssertTrue(controller.workspaceManager.requestNativeFullscreenEnter(token, in: workspaceId))
+        let generation = try XCTUnwrap(
+            controller.workspaceManager.nativeFullscreenRecord(for: token)?.transitionGeneration
+        )
+        controller.workspaceManager.cancelNativeFullscreenTransitionTimeout(originalToken: token)
+
+        XCTAssertTrue(
+            controller.workspaceManager.postNativeFullscreenTransitionExpiry(
+                originalToken: token,
+                generation: generation
+            )
+        )
+        XCTAssertEqual(controller.workspaceManager.nativeFullscreenRecord(for: token)?.transition, .enterRequested)
+        XCTAssertTrue(sink.received.isEmpty)
+
+        controller.eventIntake.drainNow()
+
+        XCTAssertEqual(sink.received.count, 1)
+        let stamped = try XCTUnwrap(sink.received.first)
+        XCTAssertGreaterThan(stamped.seq, 0)
+        guard case let .nativeFullscreenTransitionExpired(originalToken, receivedGeneration) = stamped.event else {
+            return XCTFail("Expected native fullscreen transition expiry")
+        }
+        XCTAssertEqual(originalToken, token)
+        XCTAssertEqual(receivedGeneration, generation)
+        XCTAssertEqual(controller.workspaceManager.nativeFullscreenRecord(for: token)?.transition, .enterRequested)
+
+        controller.eventInterpreter.handleIntakeEvent(stamped)
+
+        XCTAssertNil(controller.workspaceManager.nativeFullscreenRecord(for: token))
+        XCTAssertEqual(controller.workspaceManager.entry(for: token)?.layoutReason, .standard)
+    }
+
+    @MainActor
+    func testNativeFullscreenRekeyAndSuspensionPrecedeLaterExpiry() throws {
+        try assertNativeFullscreenExpiryOrdering(expiryFirst: false)
+    }
+
+    @MainActor
+    func testNativeFullscreenExpiryPrecedesLaterRekeyAndSuspension() throws {
+        try assertNativeFullscreenExpiryOrdering(expiryFirst: true)
+    }
+
+    @MainActor
+    func testRestartReconciliationRetiresMissingApplicationBeforeTimeoutResume() throws {
+        let controller = WindowAdmissionTestSupport.controller(prefix: "OmniWMRestartTerminationCleanupTests")
+        defer {
+            controller.workspaceManager.cancelNativeFullscreenTransitionTimeouts()
+            controller.eventIntake.close()
+            controller.layoutRefreshController.resetState()
+            controller.surfaceReconciler.cleanup()
+            controller.nativeFullscreenPlaceholderManager.removeAll()
+        }
+
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let liveToken = WindowToken(pid: 981_701, windowId: 981_801)
+        let livePendingToken = WindowToken(pid: liveToken.pid, windowId: 981_805)
+        let deadToken = WindowToken(pid: 981_702, windowId: 981_802)
+        _ = WindowAdmissionTestSupport.track(liveToken, in: workspaceId, controller: controller)
+        _ = WindowAdmissionTestSupport.track(livePendingToken, in: workspaceId, controller: controller)
+        _ = WindowAdmissionTestSupport.track(deadToken, in: workspaceId, controller: controller)
+        XCTAssertTrue(
+            controller.workspaceManager.requestNativeFullscreenEnter(livePendingToken, in: workspaceId)
+        )
+        XCTAssertTrue(
+            controller.workspaceManager.markNativeFullscreenSuspended(
+                liveToken,
+                ownsNonManagedFocus: false
+            )
+        )
+        XCTAssertTrue(controller.workspaceManager.markNativeFullscreenSuspended(deadToken))
+        XCTAssertTrue(controller.workspaceManager.requestNativeFullscreenExit(deadToken))
+        XCTAssertEqual(controller.workspaceManager.activeNativeFullscreenFocusOwnerToken, deadToken)
+        XCTAssertEqual(controller.workspaceManager.nativeFullscreenTransitionTimeoutCount, 2)
+
+        controller.hasStartedServices = false
+        controller.eventIntake.close()
+        controller.workspaceManager.cancelNativeFullscreenTransitionTimeouts()
+        controller.surfaceReconciler.cleanup()
+        controller.nativeFullscreenPlaceholderManager.removeAll()
+
+        controller.hasStartedServices = true
+        controller.eventIntake.open(sink: controller.eventInterpreter)
+        NativeFullscreenPlaceholderTrace.shared.beginCapture()
+        defer { NativeFullscreenPlaceholderTrace.shared.endCapture() }
+        controller.serviceLifecycleManager.reconcileStoppedApplicationTerminationsAndResumeTimeouts(
+            liveApplicationPIDs: [liveToken.pid]
+        )
+
+        XCTAssertNil(controller.workspaceManager.entry(for: deadToken))
+        XCTAssertNil(controller.workspaceManager.nativeFullscreenRecord(for: deadToken))
+        XCTAssertFalse(controller.workspaceManager.isNonManagedFocusActive)
+        XCTAssertNil(controller.workspaceManager.nonManagedFocusToken)
+        XCTAssertNil(controller.workspaceManager.activeNativeFullscreenFocusOwnerToken)
+        XCTAssertEqual(controller.workspaceManager.nativeFullscreenTransitionTimeoutCount, 1)
+        XCTAssertNotNil(controller.workspaceManager.entry(for: liveToken))
+        XCTAssertNotNil(controller.workspaceManager.entry(for: livePendingToken))
+        XCTAssertEqual(
+            controller.workspaceManager.nativeFullscreenRecord(for: liveToken)?.transition,
+            .suspended
+        )
+        XCTAssertEqual(
+            controller.workspaceManager.nativeFullscreenRecord(for: livePendingToken)?.transition,
+            .enterRequested
+        )
+        XCTAssertEqual(controller.workspaceManager.workspace(for: liveToken), workspaceId)
+        XCTAssertEqual(controller.workspaceManager.layoutReason(for: liveToken), .nativeFullscreen)
+        XCTAssertEqual(
+            WorldView(controller: controller).nativeFullscreenPlaceholders().map(\.originalToken),
+            [liveToken, livePendingToken]
+        )
+        XCTAssertFalse(controller.eventIntake.hasPendingEvents)
+        let trace = NativeFullscreenPlaceholderTrace.shared.dump()
+        let removal = try XCTUnwrap(trace.range(of: "op=record_removed original=981702:981802"))
+        let schedule = try XCTUnwrap(trace.range(of: "op=deadline_scheduled original=981701:981805"))
+        XCTAssertLessThan(removal.lowerBound, schedule.lowerBound)
+        XCTAssertFalse(trace.contains("op=deadline_scheduled original=981702:981802"))
+    }
+
+    @MainActor
+    func testRestartReconciliationPreservesLiveNativeFullscreenFocusOwner() throws {
+        let controller = WindowAdmissionTestSupport.controller(prefix: "OmniWMRestartLiveFullscreenTests")
+        defer {
+            controller.workspaceManager.cancelNativeFullscreenTransitionTimeouts()
+            controller.eventIntake.close()
+            controller.layoutRefreshController.resetState()
+        }
+
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let liveToken = WindowToken(pid: 981_703, windowId: 981_803)
+        let deadToken = WindowToken(pid: 981_704, windowId: 981_804)
+        _ = WindowAdmissionTestSupport.track(liveToken, in: workspaceId, controller: controller)
+        _ = WindowAdmissionTestSupport.track(deadToken, in: workspaceId, controller: controller)
+        XCTAssertTrue(controller.workspaceManager.markNativeFullscreenSuspended(liveToken))
+        XCTAssertTrue(controller.workspaceManager.requestNativeFullscreenEnter(deadToken, in: workspaceId))
+        controller.workspaceManager.cancelNativeFullscreenTransitionTimeouts()
+
+        controller.hasStartedServices = true
+        controller.eventIntake.open(sink: controller.eventInterpreter)
+        controller.serviceLifecycleManager.reconcileStoppedApplicationTerminationsAndResumeTimeouts(
+            liveApplicationPIDs: [liveToken.pid]
+        )
+
+        XCTAssertNil(controller.workspaceManager.entry(for: deadToken))
+        XCTAssertNil(controller.workspaceManager.nativeFullscreenRecord(for: deadToken))
+        XCTAssertNotNil(controller.workspaceManager.entry(for: liveToken))
+        XCTAssertEqual(
+            controller.workspaceManager.nativeFullscreenRecord(for: liveToken)?.transition,
+            .suspended
+        )
+        XCTAssertTrue(controller.workspaceManager.isNonManagedFocusActive)
+        XCTAssertEqual(controller.workspaceManager.nonManagedFocusToken, liveToken)
+        XCTAssertEqual(controller.workspaceManager.activeNativeFullscreenFocusOwnerToken, liveToken)
+        XCTAssertFalse(controller.eventIntake.hasPendingEvents)
+    }
+
     private func scroll(deltaY: CGFloat) -> MouseScrollIntake {
         MouseScrollIntake(
             location: .zero,
@@ -299,6 +475,91 @@ final class EventIntakeReplayTests: XCTestCase {
     private final class FakeWindowSystem {
         var focusedWindowIdByPid: [pid_t: Int] = [:]
         var staleFocusedWindowIds: [Int] = []
+    }
+
+    @MainActor
+    private func assertNativeFullscreenExpiryOrdering(
+        expiryFirst: Bool,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        let controller = WindowAdmissionTestSupport.controller(prefix: "OmniWMNativeFullscreenExpiryOrderingTests")
+        controller.hasStartedServices = true
+        controller.eventIntake.open(sink: controller.eventInterpreter)
+        defer {
+            controller.workspaceManager.cancelNativeFullscreenTransitionTimeouts()
+            controller.eventIntake.close()
+        }
+
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true),
+            file: file,
+            line: line
+        )
+        let originalToken = WindowToken(pid: 981_501, windowId: 981_601)
+        let replacementToken = WindowToken(pid: originalToken.pid, windowId: originalToken.windowId + 1)
+        _ = WindowAdmissionTestSupport.track(originalToken, in: workspaceId, controller: controller)
+        XCTAssertTrue(
+            controller.workspaceManager.requestNativeFullscreenEnter(originalToken, in: workspaceId),
+            file: file,
+            line: line
+        )
+        let generation = try XCTUnwrap(
+            controller.workspaceManager.nativeFullscreenRecord(for: originalToken)?.transitionGeneration,
+            file: file,
+            line: line
+        )
+        let replacementEvent = IntakeEvent.ipcCommand(
+            IPCCommandIntake(
+                perform: { controller in
+                    guard controller.workspaceManager.rekeyWindow(
+                        from: originalToken,
+                        to: replacementToken,
+                        newAXRef: WindowAdmissionTestSupport.axRef(for: replacementToken)
+                    ) != nil,
+                        controller.workspaceManager.markNativeFullscreenSuspended(
+                            replacementToken,
+                            ownsNonManagedFocus: false
+                        )
+                    else {
+                        return .notFound
+                    }
+                    return .executed
+                },
+                completion: { _ in }
+            )
+        )
+        let expiryEvent = IntakeEvent.nativeFullscreenTransitionExpired(
+            originalToken: originalToken,
+            generation: generation
+        )
+
+        if expiryFirst {
+            XCTAssertTrue(controller.eventIntake.enqueue(expiryEvent), file: file, line: line)
+            XCTAssertTrue(controller.eventIntake.enqueue(replacementEvent), file: file, line: line)
+        } else {
+            XCTAssertTrue(controller.eventIntake.enqueue(replacementEvent), file: file, line: line)
+            XCTAssertTrue(controller.eventIntake.enqueue(expiryEvent), file: file, line: line)
+        }
+        controller.eventIntake.drainNow()
+
+        let expectedOriginalToken = expiryFirst ? replacementToken : originalToken
+        let record = try XCTUnwrap(
+            controller.workspaceManager.nativeFullscreenRecord(originalToken: expectedOriginalToken),
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(record.originalToken, expectedOriginalToken, file: file, line: line)
+        XCTAssertEqual(record.currentToken, replacementToken, file: file, line: line)
+        XCTAssertEqual(record.transition, .suspended, file: file, line: line)
+        XCTAssertEqual(controller.workspaceManager.nativeFullscreenTransitionTimeoutCount, 0, file: file, line: line)
+        if expiryFirst {
+            XCTAssertNil(
+                controller.workspaceManager.nativeFullscreenRecord(originalToken: originalToken),
+                file: file,
+                line: line
+            )
+        }
     }
 
     @MainActor

@@ -14,7 +14,6 @@ extension WorkspaceManager {
             .map { record in
                 let entry = entry(for: record.currentToken)
                 let monitor = monitor(for: record.workspaceId)
-                let displayUUID = monitor?.displayUUID
                 return NativeFullscreenLifecycleDiagnosticsSnapshot.Record(
                     originalToken: record.originalToken,
                     currentToken: record.currentToken,
@@ -28,9 +27,9 @@ extension WorkspaceManager {
                     appHidden: isAppHidden(pid: record.currentToken.pid),
                     cornerHidden: isHiddenInCorner(record.currentToken),
                     displayId: monitor?.displayId,
-                    displayUUID: displayUUID,
-                    displayShowingFullscreen: displayUUID.flatMap {
-                        spaceTopology.isDisplayShowingFullscreenSpace($0)
+                    displayUUID: monitor?.displayUUID,
+                    displayShowingFullscreen: monitor.flatMap {
+                        spaceTopology.isDisplayShowingFullscreenSpace(on: $0)
                     }
                 )
             }
