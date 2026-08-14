@@ -12,6 +12,7 @@ struct CapturedIcon: Sendable {
 enum HiddenBarIconCaptureService {
     static func captureVisible(_ items: [ResolvedMenuBarItem]) async -> [MenuBarItemKey: CapturedIcon] {
         guard !items.isEmpty else { return [:] }
+        guard CGPreflightScreenCaptureAccess() else { return [:] }
         guard let icons = await captureMenuBarBand(items) else {
             FallbackFiringRecorder.shared.note(.capture, "hiddenBarVisibleCaptureFailed")
             return [:]

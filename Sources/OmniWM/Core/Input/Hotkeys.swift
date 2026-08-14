@@ -4,6 +4,7 @@
 @preconcurrency import AppKit
 import Carbon
 import Foundation
+import IOKit.hidsystem
 
 struct HotkeyPlannedRegistration: Equatable {
     let binding: KeyBinding
@@ -685,13 +686,13 @@ final class HotkeyCenter {
         )
     }
 
-    nonisolated static func eventTapAccessGranted() -> Bool {
-        CGPreflightListenEventAccess()
+    nonisolated static func inputMonitoringAccessGranted() -> Bool {
+        IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted
     }
 
     @discardableResult
-    nonisolated static func requestEventTapAccess() -> Bool {
-        CGRequestListenEventAccess()
+    nonisolated static func requestInputMonitoringAccess() -> Bool {
+        IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
     }
 
     nonisolated static func registrationPlan(for bindings: [HotkeyBinding]) -> HotkeyRegistrationPlan {

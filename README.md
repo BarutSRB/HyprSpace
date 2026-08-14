@@ -409,8 +409,8 @@ OmniWM is built for high responsiveness and smooth, crisp animations.
 ## Requirements
 
 - macOS 26+ (Tahoe) on Apple Silicon
-- Accessibility permissions (prompted on launch)
-- Input Monitoring permission when using a System Hyper Trigger
+- Accessibility and Input Monitoring permissions (required at launch)
+- Screen Recording permission for Overview thumbnails, drag previews, and captured Hidden Bar glyphs (optional)
 - Displays have separate spaces **ON** (the macOS default; OmniWM pauses window management until it is enabled)
 
 ## Installation
@@ -458,8 +458,8 @@ and `overlays.additions`. After either installation, complete the macOS setup in
 2. Extract and move `OmniWM.app` to `/Applications`
 3. In System Settings > Desktop & Dock > Mission Control, turn **ON** `Displays have separate Spaces`
 4. Log out of macOS and log back in for that change to take effect unless you had it on already
-5. Launch OmniWM and grant Accessibility permissions when prompted
-6. To use a System Hyper Trigger, grant Input Monitoring from Settings > Hotkeys
+5. Launch OmniWM and grant Accessibility and Input Monitoring when prompted
+6. Optionally grant Screen Recording for capture-derived visuals
 
 ## Updates
 
@@ -493,7 +493,7 @@ For setup, installation options, commands, queries, rules, subscriptions, and se
 1. Launch OmniWM from your Applications folder
 2. In System Settings > Desktop & Dock > Mission Control, turn **ON** `Displays have separate Spaces`
 3. Log out of macOS and log back in for that change to take effect unless you had it on already
-4. Grant Accessibility permissions in System Settings > Privacy & Security > Accessibility
+4. Grant Accessibility and Input Monitoring in the launch permissions window
 5. Windows will automatically tile in columns
 6. Keep one macOS Space per display and navigate with OmniWM workspaces; extra native Spaces are tolerated (their windows are left to macOS, not tiled)
 7. Use the default shortcuts in `Keyboard Shortcuts` to navigate between windows

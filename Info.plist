@@ -26,5 +26,7 @@
 	<true/>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>OmniWM uses screen capture for Overview thumbnails, window drag previews, and Hidden Bar icons.</string>
 </dict>
 </plist>

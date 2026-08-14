@@ -15,6 +15,7 @@ final class DragGhostController {
         isActive = true
 
         captureTask?.cancel()
+        guard CGPreflightScreenCaptureAccess() else { return }
         captureTask = Task { [weak self] in
             guard let self else { return }
 

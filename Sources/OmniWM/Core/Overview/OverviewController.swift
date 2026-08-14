@@ -1277,6 +1277,7 @@ final class OverviewController {
 
     private func startThumbnailCapture(windowIds: Set<Int>? = nil) {
         thumbnailCaptureTask?.cancel()
+        guard CGPreflightScreenCaptureAccess() else { return }
         environment.onThumbnailCaptureStarted()
         thumbnailCaptureTask = Task { [weak self] in
             await self?.captureThumbnails(windowIds: windowIds)

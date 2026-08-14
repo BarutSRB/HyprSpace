@@ -265,6 +265,9 @@ enum PrivateAPIHealthDiagnostics {
     }
 
     private static func captureProbe() async -> PrivateAPISelfTest {
+        guard CGPreflightScreenCaptureAccess() else {
+            return test("SCShareableContent", .inconclusive, "Screen Recording not granted")
+        }
         do {
             let content = try await SCShareableContent.current
             return test(

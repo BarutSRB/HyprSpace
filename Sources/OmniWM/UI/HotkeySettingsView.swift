@@ -149,7 +149,7 @@ struct HotkeySettingsView: View {
     @State private var showsAdvancedHotkeys = false
     @State private var confirmsResetToDefaults = false
     @State private var inputMonitoringStatus = HotkeyInputMonitoringStatus(
-        granted: HotkeyCenter.eventTapAccessGranted()
+        granted: HotkeyCenter.inputMonitoringAccessGranted()
     )
 
     var body: some View {
@@ -284,7 +284,7 @@ struct HotkeySettingsView: View {
         }
         .onAppear {
             inputMonitoringStatus = HotkeyInputMonitoringStatus(
-                granted: HotkeyCenter.eventTapAccessGranted()
+                granted: HotkeyCenter.inputMonitoringAccessGranted()
             )
         }
         .onChange(of: recordingTarget) { _, _ in
@@ -438,12 +438,12 @@ struct HotkeySettingsView: View {
 
     @discardableResult
     private func refreshInputMonitoringStatus(requestIfNeeded: Bool) -> Bool {
-        let preflightGranted = HotkeyCenter.eventTapAccessGranted()
+        let preflightGranted = HotkeyCenter.inputMonitoringAccessGranted()
         let requestGranted: Bool
         if preflightGranted || !requestIfNeeded {
             requestGranted = false
         } else {
-            requestGranted = HotkeyCenter.requestEventTapAccess()
+            requestGranted = HotkeyCenter.requestInputMonitoringAccess()
         }
         let status = HotkeySettingsDisplayModel.inputMonitoringStatus(
             preflightGranted: preflightGranted,

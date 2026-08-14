@@ -158,7 +158,7 @@ The application starts in `Sources/OmniWMApp/OmniWMApp.swift`:
        └─ applicationDidFinishLaunching()
             └─ bootstrapApplication()
                  ├─ conflict found / scan unavailable → warning → retry or quit
-                 └─ clear process snapshot → finishBootstrap()
+                 └─ clear process snapshot → launch permission check → finishBootstrap()
 ```
 
 Before `finishBootstrap()` builds the runtime object graph, `bootstrapApplication()` takes a one-shot snapshot of the current user's
@@ -166,6 +166,9 @@ GUI applications and processes. Another active window manager that could issue w
 a second OmniWM instance, or an incomplete process inventory blocks startup to prevent conflicting window mutations.
 The warning can rescan after the interfering app or service is stopped, but there is no bypass and no background
 conflict monitoring after bootstrap succeeds.
+
+The launch permission check requires Accessibility and Input Monitoring before bootstrap. Screen Recording is
+optional and only controls capture-derived visuals.
 
 The potentially interfering resident-manager catalog includes Glide, komorebi for Mac, parket, Tangrid, TrimWM,
 and Yashiki in addition to the initially supported managers. Dedicated IPC/CLI clients are excluded because they

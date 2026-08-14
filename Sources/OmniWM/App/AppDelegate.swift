@@ -70,6 +70,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var monitorSetupScreenObserver: NSObjectProtocol?
     private var monitorSetupEvaluationTask: Task<Void, Never>?
     private var launchOverlayFinished = false
+    private var launchPermissionsWindowController: LaunchPermissionsWindowController?
+    private var didFinishBootstrap = false
 
     public func applicationDidFinishLaunching(_: Notification) {
         NSApplication.shared.setActivationPolicy(.accessory)
@@ -97,12 +99,43 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         LaunchConflictGate.run(
             scan: checker.scan,
             present: presentLaunchConflictAlert,
-            onClear: finishBootstrap,
+            onClear: beginPermissionGate,
             onQuit: { NSApplication.shared.terminate(nil) }
         )
     }
 
+    private func beginPermissionGate() {
+        guard !didFinishBootstrap, launchPermissionsWindowController == nil else { return }
+
+        let windowController = LaunchPermissionsWindowController()
+        guard !windowController.snapshot.allGranted else {
+            finishBootstrap()
+            return
+        }
+
+        launchPermissionsWindowController = windowController
+        NSApplication.shared.setActivationPolicy(.regular)
+        windowController.show(
+            onStart: { [weak self] in
+                self?.endPermissionGate()
+                self?.finishBootstrap()
+            },
+            onQuit: { [weak self] in
+                self?.endPermissionGate()
+                NSApplication.shared.terminate(nil)
+            }
+        )
+    }
+
+    private func endPermissionGate() {
+        launchPermissionsWindowController = nil
+        NSApplication.shared.setActivationPolicy(.accessory)
+    }
+
     func finishBootstrap() {
+        guard !didFinishBootstrap else { return }
+        didFinishBootstrap = true
+
         let storagePaths = OmniWMStoragePaths.live
         let runtimeState = RuntimeStateStore(directory: storagePaths.stateDirectory)
         self.runtimeStateStore = runtimeState
