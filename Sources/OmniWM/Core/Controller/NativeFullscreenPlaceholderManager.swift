@@ -9,104 +9,28 @@ struct NativeFullscreenPlaceholderUpdate: Equatable {
     let currentToken: WindowToken
     let workspaceId: WorkspaceDescriptor.ID
     var frame: CGRect
-    var displayContext: NativeFullscreenCardDisplayContext?
+    var displayContext: NativeFullscreenDisplayContext?
     let selected: Bool
     let visible: Bool
 }
 
-struct NativeFullscreenCardDisplayContext: Equatable {
+struct NativeFullscreenDisplayContext: Equatable {
     let workingFrame: CGRect
     let scale: CGFloat
 }
 
-enum NativeFullscreenCardMode: Equatable {
-    case regular
-    case compact
-}
-
-struct NativeFullscreenCardLayout: Equatable {
-    let mode: NativeFullscreenCardMode
-    let frame: CGRect
-}
-
-enum NativeFullscreenCardGeometry {
-    static let regularHeight: CGFloat = 64
-    static let regularMinimumWidth: CGFloat = 176
-    static let regularMaximumWidth: CGFloat = 288
-
-    private static let regularInset: CGFloat = 12
-    private static let regularExitHysteresis: CGFloat = 8
-    private static let compactMinimumVisibleSide: CGFloat = 52
-    private static let compactExitHysteresis: CGFloat = 8
-    private static let compactMinimumSide: CGFloat = 44
-    private static let compactMaximumSide: CGFloat = 64
-    private static let compactVisiblePadding: CGFloat = 8
-
+enum NativeFullscreenPlaceholderGeometry {
     static func resolve(
         slotFrame: CGRect,
-        workingFrame: CGRect,
-        scale: CGFloat,
-        preferredRegularWidth: CGFloat,
-        previousMode: NativeFullscreenCardMode?
-    ) -> NativeFullscreenCardLayout? {
+        workingFrame: CGRect
+    ) -> CGRect? {
         guard isValid(slotFrame), isValid(workingFrame) else { return nil }
-        let visibleFrame = slotFrame.intersection(workingFrame)
-        guard !visibleFrame.isNull, !visibleFrame.isEmpty, isValid(visibleFrame) else { return nil }
-
-        let regularArea = visibleFrame.insetBy(dx: regularInset, dy: regularInset)
-        let regularWidthThreshold = previousMode == .regular
-            ? regularMinimumWidth - regularExitHysteresis
-            : regularMinimumWidth
-        let regularHeightThreshold = previousMode == .regular
-            ? regularHeight - regularExitHysteresis
-            : regularHeight
-
-        if regularArea.width >= regularWidthThreshold,
-           regularArea.height >= regularHeightThreshold
-        {
-            let maximumAvailableWidth = max(regularArea.width, regularMinimumWidth)
-            let width = min(
-                max(preferredRegularWidth.isFinite ? preferredRegularWidth : regularMinimumWidth, regularMinimumWidth),
-                min(regularMaximumWidth, maximumAvailableWidth)
-            )
-            return NativeFullscreenCardLayout(
-                mode: .regular,
-                frame: centeredFrame(
-                    size: CGSize(width: width, height: regularHeight),
-                    in: visibleFrame,
-                    scale: scale
-                )
-            )
-        }
-
-        let compactThreshold = previousMode == nil
-            ? compactMinimumVisibleSide
-            : compactMinimumVisibleSide - compactExitHysteresis
-        let visibleSide = min(visibleFrame.width, visibleFrame.height)
-        guard visibleSide >= compactThreshold else { return nil }
-        let cardSide = min(
-            max(visibleSide - compactVisiblePadding, compactMinimumSide),
-            compactMaximumSide
-        )
-        return NativeFullscreenCardLayout(
-            mode: .compact,
-            frame: centeredFrame(
-                size: CGSize(width: cardSide, height: cardSide),
-                in: visibleFrame,
-                scale: scale
-            )
-        )
-    }
-
-    private static func centeredFrame(size: CGSize, in container: CGRect, scale: CGFloat) -> CGRect {
-        let frame = CGRect(
-            x: container.midX - size.width / 2,
-            y: container.midY - size.height / 2,
-            width: size.width,
-            height: size.height
-        )
-        let effectiveScale = scale.isFinite && scale > 0 ? scale : 1
-        return frame.roundedToPhysicalPixels(scale: effectiveScale)
+        let visibleIntersection = slotFrame.intersection(workingFrame)
+        guard !visibleIntersection.isNull,
+              !visibleIntersection.isEmpty,
+              isValid(visibleIntersection)
+        else { return nil }
+        return slotFrame
     }
 
     private static func isValid(_ frame: CGRect) -> Bool {
@@ -116,6 +40,24 @@ enum NativeFullscreenCardGeometry {
             && frame.height.isFinite
             && frame.width > 0
             && frame.height > 0
+    }
+}
+
+enum NativeFullscreenCaptureExclusionOutcome: String, Equatable {
+    case failed
+    case acceptedUnverified = "accepted_unverified"
+    case verified
+
+    static func resolve(writeAccepted: Bool, readback: Bool?) -> NativeFullscreenCaptureExclusionOutcome {
+        guard writeAccepted else { return .failed }
+        switch readback {
+        case true:
+            return .verified
+        case nil:
+            return .acceptedUnverified
+        case false:
+            return .failed
+        }
     }
 }
 
@@ -168,7 +110,7 @@ final class NativeFullscreenPlaceholderManager {
     private func makePanel(for placeholder: NativeFullscreenPlaceholderUpdate) -> NativeFullscreenPlaceholderWindow {
         let appInfo = appInfoCache?.info(for: placeholder.currentToken.pid)
         let window = NativeFullscreenPlaceholderWindow(
-            originalToken: placeholder.originalToken,
+            placeholder: placeholder,
             appName: appInfo?.name,
             icon: appInfo?.icon
         )
@@ -187,6 +129,7 @@ final class NativeFullscreenPlaceholderManager {
                 windowNumber: window.windowNumber
             )
         )
+        window.prepareSurface()
         return window
     }
 
@@ -208,23 +151,28 @@ private final class NativeFullscreenPlaceholderWindow: NSPanel {
     private let surfaceId: String
     private var currentToken: WindowToken?
     private var workspaceId: WorkspaceDescriptor.ID?
-    private var slotFrame = CGRect.zero
-    private var displayContext: NativeFullscreenCardDisplayContext?
-    private var cardMode: NativeFullscreenCardMode?
-    private var appliedCardFrame: CGRect?
-    private var descriptorVisible = false
+    private var slotFrame: CGRect
+    private var displayContext: NativeFullscreenDisplayContext?
+    private var appliedPanelFrame: CGRect?
+    private var descriptorVisible: Bool
     private var appliedVisible = false
     private var registeredWindowNumber: Int?
     private var excludedWindowNumber: Int?
+    private var captureExclusionOutcome: NativeFullscreenCaptureExclusionOutcome?
     private var captureExclusionRetryIndex = 0
     private var captureExclusionRetryExhausted = false
     private var captureExclusionRetryTask: Task<Void, Never>?
 
     var onActivate: ((WindowToken) -> Void)?
 
-    init(originalToken: WindowToken, appName: String?, icon: NSImage?) {
-        self.originalToken = originalToken
-        surfaceId = "native-fullscreen-placeholder-\(originalToken.pid)-\(originalToken.windowId)"
+    init(placeholder: NativeFullscreenPlaceholderUpdate, appName: String?, icon: NSImage?) {
+        originalToken = placeholder.originalToken
+        surfaceId = "native-fullscreen-placeholder-\(placeholder.originalToken.pid)-\(placeholder.originalToken.windowId)"
+        currentToken = placeholder.currentToken
+        workspaceId = placeholder.workspaceId
+        slotFrame = placeholder.frame
+        displayContext = placeholder.displayContext
+        descriptorVisible = placeholder.visible
         placeholderView = NativeFullscreenPlaceholderView(appName: appName, icon: icon)
         super.init(
             contentRect: .zero,
@@ -250,10 +198,8 @@ private final class NativeFullscreenPlaceholderWindow: NSPanel {
         placeholderView.onActivate = { [weak self] in
             self?.activate()
         }
+        placeholderView.setSelected(placeholder.selected)
         contentView = placeholderView
-
-        registerSurface()
-        ensureCaptureExclusion(schedulesRetry: false)
     }
 
     override var canBecomeKey: Bool {
@@ -262,6 +208,11 @@ private final class NativeFullscreenPlaceholderWindow: NSPanel {
 
     override var canBecomeMain: Bool {
         false
+    }
+
+    func prepareSurface() {
+        registerSurface()
+        ensureCaptureExclusion(schedulesRetry: false)
     }
 
     func update(
@@ -279,7 +230,7 @@ private final class NativeFullscreenPlaceholderWindow: NSPanel {
 
     func moveForAnimation(
         slotFrame: CGRect,
-        displayContext: NativeFullscreenCardDisplayContext?
+        displayContext: NativeFullscreenDisplayContext?
     ) {
         self.slotFrame = slotFrame
         self.displayContext = displayContext
@@ -296,9 +247,8 @@ private final class NativeFullscreenPlaceholderWindow: NSPanel {
                 currentToken: currentToken,
                 workspaceId: workspaceId,
                 slotFrame: slotFrame,
-                cardFrame: appliedCardFrame,
+                panelFrame: appliedPanelFrame,
                 visible: isVisible,
-                mode: cardMode.map(NativeFullscreenPlaceholderTrace.Mode.init),
                 windowNumber: windowNumber
             )
         )
@@ -321,9 +271,8 @@ private final class NativeFullscreenPlaceholderWindow: NSPanel {
             workspaceId: workspaceId,
             slotFrame: slotFrame,
             displayContext: displayContext,
-            cardFrame: appliedCardFrame,
+            panelFrame: appliedPanelFrame,
             windowFrame: frame,
-            cardMode: cardMode,
             descriptorVisible: descriptorVisible,
             appliedVisible: appliedVisible,
             windowVisible: isVisible,
@@ -336,6 +285,7 @@ private final class NativeFullscreenPlaceholderWindow: NSPanel {
             registryCaptureEligible: registryCaptureEligible,
             skyLightCaptureExcluded: skyLightCaptureExcluded,
             excludedWindowNumber: excludedWindowNumber,
+            captureExclusionOutcome: captureExclusionOutcome,
             captureRetryIndex: captureExclusionRetryIndex,
             captureRetryPending: captureExclusionRetryTask != nil,
             captureRetryExhausted: captureExclusionRetryExhausted
@@ -345,36 +295,16 @@ private final class NativeFullscreenPlaceholderWindow: NSPanel {
     private func reconcileGeometry(forceOrdering: Bool) {
         guard descriptorVisible,
               let displayContext,
-              let layout = NativeFullscreenCardGeometry.resolve(
+              let panelFrame = NativeFullscreenPlaceholderGeometry.resolve(
                   slotFrame: slotFrame,
-                  workingFrame: displayContext.workingFrame,
-                  scale: displayContext.scale,
-                  preferredRegularWidth: placeholderView.preferredRegularWidth,
-                  previousMode: cardMode
+                  workingFrame: displayContext.workingFrame
               )
         else {
             hidePanel()
             return
         }
 
-        if cardMode != layout.mode {
-            cardMode = layout.mode
-            NativeFullscreenPlaceholderTrace.record(
-                NativeFullscreenPlaceholderTrace.makeRecord(
-                    .panelModeChanged,
-                    originalToken: originalToken,
-                    currentToken: currentToken,
-                    workspaceId: workspaceId,
-                    slotFrame: slotFrame,
-                    cardFrame: layout.frame,
-                    visible: isVisible,
-                    mode: .init(layout.mode),
-                    windowNumber: windowNumber
-                )
-            )
-        }
-        placeholderView.setMode(layout.mode)
-        applyCardFrame(layout.frame)
+        applyPanelFrame(panelFrame)
 
         if !isVisible || forceOrdering {
             let wasVisible = isVisible
@@ -387,9 +317,8 @@ private final class NativeFullscreenPlaceholderWindow: NSPanel {
                     currentToken: currentToken,
                     workspaceId: workspaceId,
                     slotFrame: slotFrame,
-                    cardFrame: appliedCardFrame,
+                    panelFrame: appliedPanelFrame,
                     visible: isVisible,
-                    mode: cardMode.map(NativeFullscreenPlaceholderTrace.Mode.init),
                     windowNumber: windowNumber,
                     reason: isVisible ? .accepted : .orderingFailed
                 )
@@ -400,15 +329,15 @@ private final class NativeFullscreenPlaceholderWindow: NSPanel {
         }
     }
 
-    private func applyCardFrame(_ nextFrame: CGRect) {
-        guard appliedCardFrame != nextFrame || frame != nextFrame else { return }
+    private func applyPanelFrame(_ nextFrame: CGRect) {
+        guard appliedPanelFrame != nextFrame || frame != nextFrame else { return }
         let sizeChanged = frame.size != nextFrame.size
         if frame.size == nextFrame.size {
             setFrameOrigin(nextFrame.origin)
         } else {
             setFrame(nextFrame, display: false)
         }
-        appliedCardFrame = nextFrame
+        appliedPanelFrame = nextFrame
         NativeFullscreenPlaceholderTrace.record(
             NativeFullscreenPlaceholderTrace.makeRecord(
                 sizeChanged ? .panelResized : .panelMoved,
@@ -416,9 +345,8 @@ private final class NativeFullscreenPlaceholderWindow: NSPanel {
                 currentToken: currentToken,
                 workspaceId: workspaceId,
                 slotFrame: slotFrame,
-                cardFrame: nextFrame,
+                panelFrame: nextFrame,
                 visible: isVisible,
-                mode: cardMode.map(NativeFullscreenPlaceholderTrace.Mode.init),
                 windowNumber: windowNumber
             )
         )
@@ -428,9 +356,6 @@ private final class NativeFullscreenPlaceholderWindow: NSPanel {
     }
 
     private func hidePanel() {
-        if descriptorVisible {
-            cardMode = nil
-        }
         cancelCaptureExclusionRetry(resetsAttempts: true)
         placeholderView.cancelInteraction()
         if appliedVisible || isVisible {
@@ -442,7 +367,7 @@ private final class NativeFullscreenPlaceholderWindow: NSPanel {
                     currentToken: currentToken,
                     workspaceId: workspaceId,
                     slotFrame: slotFrame,
-                    cardFrame: appliedCardFrame,
+                    panelFrame: appliedPanelFrame,
                     visible: false,
                     windowNumber: windowNumber,
                     reason: descriptorVisible ? .geometryRejected : .descriptorHidden
@@ -460,9 +385,8 @@ private final class NativeFullscreenPlaceholderWindow: NSPanel {
                 currentToken: currentToken,
                 workspaceId: workspaceId,
                 slotFrame: slotFrame,
-                cardFrame: appliedCardFrame,
+                panelFrame: appliedPanelFrame,
                 visible: isVisible,
-                mode: cardMode.map(NativeFullscreenPlaceholderTrace.Mode.init),
                 windowNumber: windowNumber
             )
         )
@@ -510,10 +434,19 @@ private final class NativeFullscreenPlaceholderWindow: NSPanel {
                 retryIndex: captureExclusionRetryIndex
             )
         )
-        if SkyLight.shared.excludeFromScreencaptureWindowSelection(windowId),
-           SkyLight.shared.isExcludedFromScreencaptureWindowSelection(windowId) != false
-        {
+        let writeAccepted = SkyLight.shared.excludeFromScreencaptureWindowSelection(windowId)
+        let readback = writeAccepted
+            ? SkyLight.shared.isExcludedFromScreencaptureWindowSelection(windowId)
+            : nil
+        captureExclusionOutcome = NativeFullscreenCaptureExclusionOutcome.resolve(
+            writeAccepted: writeAccepted,
+            readback: readback
+        )
+        if captureExclusionOutcome == .verified || captureExclusionOutcome == .acceptedUnverified {
             excludedWindowNumber = panelWindowNumber
+            let reason: NativeFullscreenPlaceholderTrace.Reason = captureExclusionOutcome == .verified
+                ? .captureVerified
+                : .captureUnverified
             NativeFullscreenPlaceholderTrace.record(
                 NativeFullscreenPlaceholderTrace.makeRecord(
                     .captureExcluded,
@@ -522,7 +455,7 @@ private final class NativeFullscreenPlaceholderWindow: NSPanel {
                     workspaceId: workspaceId,
                     visible: appliedVisible,
                     windowNumber: panelWindowNumber,
-                    reason: .accepted,
+                    reason: reason,
                     retryIndex: captureExclusionRetryIndex
                 )
             )
@@ -604,25 +537,24 @@ private final class NativeFullscreenPlaceholderWindow: NSPanel {
 }
 
 private final class NativeFullscreenPlaceholderView: NSView {
-    private static let status = "In macOS Full Screen"
+    private static let title = "In macOS Full Screen"
+    private static let subtitle = "Move or resize this slot; the window will return here."
     private static let activationModifiers: NSEvent.ModifierFlags = [.command, .control, .option, .shift, .function]
-    private static let appFont = CTFontCreateWithName("SF Pro Text" as CFString, 13, nil)
-    private static let statusFont = CTFontCreateWithName("SF Pro Text" as CFString, 11, nil)
+    private static let titleFont = CTFontCreateWithName("SF Pro Text" as CFString, 17, nil)
+    private static let subtitleFont = CTFontCreateWithName("SF Pro Text" as CFString, 12, nil)
 
     private let appName: String
     private let icon: CGImage?
-    private var appLine: CTLine
-    private var statusLine: CTLine
-    private var appTruncationToken: CTLine
-    private var statusTruncationToken: CTLine
-    private var mode = NativeFullscreenCardMode.regular
+    private let titleLine: CTLine
+    private let subtitleLine: CTLine
+    private let titleLineWidth: CGFloat
+    private let subtitleLineWidth: CGFloat
     private var tracking: NSTrackingArea?
     private var isHovered = false
     private var isPressed = false
     private var isTrackingPrimaryPress = false
     private var isSelected = false
 
-    let preferredRegularWidth: CGFloat
     var onActivate: (() -> Void)?
 
     init(appName: String?, icon: NSImage?) {
@@ -630,29 +562,22 @@ private final class NativeFullscreenPlaceholderView: NSView {
         self.appName = resolvedAppName
         let sourceIcon = icon ?? NSImage(named: NSImage.applicationIconName)
         self.icon = sourceIcon?.cgImage(forProposedRect: nil, context: nil, hints: nil)
-        let appAttributed = Self.attributedLine(
-            resolvedAppName,
-            font: Self.appFont,
-            color: .labelColor
+        let titleAttributed = Self.attributedLine(
+            Self.title,
+            font: Self.titleFont,
+            color: .white
         )
-        let statusAttributed = Self.attributedLine(
-            Self.status,
-            font: Self.statusFont,
-            color: .secondaryLabelColor
+        let subtitleAttributed = Self.attributedLine(
+            Self.subtitle,
+            font: Self.subtitleFont,
+            color: NSColor.white.withAlphaComponent(0.78)
         )
-        appLine = CTLineCreateWithAttributedString(appAttributed)
-        statusLine = CTLineCreateWithAttributedString(statusAttributed)
-        appTruncationToken = CTLineCreateWithAttributedString(
-            Self.attributedLine("…", font: Self.appFont, color: .labelColor)
-        )
-        statusTruncationToken = CTLineCreateWithAttributedString(
-            Self.attributedLine("…", font: Self.statusFont, color: .secondaryLabelColor)
-        )
-        let textWidth = max(
-            CGFloat(CTLineGetTypographicBounds(appLine, nil, nil, nil)),
-            CGFloat(CTLineGetTypographicBounds(statusLine, nil, nil, nil))
-        )
-        preferredRegularWidth = textWidth + 74
+        let resolvedTitleLine = CTLineCreateWithAttributedString(titleAttributed)
+        let resolvedSubtitleLine = CTLineCreateWithAttributedString(subtitleAttributed)
+        titleLine = resolvedTitleLine
+        subtitleLine = resolvedSubtitleLine
+        titleLineWidth = CGFloat(CTLineGetTypographicBounds(resolvedTitleLine, nil, nil, nil))
+        subtitleLineWidth = CGFloat(CTLineGetTypographicBounds(resolvedSubtitleLine, nil, nil, nil))
         super.init(frame: .zero)
         wantsLayer = true
         layerContentsRedrawPolicy = .onSetNeedsDisplay
@@ -685,22 +610,21 @@ private final class NativeFullscreenPlaceholderView: NSView {
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
-        rebuildTextLines()
         needsDisplay = true
     }
 
     override func draw(_: NSRect) {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
-        let cardBounds = bounds.insetBy(dx: 0.5, dy: 0.5)
+        let panelBounds = bounds.insetBy(dx: 0.5, dy: 0.5)
         let path = CGPath(
-            roundedRect: cardBounds,
+            roundedRect: panelBounds,
             cornerWidth: 10,
             cornerHeight: 10,
             transform: nil
         )
 
         context.addPath(path)
-        context.setFillColor(resolvedColor(.windowBackgroundColor, alpha: 0.96))
+        context.setFillColor(resolvedColor(.black, alpha: 0.98))
         context.fillPath()
 
         if isHovered || isPressed {
@@ -719,12 +643,7 @@ private final class NativeFullscreenPlaceholderView: NSView {
         )
         context.strokePath()
 
-        switch mode {
-        case .regular:
-            drawRegularContent(in: context)
-        case .compact:
-            drawCompactContent(in: context)
-        }
+        drawContent(in: context)
     }
 
     override func mouseEntered(with _: NSEvent) {
@@ -797,12 +716,6 @@ private final class NativeFullscreenPlaceholderView: NSView {
         return true
     }
 
-    func setMode(_ mode: NativeFullscreenCardMode) {
-        guard self.mode != mode else { return }
-        self.mode = mode
-        needsDisplay = true
-    }
-
     func setSelected(_ selected: Bool) {
         guard isSelected != selected else { return }
         isSelected = selected
@@ -828,37 +741,48 @@ private final class NativeFullscreenPlaceholderView: NSView {
         needsDisplay = true
     }
 
-    private func drawRegularContent(in context: CGContext) {
-        drawIcon(in: CGRect(x: 12, y: 12, width: 40, height: 40), context: context)
-        let textX: CGFloat = 62
-        let textWidth = max(bounds.width - textX - 12, 0)
-        draw(
-            line: appLine,
-            truncationToken: appTruncationToken,
-            x: textX,
-            baseline: 36,
-            maximumWidth: textWidth,
+    private func drawContent(in context: CGContext) {
+        let shortestSide = min(bounds.width, bounds.height)
+        let maximumTextWidth = max(bounds.width - 48, 0)
+        if bounds.width < 180
+            || bounds.height < 140
+            || titleLineWidth > maximumTextWidth
+            || subtitleLineWidth > maximumTextWidth
+        {
+            let iconSide = min(64, max(min(shortestSide, 24), shortestSide - 24))
+            drawIcon(
+                in: CGRect(
+                    x: (bounds.width - iconSide) / 2,
+                    y: (bounds.height - iconSide) / 2,
+                    width: iconSide,
+                    height: iconSide
+                ),
+                context: context
+            )
+            return
+        }
+        let iconSide = min(96, max(48, shortestSide * 0.2))
+        let titleHeight = CGFloat(CTFontGetAscent(Self.titleFont) + CTFontGetDescent(Self.titleFont))
+        let subtitleHeight = CGFloat(CTFontGetAscent(Self.subtitleFont) + CTFontGetDescent(Self.subtitleFont))
+        let contentHeight = iconSide + 16 + titleHeight + 6 + subtitleHeight
+        let contentBottom = max((bounds.height - contentHeight) / 2, 16)
+        let iconFrame = CGRect(
+            x: (bounds.width - iconSide) / 2,
+            y: contentBottom + titleHeight + subtitleHeight + 22,
+            width: iconSide,
+            height: iconSide
+        )
+        drawIcon(in: iconFrame, context: context)
+        drawCentered(
+            line: titleLine,
+            lineWidth: titleLineWidth,
+            baseline: contentBottom + subtitleHeight + 6,
             context: context
         )
-        draw(
-            line: statusLine,
-            truncationToken: statusTruncationToken,
-            x: textX,
-            baseline: 18,
-            maximumWidth: textWidth,
-            context: context
-        )
-    }
-
-    private func drawCompactContent(in context: CGContext) {
-        let iconSide = min(40, max(min(bounds.width, bounds.height) - 12, 24))
-        drawIcon(
-            in: CGRect(
-                x: (bounds.width - iconSide) / 2,
-                y: (bounds.height - iconSide) / 2,
-                width: iconSide,
-                height: iconSide
-            ),
+        drawCentered(
+            line: subtitleLine,
+            lineWidth: subtitleLineWidth,
+            baseline: contentBottom,
             context: context
         )
     }
@@ -871,55 +795,25 @@ private final class NativeFullscreenPlaceholderView: NSView {
         context.restoreGState()
     }
 
-    private func draw(
+    private func drawCentered(
         line: CTLine,
-        truncationToken: CTLine,
-        x: CGFloat,
+        lineWidth: CGFloat,
         baseline: CGFloat,
-        maximumWidth: CGFloat,
         context: CGContext
     ) {
-        guard maximumWidth > 0 else { return }
-        let lineWidth = CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
-        let renderedLine = lineWidth > maximumWidth
-            ? CTLineCreateTruncatedLine(line, Double(maximumWidth), .end, truncationToken) ?? line
-            : line
         context.saveGState()
         context.textMatrix = .identity
-        context.textPosition = CGPoint(x: x, y: baseline)
-        CTLineDraw(renderedLine, context)
+        context.textPosition = CGPoint(x: (bounds.width - lineWidth) / 2, y: baseline)
+        CTLineDraw(line, context)
         context.restoreGState()
     }
 
-    private func rebuildTextLines() {
-        appLine = CTLineCreateWithAttributedString(
-            Self.attributedLine(appName, font: Self.appFont, color: .labelColor)
-        )
-        statusLine = CTLineCreateWithAttributedString(
-            Self.attributedLine(
-                Self.status,
-                font: Self.statusFont,
-                color: .secondaryLabelColor
-            )
-        )
-        appTruncationToken = CTLineCreateWithAttributedString(
-            Self.attributedLine("…", font: Self.appFont, color: .labelColor)
-        )
-        statusTruncationToken = CTLineCreateWithAttributedString(
-            Self.attributedLine(
-                "…",
-                font: Self.statusFont,
-                color: .secondaryLabelColor
-            )
-        )
-    }
-
     private func resolvedColor(_ color: NSColor, alpha: CGFloat) -> CGColor {
-        var resolved = color.withAlphaComponent(alpha).cgColor
+        var resolved: CGColor?
         effectiveAppearance.performAsCurrentDrawingAppearance {
             resolved = color.withAlphaComponent(alpha).cgColor
         }
-        return resolved
+        return resolved.unsafelyUnwrapped
     }
 
     private static func attributedLine(

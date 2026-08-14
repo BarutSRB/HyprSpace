@@ -785,15 +785,18 @@ final class CommandHandler {
         {
             let currentState = isFullscreen(entry.axRef)
             if currentState {
-                _ = controller.workspaceManager.requestNativeFullscreenExit(token)
-                guard setFullscreen(entry.axRef, false) else {
-                    _ = controller.workspaceManager.markNativeFullscreenSuspended(token)
-                    return
-                }
+                applyNativeFullscreenExit(
+                    token,
+                    axRef: entry.axRef,
+                    controller: controller,
+                    setter: setFullscreen
+                )
                 return
             }
 
-            _ = controller.workspaceManager.requestNativeFullscreenEnter(token, in: entry.workspaceId)
+            guard controller.workspaceManager.requestNativeFullscreenEnter(token, in: entry.workspaceId) else {
+                return
+            }
             guard setFullscreen(entry.axRef, true) else {
                 controller.workspaceManager.restoreNativeFullscreenRecord(for: token)
                 return
@@ -817,10 +820,23 @@ final class CommandHandler {
             return
         }
 
-        _ = controller.workspaceManager.requestNativeFullscreenExit(token)
-        guard setFullscreen(entry.axRef, false) else {
+        applyNativeFullscreenExit(
+            token,
+            axRef: entry.axRef,
+            controller: controller,
+            setter: setFullscreen
+        )
+    }
+
+    private func applyNativeFullscreenExit(
+        _ token: WindowToken,
+        axRef: AXWindowRef,
+        controller: WMController,
+        setter: (AXWindowRef, Bool) -> Bool
+    ) {
+        guard controller.workspaceManager.requestNativeFullscreenExit(token) else { return }
+        if !setter(axRef, false) {
             _ = controller.workspaceManager.markNativeFullscreenSuspended(token)
-            return
         }
     }
 

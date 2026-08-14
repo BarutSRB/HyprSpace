@@ -68,10 +68,9 @@ struct NativeFullscreenPanelDiagnostics {
     let currentToken: WindowToken?
     let workspaceId: WorkspaceDescriptor.ID?
     let slotFrame: CGRect
-    let displayContext: NativeFullscreenCardDisplayContext?
-    let cardFrame: CGRect?
+    let displayContext: NativeFullscreenDisplayContext?
+    let panelFrame: CGRect?
     let windowFrame: CGRect
-    let cardMode: NativeFullscreenCardMode?
     let descriptorVisible: Bool
     let appliedVisible: Bool
     let windowVisible: Bool
@@ -84,18 +83,19 @@ struct NativeFullscreenPanelDiagnostics {
     let registryCaptureEligible: Bool?
     let skyLightCaptureExcluded: Bool?
     let excludedWindowNumber: Int?
+    let captureExclusionOutcome: NativeFullscreenCaptureExclusionOutcome?
     let captureRetryIndex: Int
     let captureRetryPending: Bool
     let captureRetryExhausted: Bool
 
     var frameSynchronized: Bool {
-        guard let cardFrame else { return false }
+        guard let panelFrame else { return false }
         let scale = displayContext?.scale ?? 1
         let tolerance = 1 / max(scale.isFinite && scale > 0 ? scale : 1, 1) + 0.001
-        return abs(cardFrame.minX - windowFrame.minX) <= tolerance
-            && abs(cardFrame.minY - windowFrame.minY) <= tolerance
-            && abs(cardFrame.width - windowFrame.width) <= tolerance
-            && abs(cardFrame.height - windowFrame.height) <= tolerance
+        return abs(panelFrame.minX - windowFrame.minX) <= tolerance
+            && abs(panelFrame.minY - windowFrame.minY) <= tolerance
+            && abs(panelFrame.width - windowFrame.width) <= tolerance
+            && abs(panelFrame.height - windowFrame.height) <= tolerance
     }
 
     var captureSummary: String {
@@ -103,6 +103,7 @@ struct NativeFullscreenPanelDiagnostics {
             + " registryCaptureEligible=\(optionalBool(registryCaptureEligible))"
             + " skyLightExcluded=\(optionalBool(skyLightCaptureExcluded))"
             + " excludedWindow=\(optionalInt(excludedWindowNumber))"
+            + " exclusionOutcome=\(captureExclusionOutcome?.rawValue ?? "none")"
             + " retryIndex=\(captureRetryIndex)"
             + " retryPending=\(captureRetryPending)"
             + " retryExhausted=\(captureRetryExhausted)"
@@ -227,8 +228,9 @@ struct NativeFullscreenPlaceholderDiagnosticsSnapshot {
         guard let panel else { return "panel-missing" }
         guard panel.currentToken == record.currentToken else { return "panel-token-mismatch" }
         guard panel.descriptorVisible else { return "panel-descriptor-hidden" }
-        guard panel.cardMode != nil, panel.cardFrame != nil else { return "geometry-rejected" }
+        guard panel.panelFrame != nil else { return "geometry-rejected" }
         guard panel.frameSynchronized else { return "panel-frame-desync" }
+        guard panel.onActiveSpace else { return "panel-off-active-space" }
         if panel.appliedVisible, !panel.windowVisible { return "ordering-failed" }
         guard panel.appliedVisible, panel.windowVisible else { return "panel-hidden" }
         return "visible"
@@ -276,10 +278,10 @@ struct NativeFullscreenPlaceholderDiagnosticsSnapshot {
     private func format(panel: NativeFullscreenPanelDiagnostics?) -> String {
         guard let panel else { return "  panel=none" }
         return "  panel current=\(token(panel.currentToken)) workspace=\(workspace(panel.workspaceId))"
-            + " slot=\(TraceFormat.rect(panel.slotFrame)) card=\(TraceFormat.rect(panel.cardFrame))"
+            + " slot=\(TraceFormat.rect(panel.slotFrame)) panelFrame=\(TraceFormat.rect(panel.panelFrame))"
             + " actual=\(TraceFormat.rect(panel.windowFrame))"
             + " frameSynchronized=\(panel.frameSynchronized)"
-            + " mode=\(mode(panel.cardMode)) descriptorVisible=\(panel.descriptorVisible)"
+            + " descriptorVisible=\(panel.descriptorVisible)"
             + " appliedVisible=\(panel.appliedVisible) windowVisible=\(panel.windowVisible)"
             + " window=\(panel.windowNumber) level=\(panel.level) order=\(panel.orderedIndex)"
             + " activeSpace=\(panel.onActiveSpace) context=\(context(panel.displayContext))"
@@ -287,17 +289,9 @@ struct NativeFullscreenPlaceholderDiagnosticsSnapshot {
             + " \(panel.captureSummary)"
     }
 
-    private func context(_ value: NativeFullscreenCardDisplayContext?) -> String {
+    private func context(_ value: NativeFullscreenDisplayContext?) -> String {
         guard let value else { return "none" }
         return "working:\(TraceFormat.rect(value.workingFrame)),scale:\(scale(value.scale))"
-    }
-
-    private func mode(_ value: NativeFullscreenCardMode?) -> String {
-        switch value {
-        case .regular: "regular"
-        case .compact: "compact"
-        case nil: "none"
-        }
     }
 
     private func token(_ value: WindowToken?) -> String {

@@ -557,7 +557,7 @@ import QuartzCore
             plan.diff.nativeFullscreenSlots,
             workspaceId: plan.workspaceId,
             displayId: plan.monitor.displayId,
-            displayContext: NativeFullscreenCardDisplayContext(
+            displayContext: NativeFullscreenDisplayContext(
                 workingFrame: plan.monitor.workingFrame,
                 scale: plan.monitor.scale
             )

@@ -191,6 +191,200 @@ final class NiriHiddenVisibilityIntegrationTests: XCTestCase {
         XCTAssertNil(controller.workspaceManager.nativeFullscreenRecord(for: token))
     }
 
+    func testNativeFullscreenCommandRejectsReusedStableOriginalTokenWithoutAXWrite() throws {
+        let controller = makeController()
+        let firstWorkspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let secondWorkspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "2", createIfMissing: true)
+        )
+        let originalToken = addWindow(
+            pid: 880_072,
+            windowId: 880_172,
+            to: firstWorkspaceId,
+            controller: controller
+        )
+        XCTAssertTrue(
+            controller.workspaceManager.markNativeFullscreenSuspended(
+                originalToken,
+                ownsNonManagedFocus: false
+            )
+        )
+        let replacementToken = WindowToken(pid: originalToken.pid, windowId: 880_173)
+        XCTAssertNotNil(
+            controller.workspaceManager.rekeyWindow(
+                from: originalToken,
+                to: replacementToken,
+                newAXRef: AXWindowRef(
+                    element: AXUIElementCreateApplication(replacementToken.pid),
+                    windowId: replacementToken.windowId
+                )
+            )
+        )
+        let reusedToken = addWindow(
+            pid: originalToken.pid,
+            windowId: originalToken.windowId,
+            to: secondWorkspaceId,
+            controller: controller
+        )
+        XCTAssertTrue(
+            controller.workspaceManager.confirmManagedFocus(
+                reusedToken,
+                in: secondWorkspaceId,
+                activateWorkspaceOnMonitor: false
+            )
+        )
+        var fullscreenWrites = 0
+        controller.commandHandler.nativeFullscreenStateProvider = { _ in false }
+        controller.commandHandler.nativeFullscreenSetter = { _, _ in
+            fullscreenWrites += 1
+            return true
+        }
+
+        XCTAssertEqual(controller.commandHandler.handleHotkeyCommand(.toggleNativeFullscreen), .executed)
+
+        XCTAssertEqual(fullscreenWrites, 0)
+        XCTAssertNil(controller.workspaceManager.nativeFullscreenRecord(for: reusedToken))
+        XCTAssertEqual(
+            controller.workspaceManager.nativeFullscreenRecord(for: replacementToken)?.currentToken,
+            replacementToken
+        )
+    }
+
+    func testNativeFullscreenCommandRetriesAcceptedUnchangedEnterRequest() throws {
+        let controller = makeController()
+        let workspaceId = try XCTUnwrap(controller.workspaceManager.workspaceId(for: "1", createIfMissing: true))
+        _ = controller.workspaceManager.focusWorkspace(named: "1")
+        let token = addWindow(pid: 880_073, windowId: 880_174, to: workspaceId, controller: controller)
+        XCTAssertTrue(
+            controller.workspaceManager.confirmManagedFocus(
+                token,
+                in: workspaceId,
+                activateWorkspaceOnMonitor: false
+            )
+        )
+        XCTAssertTrue(controller.workspaceManager.requestNativeFullscreenEnter(token, in: workspaceId))
+        let generation = controller.workspaceManager.nativeFullscreenRecord(for: token)?.transitionGeneration
+        XCTAssertTrue(controller.workspaceManager.requestNativeFullscreenEnter(token, in: workspaceId))
+        XCTAssertEqual(
+            controller.workspaceManager.nativeFullscreenRecord(for: token)?.transitionGeneration,
+            generation
+        )
+        var fullscreenWrites = 0
+        controller.commandHandler.nativeFullscreenStateProvider = { _ in false }
+        controller.commandHandler.nativeFullscreenSetter = { _, fullscreen in
+            XCTAssertTrue(fullscreen)
+            fullscreenWrites += 1
+            return true
+        }
+
+        XCTAssertEqual(controller.commandHandler.handleHotkeyCommand(.toggleNativeFullscreen), .executed)
+
+        XCTAssertEqual(fullscreenWrites, 1)
+        XCTAssertEqual(controller.workspaceManager.nativeFullscreenRecord(for: token)?.transition, .enterRequested)
+    }
+
+    func testNativeFullscreenExitCommandRejectsReusedStableOriginalTokenWithoutAXWrite() throws {
+        let controller = makeController()
+        let firstWorkspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let secondWorkspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "2", createIfMissing: true)
+        )
+        let originalToken = addWindow(
+            pid: 880_074,
+            windowId: 880_175,
+            to: firstWorkspaceId,
+            controller: controller
+        )
+        XCTAssertTrue(
+            controller.workspaceManager.markNativeFullscreenSuspended(
+                originalToken,
+                ownsNonManagedFocus: false
+            )
+        )
+        let replacementToken = WindowToken(pid: originalToken.pid, windowId: 880_176)
+        XCTAssertNotNil(
+            controller.workspaceManager.rekeyWindow(
+                from: originalToken,
+                to: replacementToken,
+                newAXRef: AXWindowRef(
+                    element: AXUIElementCreateApplication(replacementToken.pid),
+                    windowId: replacementToken.windowId
+                )
+            )
+        )
+        let reusedToken = addWindow(
+            pid: originalToken.pid,
+            windowId: originalToken.windowId,
+            to: secondWorkspaceId,
+            controller: controller
+        )
+        XCTAssertTrue(
+            controller.workspaceManager.confirmManagedFocus(
+                reusedToken,
+                in: secondWorkspaceId,
+                activateWorkspaceOnMonitor: false
+            )
+        )
+        var fullscreenWrites = 0
+        controller.commandHandler.nativeFullscreenStateProvider = { _ in true }
+        controller.commandHandler.nativeFullscreenSetter = { _, _ in
+            fullscreenWrites += 1
+            return true
+        }
+
+        XCTAssertEqual(controller.commandHandler.handleHotkeyCommand(.toggleNativeFullscreen), .executed)
+
+        XCTAssertEqual(fullscreenWrites, 0)
+        XCTAssertNil(controller.workspaceManager.nativeFullscreenRecord(for: reusedToken))
+        XCTAssertEqual(
+            controller.workspaceManager.nativeFullscreenRecord(for: replacementToken)?.currentToken,
+            replacementToken
+        )
+    }
+
+    func testNativeFullscreenCommandRetriesAcceptedUnchangedExitRequest() throws {
+        let controller = makeController()
+        let workspaceId = try XCTUnwrap(controller.workspaceManager.workspaceId(for: "1", createIfMissing: true))
+        _ = controller.workspaceManager.focusWorkspace(named: "1")
+        let token = addWindow(pid: 880_075, windowId: 880_177, to: workspaceId, controller: controller)
+        XCTAssertTrue(
+            controller.workspaceManager.confirmManagedFocus(
+                token,
+                in: workspaceId,
+                activateWorkspaceOnMonitor: false
+            )
+        )
+        XCTAssertTrue(
+            controller.workspaceManager.markNativeFullscreenSuspended(
+                token,
+                ownsNonManagedFocus: false
+            )
+        )
+        XCTAssertTrue(controller.workspaceManager.requestNativeFullscreenExit(token))
+        let generation = controller.workspaceManager.nativeFullscreenRecord(for: token)?.transitionGeneration
+        XCTAssertTrue(controller.workspaceManager.requestNativeFullscreenExit(token))
+        XCTAssertEqual(
+            controller.workspaceManager.nativeFullscreenRecord(for: token)?.transitionGeneration,
+            generation
+        )
+        var fullscreenWrites = 0
+        controller.commandHandler.nativeFullscreenStateProvider = { _ in true }
+        controller.commandHandler.nativeFullscreenSetter = { _, fullscreen in
+            XCTAssertFalse(fullscreen)
+            fullscreenWrites += 1
+            return true
+        }
+
+        XCTAssertEqual(controller.commandHandler.handleHotkeyCommand(.toggleNativeFullscreen), .executed)
+
+        XCTAssertEqual(fullscreenWrites, 1)
+        XCTAssertEqual(controller.workspaceManager.nativeFullscreenRecord(for: token)?.transition, .exitRequested)
+    }
+
     private func makeController() -> WMController {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("NiriHiddenVisibilityIntegrationTests-\(UUID().uuidString)", isDirectory: true)

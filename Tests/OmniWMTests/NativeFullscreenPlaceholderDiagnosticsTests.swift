@@ -13,6 +13,8 @@ final class NativeFullscreenPlaceholderDiagnosticsTests: XCTestCase {
     func testTraceInactiveDoesNotEvaluateRecordAutoclosure() {
         NativeFullscreenPlaceholderTrace.shared.beginCapture()
         NativeFullscreenPlaceholderTrace.shared.endCapture()
+        NativeFullscreenPlaceholderTrace.motion.beginCapture()
+        NativeFullscreenPlaceholderTrace.motion.endCapture()
         var evaluated = false
 
         func makeRecord() -> NativeFullscreenPlaceholderTrace.Record {
@@ -24,6 +26,7 @@ final class NativeFullscreenPlaceholderDiagnosticsTests: XCTestCase {
 
         XCTAssertFalse(evaluated)
         XCTAssertEqual(NativeFullscreenPlaceholderTrace.shared.dump(), "none")
+        XCTAssertEqual(NativeFullscreenPlaceholderTrace.motion.dump(), "none")
     }
 
     func testTraceFormatsMediaTimeAndSelection() {
@@ -44,6 +47,42 @@ final class NativeFullscreenPlaceholderDiagnosticsTests: XCTestCase {
         XCTAssertTrue(dump.hasPrefix("t="))
         XCTAssertTrue(dump.contains("op=surface_applied"))
         XCTAssertTrue(dump.contains("selected=true"))
+    }
+
+    func testMotionTraceCannotEvictLifecycleEvidence() {
+        NativeFullscreenPlaceholderTrace.shared.beginCapture()
+        NativeFullscreenPlaceholderTrace.motion.beginCapture()
+        defer {
+            NativeFullscreenPlaceholderTrace.shared.endCapture()
+            NativeFullscreenPlaceholderTrace.motion.endCapture()
+        }
+        let token = WindowToken(pid: 982_004, windowId: 982_104)
+
+        NativeFullscreenPlaceholderTrace.record(
+            NativeFullscreenPlaceholderTrace.makeRecord(
+                .recordUpsert,
+                originalToken: token,
+                currentToken: token,
+                transition: .suspended
+            )
+        )
+        for offset in 0 ..< 5_000 {
+            NativeFullscreenPlaceholderTrace.record(
+                NativeFullscreenPlaceholderTrace.makeRecord(
+                    offset.isMultiple(of: 2) ? .panelMoved : .panelResized,
+                    originalToken: token,
+                    currentToken: token,
+                    panelFrame: CGRect(x: offset, y: 0, width: 500, height: 400)
+                )
+            )
+        }
+
+        let lifecycleDump = NativeFullscreenPlaceholderTrace.shared.dump()
+        let motionDump = NativeFullscreenPlaceholderTrace.motion.dump()
+        XCTAssertTrue(lifecycleDump.contains("op=record_upsert original=982004:982104"))
+        XCTAssertFalse(lifecycleDump.contains("op=panel_moved"))
+        XCTAssertFalse(lifecycleDump.contains("op=panel_resized"))
+        XCTAssertEqual(motionDump.split(separator: "\n").count, 2_048)
     }
 
     func testLifecycleAndDeadlineOperationsAreTraced() throws {
@@ -68,7 +107,7 @@ final class NativeFullscreenPlaceholderDiagnosticsTests: XCTestCase {
             NativeFullscreenPlaceholderTrace.shared.endCapture()
         }
         fixture.controller.surfaceReconciler.reconcileNow()
-        let context = NativeFullscreenCardDisplayContext(
+        let context = NativeFullscreenDisplayContext(
             workingFrame: fixture.monitor.visibleFrame,
             scale: 1
         )
@@ -115,14 +154,16 @@ final class NativeFullscreenPlaceholderDiagnosticsTests: XCTestCase {
         let manager = NativeFullscreenPlaceholderManager()
         let originalToken = WindowToken(pid: 982_001, windowId: 982_101)
         let workspaceId = WorkspaceDescriptor.ID()
-        let context = NativeFullscreenCardDisplayContext(
+        let context = NativeFullscreenDisplayContext(
             workingFrame: CGRect(x: 0, y: 0, width: 1_440, height: 860),
             scale: 1
         )
         NativeFullscreenPlaceholderTrace.shared.beginCapture()
+        NativeFullscreenPlaceholderTrace.motion.beginCapture()
         defer {
             manager.removeAll()
             NativeFullscreenPlaceholderTrace.shared.endCapture()
+            NativeFullscreenPlaceholderTrace.motion.endCapture()
         }
 
         manager.apply([
@@ -159,11 +200,33 @@ final class NativeFullscreenPlaceholderDiagnosticsTests: XCTestCase {
             )
         ])
 
-        let dump = NativeFullscreenPlaceholderTrace.shared.dump()
-        XCTAssertTrue(dump.contains("op=panel_created original=982001:982101"))
-        XCTAssertTrue(dump.contains("op=panel_moved"))
-        XCTAssertTrue(dump.contains("slot=(140,100 700x500)"))
-        XCTAssertTrue(dump.contains("op=panel_hidden"))
+        let lifecycleDump = NativeFullscreenPlaceholderTrace.shared.dump()
+        let motionDump = NativeFullscreenPlaceholderTrace.motion.dump()
+        let lifecycleLines = lifecycleDump.split(separator: "\n").map(String.init)
+        let createdIndex = lifecycleLines.firstIndex { $0.contains("op=panel_created") }
+        let captureLines = lifecycleLines.enumerated().filter { $0.element.contains("op=capture_") }
+        guard let createdIndex else { return XCTFail("missing panel_created trace") }
+        XCTAssertFalse(captureLines.isEmpty)
+        XCTAssertTrue(captureLines.allSatisfy { $0.offset > createdIndex })
+        XCTAssertTrue(
+            captureLines.allSatisfy {
+                $0.element.contains("current=982001:982101")
+                    && $0.element.contains("workspace=\(workspaceId.uuidString)")
+            }
+        )
+        XCTAssertTrue(
+            captureLines.filter { $0.element.contains("op=capture_excluded") }.allSatisfy {
+                $0.element.contains("reason=capture_verified")
+                    || $0.element.contains("reason=capture_unverified")
+            }
+        )
+        XCTAssertTrue(lifecycleDump.contains("op=panel_created original=982001:982101"))
+        XCTAssertTrue(lifecycleDump.contains("op=panel_hidden"))
+        XCTAssertTrue(motionDump.contains("op=panel_moved"))
+        XCTAssertTrue(motionDump.contains("slot=(140,100 700x500)"))
+        let panel = manager.diagnosticsSnapshot().first
+        XCTAssertEqual(panel?.slotFrame, CGRect(x: 140, y: 100, width: 700, height: 500))
+        XCTAssertEqual(panel?.panelFrame, CGRect(x: 140, y: 100, width: 700, height: 500))
     }
 
     func testDefaultCoordinatorIncludesNativeFullscreenTrace() async throws {
@@ -192,6 +255,13 @@ final class NativeFullscreenPlaceholderDiagnosticsTests: XCTestCase {
                 reason: .accepted
             )
         )
+        NativeFullscreenPlaceholderTrace.record(
+            NativeFullscreenPlaceholderTrace.makeRecord(
+                .panelMoved,
+                originalToken: WindowToken(pid: 982_002, windowId: 982_102),
+                panelFrame: CGRect(x: 20, y: 20, width: 300, height: 200)
+            )
+        )
         guard case let .stopped(artifact) = await coordinator.toggle(
             desiredState: .inactive,
             reportProvider: { "report" }
@@ -201,7 +271,9 @@ final class NativeFullscreenPlaceholderDiagnosticsTests: XCTestCase {
 
         let body = try String(contentsOf: artifact.url, encoding: .utf8)
         XCTAssertTrue(body.contains("== Native Fullscreen Placeholder Trace =="))
+        XCTAssertTrue(body.contains("== Native Fullscreen Placeholder Motion Trace =="))
         XCTAssertTrue(body.contains("op=projection_accepted original=982002:982102"))
+        XCTAssertTrue(body.contains("op=panel_moved original=982002:982102"))
         XCTAssertTrue(body.contains("working=(0,0 1440x860) scale=2.00"))
     }
 
@@ -213,7 +285,7 @@ final class NativeFullscreenPlaceholderDiagnosticsTests: XCTestCase {
         }
         fixture.controller.surfaceReconciler.reconcileNow()
         let slot = CGRect(x: 120, y: 80, width: 640, height: 480)
-        let context = NativeFullscreenCardDisplayContext(
+        let context = NativeFullscreenDisplayContext(
             workingFrame: fixture.monitor.visibleFrame,
             scale: 2
         )
@@ -243,7 +315,7 @@ final class NativeFullscreenPlaceholderDiagnosticsTests: XCTestCase {
 
         XCTAssertFalse(panel.windowVisible)
         XCTAssertFalse(panel.appliedVisible)
-        XCTAssertNotNil(panel.cardFrame)
+        XCTAssertNotNil(panel.panelFrame)
         XCTAssertTrue(panel.frameSynchronized)
         XCTAssertEqual(panel.displayContext, context)
         XCTAssertFalse(
@@ -276,7 +348,7 @@ final class NativeFullscreenPlaceholderDiagnosticsTests: XCTestCase {
             fixture.controller.surfaceReconciler.cleanup()
         }
         fixture.controller.surfaceReconciler.reconcileNow()
-        let context = NativeFullscreenCardDisplayContext(
+        let context = NativeFullscreenDisplayContext(
             workingFrame: fixture.monitor.visibleFrame,
             scale: 1
         )
@@ -316,24 +388,125 @@ final class NativeFullscreenPlaceholderDiagnosticsTests: XCTestCase {
     }
 
     func testCaptureSummaryPreservesUnknownAndVerifiedStates() {
-        let unknown = panelDiagnostics(skyLightCaptureExcluded: nil)
-        let excluded = panelDiagnostics(skyLightCaptureExcluded: true)
-        let included = panelDiagnostics(skyLightCaptureExcluded: false)
+        let unknown = panelDiagnostics(
+            skyLightCaptureExcluded: nil,
+            captureExclusionOutcome: .acceptedUnverified
+        )
+        let excluded = panelDiagnostics(
+            skyLightCaptureExcluded: true,
+            captureExclusionOutcome: .verified
+        )
+        let included = panelDiagnostics(
+            skyLightCaptureExcluded: false,
+            captureExclusionOutcome: .failed
+        )
 
         XCTAssertTrue(unknown.captureSummary.contains("skyLightExcluded=unknown"))
+        XCTAssertTrue(unknown.captureSummary.contains("exclusionOutcome=accepted_unverified"))
         XCTAssertTrue(excluded.captureSummary.contains("skyLightExcluded=true"))
+        XCTAssertTrue(excluded.captureSummary.contains("exclusionOutcome=verified"))
         XCTAssertTrue(included.captureSummary.contains("skyLightExcluded=false"))
+        XCTAssertTrue(included.captureSummary.contains("exclusionOutcome=failed"))
+    }
+
+    func testCaptureExclusionOutcomePreservesTriStateVerification() {
+        XCTAssertEqual(
+            NativeFullscreenCaptureExclusionOutcome.resolve(writeAccepted: false, readback: nil),
+            .failed
+        )
+        XCTAssertEqual(
+            NativeFullscreenCaptureExclusionOutcome.resolve(writeAccepted: true, readback: false),
+            .failed
+        )
+        XCTAssertEqual(
+            NativeFullscreenCaptureExclusionOutcome.resolve(writeAccepted: true, readback: nil),
+            .acceptedUnverified
+        )
+        XCTAssertEqual(
+            NativeFullscreenCaptureExclusionOutcome.resolve(writeAccepted: true, readback: true),
+            .verified
+        )
+    }
+
+    func testReportIdentifiesPanelOrderedOffActiveSpace() {
+        let token = WindowToken(pid: 982_005, windowId: 982_105)
+        let workspaceId = WorkspaceDescriptor.ID()
+        let frame = CGRect(x: 100, y: 100, width: 700, height: 500)
+        let descriptor = NativeFullscreenPlaceholderUpdate(
+            originalToken: token,
+            currentToken: token,
+            workspaceId: workspaceId,
+            frame: frame,
+            displayContext: NativeFullscreenDisplayContext(
+                workingFrame: CGRect(x: 0, y: 0, width: 1_440, height: 860),
+                scale: 2
+            ),
+            selected: false,
+            visible: true
+        )
+        let snapshot = NativeFullscreenPlaceholderDiagnosticsSnapshot(
+            servicesStarted: true,
+            lifecycle: NativeFullscreenLifecycleDiagnosticsSnapshot(
+                records: [
+                    .init(
+                        originalToken: token,
+                        currentToken: token,
+                        workspaceId: workspaceId,
+                        transition: "suspended",
+                        generation: 1,
+                        deadlineArmed: false,
+                        entryPresent: true,
+                        layoutReason: "nativeFullscreen",
+                        workspaceVisible: true,
+                        appHidden: false,
+                        cornerHidden: false,
+                        displayId: 1,
+                        displayUUID: "display",
+                        displayShowingFullscreen: false
+                    )
+                ],
+                isNonManagedFocusActive: false,
+                nonManagedFocusToken: nil,
+                activeFocusOwnerToken: nil,
+                renderableFocusToken: nil
+            ),
+            surface: NativeFullscreenSurfaceDiagnosticsSnapshot(
+                descriptors: [descriptor],
+                acceptedProjections: [],
+                acceptedSlots: [],
+                applied: [descriptor],
+                resolutions: [.init(originalToken: token, reason: .accepted)],
+                appliedDuplicateOriginalTokens: []
+            ),
+            panels: [
+                panelDiagnostics(
+                    skyLightCaptureExcluded: nil,
+                    panelFrame: frame,
+                    windowFrame: frame,
+                    originalToken: token,
+                    workspaceId: workspaceId,
+                    descriptorVisible: true,
+                    appliedVisible: true,
+                    windowVisible: false,
+                    onActiveSpace: false
+                )
+            ]
+        )
+
+        let report = snapshot.formatted()
+        XCTAssertTrue(report.contains("original=982005:982105 resolution=panel-off-active-space"))
+        XCTAssertFalse(report.contains("resolution=ordering-failed"))
     }
 
     func testPanelFrameSynchronizationAllowsOnePhysicalPixel() {
         let synchronized = panelDiagnostics(
             skyLightCaptureExcluded: nil,
-            cardFrame: CGRect(x: 10, y: 10, width: 181.5, height: 64),
+            panelFrame: CGRect(x: 10, y: 10, width: 181.5, height: 64),
             windowFrame: CGRect(x: 10, y: 10, width: 182, height: 64)
         )
         let desynchronized = panelDiagnostics(
             skyLightCaptureExcluded: nil,
-            cardFrame: CGRect(x: 10, y: 10, width: 181.5, height: 64),
+            panelFrame: CGRect(x: 10, y: 10, width: 181.5, height: 64),
             windowFrame: CGRect(x: 12, y: 10, width: 184, height: 64)
         )
 
@@ -463,30 +636,37 @@ final class NativeFullscreenPlaceholderDiagnosticsTests: XCTestCase {
 
     private func panelDiagnostics(
         skyLightCaptureExcluded: Bool?,
-        cardFrame: CGRect? = nil,
-        windowFrame: CGRect = .zero
+        panelFrame: CGRect? = nil,
+        windowFrame: CGRect = .zero,
+        originalToken: WindowToken = WindowToken(pid: 1, windowId: 2),
+        workspaceId: WorkspaceDescriptor.ID = WorkspaceDescriptor.ID(),
+        descriptorVisible: Bool = false,
+        appliedVisible: Bool = false,
+        windowVisible: Bool = false,
+        onActiveSpace: Bool = false,
+        captureExclusionOutcome: NativeFullscreenCaptureExclusionOutcome? = nil
     ) -> NativeFullscreenPanelDiagnostics {
         NativeFullscreenPanelDiagnostics(
-            originalToken: WindowToken(pid: 1, windowId: 2),
-            currentToken: WindowToken(pid: 1, windowId: 2),
-            workspaceId: WorkspaceDescriptor.ID(),
-            slotFrame: .zero,
-            displayContext: NativeFullscreenCardDisplayContext(workingFrame: .zero, scale: 2),
-            cardFrame: cardFrame,
+            originalToken: originalToken,
+            currentToken: originalToken,
+            workspaceId: workspaceId,
+            slotFrame: panelFrame ?? .zero,
+            displayContext: NativeFullscreenDisplayContext(workingFrame: .zero, scale: 2),
+            panelFrame: panelFrame,
             windowFrame: windowFrame,
-            cardMode: nil,
-            descriptorVisible: false,
-            appliedVisible: false,
-            windowVisible: false,
+            descriptorVisible: descriptorVisible,
+            appliedVisible: appliedVisible,
+            windowVisible: windowVisible,
             windowNumber: 3,
             level: 0,
             orderedIndex: 0,
-            onActiveSpace: false,
+            onActiveSpace: onActiveSpace,
             collectionBehavior: 0,
             registeredWindowNumber: 3,
             registryCaptureEligible: false,
             skyLightCaptureExcluded: skyLightCaptureExcluded,
             excludedWindowNumber: nil,
+            captureExclusionOutcome: captureExclusionOutcome,
             captureRetryIndex: 0,
             captureRetryPending: false,
             captureRetryExhausted: false

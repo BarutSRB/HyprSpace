@@ -1139,7 +1139,7 @@ final class WorkspaceManager {
             upsertNativeFullscreenRecord(record)
         }
 
-        return changed || existing == nil
+        return true
     }
 
     @discardableResult
@@ -1223,7 +1223,7 @@ final class WorkspaceManager {
             upsertNativeFullscreenRecord(record)
         }
 
-        return changed
+        return true
     }
 
     @discardableResult
@@ -2564,6 +2564,7 @@ final class WorkspaceManager {
             return false
         case .enterRequested:
             _ = removeNativeFullscreenRecord(originalToken: originalToken)
+            drainPendingRuntimeMonitorOverrideClears()
             return true
         case .exitRequested:
             record.transition = .suspended

@@ -35,6 +35,54 @@ final class NativeFullscreenSlotProjectionTests: XCTestCase {
         XCTAssertEqual(applied.frame, frame)
         XCTAssertEqual(applied.displayContext, displayContext(for: fixture.monitor))
         XCTAssertTrue(applied.visible)
+        let panel = try XCTUnwrap(
+            fixture.controller.nativeFullscreenPlaceholderManager.diagnosticsSnapshot().first
+        )
+        XCTAssertEqual(panel.slotFrame, frame)
+        XCTAssertEqual(panel.panelFrame, frame)
+        XCTAssertEqual(panel.windowFrame, frame)
+        XCTAssertTrue(panel.frameSynchronized)
+    }
+
+    func testMissingProjectionReasonMatchesHiddenAppliedState() throws {
+        let fixture = try makeFixture()
+
+        fixture.controller.surfaceReconciler.reconcileNow()
+
+        let applied = try XCTUnwrap(fixture.controller.surfaceReconciler.appliedScene.placeholders.first)
+        let resolution = try XCTUnwrap(
+            fixture.controller.surfaceReconciler.nativeFullscreenDiagnosticsSnapshot().resolutions.first
+        )
+        XCTAssertFalse(applied.visible)
+        XCTAssertEqual(resolution.originalToken, fixture.token)
+        XCTAssertEqual(resolution.reason, .projectionMissingHidden)
+    }
+
+    func testHiddenSlotReasonMatchesHiddenAppliedState() throws {
+        let fixture = try makeFixture()
+        fixture.controller.surfaceReconciler.reconcileNow()
+        let frame = CGRect(x: 120, y: 80, width: 640, height: 480)
+
+        fixture.controller.surfaceReconciler.applyAcceptedNativeFullscreenSlots(
+            [
+                fixture.token: NativeFullscreenSlotProjection(
+                    currentToken: fixture.token,
+                    frame: frame,
+                    visible: false
+                )
+            ],
+            workspaceId: fixture.workspaceId,
+            displayId: fixture.monitor.displayId,
+            displayContext: displayContext(for: fixture.monitor)
+        )
+
+        let applied = try XCTUnwrap(fixture.controller.surfaceReconciler.appliedScene.placeholders.first)
+        let resolution = try XCTUnwrap(
+            fixture.controller.surfaceReconciler.nativeFullscreenDiagnosticsSnapshot().resolutions.first
+        )
+        XCTAssertEqual(applied.frame, frame)
+        XCTAssertFalse(applied.visible)
+        XCTAssertEqual(resolution.reason, .slotHidden)
     }
 
     func testProjectionBeforeDescriptorIsAppliedOnFullReconcile() throws {
@@ -100,6 +148,13 @@ final class NativeFullscreenSlotProjectionTests: XCTestCase {
         let applied = try XCTUnwrap(fixture.controller.surfaceReconciler.appliedScene.placeholders.first)
         XCTAssertEqual(applied.frame, frame)
         XCTAssertFalse(applied.visible)
+        let panel = try XCTUnwrap(
+            fixture.controller.nativeFullscreenPlaceholderManager.diagnosticsSnapshot().first
+        )
+        XCTAssertEqual(panel.slotFrame, frame)
+        XCTAssertFalse(panel.descriptorVisible)
+        XCTAssertFalse(panel.appliedVisible)
+        XCTAssertFalse(panel.windowVisible)
     }
 
     func testProjectionBeforeRekeyDescriptorKeepsPanelAndUsesLiveProjection() throws {
@@ -164,6 +219,14 @@ final class NativeFullscreenSlotProjectionTests: XCTestCase {
         XCTAssertEqual(appliedBeforeDescriptor.frame, replacementFrame)
         XCTAssertTrue(appliedBeforeDescriptor.visible)
         XCTAssertEqual(initialPanelIdentity, replacementPanelIdentity)
+        let panelBeforeDescriptor = try XCTUnwrap(
+            fixture.controller.nativeFullscreenPlaceholderManager.diagnosticsSnapshot().first
+        )
+        XCTAssertEqual(panelBeforeDescriptor.originalToken, fixture.token)
+        XCTAssertEqual(panelBeforeDescriptor.currentToken, replacement)
+        XCTAssertEqual(panelBeforeDescriptor.workspaceId, fixture.workspaceId)
+        XCTAssertEqual(panelBeforeDescriptor.slotFrame, replacementFrame)
+        XCTAssertTrue(panelBeforeDescriptor.descriptorVisible)
 
         fixture.controller.surfaceReconciler.reconcileNow()
         let appliedAfterDescriptor = try XCTUnwrap(
@@ -172,6 +235,63 @@ final class NativeFullscreenSlotProjectionTests: XCTestCase {
         XCTAssertEqual(appliedAfterDescriptor.currentToken, replacement)
         XCTAssertEqual(appliedAfterDescriptor.frame, replacementFrame)
         XCTAssertTrue(appliedAfterDescriptor.visible)
+    }
+
+    func testProjectionSynchronizesSelectionChangeBeforeFullReconcile() throws {
+        let fixture = try makeFixture()
+        fixture.controller.surfaceReconciler.reconcileNow()
+        let frame = CGRect(x: 120, y: 80, width: 640, height: 480)
+        let projection = [
+            fixture.token: NativeFullscreenSlotProjection(
+                currentToken: fixture.token,
+                frame: frame,
+                visible: true
+            )
+        ]
+        fixture.controller.surfaceReconciler.applyAcceptedNativeFullscreenSlots(
+            projection,
+            workspaceId: fixture.workspaceId,
+            displayId: fixture.monitor.displayId,
+            displayContext: displayContext(for: fixture.monitor)
+        )
+
+        let initialPanel = try XCTUnwrap(
+            fixture.controller.nativeFullscreenPlaceholderManager.diagnosticsSnapshot().first
+        )
+        let initialWindow = try XCTUnwrap(
+            SurfaceCoordinator.shared.visibleWindows(kind: .nativeFullscreenPlaceholder)
+                .first { $0.windowNumber == initialPanel.windowNumber }
+        )
+        XCTAssertEqual((initialWindow.contentView?.accessibilityValue() as? NSNumber)?.boolValue, false)
+
+        XCTAssertTrue(
+            fixture.controller.workspaceManager.setManagedFocus(
+                fixture.token,
+                in: fixture.workspaceId,
+                onMonitor: fixture.monitor.id
+            )
+        )
+        fixture.controller.surfaceReconciler.applyAcceptedNativeFullscreenSlots(
+            projection,
+            workspaceId: fixture.workspaceId,
+            displayId: fixture.monitor.displayId,
+            displayContext: displayContext(for: fixture.monitor)
+        )
+
+        let applied = try XCTUnwrap(fixture.controller.surfaceReconciler.appliedScene.placeholders.first)
+        let selectedPanel = try XCTUnwrap(
+            fixture.controller.nativeFullscreenPlaceholderManager.diagnosticsSnapshot().first
+        )
+        let selectedWindow = try XCTUnwrap(
+            SurfaceCoordinator.shared.visibleWindows(kind: .nativeFullscreenPlaceholder)
+                .first { $0.windowNumber == selectedPanel.windowNumber }
+        )
+        XCTAssertTrue(applied.selected)
+        XCTAssertEqual(selectedPanel.currentToken, fixture.token)
+        XCTAssertEqual(selectedPanel.workspaceId, fixture.workspaceId)
+        XCTAssertEqual(selectedPanel.slotFrame, frame)
+        XCTAssertTrue(selectedPanel.descriptorVisible)
+        XCTAssertEqual((selectedWindow.contentView?.accessibilityValue() as? NSNumber)?.boolValue, true)
     }
 
     func testRekeyDescriptorBeforeProjectionRetainsPriorGeometryWithoutUsingStaleToken() throws {
@@ -251,7 +371,7 @@ final class NativeFullscreenSlotProjectionTests: XCTestCase {
         let fixture = try makeFixture()
         fixture.controller.surfaceReconciler.reconcileNow()
         let oldFrame = CGRect(x: -300, y: 100, width: 800, height: 400)
-        let oldContext = NativeFullscreenCardDisplayContext(
+        let oldContext = NativeFullscreenDisplayContext(
             workingFrame: CGRect(x: -500, y: 0, width: 1_500, height: 900),
             scale: 1
         )
@@ -269,7 +389,7 @@ final class NativeFullscreenSlotProjectionTests: XCTestCase {
         )
 
         let nextFrame = CGRect(x: -280, y: 120, width: 800, height: 400)
-        let nextContext = NativeFullscreenCardDisplayContext(
+        let nextContext = NativeFullscreenDisplayContext(
             workingFrame: CGRect(x: 0, y: 0, width: 1_000, height: 900),
             scale: 2
         )
@@ -291,11 +411,9 @@ final class NativeFullscreenSlotProjectionTests: XCTestCase {
         let panelFrame = try XCTUnwrap(
             SurfaceCoordinator.shared.visibleSurfaceInfos().first { $0.id == surfaceId }?.frame
         )
-        let visibleFrame = nextFrame.intersection(nextContext.workingFrame)
         XCTAssertEqual(applied.frame, nextFrame)
         XCTAssertEqual(applied.displayContext, nextContext)
-        XCTAssertEqual(panelFrame.midX, visibleFrame.midX, accuracy: 0.5)
-        XCTAssertEqual(panelFrame.midY, visibleFrame.midY, accuracy: 0.5)
+        XCTAssertEqual(panelFrame, nextFrame)
     }
 
     func testProjectionForNonexistentWorkspaceIsDiscarded() throws {
@@ -432,7 +550,7 @@ final class NativeFullscreenSlotProjectionTests: XCTestCase {
         return (controller, workspaceId, monitor, token)
     }
 
-    private func displayContext(for monitor: Monitor) -> NativeFullscreenCardDisplayContext {
-        NativeFullscreenCardDisplayContext(workingFrame: monitor.visibleFrame, scale: 1)
+    private func displayContext(for monitor: Monitor) -> NativeFullscreenDisplayContext {
+        NativeFullscreenDisplayContext(workingFrame: monitor.visibleFrame, scale: 1)
     }
 }

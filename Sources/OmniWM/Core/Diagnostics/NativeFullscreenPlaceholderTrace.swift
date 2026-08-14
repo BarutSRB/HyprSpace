@@ -18,7 +18,6 @@ enum NativeFullscreenPlaceholderTrace {
         case panelDestroyed = "panel_destroyed"
         case panelMoved = "panel_moved"
         case panelResized = "panel_resized"
-        case panelModeChanged = "panel_mode_changed"
         case panelShown = "panel_shown"
         case panelHidden = "panel_hidden"
         case panelOrdered = "panel_ordered"
@@ -49,20 +48,6 @@ enum NativeFullscreenPlaceholderTrace {
         }
     }
 
-    enum Mode: String, Sendable {
-        case regular
-        case compact
-
-        init(_ mode: NativeFullscreenCardMode) {
-            switch mode {
-            case .regular:
-                self = .regular
-            case .compact:
-                self = .compact
-            }
-        }
-    }
-
     enum Reason: String, Sendable {
         case accepted
         case controllerUnavailable = "controller_unavailable"
@@ -89,6 +74,8 @@ enum NativeFullscreenPlaceholderTrace {
         case lockScreen = "lock_screen"
         case placeholderUnavailable = "placeholder_unavailable"
         case captureFailed = "capture_failed"
+        case captureUnverified = "capture_unverified"
+        case captureVerified = "capture_verified"
     }
 
     struct Record: Sendable {
@@ -101,12 +88,11 @@ enum NativeFullscreenPlaceholderTrace {
         let transition: Transition?
         let generation: Int?
         let slotFrame: CGRect?
-        let cardFrame: CGRect?
+        let panelFrame: CGRect?
         let workingFrame: CGRect?
         let scale: CGFloat?
         let visible: Bool?
         let selected: Bool?
-        let mode: Mode?
         let windowNumber: Int?
         let reason: Reason?
         let retryIndex: Int?
@@ -114,8 +100,72 @@ enum NativeFullscreenPlaceholderTrace {
 
     static let shared = SessionTraceRecorder<Record>(
         sectionTitle: "Native Fullscreen Placeholder Trace",
-        capacity: 4096
-    ) { record in
+        capacity: 4096,
+        formatter: format
+    )
+
+    static let motion = SessionTraceRecorder<Record>(
+        sectionTitle: "Native Fullscreen Placeholder Motion Trace",
+        capacity: 2048,
+        formatter: format
+    )
+
+    static var isActive: Bool {
+        shared.isActive || motion.isActive
+    }
+
+    static func record(_ record: @autoclosure () -> Record) {
+        guard isActive else { return }
+        let record = record()
+        switch record.operation {
+        case .panelMoved,
+             .panelResized:
+            motion.record(record)
+        default:
+            shared.record(record)
+        }
+    }
+
+    static func makeRecord(
+        _ operation: Operation,
+        originalToken: WindowToken? = nil,
+        currentToken: WindowToken? = nil,
+        workspaceId: WorkspaceDescriptor.ID? = nil,
+        displayId: CGDirectDisplayID? = nil,
+        transition: Transition? = nil,
+        generation: Int? = nil,
+        slotFrame: CGRect? = nil,
+        panelFrame: CGRect? = nil,
+        workingFrame: CGRect? = nil,
+        scale: CGFloat? = nil,
+        visible: Bool? = nil,
+        selected: Bool? = nil,
+        windowNumber: Int? = nil,
+        reason: Reason? = nil,
+        retryIndex: Int? = nil
+    ) -> Record {
+        Record(
+            mediaTime: CACurrentMediaTime(),
+            operation: operation,
+            originalToken: originalToken,
+            currentToken: currentToken,
+            workspaceId: workspaceId,
+            displayId: displayId,
+            transition: transition,
+            generation: generation,
+            slotFrame: slotFrame,
+            panelFrame: panelFrame,
+            workingFrame: workingFrame,
+            scale: scale,
+            visible: visible,
+            selected: selected,
+            windowNumber: windowNumber,
+            reason: reason,
+            retryIndex: retryIndex
+        )
+    }
+
+    private static func format(_ record: Record) -> String {
         var fields = [
             String(format: "t=%.3f", record.mediaTime),
             "op=\(record.operation.rawValue)"
@@ -141,8 +191,8 @@ enum NativeFullscreenPlaceholderTrace {
         if let slotFrame = record.slotFrame {
             fields.append("slot=\(TraceFormat.rect(slotFrame))")
         }
-        if let cardFrame = record.cardFrame {
-            fields.append("card=\(TraceFormat.rect(cardFrame))")
+        if let panelFrame = record.panelFrame {
+            fields.append("panel=\(TraceFormat.rect(panelFrame))")
         }
         if let workingFrame = record.workingFrame {
             fields.append("working=\(TraceFormat.rect(workingFrame))")
@@ -156,9 +206,6 @@ enum NativeFullscreenPlaceholderTrace {
         if let selected = record.selected {
             fields.append("selected=\(selected)")
         }
-        if let mode = record.mode {
-            fields.append("mode=\(mode.rawValue)")
-        }
         if let windowNumber = record.windowNumber {
             fields.append("window=\(windowNumber)")
         }
@@ -169,55 +216,5 @@ enum NativeFullscreenPlaceholderTrace {
             fields.append("retry=\(retryIndex)")
         }
         return fields.joined(separator: " ")
-    }
-
-    static var isActive: Bool {
-        shared.isActive
-    }
-
-    static func record(_ record: @autoclosure () -> Record) {
-        guard shared.isActive else { return }
-        shared.record(record())
-    }
-
-    static func makeRecord(
-        _ operation: Operation,
-        originalToken: WindowToken? = nil,
-        currentToken: WindowToken? = nil,
-        workspaceId: WorkspaceDescriptor.ID? = nil,
-        displayId: CGDirectDisplayID? = nil,
-        transition: Transition? = nil,
-        generation: Int? = nil,
-        slotFrame: CGRect? = nil,
-        cardFrame: CGRect? = nil,
-        workingFrame: CGRect? = nil,
-        scale: CGFloat? = nil,
-        visible: Bool? = nil,
-        selected: Bool? = nil,
-        mode: Mode? = nil,
-        windowNumber: Int? = nil,
-        reason: Reason? = nil,
-        retryIndex: Int? = nil
-    ) -> Record {
-        Record(
-            mediaTime: CACurrentMediaTime(),
-            operation: operation,
-            originalToken: originalToken,
-            currentToken: currentToken,
-            workspaceId: workspaceId,
-            displayId: displayId,
-            transition: transition,
-            generation: generation,
-            slotFrame: slotFrame,
-            cardFrame: cardFrame,
-            workingFrame: workingFrame,
-            scale: scale,
-            visible: visible,
-            selected: selected,
-            mode: mode,
-            windowNumber: windowNumber,
-            reason: reason,
-            retryIndex: retryIndex
-        )
     }
 }

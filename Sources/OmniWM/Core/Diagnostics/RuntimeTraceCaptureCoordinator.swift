@@ -282,6 +282,7 @@ final class RuntimeTraceCaptureCoordinator {
         recorders: [any RuntimeTraceRecording] = [
             AppVisibilityTrace.shared,
             NativeFullscreenPlaceholderTrace.shared,
+            NativeFullscreenPlaceholderTrace.motion,
             WindowAdmissionTrace.shared,
             RawAXNotificationTrace.shared,
             FrameApplyTrace.shared,

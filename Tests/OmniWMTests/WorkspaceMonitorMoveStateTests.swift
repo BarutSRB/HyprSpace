@@ -682,6 +682,47 @@ final class WorkspaceMonitorMoveStateTests: XCTestCase {
         XCTAssertNil(manager.nonManagedFocusToken)
     }
 
+    func testNativeFullscreenEnterExpiryDrainsDeferredRuntimeMonitorOverrideClear() throws {
+        let fixture = makeFixture(assignments: [("1", 0), ("2", 1), ("3", 2)])
+        let manager = fixture.manager
+        let workspaceId = try XCTUnwrap(manager.workspaceId(named: "1"))
+        let token = addWindow(
+            pid: 971_009,
+            windowId: 971_109,
+            workspaceId: workspaceId,
+            manager: manager
+        )
+        _ = manager.setInteractionMonitor(fixture.right.id)
+        XCTAssertEqual(
+            manager.moveWorkspaceToMonitor(
+                workspaceId,
+                to: fixture.center.id,
+                force: true
+            ).status,
+            .executed
+        )
+        XCTAssertTrue(manager.requestNativeFullscreenEnter(token, in: workspaceId))
+        let generation = try XCTUnwrap(manager.nativeFullscreenRecord(for: token)?.transitionGeneration)
+        var outcomes: [WorkspaceMonitorMoveOutcome] = []
+        manager.onDeferredWorkspaceMonitorMove = { outcomes.append($0) }
+
+        manager.applySettings()
+
+        XCTAssertNotNil(manager.descriptor(for: workspaceId)?.runtimeMonitorOverride)
+        XCTAssertTrue(manager.pendingRuntimeMonitorOverrideClearWorkspaceIds.contains(workspaceId))
+        XCTAssertTrue(outcomes.isEmpty)
+
+        XCTAssertTrue(manager.expireNativeFullscreenTransition(originalToken: token, generation: generation))
+
+        XCTAssertNil(manager.nativeFullscreenRecord(for: token))
+        XCTAssertNil(manager.descriptor(for: workspaceId)?.runtimeMonitorOverride)
+        XCTAssertEqual(manager.monitorForWorkspace(workspaceId)?.id, fixture.left.id)
+        XCTAssertTrue(manager.pendingRuntimeMonitorOverrideClearWorkspaceIds.isEmpty)
+        XCTAssertEqual(outcomes.count, 1)
+        XCTAssertEqual(outcomes[0].status, .executed)
+        XCTAssertTrue(outcomes[0].affectedWorkspaces.contains(workspaceId))
+    }
+
     func testNativeFullscreenTransitionExpiryRespectsGeneration() throws {
         let fixture = makeFixture(assignments: [("1", 0)])
         let manager = fixture.manager

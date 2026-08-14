@@ -178,8 +178,13 @@ enum SurfaceDerivation {
 
 private struct AcceptedNativeFullscreenSlotProjection {
     let displayId: CGDirectDisplayID
-    let displayContext: NativeFullscreenCardDisplayContext
+    let displayContext: NativeFullscreenDisplayContext
     let slots: [WindowToken: NativeFullscreenSlotProjection]
+}
+
+private struct NativeFullscreenPlaceholderResolution {
+    let update: NativeFullscreenPlaceholderUpdate
+    let reason: NativeFullscreenPlaceholderTrace.Reason
 }
 
 @MainActor
@@ -250,11 +255,11 @@ final class SurfaceReconciler {
                 return NativeFullscreenSurfaceResolutionDiagnostics(
                     originalToken: descriptor.originalToken,
                     reason: controller.map {
-                        nativeFullscreenResolutionReason(
+                        resolvedNativeFullscreenPlaceholder(
                             descriptor,
                             previous: previous,
                             controller: $0
-                        )
+                        ).reason
                     } ?? .controllerUnavailable
                 )
             },
@@ -305,7 +310,7 @@ final class SurfaceReconciler {
         _ slots: [WindowToken: NativeFullscreenSlotProjection],
         workspaceId: WorkspaceDescriptor.ID,
         displayId: CGDirectDisplayID,
-        displayContext: NativeFullscreenCardDisplayContext
+        displayContext: NativeFullscreenDisplayContext
     ) {
         guard let controller else { return }
         guard controller.hasStartedServices else {
@@ -364,26 +369,28 @@ final class SurfaceReconciler {
                   let descriptor = nativeFullscreenDescriptorsByOriginalToken[previous.originalToken]
             else { continue }
 
-            let next = resolvedNativeFullscreenPlaceholder(
+            let resolution = resolvedNativeFullscreenPlaceholder(
                 descriptor,
                 previous: previous,
                 controller: controller
             )
+            let next = resolution.update
             guard next != previous else { continue }
 
             appliedScene.placeholders[index] = next
             traceSurfaceAppliedIfSignificant(
                 next,
                 previous: previous,
-                descriptor: descriptor,
-                controller: controller
+                reason: resolution.reason
             )
-            if previous.visible,
-               next.visible,
-               (previous.frame != next.frame || previous.displayContext != next.displayContext)
+            if previous.originalToken == next.originalToken,
+               previous.currentToken == next.currentToken,
+               previous.workspaceId == next.workspaceId,
+               previous.selected == next.selected,
+               previous.visible == next.visible
             {
                 controller.nativeFullscreenPlaceholderManager.moveForAnimation(next)
-            } else if previous.visible != next.visible {
+            } else {
                 needsManagerApply = true
             }
         }
@@ -448,17 +455,17 @@ final class SurfaceReconciler {
             let previous = appliedScene.placeholders.first {
                 $0.originalToken == descriptor.originalToken
             }
-            let resolved = resolvedNativeFullscreenPlaceholder(
+            let resolution = resolvedNativeFullscreenPlaceholder(
                 descriptor,
                 previous: previous,
                 controller: controller
             )
+            let resolved = resolution.update
             if resolved != previous {
                 traceSurfaceAppliedIfSignificant(
                     resolved,
                     previous: previous,
-                    descriptor: descriptor,
-                    controller: controller
+                    reason: resolution.reason
                 )
             }
             return resolved
@@ -510,31 +517,54 @@ final class SurfaceReconciler {
         _ descriptor: NativeFullscreenPlaceholderUpdate,
         previous: NativeFullscreenPlaceholderUpdate?,
         controller: WMController
-    ) -> NativeFullscreenPlaceholderUpdate {
+    ) -> NativeFullscreenPlaceholderResolution {
         let workspaceManager = controller.workspaceManager
-        guard let record = workspaceManager.nativeFullscreenRecord(originalToken: descriptor.originalToken),
-              record.originalToken == descriptor.originalToken,
-              record.workspaceId == descriptor.workspaceId
-        else {
-            return hiddenNativeFullscreenPlaceholder(
-                descriptor,
-                currentToken: descriptor.currentToken,
-                selected: descriptor.selected,
-                previous: previous
+        guard let record = workspaceManager.nativeFullscreenRecord(originalToken: descriptor.originalToken) else {
+            return NativeFullscreenPlaceholderResolution(
+                update: hiddenNativeFullscreenPlaceholder(
+                    descriptor,
+                    currentToken: descriptor.currentToken,
+                    selected: descriptor.selected,
+                    previous: previous
+                ),
+                reason: .recordMissing
+            )
+        }
+        guard record.workspaceId == descriptor.workspaceId else {
+            return NativeFullscreenPlaceholderResolution(
+                update: hiddenNativeFullscreenPlaceholder(
+                    descriptor,
+                    currentToken: record.currentToken,
+                    selected: descriptor.selected,
+                    previous: previous
+                ),
+                reason: .recordWorkspaceMismatch
             )
         }
 
         let currentToken = record.currentToken
         let selected = workspaceManager.focusedToken == currentToken
             || workspaceManager.pendingFocusedToken == currentToken
-        guard record.transition == .suspended,
-              workspaceManager.layoutReason(for: currentToken) == .nativeFullscreen
-        else {
-            return hiddenNativeFullscreenPlaceholder(
-                descriptor,
-                currentToken: currentToken,
-                selected: selected,
-                previous: previous
+        guard record.transition == .suspended else {
+            return NativeFullscreenPlaceholderResolution(
+                update: hiddenNativeFullscreenPlaceholder(
+                    descriptor,
+                    currentToken: currentToken,
+                    selected: selected,
+                    previous: previous
+                ),
+                reason: .transitionPending
+            )
+        }
+        guard workspaceManager.layoutReason(for: currentToken) == .nativeFullscreen else {
+            return NativeFullscreenPlaceholderResolution(
+                update: hiddenNativeFullscreenPlaceholder(
+                    descriptor,
+                    currentToken: currentToken,
+                    selected: selected,
+                    previous: previous
+                ),
+                reason: .layoutNotNativeFullscreen
             )
         }
         let descriptorIsCurrent = descriptor.currentToken == currentToken
@@ -545,55 +575,73 @@ final class SurfaceReconciler {
         }
 
         guard lifecycleVisible else {
-            return hiddenNativeFullscreenPlaceholder(
-                descriptor,
-                currentToken: currentToken,
-                selected: selected,
-                previous: previous
+            return NativeFullscreenPlaceholderResolution(
+                update: hiddenNativeFullscreenPlaceholder(
+                    descriptor,
+                    currentToken: currentToken,
+                    selected: selected,
+                    previous: previous
+                ),
+                reason: descriptorIsCurrent ? .descriptorHidden : .descriptorStale
             )
         }
 
         guard let projection = nativeFullscreenSlotsByWorkspace[descriptor.workspaceId] else {
-            return retainedNativeFullscreenPlaceholder(
-                descriptor,
-                currentToken: currentToken,
-                selected: selected,
-                previous: previous
+            return NativeFullscreenPlaceholderResolution(
+                update: retainedNativeFullscreenPlaceholder(
+                    descriptor,
+                    currentToken: currentToken,
+                    selected: selected,
+                    previous: previous
+                ),
+                reason: previous?.visible == true ? .projectionMissingRetained : .projectionMissingHidden
             )
         }
         guard workspaceManager.monitor(for: descriptor.workspaceId)?.displayId == projection.displayId else {
-            return hiddenNativeFullscreenPlaceholder(
-                descriptor,
-                currentToken: currentToken,
-                selected: selected,
-                previous: previous
+            return NativeFullscreenPlaceholderResolution(
+                update: hiddenNativeFullscreenPlaceholder(
+                    descriptor,
+                    currentToken: currentToken,
+                    selected: selected,
+                    previous: previous
+                ),
+                reason: .displayMismatch
             )
         }
         guard let slot = projection.slots[descriptor.originalToken] else {
-            return hiddenNativeFullscreenPlaceholder(
-                descriptor,
-                currentToken: currentToken,
-                selected: selected,
-                previous: previous
+            return NativeFullscreenPlaceholderResolution(
+                update: hiddenNativeFullscreenPlaceholder(
+                    descriptor,
+                    currentToken: currentToken,
+                    selected: selected,
+                    previous: previous
+                ),
+                reason: .slotMissing
             )
         }
         guard slot.currentToken == currentToken else {
-            return retainedNativeFullscreenPlaceholder(
-                descriptor,
-                currentToken: currentToken,
-                selected: selected,
-                previous: previous
+            return NativeFullscreenPlaceholderResolution(
+                update: retainedNativeFullscreenPlaceholder(
+                    descriptor,
+                    currentToken: currentToken,
+                    selected: selected,
+                    previous: previous
+                ),
+                reason: previous?.visible == true ? .slotTokenMismatchRetained : .slotTokenMismatchHidden
             )
         }
 
-        return NativeFullscreenPlaceholderUpdate(
-            originalToken: descriptor.originalToken,
-            currentToken: currentToken,
-            workspaceId: descriptor.workspaceId,
-            frame: slot.frame,
-            displayContext: projection.displayContext,
-            selected: selected,
-            visible: slot.visible
+        return NativeFullscreenPlaceholderResolution(
+            update: NativeFullscreenPlaceholderUpdate(
+                originalToken: descriptor.originalToken,
+                currentToken: currentToken,
+                workspaceId: descriptor.workspaceId,
+                frame: slot.frame,
+                displayContext: projection.displayContext,
+                selected: selected,
+                visible: slot.visible
+            ),
+            reason: slot.visible ? .accepted : .slotHidden
         )
     }
 
@@ -645,7 +693,7 @@ final class SurfaceReconciler {
         isActive: Bool,
         workspaceId: WorkspaceDescriptor.ID,
         displayId: CGDirectDisplayID,
-        displayContext: NativeFullscreenCardDisplayContext
+        displayContext: NativeFullscreenDisplayContext
     ) {
         guard isActive else { return }
         if let previous,
@@ -694,7 +742,7 @@ final class SurfaceReconciler {
         _ slots: [WindowToken: NativeFullscreenSlotProjection],
         workspaceId: WorkspaceDescriptor.ID,
         displayId: CGDirectDisplayID,
-        displayContext: NativeFullscreenCardDisplayContext,
+        displayContext: NativeFullscreenDisplayContext,
         reason: NativeFullscreenPlaceholderTrace.Reason
     ) {
         guard NativeFullscreenPlaceholderTrace.isActive else { return }
@@ -732,8 +780,7 @@ final class SurfaceReconciler {
     private func traceSurfaceAppliedIfSignificant(
         _ applied: NativeFullscreenPlaceholderUpdate,
         previous: NativeFullscreenPlaceholderUpdate?,
-        descriptor: NativeFullscreenPlaceholderUpdate,
-        controller: WMController
+        reason: NativeFullscreenPlaceholderTrace.Reason
     ) {
         guard NativeFullscreenPlaceholderTrace.isActive else { return }
         if let previous,
@@ -753,45 +800,8 @@ final class SurfaceReconciler {
                 slotFrame: applied.frame,
                 visible: applied.visible,
                 selected: applied.selected,
-                reason: nativeFullscreenResolutionReason(
-                    descriptor,
-                    previous: previous,
-                    controller: controller
-                )
+                reason: reason
             )
         )
-    }
-
-    private func nativeFullscreenResolutionReason(
-        _ descriptor: NativeFullscreenPlaceholderUpdate,
-        previous: NativeFullscreenPlaceholderUpdate?,
-        controller: WMController
-    ) -> NativeFullscreenPlaceholderTrace.Reason {
-        let workspaceManager = controller.workspaceManager
-        guard let record = workspaceManager.nativeFullscreenRecord(originalToken: descriptor.originalToken) else {
-            return .recordMissing
-        }
-        guard record.workspaceId == descriptor.workspaceId else { return .recordWorkspaceMismatch }
-        let currentToken = record.currentToken
-        guard record.transition == .suspended else { return .transitionPending }
-        guard workspaceManager.layoutReason(for: currentToken) == .nativeFullscreen else {
-            return .layoutNotNativeFullscreen
-        }
-        let descriptorIsCurrent = descriptor.currentToken == currentToken
-        let lifecycleVisible = descriptorIsCurrent ? descriptor.visible : previous?.visible == true
-        guard lifecycleVisible else {
-            return descriptorIsCurrent ? .descriptorHidden : .descriptorStale
-        }
-        guard let projection = nativeFullscreenSlotsByWorkspace[descriptor.workspaceId] else {
-            return previous?.visible == true ? .projectionMissingRetained : .projectionMissingHidden
-        }
-        guard workspaceManager.monitor(for: descriptor.workspaceId)?.displayId == projection.displayId else {
-            return .displayMismatch
-        }
-        guard let slot = projection.slots[descriptor.originalToken] else { return .slotMissing }
-        guard slot.currentToken == currentToken else {
-            return previous?.visible == true ? .slotTokenMismatchRetained : .slotTokenMismatchHidden
-        }
-        return slot.visible ? .accepted : .slotHidden
     }
 }
