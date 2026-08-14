@@ -17,7 +17,6 @@ final class LaunchOverlayController {
             return
         }
 
-        let startTime = CACurrentMediaTime()
         for (index, screen) in screens.enumerated() {
             let panel = LaunchOverlayPanel(screen: screen)
             OwnedWindowRegistry.shared.register(
@@ -31,8 +30,11 @@ final class LaunchOverlayController {
                 )
             )
             panel.orderFrontRegardless()
-            panel.startAnimation(at: startTime)
             panels.append(panel)
+        }
+        let startTime = CACurrentMediaTime()
+        for panel in panels {
+            panel.startAnimation(at: startTime)
         }
 
         Task { @MainActor [weak self] in
