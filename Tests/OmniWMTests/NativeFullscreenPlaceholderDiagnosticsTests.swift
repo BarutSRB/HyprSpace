@@ -214,12 +214,17 @@ final class NativeFullscreenPlaceholderDiagnosticsTests: XCTestCase {
                     && $0.element.contains("workspace=\(workspaceId.uuidString)")
             }
         )
-        XCTAssertTrue(
-            captureLines.filter { $0.element.contains("op=capture_excluded") }.allSatisfy {
-                $0.element.contains("reason=capture_verified")
-                    || $0.element.contains("reason=capture_unverified")
-            }
-        )
+        let exclusionLines = captureLines.filter { $0.element.contains("op=capture_excluded") }
+        if exclusionLines.isEmpty {
+            XCTAssertTrue(captureLines.contains { $0.element.contains("op=capture_retry_scheduled") })
+        } else {
+            XCTAssertTrue(
+                exclusionLines.allSatisfy {
+                    $0.element.contains("reason=capture_verified")
+                        || $0.element.contains("reason=capture_unverified")
+                }
+            )
+        }
         XCTAssertTrue(lifecycleDump.contains("op=panel_created original=982001:982101"))
         XCTAssertTrue(lifecycleDump.contains("op=panel_hidden"))
         XCTAssertTrue(motionDump.contains("op=panel_moved"))

@@ -540,8 +540,8 @@ private final class NativeFullscreenPlaceholderView: NSView {
     private static let title = "In macOS Full Screen"
     private static let subtitle = "Move or resize this slot; the window will return here."
     private static let activationModifiers: NSEvent.ModifierFlags = [.command, .control, .option, .shift, .function]
-    private static let titleFont = CTFontCreateWithName("SF Pro Text" as CFString, 17, nil)
-    private static let subtitleFont = CTFontCreateWithName("SF Pro Text" as CFString, 12, nil)
+    private static let titleFont = NSFont.systemFont(ofSize: 17, weight: .semibold) as CTFont
+    private static let subtitleFont = NSFont.systemFont(ofSize: 12) as CTFont
 
     private let appName: String
     private let icon: CGImage?
@@ -813,7 +813,7 @@ private final class NativeFullscreenPlaceholderView: NSView {
         effectiveAppearance.performAsCurrentDrawingAppearance {
             resolved = color.withAlphaComponent(alpha).cgColor
         }
-        return resolved.unsafelyUnwrapped
+        return resolved ?? color.withAlphaComponent(alpha).cgColor
     }
 
     private static func attributedLine(

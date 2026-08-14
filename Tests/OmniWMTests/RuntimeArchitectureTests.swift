@@ -2713,7 +2713,7 @@ final class RuntimeArchitectureTests: XCTestCase {
         )
         let engine = try XCTUnwrap(controller.niriEngine)
         XCTAssertNil(engine.findNode(for: firstToken, in: workspaceId))
-        XCTAssertFalse(controller.shouldSuppressManagedFocusRecovery(in: workspaceId))
+        XCTAssertFalse(controller.shouldSuppressManagedFocusRecovery)
         controller.layoutRefreshController.resetState()
         controller.layoutRefreshController.layoutState.hasCompletedInitialRefresh = true
 

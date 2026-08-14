@@ -3074,7 +3074,7 @@ final class WMController {
         in workspaceId: WorkspaceDescriptor.ID,
         preferredRecoveryToken: WindowToken? = nil
     ) {
-        guard !shouldSuppressManagedFocusRecovery(in: workspaceId) else { return }
+        guard !shouldSuppressManagedFocusRecovery else { return }
         guard !workspaceManager.hasPendingNativeFullscreenTransition(in: workspaceId) else { return }
 
         if let pendingFocusedToken = workspaceManager.pendingFocusedToken,
@@ -3199,7 +3199,7 @@ extension WMController {
         ownedWindowRegistry.contains(windowNumber: windowNumber)
     }
 
-    func shouldSuppressManagedFocusRecovery(in _: WorkspaceDescriptor.ID) -> Bool {
+    var shouldSuppressManagedFocusRecovery: Bool {
         guard workspaceManager.isNonManagedFocusActive else { return false }
         return hasFrontmostOwnedWindow || workspaceManager.nonManagedFocusToken != nil
     }

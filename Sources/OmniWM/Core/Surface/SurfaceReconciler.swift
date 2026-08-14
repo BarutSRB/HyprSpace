@@ -345,6 +345,10 @@ final class SurfaceReconciler {
             )
             return
         }
+        if slots.isEmpty, !controller.workspaceManager.hasNativeFullscreenLifecycleContext {
+            nativeFullscreenSlotsByWorkspace.removeValue(forKey: workspaceId)
+            return
+        }
 
         let traceIsActive = NativeFullscreenPlaceholderTrace.isActive
         let previousProjection = traceIsActive ? nativeFullscreenSlotsByWorkspace[workspaceId] : nil

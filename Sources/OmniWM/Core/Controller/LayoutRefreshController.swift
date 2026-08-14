@@ -835,7 +835,7 @@ import QuartzCore
                 startDwindleAnimation(for: workspaceId, monitor: monitor)
             case let .activateWindow(token):
                 guard !suppressWindowActivation,
-                      !controller.shouldSuppressManagedFocusRecovery(in: workspaceId),
+                      !controller.shouldSuppressManagedFocusRecovery,
                       !controller.workspaceManager.hasPendingNativeFullscreenTransition(in: workspaceId),
                       focusSeqAccepted
                 else { continue }
@@ -1356,7 +1356,7 @@ import QuartzCore
         if recoverFocus,
            let focusedWorkspaceId = controller.activeWorkspace()?.id,
            !controller.workspaceManager.hasPendingNativeFullscreenTransition(in: focusedWorkspaceId),
-           !controller.shouldSuppressManagedFocusRecovery(in: focusedWorkspaceId),
+           !controller.shouldSuppressManagedFocusRecovery,
            layoutWorkspaceIds.contains(focusedWorkspaceId)
         {
             effects.focusValidationWorkspaceIds = [focusedWorkspaceId]
@@ -1415,7 +1415,7 @@ import QuartzCore
             .intersection(activeWorkspaceIds)
             .filter {
                 !controller.workspaceManager.hasPendingNativeFullscreenTransition(in: $0)
-                    && !controller.shouldSuppressManagedFocusRecovery(in: $0)
+                    && !controller.shouldSuppressManagedFocusRecovery
             }
             .sorted { $0.uuidString < $1.uuidString }
 
@@ -2059,7 +2059,7 @@ import QuartzCore
 
         if let focusValidationWorkspaceId,
            !controller.workspaceManager.hasPendingNativeFullscreenTransition(in: focusValidationWorkspaceId),
-           !controller.shouldSuppressManagedFocusRecovery(in: focusValidationWorkspaceId)
+           !controller.shouldSuppressManagedFocusRecovery
         {
             effects.focusValidationWorkspaceIds = [focusValidationWorkspaceId]
         }

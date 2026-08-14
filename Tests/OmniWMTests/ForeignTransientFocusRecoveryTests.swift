@@ -134,7 +134,7 @@ final class ForeignTransientFocusRecoveryTests: XCTestCase {
         XCTAssertNil(fixture.controller.workspaceManager.pendingFocusedToken)
     }
 
-    func testNativeFullscreenOwnerSuppressesAutomaticRecoveryGlobally() throws {
+    func testNativeFullscreenOwnerSuppressesAutomaticRecovery() throws {
         let fixture = try makeFixture(prefix: "OmniWMFullscreenOwnerRecoveryScopeTests")
         let ownerWorkspaceId = try XCTUnwrap(
             fixture.controller.workspaceManager.workspaceId(for: "2", createIfMissing: true)
@@ -153,8 +153,7 @@ final class ForeignTransientFocusRecoveryTests: XCTestCase {
             fixture.controller.workspaceManager.activeNativeFullscreenFocusOwnerToken,
             ownerToken
         )
-        XCTAssertTrue(fixture.controller.shouldSuppressManagedFocusRecovery(in: ownerWorkspaceId))
-        XCTAssertTrue(fixture.controller.shouldSuppressManagedFocusRecovery(in: fixture.workspaceId))
+        XCTAssertTrue(fixture.controller.shouldSuppressManagedFocusRecovery)
     }
 
     func testUnrelatedNativeFullscreenTransitionDoesNotSuppressManagedBorder() throws {
