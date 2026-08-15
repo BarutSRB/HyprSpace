@@ -216,8 +216,9 @@ final class GhosttySurfaceView: NSView, @preconcurrency NSTextInputClient {
         fatalError("init(coder:) is not supported")
     }
 
-    deinit {
+    isolated deinit {
         NotificationCenter.default.removeObserver(self)
+        releaseSurface()
     }
 
     override func makeBackingLayer() -> CALayer {
@@ -789,11 +790,11 @@ final class GhosttySurfaceView: NSView, @preconcurrency NSTextInputClient {
     private func sendSurfaceText(_ text: String) {
         guard let surface = ghosttySurface else { return }
 
-        let length = text.utf8CString.count
-        guard length > 1 else { return }
+        let length = text.utf8.count
+        guard length > 0 else { return }
 
         text.withCString { ptr in
-            ghostty_surface_text(surface, ptr, UInt(length - 1))
+            ghostty_surface_text(surface, ptr, UInt(length))
         }
     }
 
@@ -802,11 +803,11 @@ final class GhosttySurfaceView: NSView, @preconcurrency NSTextInputClient {
             let text = markedText.string
 
             guard let surface = ghosttySurface else { return }
-            let length = text.utf8CString.count
-            guard length > 1 else { return }
+            let length = text.utf8.count
+            guard length > 0 else { return }
 
             text.withCString { ptr in
-                ghostty_surface_preedit(surface, ptr, UInt(length - 1))
+                ghostty_surface_preedit(surface, ptr, UInt(length))
             }
         } else if clearIfNeeded {
             guard let surface = ghosttySurface else { return }
@@ -816,11 +817,11 @@ final class GhosttySurfaceView: NSView, @preconcurrency NSTextInputClient {
 
     private func performBindingAction(_ action: String) {
         guard let surface = ghosttySurface else { return }
-        let length = action.utf8CString.count
-        guard length > 1 else { return }
+        let length = action.utf8.count
+        guard length > 0 else { return }
 
         action.withCString { ptr in
-            _ = ghostty_surface_binding_action(surface, ptr, UInt(length - 1))
+            _ = ghostty_surface_binding_action(surface, ptr, UInt(length))
         }
     }
 }

@@ -878,14 +878,17 @@ final class DwindleLayoutEngine {
     func calculateLayout(
         for workspaceId: WorkspaceDescriptor.ID,
         screen: CGRect,
-        fullscreenScreen: CGRect? = nil
+        fullscreenScreen: CGRect? = nil,
+        calculationSettings: DwindleSettings? = nil
     ) -> [WindowToken: CGRect] {
         guard let state = states[workspaceId] else { return [:] }
+        let calculationSettings = calculationSettings ?? settings
         let excludedTokens = state.excludedTokens
         prepareProjectedLayoutFacts(
             for: state.root,
             boundaryEdges: .all,
-            excludedTokens: excludedTokens
+            excludedTokens: excludedTokens,
+            innerGap: calculationSettings.innerGap
         )
         guard state.root.projectedVisibleLeafCount > 0 else { return [:] }
 
@@ -905,7 +908,8 @@ final class DwindleLayoutEngine {
                     rect = singleWindowRect(
                         screen: tilingArea,
                         fullscreenScreen: fullscreenArea,
-                        minSize: minimumSize(for: tile, excluding: excludedTokens)
+                        minSize: minimumSize(for: tile, excluding: excludedTokens),
+                        settings: calculationSettings
                     )
                 }
                 leaf.cachedFrame = rect
@@ -926,6 +930,7 @@ final class DwindleLayoutEngine {
                 fullscreenArea: fullscreenArea,
                 boundaryEdges: .all,
                 excludedTokens: excludedTokens,
+                settings: calculationSettings,
                 output: &output
             )
         }
@@ -1059,6 +1064,7 @@ final class DwindleLayoutEngine {
         fullscreenArea: CGRect,
         boundaryEdges: ResizeEdge,
         excludedTokens: Set<WindowToken>,
+        settings: DwindleSettings,
         output: inout [WindowToken: CGRect]
     ) {
         switch node.kind {
@@ -1107,6 +1113,7 @@ final class DwindleLayoutEngine {
                         fullscreenArea: fullscreenArea,
                         boundaryEdges: boundaryEdges,
                         excludedTokens: excludedTokens,
+                        settings: settings,
                         output: &output
                     )
                 }
@@ -1123,7 +1130,8 @@ final class DwindleLayoutEngine {
                 orientation: orientation,
                 ratio: ratio,
                 firstMinSize: firstMin,
-                secondMinSize: secondMin
+                secondMinSize: secondMin,
+                settings: settings
             )
 
             calculateLayoutRecursive(
@@ -1133,6 +1141,7 @@ final class DwindleLayoutEngine {
                 fullscreenArea: fullscreenArea,
                 boundaryEdges: childEdges.first,
                 excludedTokens: excludedTokens,
+                settings: settings,
                 output: &output
             )
             calculateLayoutRecursive(
@@ -1142,6 +1151,7 @@ final class DwindleLayoutEngine {
                 fullscreenArea: fullscreenArea,
                 boundaryEdges: childEdges.second,
                 excludedTokens: excludedTokens,
+                settings: settings,
                 output: &output
             )
         }
@@ -1243,13 +1253,15 @@ final class DwindleLayoutEngine {
     private func prepareProjectedLayoutFacts(
         for node: DwindleNode,
         boundaryEdges: ResizeEdge,
-        excludedTokens: Set<WindowToken>
+        excludedTokens: Set<WindowToken>,
+        innerGap: CGFloat
     ) {
         prepareProjectedVisibilityFacts(for: node, excludedTokens: excludedTokens)
         prepareProjectedMinSizeFacts(
             for: node,
             boundaryEdges: boundaryEdges,
-            excludedTokens: excludedTokens
+            excludedTokens: excludedTokens,
+            innerGap: innerGap
         )
     }
 
@@ -1275,7 +1287,8 @@ final class DwindleLayoutEngine {
     private func prepareProjectedMinSizeFacts(
         for node: DwindleNode,
         boundaryEdges: ResizeEdge,
-        excludedTokens: Set<WindowToken>
+        excludedTokens: Set<WindowToken>,
+        innerGap: CGFloat
     ) -> CGSize {
         guard node.projectedVisibleLeafCount > 0 else {
             node.projectedMinSize = CGSize(width: 1, height: 1)
@@ -1288,7 +1301,7 @@ final class DwindleLayoutEngine {
                 for: tile,
                 boundaryEdges: boundaryEdges,
                 excludedTokens: excludedTokens,
-                innerGap: settings.innerGap
+                innerGap: innerGap
             )
             return node.projectedMinSize
 
@@ -1297,7 +1310,8 @@ final class DwindleLayoutEngine {
                 for: node,
                 orientation: orientation,
                 boundaryEdges: boundaryEdges,
-                excludedTokens: excludedTokens
+                excludedTokens: excludedTokens,
+                innerGap: innerGap
             )
             return node.projectedMinSize
         }
@@ -1307,7 +1321,8 @@ final class DwindleLayoutEngine {
         for node: DwindleNode,
         orientation: DwindleOrientation,
         boundaryEdges: ResizeEdge,
-        excludedTokens: Set<WindowToken>
+        excludedTokens: Set<WindowToken>,
+        innerGap: CGFloat
     ) -> CGSize {
         guard let first = node.firstChild(), let second = node.secondChild() else {
             return CGSize(width: 1, height: 1)
@@ -1316,14 +1331,16 @@ final class DwindleLayoutEngine {
             return prepareProjectedMinSizeFacts(
                 for: second,
                 boundaryEdges: boundaryEdges,
-                excludedTokens: excludedTokens
+                excludedTokens: excludedTokens,
+                innerGap: innerGap
             )
         }
         if second.projectedVisibleLeafCount == 0 {
             return prepareProjectedMinSizeFacts(
                 for: first,
                 boundaryEdges: boundaryEdges,
-                excludedTokens: excludedTokens
+                excludedTokens: excludedTokens,
+                innerGap: innerGap
             )
         }
 
@@ -1331,12 +1348,14 @@ final class DwindleLayoutEngine {
         let firstMin = prepareProjectedMinSizeFacts(
             for: first,
             boundaryEdges: childEdges.first,
-            excludedTokens: excludedTokens
+            excludedTokens: excludedTokens,
+            innerGap: innerGap
         )
         let secondMin = prepareProjectedMinSizeFacts(
             for: second,
             boundaryEdges: childEdges.second,
-            excludedTokens: excludedTokens
+            excludedTokens: excludedTokens,
+            innerGap: innerGap
         )
         switch orientation {
         case .horizontal:
@@ -1565,6 +1584,24 @@ final class DwindleLayoutEngine {
         firstMinSize: CGSize,
         secondMinSize: CGSize
     ) -> (CGRect, CGRect) {
+        splitRect(
+            rect,
+            orientation: orientation,
+            ratio: ratio,
+            firstMinSize: firstMinSize,
+            secondMinSize: secondMinSize,
+            settings: settings
+        )
+    }
+
+    private func splitRect(
+        _ rect: CGRect,
+        orientation: DwindleOrientation,
+        ratio: CGFloat,
+        firstMinSize: CGSize,
+        secondMinSize: CGSize,
+        settings: DwindleSettings
+    ) -> (CGRect, CGRect) {
         var fraction = settings.ratioToFraction(ratio)
 
         switch orientation {
@@ -1602,7 +1639,12 @@ final class DwindleLayoutEngine {
         }
     }
 
-    private func singleWindowRect(screen: CGRect, fullscreenScreen: CGRect, minSize: CGSize) -> CGRect {
+    private func singleWindowRect(
+        screen: CGRect,
+        fullscreenScreen: CGRect,
+        minSize: CGSize,
+        settings: DwindleSettings
+    ) -> CGRect {
         let baseFrame = settings.singleWindowFit.usesFullscreenLayoutFrame ? fullscreenScreen : screen
         let fit = settings.singleWindowFit.frame(in: baseFrame)
         var rect = fit
@@ -2348,15 +2390,15 @@ final class DwindleLayoutEngine {
     }
 
     func calculateAnimatedFrames(
-        baseFrames: [WindowToken: CGRect],
+        baseFrames: consuming [WindowToken: CGRect],
         in workspaceId: WorkspaceDescriptor.ID,
         at time: TimeInterval
     ) -> [WindowToken: CGRect] {
-        guard let state = states[workspaceId] else { return baseFrames }
-        var result = baseFrames
+        guard let state = states[workspaceId] else { return consume baseFrames }
+        var result = consume baseFrames
 
-        for (handle, frame) in baseFrames {
-            guard let node = state.leafByToken[handle] else { continue }
+        for (handle, node) in state.leafByToken {
+            guard let frame = result[handle] else { continue }
             guard let presentedFrame = node.presentedFrame(at: time) else { continue }
 
             let hasAnimation = abs(presentedFrame.origin.x - frame.origin.x) > 0.1 ||

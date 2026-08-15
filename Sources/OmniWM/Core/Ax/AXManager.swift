@@ -30,6 +30,18 @@ struct AXFrameApplicationTarget: Sendable {
     }
 }
 
+struct AXClosingFrameTarget: Sendable {
+    let animationId: UUID
+    let pid: pid_t
+    let expectedWindow: AXWindowRef
+    let frame: CGRect
+    let currentFrameHint: CGRect?
+
+    var windowId: Int {
+        expectedWindow.windowId
+    }
+}
+
 func boundedFullRescanMap<Input: Sendable, Output: Sendable>(
     _ inputs: [Input],
     maxConcurrent: Int,
@@ -1895,6 +1907,20 @@ final class AXManager {
         let writable = framesAllowedToWrite(frames)
         guard !writable.isEmpty else { return }
         enqueueFrameApplications(writable, isRetry: false, verify: verify, terminalObserver: terminalObserver)
+    }
+
+    func applyClosingFrames(_ frames: [AXClosingFrameTarget]) {
+        guard !frames.isEmpty else { return }
+        var framesByPID: [pid_t: [AXClosingFrameTarget]] = [:]
+        framesByPID.reserveCapacity(min(frames.count, 8))
+
+        for frame in frames where !macOSHiddenAppPIDs.contains(frame.pid) {
+            framesByPID[frame.pid, default: []].append(frame)
+        }
+
+        for (pid, appFrames) in framesByPID {
+            AppAXContext.contexts[pid]?.setClosingFramesBatch(appFrames)
+        }
     }
 
     func applyParkFramesParallel(_ frames: [AXFrameApplicationTarget]) {

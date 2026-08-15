@@ -180,14 +180,25 @@ struct FocusSessionSnapshot: Equatable {
 extension FocusSessionSnapshot {
     @discardableResult
     mutating func recordTiledFocus(_ token: WindowToken) -> Bool {
-        let previous = tiledFocusHistory
+        var unchanged = tiledFocusHistory.count <= 32 && tiledFocusHistory.first == token
+        if unchanged {
+            var index = 1
+            while index < tiledFocusHistory.count {
+                if tiledFocusHistory[index] == token {
+                    unchanged = false
+                    break
+                }
+                index += 1
+            }
+        }
+        lastTiledFocusedToken = token
+        guard !unchanged else { return false }
         tiledFocusHistory.removeAll { $0 == token }
         tiledFocusHistory.insert(token, at: 0)
         if tiledFocusHistory.count > 32 {
             tiledFocusHistory.removeLast(tiledFocusHistory.count - 32)
         }
-        lastTiledFocusedToken = token
-        return tiledFocusHistory != previous
+        return true
     }
 
     @discardableResult
@@ -243,8 +254,9 @@ extension FocusSessionSnapshot {
             lastTiledFocusedToken = nil
             changed = true
         }
-        if tiledFocusHistory.contains(token) {
-            tiledFocusHistory.removeAll { $0 == token }
+        let previousHistoryCount = tiledFocusHistory.count
+        tiledFocusHistory.removeAll { $0 == token }
+        if tiledFocusHistory.count != previousHistoryCount {
             changed = true
         }
 
@@ -264,47 +276,42 @@ extension FocusSessionSnapshot {
             return changed
         }
 
-        for (id, rememberedToken) in lastTiledFocusedByWorkspace where rememberedToken == token {
-            lastTiledFocusedByWorkspace[id] = nil
-            changed = true
-        }
-        for (id, rememberedToken) in lastFloatingFocusedByWorkspace where rememberedToken == token {
-            lastFloatingFocusedByWorkspace[id] = nil
-            changed = true
-        }
-        for (id, rememberedToken) in lastFocusedByWorkspace where rememberedToken == token {
-            lastFocusedByWorkspace[id] = nil
-            changed = true
-        }
+        changed = Self.removeRememberedFocus(token, from: &lastTiledFocusedByWorkspace) || changed
+        changed = Self.removeRememberedFocus(token, from: &lastFloatingFocusedByWorkspace) || changed
+        changed = Self.removeRememberedFocus(token, from: &lastFocusedByWorkspace) || changed
 
         return changed
     }
 
     @discardableResult
     mutating func replaceRememberedFocus(from oldToken: WindowToken, to newToken: WindowToken) -> Bool {
+        guard oldToken != newToken else { return false }
         var changed = false
 
         if lastTiledFocusedToken == oldToken {
             lastTiledFocusedToken = newToken
             changed = true
         }
-        if tiledFocusHistory.contains(oldToken) {
-            tiledFocusHistory = tiledFocusHistory.map { $0 == oldToken ? newToken : $0 }
+        for index in tiledFocusHistory.indices where tiledFocusHistory[index] == oldToken {
+            tiledFocusHistory[index] = newToken
             changed = true
         }
 
-        for (workspaceId, token) in lastTiledFocusedByWorkspace where token == oldToken {
-            lastTiledFocusedByWorkspace[workspaceId] = newToken
-            changed = true
-        }
-        for (workspaceId, token) in lastFloatingFocusedByWorkspace where token == oldToken {
-            lastFloatingFocusedByWorkspace[workspaceId] = newToken
-            changed = true
-        }
-        for (workspaceId, token) in lastFocusedByWorkspace where token == oldToken {
-            lastFocusedByWorkspace[workspaceId] = newToken
-            changed = true
-        }
+        changed = Self.replaceRememberedFocus(
+            from: oldToken,
+            to: newToken,
+            in: &lastTiledFocusedByWorkspace
+        ) || changed
+        changed = Self.replaceRememberedFocus(
+            from: oldToken,
+            to: newToken,
+            in: &lastFloatingFocusedByWorkspace
+        ) || changed
+        changed = Self.replaceRememberedFocus(
+            from: oldToken,
+            to: newToken,
+            in: &lastFocusedByWorkspace
+        ) || changed
 
         return changed
     }
@@ -331,8 +338,9 @@ extension FocusSessionSnapshot {
                 lastTiledFocusedToken = nil
                 changed = true
             }
-            if tiledFocusHistory.contains(token) {
-                tiledFocusHistory.removeAll { $0 == token }
+            let previousHistoryCount = tiledFocusHistory.count
+            tiledFocusHistory.removeAll { $0 == token }
+            if tiledFocusHistory.count != previousHistoryCount {
                 changed = true
             }
         }
@@ -363,6 +371,35 @@ extension FocusSessionSnapshot {
         let matchesRequest = requestId.map { request.requestId == $0 } ?? (request.requestId == nil)
         guard matchesToken, matchesWorkspace, matchesRequest else { return false }
         return clearPendingManagedFocus()
+    }
+
+    private static func removeRememberedFocus(
+        _ token: WindowToken,
+        from rememberedFocus: inout [WorkspaceDescriptor.ID: WindowToken]
+    ) -> Bool {
+        var changed = false
+        while let workspaceId = rememberedFocus.first(where: { $0.value == token })?.key {
+            rememberedFocus.removeValue(forKey: workspaceId)
+            changed = true
+        }
+        return changed
+    }
+
+    private static func replaceRememberedFocus(
+        from oldToken: WindowToken,
+        to newToken: WindowToken,
+        in rememberedFocus: inout [WorkspaceDescriptor.ID: WindowToken]
+    ) -> Bool {
+        var changed = false
+        var index = rememberedFocus.startIndex
+        while index != rememberedFocus.endIndex {
+            if rememberedFocus.values[index] == oldToken {
+                rememberedFocus.values[index] = newToken
+                changed = true
+            }
+            rememberedFocus.formIndex(after: &index)
+        }
+        return changed
     }
 }
 

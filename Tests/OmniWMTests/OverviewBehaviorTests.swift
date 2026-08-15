@@ -137,16 +137,13 @@ final class OverviewBehaviorTests: XCTestCase {
         let fixture = makeProjectionFixture()
         var layout = projectedLayout(fixture: fixture, scale: 1, query: "")
         let first = try XCTUnwrap(layout.allWindows.first?.handle)
-        layout.setSelected(handle: first)
 
         let second = try XCTUnwrap(
             OverviewLayoutCalculator.findNextWindow(in: layout, from: first, direction: .down)
         )
-        layout.setSelected(handle: second)
         let third = try XCTUnwrap(
             OverviewLayoutCalculator.findNextWindow(in: layout, from: second, direction: .down)
         )
-        layout.setSelected(handle: third)
         let thirdWindow = try XCTUnwrap(layout.window(for: third))
         layout.scrollOffset = OverviewLayoutCalculator.scrollOffsetRevealing(
             targetFrame: thirdWindow.overviewFrame,
@@ -326,8 +323,6 @@ final class OverviewBehaviorTests: XCTestCase {
         var firstMonitor = projectedLayout(fixture: fixture, scale: 1, query: "")
         var secondMonitor = firstMonitor
         let selected = try XCTUnwrap(firstMonitor.allWindows.last?.handle)
-        firstMonitor.setSelected(handle: selected)
-        secondMonitor.setSelected(handle: selected)
         firstMonitor.scrollOffset = -500
         secondMonitor.scrollOffset = -700
         let firstMidpoint = try XCTUnwrap(firstMonitor.window(for: selected)).overviewFrame.midY
@@ -337,8 +332,6 @@ final class OverviewBehaviorTests: XCTestCase {
 
         var zoomedFirst = projectedLayout(fixture: fixture, scale: 1.5, query: "")
         var zoomedSecond = zoomedFirst
-        zoomedFirst.setSelected(handle: selected)
-        zoomedSecond.setSelected(handle: selected)
         let zoomedWindow = try XCTUnwrap(zoomedFirst.window(for: selected))
         let firstDesiredOffset = zoomedWindow.overviewFrame.midY - firstMidpoint
         let secondDesiredOffset = zoomedWindow.overviewFrame.midY - secondMidpoint
@@ -377,8 +370,8 @@ final class OverviewBehaviorTests: XCTestCase {
         var fixture = makeProjectionFixture()
         var layout = projectedLayout(fixture: fixture, scale: 1, query: "")
         let first = try XCTUnwrap(layout.allWindows.first?.handle)
-        layout.setSelected(handle: first)
-        assertViewportInvariant(layout)
+        var selectedHandle = first
+        assertViewportInvariant(layout, selectedHandle: selectedHandle)
 
         let second = try XCTUnwrap(
             OverviewLayoutCalculator.findNextWindow(in: layout, from: first, direction: .down)
@@ -386,9 +379,9 @@ final class OverviewBehaviorTests: XCTestCase {
         let third = try XCTUnwrap(
             OverviewLayoutCalculator.findNextWindow(in: layout, from: second, direction: .down)
         )
-        layout.setSelected(handle: third)
-        revealSelection(in: &layout)
-        assertViewportInvariant(layout)
+        selectedHandle = third
+        revealSelection(selectedHandle, in: &layout)
+        assertViewportInvariant(layout, selectedHandle: selectedHandle)
 
         let previousOffset = layout.scrollOffset
         layout = projectedLayout(fixture: fixture, scale: 1, query: "third")
@@ -397,27 +390,25 @@ final class OverviewBehaviorTests: XCTestCase {
             layout: layout,
             screenFrame: screenFrame
         )
-        layout.setSelected(handle: third)
-        revealSelection(in: &layout)
-        assertViewportInvariant(layout)
+        revealSelection(selectedHandle, in: &layout)
+        assertViewportInvariant(layout, selectedHandle: selectedHandle)
 
         let midpoint = try XCTUnwrap(layout.window(for: third)).overviewFrame.midY - layout.scrollOffset
         layout = projectedLayout(fixture: fixture, scale: 1.5, query: "third")
-        layout.setSelected(handle: third)
         let zoomedWindow = try XCTUnwrap(layout.window(for: third))
         layout.scrollOffset = OverviewLayoutCalculator.clampedScrollOffset(
             zoomedWindow.overviewFrame.midY - midpoint,
             layout: layout,
             screenFrame: screenFrame
         )
-        revealSelection(in: &layout)
-        assertViewportInvariant(layout)
+        revealSelection(selectedHandle, in: &layout)
+        assertViewportInvariant(layout, selectedHandle: selectedHandle)
 
         fixture.windows.removeValue(forKey: third)
         layout = projectedLayout(fixture: fixture, scale: 1.5, query: "")
-        layout.setSelected(handle: layout.allWindows.first?.handle)
-        revealSelection(in: &layout)
-        assertViewportInvariant(layout)
+        selectedHandle = try XCTUnwrap(layout.allWindows.first?.handle)
+        revealSelection(selectedHandle, in: &layout)
+        assertViewportInvariant(layout, selectedHandle: selectedHandle)
     }
 
     func testActivationAndDismissalDoNotRepeatWhileNavigationAndCyclingDo() {
@@ -1001,8 +992,8 @@ final class OverviewBehaviorTests: XCTestCase {
         )
     }
 
-    private func revealSelection(in layout: inout OverviewLayout) {
-        guard let selected = layout.selectedWindow() else { return }
+    private func revealSelection(_ selectedHandle: WindowHandle, in layout: inout OverviewLayout) {
+        guard let selected = layout.window(for: selectedHandle) else { return }
         layout.scrollOffset = OverviewLayoutCalculator.scrollOffsetRevealing(
             targetFrame: selected.overviewFrame,
             currentOffset: layout.scrollOffset,
@@ -1011,10 +1002,18 @@ final class OverviewBehaviorTests: XCTestCase {
         )
     }
 
-    private func assertViewportInvariant(_ layout: OverviewLayout, file: StaticString = #filePath, line: UInt = #line) {
+    private func assertViewportInvariant(
+        _ layout: OverviewLayout,
+        selectedHandle: WindowHandle?,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
         let bounds = OverviewLayoutCalculator.scrollOffsetBounds(layout: layout, screenFrame: screenFrame)
         XCTAssertTrue(bounds.contains(layout.scrollOffset), file: file, line: line)
-        if let selected = layout.selectedWindow(), selected.matchesSearch {
+        if let selectedHandle,
+           let selected = layout.window(for: selectedHandle),
+           selected.matchesSearch
+        {
             assertVisible(selected.overviewFrame, in: layout, offset: layout.scrollOffset, file: file, line: line)
         }
     }

@@ -5,6 +5,11 @@ import Foundation
 
 @MainActor
 final class LayoutDiffExecutor {
+    struct FrameOnlyPreparation {
+        let frameUpdates: [AXFrameApplicationTarget]
+        let terminalRecoveryFrameUpdates: [AXFrameApplicationTarget]
+    }
+
     private struct DeferredRevealFrameUpdate {
         let pid: pid_t
         let windowId: Int
@@ -34,6 +39,10 @@ final class LayoutDiffExecutor {
         }
 
         let diff = plan.diff
+        if Self.isFrameOnly(diff) {
+            executeFrameOnly(diff, plan: plan, monitor: monitor, controller: controller)
+            return
+        }
 
         var resolvedEntries: [WindowToken: WindowState] = [:]
         var hiddenEntries: [(entry: WindowState, side: HideSide)] = []
@@ -334,6 +343,72 @@ final class LayoutDiffExecutor {
                 }
             )
         }
+    }
+
+    nonisolated static func isFrameOnly(_ diff: WorkspaceLayoutDiff) -> Bool {
+        diff.visibilityChanges.isEmpty &&
+            diff.restoreChanges.isEmpty &&
+            diff.deferredHides.isEmpty
+    }
+
+    func prepareFrameOnlyUpdates(
+        _ changes: [LayoutFrameChange],
+        controller: WMController
+    ) -> FrameOnlyPreparation {
+        var frameUpdates: [AXFrameApplicationTarget] = []
+        frameUpdates.reserveCapacity(changes.count)
+        var terminalRecoveryFrameUpdates: [AXFrameApplicationTarget] = []
+
+        for change in changes {
+            guard let entry = controller.workspaceManager.entry(for: change.token),
+                  entry.layoutReason != .nativeFullscreen
+            else {
+                continue
+            }
+            let forceNativeFullscreenRestoreApply = refreshController
+                .consumeNativeFullscreenRestoredFrameApply(for: change.token)
+            if change.forceApply {
+                controller.axManager.forceApplyNextFrame(for: entry.windowId)
+            }
+            if forceNativeFullscreenRestoreApply {
+                controller.axManager.forceApplyNextFrame(for: entry.windowId)
+            }
+            let frameUpdate = AXFrameApplicationTarget(
+                pid: entry.pid,
+                window: entry.axRef,
+                frame: change.frame
+            )
+            if change.allowsTerminalRecovery {
+                terminalRecoveryFrameUpdates.append(frameUpdate)
+            } else {
+                frameUpdates.append(frameUpdate)
+            }
+        }
+
+        return FrameOnlyPreparation(
+            frameUpdates: frameUpdates,
+            terminalRecoveryFrameUpdates: terminalRecoveryFrameUpdates
+        )
+    }
+
+    private func executeFrameOnly(
+        _ diff: WorkspaceLayoutDiff,
+        plan: WorkspaceLayoutPlan,
+        monitor: Monitor,
+        controller: WMController
+    ) {
+        let preparation = prepareFrameOnlyUpdates(diff.frameChanges, controller: controller)
+        applyFrameUpdates(
+            preparation.frameUpdates,
+            isAnimationTick: plan.isAnimationTick,
+            controller: controller
+        )
+        refreshController.applyWorkspaceMonitorRelocationFrameUpdates(
+            preparation.terminalRecoveryFrameUpdates,
+            workspaceId: plan.workspaceId,
+            monitorId: monitor.id,
+            controller: controller
+        )
     }
 
     private func applyDeferredRevealFrames(

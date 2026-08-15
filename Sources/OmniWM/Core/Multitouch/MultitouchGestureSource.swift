@@ -19,9 +19,54 @@ final class MultitouchGestureSource {
         let y: Float
     }
 
+    struct RawTouchBuffer: RandomAccessCollection, Sendable {
+        private var inline = InlineArray<16, RawTouch>(repeating: RawTouch(x: 0, y: 0))
+        private var overflow: [RawTouch] = []
+        private(set) var count = 0
+
+        var startIndex: Int {
+            0
+        }
+
+        var endIndex: Int {
+            count
+        }
+
+        init() {}
+
+        init(_ touches: [RawTouch]) {
+            for touch in touches {
+                append(touch)
+            }
+        }
+
+        mutating func append(_ touch: RawTouch) {
+            if count < inline.count {
+                inline[count] = touch
+            } else {
+                overflow.append(touch)
+            }
+            count += 1
+        }
+
+        subscript(index: Int) -> RawTouch {
+            index < inline.count ? inline[index] : overflow[index - inline.count]
+        }
+    }
+
     struct RawFrame: Sendable {
-        let touches: [RawTouch]
+        let touches: RawTouchBuffer
         let timestamp: Double
+
+        init(touches: [RawTouch], timestamp: Double) {
+            self.touches = RawTouchBuffer(touches)
+            self.timestamp = timestamp
+        }
+
+        init(touches: consuming RawTouchBuffer, timestamp: Double) {
+            self.touches = consume touches
+            self.timestamp = timestamp
+        }
     }
 
     enum LifecycleState: String, Sendable {
@@ -827,8 +872,7 @@ final class MultitouchGestureSource {
         timestamp: Double
     ) -> RawFrame {
         guard let fingers, count > 0 else { return RawFrame(touches: [], timestamp: timestamp) }
-        var touches: [RawTouch] = []
-        touches.reserveCapacity(Int(count))
+        var touches = RawTouchBuffer()
         for index in 0 ..< Int(count) {
             let base = index * multitouchTouchStride
             let state = fingers.load(fromByteOffset: base + multitouchStateByteOffset, as: Int32.self)

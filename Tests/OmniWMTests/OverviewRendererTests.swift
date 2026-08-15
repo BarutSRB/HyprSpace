@@ -1,12 +1,37 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Copyright (C) 2026 BarutSRB — https://github.com/BarutSRB/OmniWM
 
+import AppKit
 import CoreGraphics
+import CoreText
 import Foundation
 @testable import OmniWM
 import XCTest
 
 final class OverviewRendererTests: XCTestCase {
+    func testTextLineCacheReusesLinesAndRemainsBounded() {
+        var cache = OverviewTextLineCache()
+        let key = OverviewTextLineCache.Key(role: .title, text: "Window", widthBucket: 200)
+        let first = cache.line(for: key) {
+            CTLineCreateWithAttributedString(NSAttributedString(string: "Window"))
+        }
+        let second = cache.line(for: key) {
+            XCTFail("Expected the cached Core Text line")
+            return CTLineCreateWithAttributedString(NSAttributedString(string: "Replacement"))
+        }
+
+        XCTAssertTrue(first === second)
+
+        for index in 0 ..< 600 {
+            let key = OverviewTextLineCache.Key(role: .appName, text: "App \(index)", widthBucket: 0)
+            _ = cache.line(for: key) {
+                CTLineCreateWithAttributedString(NSAttributedString(string: "App \(index)"))
+            }
+        }
+
+        XCTAssertLessThanOrEqual(cache.entryCount, 512)
+    }
+
     func testDefaultPalettePreservesExistingColors() {
         assertColor(OverviewRenderPalette.default.backdrop, equals: [0.05, 0.05, 0.08, 1.0])
         assertColor(OverviewRenderPalette.default.normalBorder, equals: [0.3, 0.3, 0.35, 0.5])
@@ -36,49 +61,125 @@ final class OverviewRendererTests: XCTestCase {
             selectedBorderColor: SettingsColor(red: 0, green: 0, blue: 1, alpha: 1)
         )
         let token = WindowToken(pid: 1, windowId: 1)
-        var window = OverviewWindowItem(
+        let window = OverviewWindowItem(
             handle: WindowHandle(id: token),
             windowId: token.windowId,
             workspaceId: UUID(),
-            thumbnail: nil,
             title: "Window",
             appName: "App",
             appIcon: nil,
             originalFrame: .zero,
             overviewFrame: .zero,
-            isHovered: false,
-            isSelected: false,
-            matchesSearch: true,
-            closeButtonHovered: false
+            matchesSearch: true
         )
 
-        assertColor(OverviewRenderer.borderColor(for: window, palette: palette), equals: [1, 0, 0, 1])
-        window.isHovered = true
-        assertColor(OverviewRenderer.borderColor(for: window, palette: palette), equals: [0, 1, 0, 1])
-        window.isSelected = true
-        assertColor(OverviewRenderer.borderColor(for: window, palette: palette), equals: [0, 0, 1, 1])
+        XCTAssertEqual(window.title, "Window")
+        assertColor(
+            OverviewRenderer.borderColor(isSelected: false, isHovered: false, palette: palette),
+            equals: [1, 0, 0, 1]
+        )
+        assertColor(
+            OverviewRenderer.borderColor(isSelected: false, isHovered: true, palette: palette),
+            equals: [0, 1, 0, 1]
+        )
+        assertColor(
+            OverviewRenderer.borderColor(isSelected: true, isHovered: true, palette: palette),
+            equals: [0, 0, 1, 1]
+        )
     }
 
-    func testVisibleContentRectTracksScrollOnlyWhenFullyOpen() {
+    func testVisibleContentRectTracksScrollDuringAnimation() {
         let bounds = CGRect(x: 0, y: 0, width: 1440, height: 900)
 
         XCTAssertEqual(
-            OverviewRenderer.visibleContentRect(bounds: bounds, scrollOffset: -320, isFullyOpen: true),
+            OverviewRenderer.visibleContentRect(bounds: bounds, scrollOffset: -320),
             CGRect(x: 0, y: -320, width: 1440, height: 900)
-        )
-        XCTAssertNil(
-            OverviewRenderer.visibleContentRect(bounds: bounds, scrollOffset: -320, isFullyOpen: false)
         )
     }
 
-    func testStaticCullingKeepsIntersectingFramesAndAnimationDisablesCulling() {
+    func testCullingKeepsIntersectingFramesAndRejectsHiddenFrames() {
         let viewport = CGRect(x: 0, y: -320, width: 1440, height: 900)
         let visible = CGRect(x: 100, y: 100, width: 300, height: 200)
         let hidden = CGRect(x: 100, y: -700, width: 300, height: 200)
 
         XCTAssertTrue(OverviewRenderer.shouldRender(frame: visible, visibleContentRect: viewport))
         XCTAssertFalse(OverviewRenderer.shouldRender(frame: hidden, visibleContentRect: viewport))
-        XCTAssertTrue(OverviewRenderer.shouldRender(frame: hidden, visibleContentRect: nil))
+    }
+
+    func testSectionCullingIncludesInterpolatedAnimationFrame() {
+        let token = WindowToken(pid: 1, windowId: 1)
+        let workspaceId = UUID()
+        let window = OverviewWindowItem(
+            handle: WindowHandle(id: token),
+            windowId: token.windowId,
+            workspaceId: workspaceId,
+            title: "Window",
+            appName: "App",
+            appIcon: nil,
+            originalFrame: CGRect(x: 100, y: 100, width: 300, height: 200),
+            overviewFrame: CGRect(x: 100, y: -1000, width: 300, height: 200),
+            matchesSearch: true
+        )
+        let section = OverviewWorkspaceSection(
+            workspaceId: workspaceId,
+            name: "Workspace",
+            windows: [window],
+            sectionFrame: CGRect(x: 0, y: -1100, width: 1000, height: 400),
+            labelFrame: CGRect(x: 20, y: -700, width: 960, height: 32),
+            gridFrame: CGRect(x: 0, y: -1100, width: 1000, height: 400),
+            isActive: true
+        )
+        let viewport = CGRect(x: 0, y: 0, width: 1000, height: 800)
+
+        XCTAssertFalse(
+            OverviewRenderer.shouldRender(
+                frame: section.sectionFrame.union(section.labelFrame),
+                visibleContentRect: viewport
+            )
+        )
+        XCTAssertTrue(
+            OverviewRenderer.shouldRender(
+                frame: OverviewRenderer.sectionCullingFrame(section, progress: 0.1),
+                visibleContentRect: viewport
+            )
+        )
+    }
+
+    @MainActor
+    func testLayoutCachesRasterizedApplicationIcon() {
+        let bitmap = CGContext(
+            data: nil,
+            width: 4,
+            height: 4,
+            bitsPerComponent: 8,
+            bytesPerRow: 16,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        )!
+        let sourceImage = bitmap.makeImage()!
+        let appIcon = NSImage(cgImage: sourceImage, size: NSSize(width: 4, height: 4))
+        let workspaceId = UUID()
+        let token = WindowToken(pid: 1, windowId: 1)
+        let handle = WindowHandle(id: token)
+        let data: OverviewWindowLayoutData = (
+            token: token,
+            workspaceId: workspaceId,
+            title: "Window",
+            appName: "App",
+            appIcon: appIcon,
+            frame: CGRect(x: 0, y: 0, width: 800, height: 600)
+        )
+
+        let layout = OverviewLayoutCalculator.calculateLayout(
+            workspaces: [(id: workspaceId, name: "Workspace", isActive: true)],
+            windows: [handle: data],
+            screenFrame: CGRect(x: 0, y: 0, width: 1440, height: 900),
+            searchQuery: "",
+            scale: 1
+        )
+
+        XCTAssertEqual(layout.allWindows.first?.appIcon?.width, 4)
+        XCTAssertEqual(layout.allWindows.first?.appIcon?.height, 4)
     }
 
     func testSectionCullingIncludesWorkspaceLabelFrame() {
@@ -107,7 +208,13 @@ final class OverviewRendererTests: XCTestCase {
         layout.scale = 1.25
         let view = OverviewView(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
 
-        view.updateLayout(layout, state: .open, searchQuery: "term", palette: palette)
+        view.updateLayout(
+            layout,
+            state: .open,
+            searchQuery: "term",
+            selectedWindowHandle: nil,
+            palette: palette
+        )
 
         XCTAssertEqual(view.layout.scale, 1.25)
         XCTAssertEqual(view.searchQuery, "term")

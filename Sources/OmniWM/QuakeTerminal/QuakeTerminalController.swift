@@ -10,6 +10,15 @@ enum QuakeTerminalRestoreTarget: Equatable {
 }
 
 @MainActor
+private final class GhosttyAppCallbackContext {
+    weak var controller: QuakeTerminalController?
+
+    init(controller: QuakeTerminalController) {
+        self.controller = controller
+    }
+}
+
+@MainActor
 final class QuakeTerminalController: NSObject, NSWindowDelegate, QuakeTerminalTabBarDelegate {
     private enum HideBehavior {
         case restoreLatestTarget
@@ -19,6 +28,7 @@ final class QuakeTerminalController: NSObject, NSWindowDelegate, QuakeTerminalTa
     private(set) var window: QuakeTerminalWindow?
     private var ghosttyApp: ghostty_app_t?
     private var ghosttyConfig: ghostty_config_t?
+    private var retainedAppCallbackContext: Unmanaged<GhosttyAppCallbackContext>?
 
     private var tabs: [QuakeTerminalTab] = []
     private var activeTabIndex: Int = 0
@@ -78,6 +88,10 @@ final class QuakeTerminalController: NSObject, NSWindowDelegate, QuakeTerminalTa
         super.init()
     }
 
+    isolated deinit {
+        cleanup()
+    }
+
     private func initializeGhosttyIfNeeded() {
         guard !Self.ghosttyInitialized else { return }
         let result = ghostty_init(0, nil)
@@ -104,13 +118,15 @@ final class QuakeTerminalController: NSObject, NSWindowDelegate, QuakeTerminalTa
         ghosttyConfig = config
         updateGhosttyAppearance(QuakeGhosttyAppearance(config: config))
 
+        let retainedAppContext = Unmanaged.passRetained(GhosttyAppCallbackContext(controller: self))
         var runtimeConfig = ghostty_runtime_config_s()
-        runtimeConfig.userdata = Unmanaged.passUnretained(self).toOpaque()
+        runtimeConfig.userdata = retainedAppContext.toOpaque()
         runtimeConfig.supports_selection_clipboard = true
         runtimeConfig.wakeup_cb = { userdata in
             guard let userdata else { return }
+            let context = Unmanaged<GhosttyAppCallbackContext>.fromOpaque(userdata).takeUnretainedValue()
             DispatchQueue.main.async {
-                let controller = Unmanaged<QuakeTerminalController>.fromOpaque(userdata).takeUnretainedValue()
+                guard let controller = context.controller else { return }
                 controller.tick()
             }
         }
@@ -122,14 +138,16 @@ final class QuakeTerminalController: NSObject, NSWindowDelegate, QuakeTerminalTa
                       let config = action.action.config_change.config else { return false }
                 let appearance = QuakeGhosttyAppearance(config: config)
                 return MainActor.assumeIsolated {
-                    let controller = Unmanaged<QuakeTerminalController>.fromOpaque(userdata).takeUnretainedValue()
+                    let context = Unmanaged<GhosttyAppCallbackContext>.fromOpaque(userdata).takeUnretainedValue()
+                    guard let controller = context.controller else { return false }
                     controller.receiveGhosttyAppearance(appearance)
                     return true
                 }
             case GHOSTTY_ACTION_RELOAD_CONFIG:
                 guard target.tag == GHOSTTY_TARGET_APP else { return false }
                 return MainActor.assumeIsolated {
-                    let controller = Unmanaged<QuakeTerminalController>.fromOpaque(userdata).takeUnretainedValue()
+                    let context = Unmanaged<GhosttyAppCallbackContext>.fromOpaque(userdata).takeUnretainedValue()
+                    guard let controller = context.controller else { return false }
                     controller.reloadGhosttyConfig(soft: action.action.reload_config.soft)
                     return true
                 }
@@ -179,8 +197,8 @@ final class QuakeTerminalController: NSObject, NSWindowDelegate, QuakeTerminalTa
         }
         runtimeConfig.close_surface_cb = { userdata, processAlive in
             guard let userdata else { return }
+            let context = Unmanaged<GhosttySurfaceCallbackContext>.fromOpaque(userdata).takeUnretainedValue()
             DispatchQueue.main.async {
-                let context = Unmanaged<GhosttySurfaceCallbackContext>.fromOpaque(userdata).takeUnretainedValue()
                 guard let controller = context.controller, let view = context.view else { return }
                 controller.surfaceClosed(view: view, processAlive: processAlive)
             }
@@ -188,12 +206,14 @@ final class QuakeTerminalController: NSObject, NSWindowDelegate, QuakeTerminalTa
 
         ghosttyApp = ghostty_app_new(&runtimeConfig, config)
         guard ghosttyApp != nil else {
+            retainedAppContext.release()
             Log.terminal.error("Failed to create ghostty app")
             ghostty_config_free(config)
             ghosttyConfig = nil
             updateGhosttyAppearance(nil)
             return
         }
+        retainedAppCallbackContext = retainedAppContext
 
         startGhosttyAppearanceSync()
         applyCurrentGhosttyColorScheme()
@@ -214,6 +234,10 @@ final class QuakeTerminalController: NSObject, NSWindowDelegate, QuakeTerminalTa
         if let ghosttyApp {
             ghostty_app_free(ghosttyApp)
             self.ghosttyApp = nil
+        }
+        if let retainedAppCallbackContext {
+            retainedAppCallbackContext.release()
+            self.retainedAppCallbackContext = nil
         }
         if let ghosttyConfig {
             ghostty_config_free(ghosttyConfig)

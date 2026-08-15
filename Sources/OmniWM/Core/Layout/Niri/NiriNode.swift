@@ -234,6 +234,10 @@ class NiriNode {
         parent?.invalidateChildrenCache()
     }
 
+    func invalidateAxisSolveInputs() {
+        parent?.invalidateAxisSolveInputs()
+    }
+
     func findRoot() -> NiriRoot? {
         var current: NiriNode? = self
         while let node = current {
@@ -384,13 +388,20 @@ class NiriContainer: NiriNode {
 
     private var _cachedWindowNodes: [NiriWindow]?
 
+    private(set) var axisSolveRevision: UInt64 = 0
+
     override init() {
         super.init()
     }
 
     override func invalidateChildrenCache() {
+        axisSolveRevision &+= 1
         _cachedWindowNodes = nil
         super.invalidateChildrenCache()
+    }
+
+    override func invalidateAxisSolveInputs() {
+        axisSolveRevision &+= 1
     }
 
     func animateMoveFrom(
@@ -732,13 +743,31 @@ class NiriWindow: NiriNode {
 
     var sizingMode: SizingMode = .normal
 
-    var height: WeightedSize = .default
+    var height: WeightedSize = .default {
+        didSet {
+            if oldValue != height {
+                invalidateAxisSolveInputs()
+            }
+        }
+    }
 
     var savedHeight: WeightedSize?
 
-    var windowWidth: WeightedSize = .default
+    var windowWidth: WeightedSize = .default {
+        didSet {
+            if oldValue != windowWidth {
+                invalidateAxisSolveInputs()
+            }
+        }
+    }
 
-    var constraints: WindowSizeConstraints = .unconstrained
+    var constraints: WindowSizeConstraints = .unconstrained {
+        didSet {
+            if oldValue != constraints {
+                invalidateAxisSolveInputs()
+            }
+        }
+    }
 
     var resolvedHeight: CGFloat?
 
@@ -796,10 +825,6 @@ class NiriWindow: NiriNode {
 
     var isMaximized: Bool {
         sizingMode == .maximized
-    }
-
-    var handle: WindowHandle {
-        WindowHandle(id: token)
     }
 
     func renderOffset(at time: TimeInterval = CACurrentMediaTime()) -> CGPoint {

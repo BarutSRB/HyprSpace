@@ -24,10 +24,13 @@ enum NiriAxisSolver {
 }
 
 struct NiriAxisSolveKey: Hashable {
-    let inputs: [NiriAxisSolver.Input]
+    let containerId: NodeId
+    let containerRevision: UInt64
+    let configurationRevision: UInt64
     let availableSpace: CGFloat
     let gap: CGFloat
     let isTabbed: Bool
+    let isVertical: Bool
 }
 
 extension NiriAxisSolver {

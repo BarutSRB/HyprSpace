@@ -92,13 +92,13 @@ import QuartzCore
     }
 
     func tickDwindleAnimation(targetTime: CFTimeInterval, displayId: CGDirectDisplayID) {
-        guard let (wsId, _) = dwindleAnimationByDisplay[displayId] else { return }
+        guard let (wsId, animationMonitor) = dwindleAnimationByDisplay[displayId] else { return }
         guard let controller, let engine = controller.dwindleEngine else {
             controller?.layoutRefreshController.stopDwindleAnimation(for: displayId)
             return
         }
 
-        guard let monitor = controller.workspaceManager.monitors.first(where: { $0.displayId == displayId }) else {
+        guard let monitor = controller.workspaceManager.monitor(byId: animationMonitor.id) else {
             controller.layoutRefreshController.stopDwindleAnimation(for: displayId)
             return
         }
@@ -1150,13 +1150,16 @@ import QuartzCore
         )
 
         let animationsActive = engine.hasActiveAnimations(in: snapshot.workspaceId, at: now)
-        let diffFrames = animationsActive
-            ? engine.calculateAnimatedFrames(
-                baseFrames: newFrames,
+        let diffFrames: [WindowToken: CGRect]
+        if animationsActive {
+            diffFrames = engine.calculateAnimatedFrames(
+                baseFrames: consume newFrames,
                 in: snapshot.workspaceId,
                 at: now
             )
-            : newFrames
+        } else {
+            diffFrames = consume newFrames
+        }
         let diff = layoutDiff(
             windows: snapshot.windows,
             frames: diffFrames,
@@ -1190,12 +1193,11 @@ import QuartzCore
         snapshot: DwindleWorkspaceSnapshot,
         engine: DwindleLayoutEngine
     ) -> WorkspaceLayoutPlan {
-        applyResolvedSettings(snapshot.settings, to: engine)
-
         let frames = engine.calculateLayout(
             for: snapshot.workspaceId,
             screen: snapshot.monitor.workingFrame,
-            fullscreenScreen: snapshot.monitor.fullscreenLayoutFrame
+            fullscreenScreen: snapshot.monitor.fullscreenLayoutFrame,
+            calculationSettings: calculationSettings(snapshot.settings, from: engine)
         )
         let diff = layoutDiff(
             windows: snapshot.windows,
@@ -1226,15 +1228,14 @@ import QuartzCore
         engine: DwindleLayoutEngine,
         targetTime: TimeInterval
     ) -> WorkspaceLayoutPlan {
-        applyResolvedSettings(snapshot.settings, to: engine)
-
         let baseFrames = engine.calculateLayout(
             for: snapshot.workspaceId,
             screen: snapshot.monitor.workingFrame,
-            fullscreenScreen: snapshot.monitor.fullscreenLayoutFrame
+            fullscreenScreen: snapshot.monitor.fullscreenLayoutFrame,
+            calculationSettings: calculationSettings(snapshot.settings, from: engine)
         )
         let animatedFrames = engine.calculateAnimatedFrames(
-            baseFrames: baseFrames,
+            baseFrames: consume baseFrames,
             in: snapshot.workspaceId,
             at: targetTime
         )
@@ -1360,6 +1361,19 @@ import QuartzCore
         engine.settings.singleWindowFit = settings.singleWindowFit
         engine.settings.innerGap = settings.innerGap
         engine.tabRailWidth = TabRailManager.tabIndicatorWidth
+    }
+
+    private func calculationSettings(
+        _ resolved: ResolvedDwindleSettings,
+        from engine: DwindleLayoutEngine
+    ) -> DwindleSettings {
+        var settings = engine.settings
+        settings.smartSplit = resolved.smartSplit
+        settings.defaultSplitRatio = resolved.defaultSplitRatio
+        settings.splitWidthMultiplier = resolved.splitWidthMultiplier
+        settings.singleWindowFit = resolved.singleWindowFit
+        settings.innerGap = resolved.innerGap
+        return settings
     }
 }
 

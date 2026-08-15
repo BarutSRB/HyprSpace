@@ -104,19 +104,13 @@ enum NativeSpaceWindowInventoryResult: Equatable, Sendable {
     case authoritative([UInt64: [WindowServerInfo]])
 }
 
-private typealias CFReleaseFunc = @convention(c) (CFTypeRef) -> Void
-private let cfRelease: CFReleaseFunc = {
-    let lib = dlopen("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation", RTLD_LAZY)!
-    return unsafeBitCast(dlsym(lib, "CFRelease"), to: CFReleaseFunc.self)
-}()
-
 @MainActor
 final class SkyLight {
     static let shared = SkyLight()
 
     private typealias MainConnectionIDFunc = @convention(c) () -> Int32
-    private typealias WindowQueryWindowsFunc = @convention(c) (Int32, CFArray, UInt32) -> CFTypeRef?
-    private typealias WindowQueryResultCopyWindowsFunc = @convention(c) (CFTypeRef) -> CFTypeRef?
+    private typealias WindowQueryWindowsFunc = @convention(c) (Int32, CFArray, UInt32) -> Unmanaged<CFTypeRef>?
+    private typealias WindowQueryResultCopyWindowsFunc = @convention(c) (CFTypeRef) -> Unmanaged<CFTypeRef>?
     private typealias WindowIteratorGetCountFunc = @convention(c) (CFTypeRef) -> Int32
     private typealias WindowIteratorAdvanceFunc = @convention(c) (CFTypeRef) -> Bool
     private typealias WindowIteratorGetCornerRadiiFunc = @convention(c) (
@@ -130,7 +124,7 @@ final class SkyLight {
     private typealias WindowIteratorGetTagsFunc = @convention(c) (CFTypeRef) -> UInt64
     private typealias WindowIteratorGetAttributesFunc = @convention(c) (CFTypeRef) -> UInt32
     private typealias WindowIteratorGetParentIDFunc = @convention(c) (CFTypeRef) -> UInt32
-    private typealias TransactionCreateFunc = @convention(c) (Int32) -> CFTypeRef?
+    private typealias TransactionCreateFunc = @convention(c) (Int32) -> Unmanaged<CFTypeRef>?
     private typealias TransactionCommitFunc = @convention(c) (CFTypeRef, Int32) -> CGError
     private typealias TransactionOrderWindowFunc = @convention(c) (CFTypeRef, UInt32, Int32, UInt32) -> Void
     private typealias WindowIsOrderedInFunc = @convention(c) (Int32, UInt32, UnsafeMutablePointer<UInt8>) -> CGError
@@ -146,7 +140,11 @@ final class SkyLight {
         UnsafeMutablePointer<UInt32>
     ) -> CGError
     private typealias ReleaseWindowFunc = @convention(c) (Int32, UInt32) -> CGError
-    private typealias WindowContextCreateFunc = @convention(c) (Int32, UInt32, CFDictionary?) -> CGContext?
+    private typealias WindowContextCreateFunc = @convention(c) (
+        Int32,
+        UInt32,
+        CFDictionary?
+    ) -> Unmanaged<CGContext>?
     private typealias SetWindowShapeFunc = @convention(c) (Int32, UInt32, Float, Float, CFTypeRef) -> CGError
     private typealias SetWindowResolutionFunc = @convention(c) (Int32, UInt32, Float) -> CGError
     private typealias SetWindowOpacityFunc = @convention(c) (Int32, UInt32, Int32) -> CGError
@@ -163,9 +161,9 @@ final class SkyLight {
     private typealias NewRegionWithRectFunc = @convention(c) (UnsafePointer<CGRect>, UnsafeMutablePointer<CFTypeRef?>)
         -> CGError
     private typealias TransactionSetWindowLevelFunc = @convention(c) (CFTypeRef, UInt32, Int32) -> CGError
-    private typealias CopyManagedDisplaySpacesFunc = @convention(c) (Int32) -> CFArray?
+    private typealias CopyManagedDisplaySpacesFunc = @convention(c) (Int32) -> Unmanaged<CFArray>?
     private typealias GetActiveSpaceFunc = @convention(c) (Int32) -> UInt64
-    private typealias CopySpacesForWindowsFunc = @convention(c) (Int32, Int32, CFArray) -> CFArray?
+    private typealias CopySpacesForWindowsFunc = @convention(c) (Int32, Int32, CFArray) -> Unmanaged<CFArray>?
     private typealias CopyWindowsWithOptionsAndTagsFunc = @convention(c) (
         Int32,
         UInt32,
@@ -173,7 +171,7 @@ final class SkyLight {
         UInt32,
         UnsafeMutablePointer<UInt64>,
         UnsafeMutablePointer<UInt64>
-    ) -> CFArray?
+    ) -> Unmanaged<CFArray>?
     private typealias GetSpaceManagementModeFunc = @convention(c) (Int32) -> Int32
     private typealias DisplayCreateUUIDFromDisplayIDFunc = @convention(c) (CGDirectDisplayID) -> Unmanaged<CFUUID>?
 
@@ -422,10 +420,8 @@ final class SkyLight {
         let widNumber = CFNumberCreate(nil, .sInt32Type, &widValue)!
         let windowArray = [widNumber] as CFArray
 
-        guard let query = windowQueryWindows(cid, windowArray, 0) else { return nil }
-        defer { cfRelease(query) }
-        guard let iterator = windowQueryResultCopyWindows(query) else { return nil }
-        defer { cfRelease(iterator) }
+        guard let query = windowQueryWindows(cid, windowArray, 0)?.takeRetainedValue() else { return nil }
+        guard let iterator = windowQueryResultCopyWindows(query)?.takeRetainedValue() else { return nil }
 
         guard windowIteratorGetCount(iterator) > 0,
               windowIteratorAdvance(iterator)
@@ -519,11 +515,10 @@ final class SkyLight {
 
     func orderWindow(_ wid: UInt32, relativeTo targetWid: UInt32, order: SkyLightWindowOrder = .above) {
         let cid = getMainConnectionID()
-        guard let transaction = transactionCreate(cid) else {
+        guard let transaction = transactionCreate(cid)?.takeRetainedValue() else {
             FallbackFiringRecorder.shared.note(.skylight, "transactionCreateNil")
             return
         }
-        defer { cfRelease(transaction) }
         transactionOrderWindow(transaction, wid, order.rawValue, targetWid)
         _ = commit(transaction)
     }
@@ -557,8 +552,7 @@ final class SkyLight {
     func displayId(forSpaceId spaceId: UInt64, among monitors: [Monitor]) -> CGDirectDisplayID? {
         guard spaceId != 0, !monitors.isEmpty else { return nil }
         let cid = getMainConnectionID()
-        guard cid != 0, let spacesRef = copyManagedDisplaySpaces(cid) else { return nil }
-        defer { cfRelease(spacesRef) }
+        guard cid != 0, let spacesRef = copyManagedDisplaySpaces(cid)?.takeRetainedValue() else { return nil }
         guard let displaySpaces = spacesRef as? [[String: Any]] else { return nil }
 
         var displayIdByIdentifier: [String: CGDirectDisplayID] = [:]
@@ -604,8 +598,8 @@ final class SkyLight {
         var widValue = Int32(bitPattern: windowId)
         guard let widNumber = CFNumberCreate(nil, .sInt32Type, &widValue) else { return [] }
         let windowArray = [widNumber] as CFArray
-        guard let result = copySpacesForWindows(cid, Self.allSpacesMask, windowArray) else { return [] }
-        defer { cfRelease(result) }
+        guard let result = copySpacesForWindows(cid, Self.allSpacesMask, windowArray)?.takeRetainedValue()
+        else { return [] }
         guard let spaceValues = result as? [Any] else { return [] }
         return spaceValues.compactMap(Self.numericUInt64).filter { $0 != 0 }
     }
@@ -667,10 +661,8 @@ final class SkyLight {
         }
 
         let windowNumbers = windowIds.map { NSNumber(value: $0) } as CFArray
-        guard let query = windowQueryWindows(cid, windowNumbers, windowCount) else { return nil }
-        defer { cfRelease(query) }
-        guard let iterator = windowQueryResultCopyWindows(query) else { return nil }
-        defer { cfRelease(iterator) }
+        guard let query = windowQueryWindows(cid, windowNumbers, windowCount)?.takeRetainedValue() else { return nil }
+        guard let iterator = windowQueryResultCopyWindows(query)?.takeRetainedValue() else { return nil }
 
         var windowInfoById: [UInt32: WindowServerInfo] = [:]
         windowInfoById.reserveCapacity(windowIds.count)
@@ -705,10 +697,9 @@ final class SkyLight {
             Self.nativeSpaceWindowOptions,
             &setTags,
             &clearTags
-        ) else {
+        )?.takeRetainedValue() else {
             return nil
         }
-        defer { cfRelease(windows) }
 
         var windowIds: [UInt32] = []
         let count = CFArrayGetCount(windows)
@@ -758,8 +749,7 @@ final class SkyLight {
 
     func managedSpaces() -> [ManagedDisplaySpaces] {
         let cid = getMainConnectionID()
-        guard cid != 0, let spacesRef = copyManagedDisplaySpaces(cid) else { return [] }
-        defer { cfRelease(spacesRef) }
+        guard cid != 0, let spacesRef = copyManagedDisplaySpaces(cid)?.takeRetainedValue() else { return [] }
         guard let displaySpaces = spacesRef as? [[String: Any]] else { return [] }
 
         return displaySpaces.compactMap { display in
@@ -846,7 +836,7 @@ final class SkyLight {
 
     func withTransactionScope(_ body: () -> Void) {
         guard scopedTransaction == nil,
-              let transaction = transactionCreate(getMainConnectionID())
+              let transaction = transactionCreate(getMainConnectionID())?.takeRetainedValue()
         else {
             body()
             return
@@ -855,7 +845,6 @@ final class SkyLight {
         body()
         scopedTransaction = nil
         _ = commit(transaction)
-        cfRelease(transaction)
     }
 
     private func withTransaction(_ ops: (CFTypeRef) -> Void) {
@@ -863,11 +852,10 @@ final class SkyLight {
             ops(transaction)
             return
         }
-        guard let transaction = transactionCreate(getMainConnectionID()) else {
+        guard let transaction = transactionCreate(getMainConnectionID())?.takeRetainedValue() else {
             FallbackFiringRecorder.shared.note(.skylight, "transactionCreateNil")
             return
         }
-        defer { cfRelease(transaction) }
         ops(transaction)
         _ = commit(transaction)
     }
@@ -885,10 +873,8 @@ final class SkyLight {
         guard cid != 0 else { return [] }
 
         let emptyArray = [] as CFArray
-        guard let query = windowQueryWindows(cid, emptyArray, 0) else { return [] }
-        defer { cfRelease(query) }
-        guard let iterator = windowQueryResultCopyWindows(query) else { return [] }
-        defer { cfRelease(iterator) }
+        guard let query = windowQueryWindows(cid, emptyArray, 0)?.takeRetainedValue() else { return [] }
+        guard let iterator = windowQueryResultCopyWindows(query)?.takeRetainedValue() else { return [] }
 
         var results: [WindowServerInfo] = []
 
@@ -937,10 +923,8 @@ final class SkyLight {
         let widNumber = CFNumberCreate(nil, .sInt32Type, &widValue)!
         let windowArray = [widNumber] as CFArray
 
-        guard let query = windowQueryWindows(cid, windowArray, 1) else { return nil }
-        defer { cfRelease(query) }
-        guard let iterator = windowQueryResultCopyWindows(query) else { return nil }
-        defer { cfRelease(iterator) }
+        guard let query = windowQueryWindows(cid, windowArray, 1)?.takeRetainedValue() else { return nil }
+        guard let iterator = windowQueryResultCopyWindows(query)?.takeRetainedValue() else { return nil }
         guard windowIteratorAdvance(iterator) else { return nil }
 
         let wid = windowIteratorGetWindowID(iterator)
@@ -1053,7 +1037,7 @@ final class SkyLight {
     func createWindowContext(for wid: UInt32) -> CGContext? {
         let cid = getMainConnectionID()
         guard cid != 0 else { return nil }
-        return windowContextCreate(cid, wid, nil)
+        return windowContextCreate(cid, wid, nil)?.takeRetainedValue()
     }
 
     @discardableResult

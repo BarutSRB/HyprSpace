@@ -106,7 +106,7 @@ struct CubicConfig {
     }
 }
 
-final class CubicAnimation {
+struct CubicAnimation {
     private let from: Double
     private let target: Double
     private let startTime: TimeInterval

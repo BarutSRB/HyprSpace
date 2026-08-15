@@ -3,7 +3,54 @@
 
 import AppKit
 import CoreGraphics
+import CoreText
 import Foundation
+
+struct OverviewTextLineCache {
+    enum Role: Hashable {
+        case appName
+        case groupBadge
+        case searchPlaceholder
+        case searchQuery
+        case title
+        case workspaceActive
+        case workspaceInactive
+    }
+
+    struct Key: Hashable {
+        let role: Role
+        let text: String
+        let widthBucket: Int
+    }
+
+    private static let maximumEntryCount = 512
+    private var lines: [Key: CTLine] = [:]
+    let appNameFont = CTFontCreateWithName("SF Pro Text" as CFString, 10, nil)
+    let groupBadgeFont = CTFontCreateWithName("SF Pro Text" as CFString, 11, nil)
+    let searchFont = CTFontCreateWithName("SF Pro Text" as CFString, 16, nil)
+    let titleFont = CTFontCreateWithName("SF Pro Text" as CFString, 12, nil)
+    let workspaceLabelFont = CTFontCreateWithName("SF Pro Display" as CFString, 16, nil)
+
+    var entryCount: Int {
+        lines.count
+    }
+
+    mutating func line(for key: Key, make: () -> CTLine) -> CTLine {
+        if let line = lines[key] {
+            return line
+        }
+        if lines.count >= Self.maximumEntryCount {
+            lines.removeAll(keepingCapacity: true)
+        }
+        let line = make()
+        lines[key] = line
+        return line
+    }
+
+    mutating func removeAll() {
+        lines.removeAll(keepingCapacity: true)
+    }
+}
 
 struct OverviewRenderPalette {
     private struct Components: Sendable {
@@ -115,18 +162,14 @@ enum OverviewRenderer {
         static let searchBarCornerRadius: CGFloat = 10
         static let searchBarBorderWidth: CGFloat = 1.5
         static let iconSize: CGFloat = 24
-        static let titleFontSize: CGFloat = 12
-        static let appNameFontSize: CGFloat = 10
-        static let groupBadgeFontSize: CGFloat = 11
         static let groupBadgeHeight: CGFloat = 22
         static let groupBadgePadding: CGFloat = 8
-        static let workspaceLabelFontSize: CGFloat = 16
-        static let searchFontSize: CGFloat = 16
         static let dropLineHeight: CGFloat = 4
         static let dropOutlineWidth: CGFloat = 3
         static let dropLineWidth: CGFloat = 4
         static let columnCornerRadius: CGFloat = 10
         static let dividerHeight: CGFloat = 2
+        static let titleWidthBucket: CGFloat = 4
     }
 
     static func render(
@@ -134,10 +177,13 @@ enum OverviewRenderer {
         layout: OverviewLayout,
         thumbnails: [Int: CGImage],
         searchQuery: String,
+        selectedWindowHandle: WindowHandle?,
+        hoveredWindowHandle: WindowHandle?,
+        closeButtonHovered: Bool,
+        textLineCache: inout OverviewTextLineCache,
         progress: Double,
         bounds: CGRect,
-        palette: OverviewRenderPalette = .default,
-        isFullyOpen: Bool = false
+        palette: OverviewRenderPalette = .default
     ) {
         let alpha = CGFloat(progress)
 
@@ -150,24 +196,25 @@ enum OverviewRenderer {
         guard progress > 0 else { return }
 
         let scrollOffset = layout.scrollOffset
-        let visibleContentRect = visibleContentRect(
-            bounds: bounds,
-            scrollOffset: scrollOffset,
-            isFullyOpen: isFullyOpen
-        )
+        let visibleContentRect = visibleContentRect(bounds: bounds, scrollOffset: scrollOffset)
 
         context.saveGState()
         context.translateBy(x: 0, y: -scrollOffset)
 
         for section in layout.workspaceSections {
             if !shouldRender(
-                frame: section.sectionFrame.union(section.labelFrame),
+                frame: sectionCullingFrame(section, progress: progress),
                 visibleContentRect: visibleContentRect
             ) {
                 continue
             }
 
-            renderWorkspaceLabel(context: context, section: section, alpha: alpha)
+            renderWorkspaceLabel(
+                context: context,
+                section: section,
+                alpha: alpha,
+                textLineCache: &textLineCache
+            )
 
             if let columns = layout.niriColumnsByWorkspace[section.workspaceId] {
                 renderNiriColumns(
@@ -180,14 +227,20 @@ enum OverviewRenderer {
             }
 
             for window in section.windows {
-                if !shouldRender(frame: window.overviewFrame, visibleContentRect: visibleContentRect) {
+                let frame = window.interpolatedFrame(progress: progress)
+                if !shouldRender(frame: frame, visibleContentRect: visibleContentRect) {
                     continue
                 }
 
                 renderWindow(
                     context: context,
                     window: window,
+                    frame: frame,
                     thumbnail: thumbnails[window.windowId],
+                    isSelected: window.handle == selectedWindowHandle,
+                    isHovered: window.handle == hoveredWindowHandle,
+                    isCloseButtonHovered: window.handle == hoveredWindowHandle && closeButtonHovered,
+                    textLineCache: &textLineCache,
                     progress: progress,
                     palette: palette
                 )
@@ -209,29 +262,37 @@ enum OverviewRenderer {
             context: context,
             frame: layout.searchBarFrame,
             searchQuery: searchQuery,
-            alpha: alpha
+            alpha: alpha,
+            textLineCache: &textLineCache
         )
     }
 
-    static func visibleContentRect(
-        bounds: CGRect,
-        scrollOffset: CGFloat,
-        isFullyOpen: Bool
-    ) -> CGRect? {
-        guard isFullyOpen else { return nil }
+    static func visibleContentRect(bounds: CGRect, scrollOffset: CGFloat) -> CGRect {
         return bounds.offsetBy(dx: 0, dy: scrollOffset)
     }
 
-    static func shouldRender(frame: CGRect, visibleContentRect: CGRect?) -> Bool {
-        guard let visibleContentRect else { return true }
-        return frame.intersects(visibleContentRect)
+    static func shouldRender(frame: CGRect, visibleContentRect: CGRect) -> Bool {
+        frame.intersects(visibleContentRect.insetBy(dx: -8, dy: -8))
     }
 
-    static func borderColor(for window: OverviewWindowItem, palette: OverviewRenderPalette) -> CGColor {
-        if window.isSelected {
+    static func sectionCullingFrame(
+        _ section: OverviewWorkspaceSection,
+        progress: Double
+    ) -> CGRect {
+        section.windows.reduce(section.sectionFrame.union(section.labelFrame)) { frame, window in
+            frame.union(window.interpolatedFrame(progress: progress))
+        }
+    }
+
+    static func borderColor(
+        isSelected: Bool,
+        isHovered: Bool,
+        palette: OverviewRenderPalette
+    ) -> CGColor {
+        if isSelected {
             return palette.selectedBorder
         }
-        if window.isHovered {
+        if isHovered {
             return palette.hoveredBorder
         }
         return palette.normalBorder
@@ -242,7 +303,7 @@ enum OverviewRenderer {
         columns: [OverviewNiriColumn],
         layout: OverviewLayout,
         alpha: CGFloat,
-        visibleContentRect: CGRect?
+        visibleContentRect: CGRect
     ) {
         context.saveGState()
         defer { context.restoreGState() }
@@ -337,18 +398,16 @@ enum OverviewRenderer {
     private static func renderWorkspaceLabel(
         context: CGContext,
         section: OverviewWorkspaceSection,
-        alpha: CGFloat
+        alpha: CGFloat,
+        textLineCache: inout OverviewTextLineCache
     ) {
-        let font = CTFontCreateWithName("SF Pro Display" as CFString, Metrics.workspaceLabelFontSize, nil)
         let color = section.isActive ? Colors.workspaceLabelActiveNS : Colors.workspaceLabelInactiveNS
-
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: color
-        ]
-
-        let attributedString = NSAttributedString(string: section.name, attributes: attributes)
-        let line = CTLineCreateWithAttributedString(attributedString)
+        let role: OverviewTextLineCache.Role = section.isActive ? .workspaceActive : .workspaceInactive
+        let key = OverviewTextLineCache.Key(role: role, text: section.name, widthBucket: 0)
+        let font = textLineCache.workspaceLabelFont
+        let line = textLineCache.line(for: key) {
+            makeLine(text: section.name, font: font, color: color)
+        }
 
         context.saveGState()
         context.setAlpha(alpha)
@@ -361,11 +420,15 @@ enum OverviewRenderer {
     private static func renderWindow(
         context: CGContext,
         window: OverviewWindowItem,
+        frame: CGRect,
         thumbnail: CGImage?,
+        isSelected: Bool,
+        isHovered: Bool,
+        isCloseButtonHovered: Bool,
+        textLineCache: inout OverviewTextLineCache,
         progress: Double,
         palette: OverviewRenderPalette
     ) {
-        let frame = window.interpolatedFrame(progress: progress)
         let alpha = CGFloat(progress) * (window.matchesSearch ? 1.0 : 0.3)
 
         context.saveGState()
@@ -407,8 +470,12 @@ enum OverviewRenderer {
             context.fillPath()
         }
 
-        let borderColor = Self.borderColor(for: window, palette: palette)
-        let borderWidth = window.isSelected ? Metrics.selectedBorderWidth : Metrics.windowBorderWidth
+        let borderColor = Self.borderColor(
+            isSelected: isSelected,
+            isHovered: isHovered,
+            palette: palette
+        )
+        let borderWidth = isSelected ? Metrics.selectedBorderWidth : Metrics.windowBorderWidth
 
         context.addPath(path)
         context.setStrokeColor(borderColor)
@@ -464,22 +531,27 @@ enum OverviewRenderer {
                 width: Metrics.iconSize,
                 height: Metrics.iconSize
             )
-            if let cgIcon = icon.cgImage(forProposedRect: nil, context: nil, hints: nil) {
-                context.draw(cgIcon, in: iconRect)
-            }
+            context.draw(icon, in: iconRect)
         }
 
         let textX = infoRect.minX + 8 + Metrics.iconSize + 6
         let maxTextWidth = infoRect.width - (textX - infoRect.minX) - 8
 
-        let titleFont = CTFontCreateWithName("SF Pro Text" as CFString, Metrics.titleFontSize, nil)
-        let truncatedTitle = truncateText(window.title, font: titleFont, maxWidth: maxTextWidth)
-        let titleAttributes: [NSAttributedString.Key: Any] = [
-            .font: titleFont,
-            .foregroundColor: Colors.textWhiteNS
-        ]
-        let titleString = NSAttributedString(string: truncatedTitle, attributes: titleAttributes)
-        let titleLine = CTLineCreateWithAttributedString(titleString)
+        let titleWidth = bucketedTitleWidth(maxTextWidth)
+        let titleKey = OverviewTextLineCache.Key(
+            role: .title,
+            text: window.title,
+            widthBucket: Int(titleWidth)
+        )
+        let titleFont = textLineCache.titleFont
+        let titleLine = textLineCache.line(for: titleKey) {
+            makeTruncatedLine(
+                text: window.title,
+                font: titleFont,
+                color: Colors.textWhiteNS,
+                maxWidth: titleWidth
+            )
+        }
 
         context.saveGState()
         context.textMatrix = .identity
@@ -487,13 +559,11 @@ enum OverviewRenderer {
         CTLineDraw(titleLine, context)
         context.restoreGState()
 
-        let appFont = CTFontCreateWithName("SF Pro Text" as CFString, Metrics.appNameFontSize, nil)
-        let appAttributes: [NSAttributedString.Key: Any] = [
-            .font: appFont,
-            .foregroundColor: Colors.textGrayNS
-        ]
-        let appString = NSAttributedString(string: window.appName, attributes: appAttributes)
-        let appLine = CTLineCreateWithAttributedString(appString)
+        let appKey = OverviewTextLineCache.Key(role: .appName, text: window.appName, widthBucket: 0)
+        let appNameFont = textLineCache.appNameFont
+        let appLine = textLineCache.line(for: appKey) {
+            makeLine(text: window.appName, font: appNameFont, color: Colors.textGrayNS)
+        }
 
         context.saveGState()
         context.textMatrix = .identity
@@ -501,11 +571,11 @@ enum OverviewRenderer {
         CTLineDraw(appLine, context)
         context.restoreGState()
 
-        if window.isHovered {
+        if isHovered {
             renderCloseButton(
                 context: context,
                 frame: window.closeButtonFrame,
-                isHovered: window.closeButtonHovered
+                isHovered: isCloseButtonHovered
             )
         }
 
@@ -513,7 +583,8 @@ enum OverviewRenderer {
             renderGroupBadge(
                 context: context,
                 count: window.groupCount,
-                frame: frame
+                frame: frame,
+                textLineCache: &textLineCache
             )
         }
 
@@ -523,18 +594,15 @@ enum OverviewRenderer {
     private static func renderGroupBadge(
         context: CGContext,
         count: Int,
-        frame: CGRect
+        frame: CGRect,
+        textLineCache: inout OverviewTextLineCache
     ) {
         let text = "\(count)"
-        let font = CTFontCreateWithName("SF Pro Text" as CFString, Metrics.groupBadgeFontSize, nil)
-        let attributedString = NSAttributedString(
-            string: text,
-            attributes: [
-                .font: font,
-                .foregroundColor: Colors.textWhiteNS
-            ]
-        )
-        let line = CTLineCreateWithAttributedString(attributedString)
+        let key = OverviewTextLineCache.Key(role: .groupBadge, text: text, widthBucket: 0)
+        let font = textLineCache.groupBadgeFont
+        let line = textLineCache.line(for: key) {
+            makeLine(text: text, font: font, color: Colors.textWhiteNS)
+        }
         let textBounds = CTLineGetBoundsWithOptions(line, .useGlyphPathBounds)
         let badgeWidth = max(
             Metrics.groupBadgeHeight,
@@ -598,7 +666,8 @@ enum OverviewRenderer {
         context: CGContext,
         frame: CGRect,
         searchQuery: String,
-        alpha: CGFloat
+        alpha: CGFloat,
+        textLineCache: inout OverviewTextLineCache
     ) {
         let path = CGPath(
             roundedRect: frame,
@@ -621,13 +690,12 @@ enum OverviewRenderer {
         let displayText = searchQuery.isEmpty ? "Type to search..." : searchQuery
         let textColor = searchQuery.isEmpty ? Colors.textDimmedNS : Colors.textWhiteNS
 
-        let font = CTFontCreateWithName("SF Pro Text" as CFString, Metrics.searchFontSize, nil)
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: textColor
-        ]
-        let attributedString = NSAttributedString(string: displayText, attributes: attributes)
-        let line = CTLineCreateWithAttributedString(attributedString)
+        let role: OverviewTextLineCache.Role = searchQuery.isEmpty ? .searchPlaceholder : .searchQuery
+        let key = OverviewTextLineCache.Key(role: role, text: displayText, widthBucket: 0)
+        let font = textLineCache.searchFont
+        let line = textLineCache.line(for: key) {
+            makeLine(text: displayText, font: font, color: textColor)
+        }
 
         let textBounds = CTLineGetBoundsWithOptions(line, .useGlyphPathBounds)
         let textX = frame.midX - textBounds.width / 2
@@ -656,20 +724,34 @@ enum OverviewRenderer {
         }
     }
 
-    private static func truncateText(_ text: String, font: CTFont, maxWidth: CGFloat) -> String {
-        var result = text
-        while result.count > 0 {
-            let attributes: [NSAttributedString.Key: Any] = [.font: font]
-            let attrString = NSAttributedString(string: result + "...", attributes: attributes)
-            let line = CTLineCreateWithAttributedString(attrString)
-            let bounds = CTLineGetBoundsWithOptions(line, .useGlyphPathBounds)
+    private static func bucketedTitleWidth(_ maxWidth: CGFloat) -> CGFloat {
+        max(1, floor(maxWidth / Metrics.titleWidthBucket) * Metrics.titleWidthBucket)
+    }
 
-            if bounds.width <= maxWidth || result.count <= 3 {
-                return result == text ? text : result + "..."
-            }
-            result = String(result.dropLast())
+    private static func makeLine(text: String, font: CTFont, color: NSColor) -> CTLine {
+        CTLineCreateWithAttributedString(
+            NSAttributedString(
+                string: text,
+                attributes: [
+                    .font: font,
+                    .foregroundColor: color
+                ]
+            )
+        )
+    }
+
+    private static func makeTruncatedLine(
+        text: String,
+        font: CTFont,
+        color: NSColor,
+        maxWidth: CGFloat
+    ) -> CTLine {
+        let line = makeLine(text: text, font: font, color: color)
+        guard CTLineGetTypographicBounds(line, nil, nil, nil) > Double(maxWidth) else {
+            return line
         }
-        return text
+        let token = makeLine(text: "…", font: font, color: color)
+        return CTLineCreateTruncatedLine(line, Double(maxWidth), .end, token) ?? token
     }
 
     static func aspectFitRect(contentSize: CGSize, in bounds: CGRect) -> CGRect {

@@ -25,14 +25,13 @@ class NiriInteractionTestCase: XCTestCase {
     func beginMove(
         _ engine: NiriLayoutEngine,
         window: NiriWindow,
-        handle: WindowHandle? = nil,
         in workspaceId: WorkspaceDescriptor.ID
     ) -> Bool {
         var state = ViewportState()
         let frames = layout(engine, in: workspaceId, state: state)
         return engine.interactiveMoveBegin(
             windowId: window.id,
-            windowHandle: handle ?? window.handle,
+            windowToken: window.token,
             startLocation: frames[window.token]?.center ?? .zero,
             in: workspaceId,
             motion: .disabled,
@@ -119,7 +118,7 @@ final class NiriInteractionOwnershipTests: NiriInteractionTestCase {
         XCTAssertTrue(
             engine.interactiveMoveBegin(
                 windowId: source.id,
-                windowHandle: source.handle,
+                windowToken: source.token,
                 startLocation: sourceFrame.center,
                 in: workspaceA,
                 motion: .disabled,
@@ -551,14 +550,12 @@ final class NiriInteractionLifecycleTests: NiriInteractionTestCase {
         let newToken = WindowToken(pid: 1_019, windowId: 101)
         let source = engine.addWindow(token: oldToken, to: workspace, afterSelection: nil)
         let target = addWindow(engine, pid: 1_019, windowId: 2, to: workspace, after: source)
-        let moveHandle = source.handle
-        XCTAssertTrue(beginMove(engine, window: source, handle: moveHandle, in: workspace))
+        XCTAssertTrue(beginMove(engine, window: source, in: workspace))
 
         XCTAssertTrue(engine.rekeyWindow(from: oldToken, to: newToken, in: workspace))
 
         XCTAssertEqual(source.token, newToken)
-        XCTAssertEqual(moveHandle.token, newToken)
-        XCTAssertEqual(engine.interactiveMove?.windowHandle.token, newToken)
+        XCTAssertEqual(engine.interactiveMove?.windowToken, newToken)
         let targetFrame = try XCTUnwrap(layout(engine, in: workspace)[target.token])
         XCTAssertNotNil(
             engine.interactiveMoveUpdate(currentLocation: targetFrame.center)
@@ -665,7 +662,7 @@ final class NiriInteractionOrientationTests: NiriInteractionTestCase {
         XCTAssertTrue(
             engine.interactiveMoveBegin(
                 windowId: source.id,
-                windowHandle: source.handle,
+                windowToken: source.token,
                 startLocation: sourceFrame.center,
                 isInsertMode: true,
                 in: workspaceId,

@@ -119,6 +119,7 @@ final class OverviewWindow: NSPanel {
         _ layout: OverviewLayout,
         state: OverviewState,
         searchQuery: String,
+        selectedWindowHandle: WindowHandle?,
         palette: OverviewRenderPalette? = nil,
         thumbnails: [Int: CGImage]? = nil
     ) {
@@ -126,6 +127,7 @@ final class OverviewWindow: NSPanel {
             layout,
             state: state,
             searchQuery: searchQuery,
+            selectedWindowHandle: selectedWindowHandle,
             palette: palette,
             thumbnails: thumbnails
         )
@@ -147,6 +149,7 @@ final class OverviewView: NSView {
     private(set) var searchQuery: String = ""
     private(set) var thumbnails: [Int: CGImage] = [:]
     private(set) var palette: OverviewRenderPalette
+    private(set) var selectedWindowHandle: WindowHandle?
 
     var onWindowSelected: ((WindowHandle) -> Void)?
     var onWindowClosed: ((WindowHandle) -> Void)?
@@ -162,11 +165,15 @@ final class OverviewView: NSView {
     private var dragCandidateHandle: WindowHandle?
     private var dragStartPoint: CGPoint = .zero
     private var isDragging: Bool = false
+    private var hoveredWindowHandle: WindowHandle?
+    private var closeButtonHovered = false
+    private var textLineCache = OverviewTextLineCache()
     private let dragThreshold: CGFloat = 6.0
     private let scrollAxisEpsilon: CGFloat = 0.0001
 
     init(frame: NSRect, palette: OverviewRenderPalette = .default) {
         self.palette = palette
+        selectedWindowHandle = nil
         super.init(frame: frame)
         wantsLayer = true
     }
@@ -180,12 +187,23 @@ final class OverviewView: NSView {
         _ layout: OverviewLayout,
         state: OverviewState,
         searchQuery: String,
+        selectedWindowHandle: WindowHandle?,
         palette: OverviewRenderPalette? = nil,
         thumbnails: [Int: CGImage]? = nil
     ) {
         self.layout = layout
         overviewState = state
         self.searchQuery = searchQuery
+        self.selectedWindowHandle = selectedWindowHandle
+        if let hoveredWindowHandle,
+           layout.window(for: hoveredWindowHandle)?.matchesSearch != true
+        {
+            self.hoveredWindowHandle = nil
+            closeButtonHovered = false
+        }
+        if case .closed = state {
+            textLineCache.removeAll()
+        }
         if let palette {
             self.palette = palette
         }
@@ -238,15 +256,14 @@ final class OverviewView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
+        let hit = layout.windowHit(at: point)
 
-        if layout.isCloseButtonAt(point: point) {
-            if let window = layout.windowAt(point: point) {
-                onWindowClosed?(window.handle)
-            }
+        if let hit, hit.isCloseButton {
+            onWindowClosed?(hit.window.handle)
             return
         }
 
-        if let window = layout.windowAt(point: point) {
+        if let window = hit?.window {
             if event.modifierFlags.contains(.option) {
                 dragCandidateHandle = window.handle
                 dragStartPoint = point
@@ -285,15 +302,14 @@ final class OverviewView: NSView {
 
         guard dragCandidateHandle != nil else { return }
         cancelDragState()
+        let hit = layout.windowHit(at: point)
 
-        if layout.isCloseButtonAt(point: point) {
-            if let window = layout.windowAt(point: point) {
-                onWindowClosed?(window.handle)
-            }
+        if let hit, hit.isCloseButton {
+            onWindowClosed?(hit.window.handle)
             return
         }
 
-        if let window = layout.windowAt(point: point) {
+        if let window = hit?.window {
             onWindowSelected?(window.handle)
             return
         }
@@ -339,12 +355,14 @@ final class OverviewView: NSView {
     }
 
     private func updateHoverState(at point: CGPoint) {
-        let isCloseButton = layout.isCloseButtonAt(point: point)
-        if let window = layout.windowAt(point: point) {
-            layout.setHovered(handle: window.handle, closeButtonHovered: isCloseButton)
-        } else {
-            layout.setHovered(handle: nil)
-        }
+        let hit = layout.windowHit(at: point)
+        let nextHoveredHandle = hit?.window.handle
+        let nextCloseButtonHovered = hit?.isCloseButton ?? false
+        guard nextHoveredHandle != hoveredWindowHandle
+            || nextCloseButtonHovered != closeButtonHovered
+        else { return }
+        hoveredWindowHandle = nextHoveredHandle
+        closeButtonHovered = nextCloseButtonHovered
         needsDisplay = true
     }
 
@@ -357,22 +375,18 @@ final class OverviewView: NSView {
         case .open: 1.0
         case let .closing(_, p): 1.0 - p
         }
-        let isFullyOpen: Bool = switch overviewState {
-        case .open: true
-        case .closed,
-             .opening,
-             .closing: false
-        }
-
         OverviewRenderer.render(
             context: context,
             layout: layout,
             thumbnails: thumbnails,
             searchQuery: searchQuery,
+            selectedWindowHandle: selectedWindowHandle,
+            hoveredWindowHandle: hoveredWindowHandle,
+            closeButtonHovered: closeButtonHovered,
+            textLineCache: &textLineCache,
             progress: progress,
             bounds: bounds,
-            palette: palette,
-            isFullyOpen: isFullyOpen
+            palette: palette
         )
     }
 }

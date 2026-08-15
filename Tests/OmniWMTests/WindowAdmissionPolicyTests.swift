@@ -8,6 +8,59 @@ import XCTest
 
 @MainActor
 final class WindowAdmissionPolicyTests: XCTestCase {
+    func testFirstObservableAdmissionCarriesResolvedInteractionPolicy() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let token = WindowToken(pid: 467_090, windowId: 467_091)
+        var observedPolicy: WindowInteractionPolicy?
+        controller.workspaceManager.onWindowPresenceObserved = { handle in
+            observedPolicy = controller.workspaceManager.entry(for: handle)?.interactionPolicy
+        }
+
+        _ = controller.workspaceManager.addWindow(
+            AXWindowRef(
+                element: AXUIElementCreateApplication(token.pid),
+                windowId: token.windowId
+            ),
+            pid: token.pid,
+            windowId: token.windowId,
+            to: workspaceId,
+            interactionPolicy: .handsOffSurface
+        )
+
+        XCTAssertEqual(observedPolicy, .handsOffSurface)
+        XCTAssertEqual(controller.workspaceManager.entry(for: token)?.interactionPolicy, .handsOffSurface)
+    }
+
+    func testAutomaticRuleReevaluationRefreshesInteractionPolicyWithoutReadmission() async throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let token = WindowToken(pid: 467_092, windowId: 467_093)
+        let axRef = AXWindowRef(
+            element: AXUIElementCreateApplication(token.pid),
+            windowId: token.windowId
+        )
+        _ = controller.workspaceManager.addWindow(
+            axRef,
+            pid: token.pid,
+            windowId: token.windowId,
+            to: workspaceId,
+            mode: .floating,
+            interactionPolicy: .handsOffSurface
+        )
+
+        let outcome = await controller.reevaluateWindowRules(for: [.window(token)])
+
+        XCTAssertTrue(outcome.evaluatedAnyWindow)
+        XCTAssertFalse(outcome.relayoutNeeded)
+        XCTAssertEqual(controller.workspaceManager.entry(for: token)?.mode, .floating)
+        XCTAssertEqual(controller.workspaceManager.entry(for: token)?.interactionPolicy, .untracked)
+    }
+
     func testMeaningfulAdmissionFrameRejectsOneByOneProxyGeometry() {
         XCTAssertFalse(WMController.isMeaningfulAdmissionFrame(CGRect(x: 0, y: 0, width: 1, height: 1)))
         XCTAssertFalse(WMController.isMeaningfulAdmissionFrame(CGRect(x: 0, y: 0, width: 1, height: 400)))

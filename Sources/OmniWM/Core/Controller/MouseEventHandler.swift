@@ -848,7 +848,7 @@ final class MouseEventHandler {
                 controller.workspaceManager.withNiriViewportState(for: wsId) { vstate in
                     if engine.interactiveMoveBegin(
                         windowId: tiledWindow.id,
-                        windowHandle: tiledWindow.handle,
+                        windowToken: tiledWindow.token,
                         startLocation: location,
                         isInsertMode: isInsertMode,
                         in: wsId,
@@ -867,7 +867,7 @@ final class MouseEventHandler {
                     state.capturedInteractionButton = button
                     NSCursor.closedHand.set()
 
-                    if let entry = controller.workspaceManager.entry(for: tiledWindow.handle),
+                    if let entry = controller.workspaceManager.entry(for: tiledWindow.token),
                        let frame = AXWindowService.framePreferFast(entry.axRef)
                     {
                         if state.dragGhostController == nil {
@@ -1097,7 +1097,7 @@ final class MouseEventHandler {
                 if let monitor = controller.workspaceManager.monitor(for: wsId) {
                     let workingFrame = controller.insetWorkingFrame(for: monitor)
                     let gaps = controller.innerGap(for: monitor)
-                    let movedToken = move.windowHandle.id
+                    let movedToken = move.windowToken
                     var didEnd = false
                     controller.workspaceManager.withNiriViewportState(for: wsId) { vstate in
                         didEnd = engine.interactiveMoveEnd(
@@ -1766,11 +1766,11 @@ final class MouseEventHandler {
             return
         }
 
+        let columns = engine.projectedColumns(in: wsId)
         var didApply = false
         var shouldStartAnimation = false
         controller.workspaceManager.withNiriViewportState(for: wsId) { vstate in
             for _ in 0 ..< abs(ticks) {
-                let columns = engine.projectedColumns(in: wsId)
                 let activeColumnIndex = engine.projectedActiveColumnIndex(
                     state: vstate,
                     columns: columns,
@@ -1778,7 +1778,12 @@ final class MouseEventHandler {
                 )
                 let targetColumnIndex = activeColumnIndex + step
                 guard columns.indices.contains(targetColumnIndex),
-                      let currentNode = currentSelectionNode(engine: engine, wsId: wsId, state: vstate),
+                      let currentNode = currentSelectionNode(
+                          engine: engine,
+                          wsId: wsId,
+                          state: vstate,
+                          columns: columns
+                      ),
                       let newNode = engine.focusColumn(
                           targetColumnIndex,
                           currentSelection: currentNode,
@@ -1973,7 +1978,8 @@ final class MouseEventHandler {
     private func currentSelectionNode(
         engine: NiriLayoutEngine,
         wsId: WorkspaceDescriptor.ID,
-        state: ViewportState
+        state: ViewportState,
+        columns: [NiriProjectedColumn]? = nil
     ) -> NiriNode? {
         if let selectedNodeId = state.selectedNodeId,
            let selectedNode = engine.findNode(by: selectedNodeId, in: wsId)
@@ -1986,7 +1992,7 @@ final class MouseEventHandler {
             }
         }
 
-        let columns = engine.projectedColumns(in: wsId)
+        let columns = columns ?? engine.projectedColumns(in: wsId)
         guard !columns.isEmpty else { return nil }
         let activeColumnIndex = engine.projectedActiveColumnIndex(
             state: state,

@@ -345,6 +345,21 @@ enum AXWindowService {
     @MainActor private static var titleCache: [UInt32: String?] = [:]
     @MainActor private static var titleInsertionOrder: [UInt32] = []
 
+    private static func value(at index: Int, in values: CFArray) -> CFTypeRef? {
+        guard index >= 0,
+              index < CFArrayGetCount(values),
+              let pointer = CFArrayGetValueAtIndex(values, index)
+        else {
+            return nil
+        }
+        return unsafeBitCast(pointer, to: CFTypeRef.self)
+    }
+
+    private static func stringValue(_ value: CFTypeRef?) -> String? {
+        guard let value, CFGetTypeID(value) == CFStringGetTypeID() else { return nil }
+        return unsafeDowncast(value, to: NSString.self) as String
+    }
+
     @MainActor
     static func titlePreferFast(windowId: UInt32) -> String? {
         if let cached = titleCache[windowId] {
@@ -418,18 +433,19 @@ enum AXWindowService {
             &valuesPtr
         )
         guard result == .success,
-              let values = valuesPtr as? [Any],
-              values.count == 2
+              let values = valuesPtr,
+              CFArrayGetCount(values) == 2,
+              let posRaw = value(at: 0, in: values),
+              let sizeRaw = value(at: 1, in: values)
         else { throw .cannotGetAttribute }
-        let posRaw = values[0] as CFTypeRef
-        let sizeRaw = values[1] as CFTypeRef
         guard CFGetTypeID(posRaw) == AXValueGetTypeID(),
               CFGetTypeID(sizeRaw) == AXValueGetTypeID()
         else { throw .cannotGetAttribute }
         var pos = CGPoint.zero
         var size = CGSize.zero
-        guard AXValueGetValue(posRaw as! AXValue, .cgPoint, &pos),
-              AXValueGetValue(sizeRaw as! AXValue, .cgSize, &size) else { throw .cannotGetAttribute }
+        guard AXValueGetValue(unsafeDowncast(posRaw, to: AXValue.self), .cgPoint, &pos),
+              AXValueGetValue(unsafeDowncast(sizeRaw, to: AXValue.self), .cgSize, &size)
+        else { throw .cannotGetAttribute }
         return convertFromAX(CGRect(origin: pos, size: size))
     }
 
@@ -543,8 +559,11 @@ enum AXWindowService {
         ] as CFArray
         var valuesPtr: CFArray?
         let result = AXUIElementCopyMultipleAttributeValues(window.element, attributes, .init(), &valuesPtr)
-        guard result == .success, let values = valuesPtr as? [Any], values.count == 2 else { return (nil, nil) }
-        return (values[0] as? String, values[1] as? String)
+        guard result == .success, let values = valuesPtr, CFArrayGetCount(values) == 2 else { return (nil, nil) }
+        return (
+            stringValue(value(at: 0, in: values)),
+            stringValue(value(at: 1, in: values))
+        )
     }
 
     static func isSystemModalSurface(role: String?, subrole: String?) -> Bool {
@@ -649,8 +668,8 @@ enum AXWindowService {
         )
 
         guard result == .success,
-              let valuesArray = values as? [Any?],
-              valuesArray.count > WindowTypeAttributeIndex.minimizeButton.rawValue
+              let values,
+              CFArrayGetCount(values) > WindowTypeAttributeIndex.minimizeButton.rawValue
         else {
             return AXWindowDecisionEvidence.unavailable(
                 appPolicy: appPolicy,
@@ -658,9 +677,8 @@ enum AXWindowService {
             ).facts
         }
 
-        func attributeValue(_ index: WindowTypeAttributeIndex) -> Any? {
-            guard valuesArray.indices.contains(index.rawValue) else { return nil }
-            return valuesArray[index.rawValue]
+        func attributeValue(_ index: WindowTypeAttributeIndex) -> CFTypeRef? {
+            value(at: index.rawValue, in: values)
         }
 
         let fullscreenButtonValue = attributeValue(.fullScreenButton)
@@ -688,9 +706,9 @@ enum AXWindowService {
 
         return makeWindowFacts(
             AXWindowFactAttributeValues(
-                role: attributeValue(.role) as? String,
-                subrole: attributeValue(.subrole) as? String,
-                title: includeTitle ? (attributeValue(.title) as? String) : nil,
+                role: stringValue(attributeValue(.role)),
+                subrole: stringValue(attributeValue(.subrole)),
+                title: includeTitle ? stringValue(attributeValue(.title)) : nil,
                 closeButton: attributeValue(.closeButton),
                 fullscreenButton: fullscreenButtonValue,
                 fullscreenButtonEnabled: fullscreenButtonEnabled,
@@ -724,9 +742,14 @@ enum AXWindowService {
         )
     }
 
+    private static func resolvedAttribute(_ value: CFTypeRef?) -> Bool {
+        guard let value else { return false }
+        return CFGetTypeID(value) == AXUIElementGetTypeID()
+    }
+
     static func resolvedAttribute(_ value: Any?) -> Bool {
         guard let value else { return false }
-        return CFGetTypeID(value as CFTypeRef) == AXUIElementGetTypeID()
+        return resolvedAttribute(value as CFTypeRef)
     }
 
     static func fullscreenButtonEvidence(_ value: Any?) -> AXFullscreenButtonEvidence {
@@ -759,15 +782,34 @@ enum AXWindowService {
         }
     }
 
-    static func sizeValue(_ value: Any?) -> CGSize? {
+    private static func sizeValue(_ value: CFTypeRef?) -> CGSize? {
         guard let value,
-              CFGetTypeID(value as CFTypeRef) == AXValueGetTypeID()
+              CFGetTypeID(value) == AXValueGetTypeID()
         else {
             return nil
         }
         var size = CGSize.zero
-        guard AXValueGetValue(value as! AXValue, .cgSize, &size) else { return nil }
+        guard AXValueGetValue(unsafeDowncast(value, to: AXValue.self), .cgSize, &size) else { return nil }
         return size
+    }
+
+    static func sizeValue(_ value: Any?) -> CGSize? {
+        guard let value else { return nil }
+        return sizeValue(value as CFTypeRef)
+    }
+
+    static func sizeConstraintInputs(
+        from values: CFArray,
+        currentSize: CGSize?
+    ) -> AXWindowConstraintInputs {
+        AXWindowConstraintInputs(
+            hasGrowArea: resolvedAttribute(value(at: 0, in: values)),
+            hasZoomButton: resolvedAttribute(value(at: 1, in: values)),
+            subrole: stringValue(value(at: 2, in: values)),
+            minSize: sizeValue(value(at: 3, in: values)),
+            maxSize: sizeValue(value(at: 4, in: values)),
+            currentSize: currentSize
+        )
     }
 
     static func resolvedSizeConstraints(_ inputs: AXWindowConstraintInputs) -> WindowSizeConstraints {
@@ -873,40 +915,21 @@ enum AXWindowService {
             &values
         )
 
-        var hasGrowArea = false
-        var hasZoomButton = false
-        var subroleValue: String?
-        var minSize: CGSize?
-        var maxSize: CGSize?
-
-        if result == .success, let valuesArray = values as? [Any?] {
-            if !valuesArray.isEmpty, valuesArray[0] != nil, !(valuesArray[0] is NSError) {
-                hasGrowArea = true
-            }
-            if valuesArray.count > 1, valuesArray[1] != nil, !(valuesArray[1] is NSError) {
-                hasZoomButton = true
-            }
-            if valuesArray.count > 2, let subrole = valuesArray[2] as? String {
-                subroleValue = subrole
-            }
-            if valuesArray.count > 3 {
-                minSize = sizeValue(valuesArray[3])
-            }
-            if valuesArray.count > 4 {
-                maxSize = sizeValue(valuesArray[4])
-            }
+        let observedSize = currentSize ?? (try? frame(window).size)
+        let inputs = if result == .success, let values {
+            sizeConstraintInputs(from: values, currentSize: observedSize)
+        } else {
+            AXWindowConstraintInputs(
+                hasGrowArea: false,
+                hasZoomButton: false,
+                subrole: nil,
+                minSize: nil,
+                maxSize: nil,
+                currentSize: observedSize
+            )
         }
 
-        return resolvedSizeConstraints(
-            AXWindowConstraintInputs(
-                hasGrowArea: hasGrowArea,
-                hasZoomButton: hasZoomButton,
-                subrole: subroleValue,
-                minSize: minSize,
-                maxSize: maxSize,
-                currentSize: currentSize ?? (try? frame(window).size)
-            )
-        )
+        return resolvedSizeConstraints(inputs)
     }
 
     static func axWindowRef(for windowId: UInt32, pid: pid_t) -> AXWindowRef? {

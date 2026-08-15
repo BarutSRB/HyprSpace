@@ -100,6 +100,42 @@ final class LockedWindowGenerationMap: @unchecked Sendable {
     }
 }
 
+final class LockedClosingFrameGenerationMap: @unchecked Sendable {
+    private let lock = NSLock()
+    private var nextGeneration: UInt64 = 1
+    private var generations: [UUID: UInt64] = [:]
+
+    func nextGeneration(for animationId: UUID) -> UInt64 {
+        lock.lock()
+        defer { lock.unlock() }
+        let generation = nextGeneration
+        nextGeneration &+= 1
+        generations[animationId] = generation
+        return generation
+    }
+
+    func isCurrent(_ generation: UInt64, for animationId: UUID) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return generations[animationId] == generation
+    }
+
+    func removeIfCurrent(_ generation: UInt64, for animationId: UUID) {
+        lock.lock()
+        if generations[animationId] == generation {
+            generations.removeValue(forKey: animationId)
+        }
+        lock.unlock()
+    }
+
+    func invalidateAll() {
+        lock.lock()
+        nextGeneration &+= 1
+        generations.removeAll(keepingCapacity: true)
+        lock.unlock()
+    }
+}
+
 final class LockedGenerationEpoch: @unchecked Sendable {
     private let lock = NSLock()
     private var generation: UInt64 = 0
@@ -237,6 +273,11 @@ struct AppAXFrameWriteRequest: Sendable {
     let verify: Bool
 }
 
+struct AppAXClosingFrameWriteRequest: Sendable {
+    let target: AXClosingFrameTarget
+    let generation: UInt64
+}
+
 private final class AppAXContextCreationState: @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: CheckedContinuation<AppAXContext?, Error>?
@@ -267,8 +308,10 @@ final class AppAXContext {
     }
 
     private var activeFrameBatchJobs: [UUID: RunLoopJob] = [:]
+    private var activeClosingFrameBatchJobs: [UUID: RunLoopJob] = [:]
     private let frameWriteGenerations = LockedWindowGenerationMap()
     private let parkFrameWriteGenerations = LockedWindowGenerationMap()
+    private let closingFrameWriteGenerations = LockedClosingFrameGenerationMap()
     private let windowBindingEpoch = LockedGenerationEpoch()
     private let frameWriteSuppression = LockedWindowIdSet()
     private let axObserver: ThreadGuardedValue<AXObserver?>
@@ -1878,10 +1921,46 @@ final class AppAXContext {
 
     func setMacOSAppHidden(_ hidden: Bool, for windowIds: [Int]) {
         frameWriteSuppression.setHardSuppressed(hidden)
+        if hidden {
+            closingFrameWriteGenerations.invalidateAll()
+        }
         for windowId in windowIds {
             _ = frameWriteGenerations.nextGeneration(for: windowId)
             _ = parkFrameWriteGenerations.nextGeneration(for: windowId)
         }
+    }
+
+    func setClosingFramesBatch(_ frames: [AXClosingFrameTarget]) {
+        guard let thread, !frames.isEmpty else { return }
+        nonisolated(unsafe) let appThread = thread
+        let requests = frames.map {
+            AppAXClosingFrameWriteRequest(
+                target: $0,
+                generation: closingFrameWriteGenerations.nextGeneration(for: $0.animationId)
+            )
+        }
+        let batchId = UUID()
+
+        let batchJob = appThread.runInLoopAsync { [self] job in
+            for request in requests {
+                _ = applyClosingFrameWriteRequest(
+                    request,
+                    generations: closingFrameWriteGenerations,
+                    isCancelled: {
+                        job.isCancelled || frameWriteSuppression.isHardSuppressed()
+                    }
+                )
+                closingFrameWriteGenerations.removeIfCurrent(
+                    request.generation,
+                    for: request.target.animationId
+                )
+            }
+
+            scheduleOnMainRunLoop { [weak self] in
+                self?.activeClosingFrameBatchJobs.removeValue(forKey: batchId)
+            }
+        }
+        activeClosingFrameBatchJobs[batchId] = batchJob
     }
 
     func setFramesBatch(
@@ -2099,6 +2178,11 @@ final class AppAXContext {
             job.cancel()
         }
         activeFrameBatchJobs = [:]
+        for (_, job) in activeClosingFrameBatchJobs {
+            job.cancel()
+        }
+        activeClosingFrameBatchJobs = [:]
+        closingFrameWriteGenerations.invalidateAll()
 
         nonisolated(unsafe) let appThread = thread
         appThread?.runInLoopAsync { [
@@ -2145,6 +2229,29 @@ final class AppAXContext {
             }
         }
     }
+}
+
+@discardableResult
+func applyClosingFrameWriteRequest(
+    _ request: AppAXClosingFrameWriteRequest,
+    generations: LockedClosingFrameGenerationMap,
+    isCancelled: () -> Bool = { false },
+    writeFrame: (AXWindowRef, CGRect, CGRect?, Bool) -> AXFrameWriteResult = {
+        AXWindowService.setFrame($0, frame: $1, currentFrameHint: $2, verify: $3)
+    }
+) -> Bool {
+    guard !isCancelled(),
+          generations.isCurrent(request.generation, for: request.target.animationId)
+    else {
+        return false
+    }
+    _ = writeFrame(
+        request.target.expectedWindow,
+        request.target.frame,
+        request.target.currentFrameHint,
+        false
+    )
+    return true
 }
 
 func applyFrameWriteRequest(

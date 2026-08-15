@@ -18,6 +18,7 @@ enum EventNormalizer {
             axRef,
             ruleEffects,
             admissionHints,
+            interactionPolicy,
             metadata,
             source
         ):
@@ -29,6 +30,7 @@ enum EventNormalizer {
                 axRef: axRef,
                 ruleEffects: ruleEffects,
                 admissionHints: admissionHints,
+                interactionPolicy: interactionPolicy,
                 managedReplacementMetadata: metadata,
                 source: source
             )

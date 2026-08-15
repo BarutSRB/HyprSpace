@@ -1336,6 +1336,27 @@ final class AXFullRescanBoundaryTests: XCTestCase {
         }
     }
 
+    func testConstraintBatchTreatsMissingSentinelsAsAbsent() throws {
+        let noValue = try XCTUnwrap(axBoundaryErrorValue(.noValue))
+        let values = [
+            kCFNull as CFTypeRef,
+            noValue as CFTypeRef,
+            kAXDialogSubrole as CFTypeRef,
+            kCFNull as CFTypeRef,
+            kCFNull as CFTypeRef
+        ] as CFArray
+        let currentSize = CGSize(width: 420, height: 280)
+
+        let inputs = AXWindowService.sizeConstraintInputs(from: values, currentSize: currentSize)
+
+        XCTAssertFalse(inputs.hasGrowArea)
+        XCTAssertFalse(inputs.hasZoomButton)
+        XCTAssertEqual(inputs.subrole, kAXDialogSubrole as String)
+        XCTAssertNil(inputs.minSize)
+        XCTAssertNil(inputs.maxSize)
+        XCTAssertEqual(AXWindowService.resolvedSizeConstraints(inputs), .fixed(size: currentSize))
+    }
+
     func testFullscreenButtonEvidencePreservesFailures() throws {
         var point = CGPoint(x: 10, y: 20)
         let pointValue = try XCTUnwrap(AXValueCreate(.cgPoint, &point))

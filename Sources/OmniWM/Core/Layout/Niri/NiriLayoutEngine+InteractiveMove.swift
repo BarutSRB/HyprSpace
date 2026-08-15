@@ -7,7 +7,7 @@ import Foundation
 extension NiriLayoutEngine {
     func interactiveMoveBegin(
         windowId: NodeId,
-        windowHandle: WindowHandle,
+        windowToken: WindowToken,
         startLocation: CGPoint,
         isInsertMode: Bool = false,
         in workspaceId: WorkspaceDescriptor.ID,
@@ -31,7 +31,7 @@ extension NiriLayoutEngine {
 
         interactiveMove = InteractiveMove(
             windowId: windowId,
-            windowHandle: windowHandle,
+            windowToken: windowToken,
             workspaceId: workspaceId,
             startMouseLocation: startLocation,
             originalColumnIndex: colIdx,
@@ -178,7 +178,7 @@ extension NiriLayoutEngine {
                     }
                     return .window(
                         nodeId: window.id,
-                        handle: window.handle,
+                        token: window.token,
                         insertPosition: position
                     )
                 }

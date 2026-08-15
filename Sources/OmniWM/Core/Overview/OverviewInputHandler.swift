@@ -163,26 +163,16 @@ final class OverviewInputHandler {
         return .init(action: .consume, shouldConsume: true)
     }
 
-    func handleMouseMoved(at point: CGPoint, in layout: inout OverviewLayout) {
-        let isCloseButton = layout.isCloseButtonAt(point: point)
-        if let window = layout.windowAt(point: point) {
-            layout.setHovered(handle: window.handle, closeButtonHovered: isCloseButton)
-        } else {
-            layout.setHovered(handle: nil)
-        }
-    }
-
     func handleMouseDown(at point: CGPoint, in layout: OverviewLayout) {
         guard let controller else { return }
+        let hit = layout.windowHit(at: point)
 
-        if layout.isCloseButtonAt(point: point) {
-            if let window = layout.windowAt(point: point) {
-                controller.closeWindow(window.handle)
-            }
+        if let hit, hit.isCloseButton {
+            controller.closeWindow(hit.window.handle)
             return
         }
 
-        if let window = layout.windowAt(point: point) {
+        if let window = hit?.window {
             controller.selectAndActivateWindow(window.handle)
             return
         }
@@ -196,30 +186,5 @@ final class OverviewInputHandler {
 
     func reset() {
         searchQuery = ""
-    }
-
-    func matchingWindows(in layout: OverviewLayout) -> [OverviewWindowItem] {
-        layout.allWindows.filter(\.matchesSearch)
-    }
-
-    func selectFirstMatch(in layout: inout OverviewLayout) {
-        let matching = matchingWindows(in: layout)
-        if let first = matching.first {
-            layout.setSelected(handle: first.handle)
-        } else {
-            layout.setSelected(handle: nil)
-        }
-    }
-
-    func autoSelectOnSearch(in layout: inout OverviewLayout) {
-        guard !searchQuery.isEmpty else { return }
-
-        let matching = matchingWindows(in: layout)
-
-        if layout.selectedWindow() == nil || !(layout.selectedWindow()?.matchesSearch ?? false) {
-            if let first = matching.first {
-                layout.setSelected(handle: first.handle)
-            }
-        }
     }
 }

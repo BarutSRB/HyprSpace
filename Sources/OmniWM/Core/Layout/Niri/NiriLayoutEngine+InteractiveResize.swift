@@ -27,7 +27,7 @@ extension NiriLayoutEngine {
                 let edges = detectEdges(point: point, frame: frame, threshold: threshold)
                 if !edges.isEmpty {
                     return ResizeHitTestResult(
-                        windowHandle: window.handle,
+                        windowToken: window.token,
                         nodeId: window.id,
                         edges: edges,
                         columnIndex: colIdx,

@@ -6,7 +6,7 @@ import Foundation
 
 struct InteractiveMove {
     let windowId: NodeId
-    let windowHandle: WindowHandle
+    var windowToken: WindowToken
     let workspaceId: WorkspaceDescriptor.ID
     let startMouseLocation: CGPoint
     let originalColumnIndex: Int
@@ -18,7 +18,7 @@ struct InteractiveMove {
 }
 
 enum MoveHoverTarget: Equatable {
-    case window(nodeId: NodeId, handle: WindowHandle, insertPosition: InsertPosition)
+    case window(nodeId: NodeId, token: WindowToken, insertPosition: InsertPosition)
     case columnGap(columnIndex: Int, insertPosition: InsertPosition)
     case workspaceEdge(side: HorizontalSide)
 }

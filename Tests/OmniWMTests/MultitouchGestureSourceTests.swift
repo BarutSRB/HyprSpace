@@ -99,6 +99,24 @@ final class MultitouchGestureSourceTests: XCTestCase {
         XCTAssertNil(touch.normalizedPosition)
     }
 
+    func testInlineTouchStoragePreservesOverflowContacts() throws {
+        let positions = (0 ..< 20).map { index in
+            (Float(index) / 20, Float(20 - index) / 20)
+        }
+        let result = MultitouchGestureSource.makeSnapshot(
+            frame: frame(positions),
+            location: location,
+            previousActiveCount: 0
+        )
+        let snapshot = try XCTUnwrap(result.snapshot)
+        let lastPosition = try XCTUnwrap(snapshot.touches.last?.normalizedPosition)
+
+        XCTAssertEqual(result.activeCount, 20)
+        XCTAssertEqual(snapshot.touches.count, 20)
+        XCTAssertEqual(lastPosition.x, 0.95, accuracy: 0.0001)
+        XCTAssertEqual(lastPosition.y, 0.05, accuracy: 0.0001)
+    }
+
     func testTimestampIsPropagated() throws {
         let result = MultitouchGestureSource.makeSnapshot(
             frame: frame([(0.5, 0.5), (0.55, 0.5), (0.6, 0.5)], timestamp: 42.5),

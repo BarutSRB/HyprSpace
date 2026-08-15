@@ -4,7 +4,7 @@
 import Synchronization
 
 final class RunLoopJob: Sendable {
-    private struct State {
+    private struct State: ~Copyable {
         var cancelled = false
         var scheduledBody: (@Sendable (RunLoopJob) -> Void)?
     }
@@ -42,10 +42,6 @@ final class RunLoopJob: Sendable {
     }
 
     func takeScheduledBody() -> (@Sendable (RunLoopJob) -> Void)? {
-        state.withLock {
-            let body = $0.scheduledBody
-            $0.scheduledBody = nil
-            return body
-        }
+        state.withLock { $0.scheduledBody.take() }
     }
 }

@@ -212,7 +212,7 @@ final class HotkeyCenter {
     private var hyperTriggerRunLoopSource: CFRunLoopSource?
     private var hyperTrigger = HyperTriggerStateMachine(trigger: .none, capsLockRemapped: false)
     private let capsLockHyperRemapper = CapsLockHyperRemapper()
-    private let capsLockToggler = CapsLockToggler()
+    private var capsLockToggler = CapsLockToggler()
     private var capsLockHyperRemapActive = false
 
     private(set) var registrationFailures: [HotkeyCommand: HotkeyRegistrationFailureReason] = [:]
@@ -273,8 +273,10 @@ final class HotkeyCenter {
 
     deinit {
         MainActor.assumeIsolated {
+            unregisterCommandHotkeys()
             stopHyperTriggerTap()
             restoreCapsLockHyperRemap()
+            removeCarbonEventHandler()
         }
     }
 
@@ -322,11 +324,15 @@ final class HotkeyCenter {
         unregisterCommandHotkeys()
         stopHyperTriggerTap()
         restoreCapsLockHyperRemap()
+        removeCarbonEventHandler()
+        DiagnosticsEventRecorder.shared.recordLifecycle(name: "hotkeys.stop")
+    }
+
+    private func removeCarbonEventHandler() {
         if let handler {
             RemoveEventHandler(handler)
             self.handler = nil
         }
-        DiagnosticsEventRecorder.shared.recordLifecycle(name: "hotkeys.stop")
     }
 
     func setCommandHotkeysSuspended(_ suspended: Bool) {

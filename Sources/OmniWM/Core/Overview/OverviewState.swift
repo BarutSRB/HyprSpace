@@ -47,16 +47,12 @@ struct OverviewWindowItem {
     let handle: WindowHandle
     let windowId: Int
     let workspaceId: WorkspaceDescriptor.ID
-    var thumbnail: CGImage?
-    var title: String
-    var appName: String
-    var appIcon: NSImage?
-    var originalFrame: CGRect
-    var overviewFrame: CGRect
-    var isHovered: Bool
-    var isSelected: Bool
-    var matchesSearch: Bool
-    var closeButtonHovered: Bool
+    let title: String
+    let appName: String
+    let appIcon: CGImage?
+    let originalFrame: CGRect
+    let overviewFrame: CGRect
+    let matchesSearch: Bool
     var groupCount = 1
 
     var closeButtonFrame: CGRect {
@@ -82,14 +78,17 @@ struct OverviewWindowItem {
 }
 
 struct OverviewLayout {
+    struct WindowHit {
+        let window: OverviewWindowItem
+        let isCloseButton: Bool
+    }
+
     private struct WindowPosition {
         let sectionIndex: Int
         let windowIndex: Int
     }
 
-    var workspaceSections: [OverviewWorkspaceSection] {
-        didSet { rebuildWindowIndex() }
-    }
+    private(set) var workspaceSections: [OverviewWorkspaceSection]
 
     var searchBarFrame: CGRect
     var totalContentHeight: CGFloat
@@ -99,8 +98,6 @@ struct OverviewLayout {
     var dragTarget: OverviewDragTarget?
     var niriColumnsByWorkspace: [WorkspaceDescriptor.ID: [OverviewNiriColumn]]
     private var windowPositionByHandle: [WindowHandle: WindowPosition]
-    private var lastHoveredHandle: WindowHandle?
-    private var lastSelectedHandle: WindowHandle?
 
     init() {
         workspaceSections = []
@@ -112,13 +109,24 @@ struct OverviewLayout {
         dragTarget = nil
         niriColumnsByWorkspace = [:]
         windowPositionByHandle = [:]
-        lastHoveredHandle = nil
-        lastSelectedHandle = nil
-        rebuildWindowIndex()
     }
 
     var allWindows: [OverviewWindowItem] {
         workspaceSections.flatMap(\.windows)
+    }
+
+    mutating func replaceWorkspaceSections(_ sections: [OverviewWorkspaceSection]) {
+        workspaceSections = sections
+        rebuildWindowIndex()
+    }
+
+    mutating func updateGroupCounts(_ groupCountByHandle: [WindowHandle: Int]) {
+        for sectionIndex in workspaceSections.indices {
+            for windowIndex in workspaceSections[sectionIndex].windows.indices {
+                let handle = workspaceSections[sectionIndex].windows[windowIndex].handle
+                workspaceSections[sectionIndex].windows[windowIndex].groupCount = groupCountByHandle[handle] ?? 1
+            }
+        }
     }
 
     private mutating func rebuildWindowIndex() {
@@ -129,97 +137,25 @@ struct OverviewLayout {
                 windowPositionByHandle[handle] = WindowPosition(sectionIndex: sectionIndex, windowIndex: windowIndex)
             }
         }
-        if let lastHoveredHandle, windowPositionByHandle[lastHoveredHandle] == nil {
-            self.lastHoveredHandle = nil
-        }
-        if let lastSelectedHandle, windowPositionByHandle[lastSelectedHandle] == nil {
-            self.lastSelectedHandle = nil
-        }
-    }
-
-    @discardableResult
-    private mutating func mutateWindow(
-        for handle: WindowHandle,
-        _ mutate: (inout OverviewWindowItem) -> Void
-    ) -> Bool {
-        if let position = windowPositionByHandle[handle],
-           workspaceSections.indices.contains(position.sectionIndex),
-           workspaceSections[position.sectionIndex].windows.indices.contains(position.windowIndex)
-        {
-            mutate(&workspaceSections[position.sectionIndex].windows[position.windowIndex])
-            return true
-        }
-        rebuildWindowIndex()
-        guard let position = windowPositionByHandle[handle],
-              workspaceSections.indices.contains(position.sectionIndex),
-              workspaceSections[position.sectionIndex].windows.indices.contains(position.windowIndex)
-        else {
-            return false
-        }
-        mutate(&workspaceSections[position.sectionIndex].windows[position.windowIndex])
-        return true
-    }
-
-    mutating func updateWindowFrame(handle: WindowHandle, frame: CGRect) {
-        _ = mutateWindow(for: handle) { $0.overviewFrame = frame }
-    }
-
-    mutating func setHovered(handle: WindowHandle?, closeButtonHovered: Bool = false) {
-        if let previous = lastHoveredHandle, previous != handle {
-            _ = mutateWindow(for: previous) {
-                $0.isHovered = false
-                $0.closeButtonHovered = false
-            }
-        }
-
-        guard let handle else {
-            lastHoveredHandle = nil
-            return
-        }
-
-        let updated = mutateWindow(for: handle) {
-            $0.isHovered = true
-            $0.closeButtonHovered = closeButtonHovered
-        }
-        lastHoveredHandle = updated ? handle : nil
-    }
-
-    mutating func setSelected(handle: WindowHandle?) {
-        if let previous = lastSelectedHandle, previous != handle {
-            _ = mutateWindow(for: previous) { $0.isSelected = false }
-        }
-
-        guard let handle else {
-            lastSelectedHandle = nil
-            return
-        }
-
-        let updated = mutateWindow(for: handle) { $0.isSelected = true }
-        lastSelectedHandle = updated ? handle : nil
     }
 
     func windowAt(point: CGPoint) -> OverviewWindowItem? {
+        windowHit(at: point)?.window
+    }
+
+    func windowHit(at point: CGPoint) -> WindowHit? {
         let adjustedPoint = CGPoint(x: point.x, y: point.y + scrollOffset)
         for section in workspaceSections {
             for window in section.windows where window.matchesSearch {
                 if window.overviewFrame.contains(adjustedPoint) {
-                    return window
+                    return WindowHit(
+                        window: window,
+                        isCloseButton: window.closeButtonFrame.contains(adjustedPoint)
+                    )
                 }
             }
         }
         return nil
-    }
-
-    func isCloseButtonAt(point: CGPoint) -> Bool {
-        let adjustedPoint = CGPoint(x: point.x, y: point.y + scrollOffset)
-        for section in workspaceSections {
-            for window in section.windows where window.matchesSearch {
-                if window.closeButtonFrame.contains(adjustedPoint) {
-                    return true
-                }
-            }
-        }
-        return false
     }
 
     func workspaceSection(at point: CGPoint) -> OverviewWorkspaceSection? {
@@ -281,18 +217,6 @@ struct OverviewLayout {
         else {
             return nil
         }
-        return workspaceSections[position.sectionIndex].windows[position.windowIndex]
-    }
-
-    func selectedWindow() -> OverviewWindowItem? {
-        guard let handle = lastSelectedHandle,
-              let position = windowPositionByHandle[handle] else { return nil }
-        return workspaceSections[position.sectionIndex].windows[position.windowIndex]
-    }
-
-    func hoveredWindow() -> OverviewWindowItem? {
-        guard let handle = lastHoveredHandle,
-              let position = windowPositionByHandle[handle] else { return nil }
         return workspaceSections[position.sectionIndex].windows[position.windowIndex]
     }
 }

@@ -27,9 +27,9 @@ extension AXEventHandler {
             mode: candidate.mode,
             ruleEffects: candidate.ruleEffects,
             admissionHints: candidate.admissionHints,
+            interactionPolicy: candidate.interactionPolicy,
             managedReplacementMetadata: candidate.replacementMetadata
         )
-        controller.workspaceManager.setInteractionPolicy(candidate.interactionPolicy, for: trackedToken)
         guard let trackedEntry = controller.workspaceManager.entry(for: trackedToken) else {
             WindowAdmissionTrace.record(
                 .init(

@@ -2380,6 +2380,7 @@ final class WMController {
 
             evaluatedAnyWindow = true
             let evaluation = evaluateWindowDisposition(axRef: axRef, pid: token.pid)
+            let interactionPolicy = WindowInteractionPolicy.resolve(for: evaluation)
 
             guard let effectiveTrackedMode = trackedModePreservingAutomaticFallbackState(
                 decision: evaluation.decision,
@@ -2454,6 +2455,9 @@ final class WMController {
                    admissionHints: evaluation.decision.admissionHints
                )
             {
+                if workspaceManager.entry(for: token) != nil {
+                    workspaceManager.setInteractionPolicy(interactionPolicy, for: token)
+                }
                 affectedWorkspaceIds.insert(workspaceId)
                 relayoutNeeded = true
                 continue
@@ -2498,8 +2502,11 @@ final class WMController {
                     mode: oldMode ?? effectiveTrackedMode,
                     ruleEffects: evaluation.decision.ruleEffects,
                     admissionHints: evaluation.decision.admissionHints,
+                    interactionPolicy: interactionPolicy,
                     managedReplacementMetadata: managedReplacementMetadata
                 )
+            } else if existingEntry != nil {
+                workspaceManager.setInteractionPolicy(interactionPolicy, for: token)
             }
             if existingEntry != nil {
                 _ = workspaceManager.updateAdmissionHints(

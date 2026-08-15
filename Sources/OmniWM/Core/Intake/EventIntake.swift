@@ -94,6 +94,7 @@ final class EventIntake {
         var drainScheduled = false
         var nextSeq: UInt64 = 1
         var orderedEvents: [StampedIntakeEvent] = []
+        var spareOrderedEvents: [StampedIntakeEvent] = []
         var pendingCGSFrameWindowIds: Set<UInt32> = []
         var openMouseMovedSeq: UInt64?
         var openLeftDraggedSeq: UInt64?
@@ -147,10 +148,12 @@ final class EventIntake {
             }
         }
         let dropped = buffer.withLock { state -> [StampedIntakeEvent] in
-            let dropped = state.orderedEvents
+            var dropped: [StampedIntakeEvent] = []
+            swap(&dropped, &state.orderedEvents)
             state.isOpen = false
             state.drainScheduled = false
             state.orderedEvents.removeAll(keepingCapacity: false)
+            state.spareOrderedEvents.removeAll(keepingCapacity: false)
             state.pendingCGSFrameWindowIds.removeAll(keepingCapacity: false)
             state.closeMouseCoalescingWindows()
             return dropped
@@ -305,17 +308,32 @@ final class EventIntake {
     }
 
     private func drainPendingEventsOnMainRunLoop() {
-        let events = buffer.withLock { state -> [StampedIntakeEvent] in
+        var events = buffer.withLock { state -> [StampedIntakeEvent] in
             var events: [StampedIntakeEvent] = []
+            swap(&events, &state.spareOrderedEvents)
+            events.removeAll(keepingCapacity: true)
             swap(&events, &state.orderedEvents)
             state.pendingCGSFrameWindowIds.removeAll(keepingCapacity: true)
             state.closeMouseCoalescingWindows()
             state.drainScheduled = false
             return events
         }
+        defer {
+            events.removeAll(keepingCapacity: true)
+            recycleDrainedEvents(events)
+        }
         guard let sink else { return }
         for stamped in events {
             sink.handleIntakeEvent(stamped)
+        }
+    }
+
+    private nonisolated func recycleDrainedEvents(_ events: [StampedIntakeEvent]) {
+        buffer.withLock { state in
+            guard state.isOpen,
+                  events.capacity > state.spareOrderedEvents.capacity
+            else { return }
+            state.spareOrderedEvents = events
         }
     }
 }

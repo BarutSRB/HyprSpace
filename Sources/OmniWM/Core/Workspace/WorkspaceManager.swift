@@ -88,7 +88,7 @@ final class WorkspaceManager {
         let windowSnapshots = world.allEntries()
             .sorted {
                 if $0.workspaceId != $1.workspaceId {
-                    return $0.workspaceId.uuidString < $1.workspaceId.uuidString
+                    return $0.workspaceId < $1.workspaceId
                 }
                 if $0.pid != $1.pid {
                     return $0.pid < $1.pid
@@ -1991,6 +1991,7 @@ final class WorkspaceManager {
         mode: TrackedWindowMode = .tiling,
         ruleEffects: ManagedWindowRuleEffects = .none,
         admissionHints: ManagedWindowAdmissionHints = .none,
+        interactionPolicy: WindowInteractionPolicy = .full,
         managedReplacementMetadata: ManagedReplacementMetadata? = nil
     ) -> WindowToken {
         let token = WindowToken(pid: pid, windowId: windowId)
@@ -2017,6 +2018,7 @@ final class WorkspaceManager {
                 axRef: ax,
                 ruleEffects: ruleEffects,
                 admissionHints: admissionHints,
+                interactionPolicy: interactionPolicy,
                 managedReplacementMetadata: managedReplacementMetadata,
                 source: .workspaceManager
             )
@@ -2083,6 +2085,10 @@ final class WorkspaceManager {
 
     func entries(in workspace: WorkspaceDescriptor.ID) -> [WindowState] {
         world.windows(in: workspace)
+    }
+
+    func windowCount(in workspace: WorkspaceDescriptor.ID) -> Int {
+        world.windowCount(in: workspace)
     }
 
     func tiledEntries(in workspace: WorkspaceDescriptor.ID) -> [WindowState] {
@@ -3626,10 +3632,15 @@ final class WorkspaceManager {
         let anchorPoint = workspace.assignedMonitorPoint
             ?? monitorIdShowingWorkspace(workspaceId).flatMap { monitor(byId: $0)?.workspaceAnchorPoint }
         guard let anchorPoint else { return context.sortedMonitors.first }
+        func distanceSquared(to point: CGPoint) -> CGFloat {
+            let dx = point.x - anchorPoint.x
+            let dy = point.y - anchorPoint.y
+            return dx * dx + dy * dy
+        }
 
         return context.sortedMonitors.min { lhs, rhs in
-            let lhsDistance = lhs.workspaceAnchorPoint.distanceSquared(to: anchorPoint)
-            let rhsDistance = rhs.workspaceAnchorPoint.distanceSquared(to: anchorPoint)
+            let lhsDistance = distanceSquared(to: lhs.workspaceAnchorPoint)
+            let rhsDistance = distanceSquared(to: rhs.workspaceAnchorPoint)
             if lhsDistance != rhsDistance {
                 return lhsDistance < rhsDistance
             }
@@ -3879,7 +3890,7 @@ final class WorkspaceManager {
 extension WorkspaceManager {
     private func noteInvalidation(for event: WMEvent) {
         switch event {
-        case let .windowAdmitted(_, workspaceId, _, _, _, _, _, _, _),
+        case let .windowAdmitted(_, workspaceId, _, _, _, _, _, _, _, _),
              let .windowModeChanged(_, workspaceId, _, _, _),
              let .hiddenStateChanged(_, workspaceId, _, _, _),
              let .managedReplacementMetadataChanged(_, workspaceId, _, _, _):
@@ -3985,13 +3996,5 @@ extension WorkspaceManager {
         for workspaceId in workspaceIds {
             onRuntimeInvalidation?(workspaceId, domains)
         }
-    }
-}
-
-private extension CGPoint {
-    func distanceSquared(to point: CGPoint) -> CGFloat {
-        let dx = x - point.x
-        let dy = y - point.y
-        return dx * dx + dy * dy
     }
 }

@@ -261,7 +261,7 @@ enum StructuralMutationOutcome: Equatable {
         controller.layoutRefreshController.recordScrollBuild(
             seconds: buildSeconds,
             workspaceCount: 1,
-            windowCount: controller.workspaceManager.entries(in: wsId).count
+            windowCount: controller.workspaceManager.windowCount(in: wsId)
         )
 
         let commitStart = trace ? CACurrentMediaTime() : 0
@@ -1381,7 +1381,7 @@ enum StructuralMutationOutcome: Equatable {
                 in: column,
                 workspaceId: workspaceId
             ) else { continue }
-            let activeWindowId = controller.workspaceManager.entry(for: activeWindow.handle)?.windowId
+            let activeWindowId = controller.workspaceManager.entry(for: activeWindow.token)?.windowId
             guard let activeStorageIndex = windows.firstIndex(where: { $0 === activeWindow }) else { continue }
             let activeVisualIndex = windows.count - 1 - activeStorageIndex
             let tabs = tabbedColumnTabs(
@@ -1419,7 +1419,7 @@ enum StructuralMutationOutcome: Equatable {
         for visualIndex in 0 ..< windows.count {
             let storageIndex = windows.count - 1 - visualIndex
             let window = windows[storageIndex]
-            let entry = controller.workspaceManager.entry(for: window.handle)
+            let entry = controller.workspaceManager.entry(for: window.token)
             let appName: String?
             if let entry, controller.appInfoCache.hasCachedInfo(for: entry.pid) {
                 appName = controller.appInfoCache.name(for: entry.pid)

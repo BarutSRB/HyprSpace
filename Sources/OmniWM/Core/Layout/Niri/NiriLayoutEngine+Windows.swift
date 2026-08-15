@@ -683,11 +683,12 @@ extension NiriLayoutEngine {
         node.token = newToken
         state.index(node)
 
-        if let move = interactiveMove,
+        if var move = interactiveMove,
            move.workspaceId == workspaceId,
            move.windowId == node.id
         {
-            move.windowHandle.id = newToken
+            move.windowToken = newToken
+            interactiveMove = move
         }
 
         node.invalidateChildrenCache()

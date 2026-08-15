@@ -8,7 +8,7 @@ extension NiriLayoutEngine {
     struct WorkspaceMoveResult {
         let newFocusNodeId: NodeId?
 
-        let movedHandle: WindowHandle?
+        let movedToken: WindowToken?
 
         let targetWorkspaceId: WorkspaceDescriptor.ID
     }
@@ -64,7 +64,7 @@ extension NiriLayoutEngine {
 
         return WorkspaceMoveResult(
             newFocusNodeId: fallbackSelection,
-            movedHandle: window.handle,
+            movedToken: window.token,
             targetWorkspaceId: targetWorkspaceId
         )
     }
@@ -122,11 +122,11 @@ extension NiriLayoutEngine {
 
         targetState.selectedNodeId = column.firstChild()?.id
 
-        let firstWindowHandle = movedWindows.first?.handle
+        let firstWindowToken = movedWindows.first?.token
 
         return WorkspaceMoveResult(
             newFocusNodeId: fallbackSelection,
-            movedHandle: firstWindowHandle,
+            movedToken: firstWindowToken,
             targetWorkspaceId: targetWorkspaceId
         )
     }

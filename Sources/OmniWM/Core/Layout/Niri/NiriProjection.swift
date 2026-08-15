@@ -22,12 +22,18 @@ extension NiriLayoutEngine {
             )
             return
         }
+        let exclusionsChanged = projectionExclusions(in: workspaceId) != excludedTokens
         if excludedTokens.isEmpty {
             excludedTokensByWorkspace.removeValue(forKey: workspaceId)
         } else {
             excludedTokensByWorkspace[workspaceId] = excludedTokens
         }
         guard let root = root(for: workspaceId) else { return }
+        if exclusionsChanged {
+            for column in root.columns {
+                column.invalidateAxisSolveInputs()
+            }
+        }
         for window in root.allWindows where excludedTokens.contains(window.token) {
             window.frame = nil
             window.renderedFrame = nil

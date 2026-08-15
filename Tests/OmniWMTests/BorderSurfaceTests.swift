@@ -514,6 +514,19 @@ final class BorderSurfaceTests: XCTestCase {
         XCTAssertNil(window.windowId)
         XCTAssertEqual(recorder.releasedCount, 1)
     }
+
+    @MainActor
+    func testDeinitReleasesWindow() {
+        let recorder = BorderOperationsRecorder()
+        var window: BorderWindow? = BorderWindow(config: configRed, operations: recorder.operations())
+
+        _ = window?.update(frame: CGRect(x: 0, y: 0, width: 100, height: 80), targetWid: 55)
+        XCTAssertNotNil(window?.windowId)
+
+        window = nil
+
+        XCTAssertEqual(recorder.releasedCount, 1)
+    }
 }
 
 final class WindowCornerRadiiTests: XCTestCase {

@@ -4,7 +4,7 @@
 import IOKit
 import IOKit.hidsystem
 
-final class CapsLockToggler {
+struct CapsLockToggler: ~Copyable {
     private var hidConnection: io_connect_t = 0
 
     deinit {
@@ -14,7 +14,7 @@ final class CapsLockToggler {
     }
 
     @discardableResult
-    func toggle() -> Bool {
+    mutating func toggle() -> Bool {
         guard let connection = connection() else { return false }
         var isLocked = false
         guard IOHIDGetModifierLockState(connection, Int32(kIOHIDCapsLockState), &isLocked) == KERN_SUCCESS else {
@@ -23,7 +23,7 @@ final class CapsLockToggler {
         return IOHIDSetModifierLockState(connection, Int32(kIOHIDCapsLockState), !isLocked) == KERN_SUCCESS
     }
 
-    private func connection() -> io_connect_t? {
+    private mutating func connection() -> io_connect_t? {
         if hidConnection != 0 {
             return hidConnection
         }

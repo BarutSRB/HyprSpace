@@ -67,6 +67,10 @@ final class BorderWindow {
         self.operations = operations
     }
 
+    isolated deinit {
+        destroy()
+    }
+
     func destroy() {
         context = nil
         if wid != 0 {

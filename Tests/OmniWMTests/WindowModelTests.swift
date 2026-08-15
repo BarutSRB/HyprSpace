@@ -7,6 +7,74 @@ import CoreGraphics
 import XCTest
 
 final class WindowModelTests: XCTestCase {
+    func testUpsertInstallsAndUpdatesInteractionPolicyAtomically() throws {
+        let model = WindowModel()
+        let workspaceId = WorkspaceDescriptor(name: "workspace").id
+        let token = model.upsert(
+            window: AXWindowRef(element: AXUIElementCreateApplication(467_000), windowId: 467_000),
+            pid: 467_000,
+            windowId: 467_000,
+            workspace: workspaceId,
+            interactionPolicy: .handsOffSurface
+        )
+
+        XCTAssertEqual(model.entry(for: token)?.interactionPolicy, .handsOffSurface)
+
+        _ = model.upsert(
+            window: AXWindowRef(element: AXUIElementCreateApplication(467_000), windowId: 467_000),
+            pid: 467_000,
+            windowId: 467_000,
+            workspace: workspaceId,
+            interactionPolicy: .untracked
+        )
+
+        XCTAssertEqual(model.entry(for: token)?.interactionPolicy, .untracked)
+    }
+
+    func testNestedIndexesRemainCoherentAcrossRemovalMoveModeAndRekey() throws {
+        let model = WindowModel()
+        let firstWorkspace = WorkspaceDescriptor(name: "first").id
+        let secondWorkspace = WorkspaceDescriptor(name: "second").id
+        let pid: pid_t = 467_050
+        let tokens = (1 ... 3).map { windowId in
+            model.upsert(
+                window: AXWindowRef(element: AXUIElementCreateApplication(pid), windowId: windowId),
+                pid: pid,
+                windowId: windowId,
+                workspace: firstWorkspace
+            )
+        }
+
+        XCTAssertEqual(model.windowCount(in: firstWorkspace), 3)
+        XCTAssertEqual(model.removeWindow(key: tokens[1])?.token, tokens[1])
+        XCTAssertEqual(model.windows(in: firstWorkspace).map(\.token), [tokens[0], tokens[2]])
+
+        model.updateWorkspace(for: tokens[2], workspace: secondWorkspace)
+        model.setMode(.floating, for: tokens[2])
+        XCTAssertEqual(model.windowCount(in: firstWorkspace), 1)
+        XCTAssertEqual(model.windowCount(in: secondWorkspace), 1)
+        XCTAssertEqual(model.windows(in: secondWorkspace, mode: .floating).map(\.token), [tokens[2]])
+        XCTAssertTrue(model.windows(in: secondWorkspace, mode: .tiling).isEmpty)
+
+        let rekeyedToken = WindowToken(pid: pid + 1, windowId: 4)
+        let handle = try XCTUnwrap(model.handle(for: tokens[2]))
+        XCTAssertNotNil(
+            model.rekeyWindow(
+                from: tokens[2],
+                to: rekeyedToken,
+                newAXRef: AXWindowRef(
+                    element: AXUIElementCreateApplication(rekeyedToken.pid),
+                    windowId: rekeyedToken.windowId
+                )
+            )
+        )
+
+        XCTAssertEqual(model.windows(in: secondWorkspace).map(\.token), [rekeyedToken])
+        XCTAssertEqual(model.entries(forPid: pid + 1).map(\.token), [rekeyedToken])
+        XCTAssertFalse(model.entries(forPid: pid).contains { $0.token == tokens[2] })
+        XCTAssertTrue(model.handle(for: rekeyedToken) === handle)
+    }
+
     func testUpsertPreservesExistingEntryWhenPidConflictsForSameWindowId() throws {
         let model = WindowModel()
         let existingWorkspaceId = WorkspaceDescriptor(name: "existing").id

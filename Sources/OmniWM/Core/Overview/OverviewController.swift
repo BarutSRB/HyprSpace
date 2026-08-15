@@ -1078,7 +1078,6 @@ final class OverviewController {
         }
 
         reconcileSelectedWindowHandle()
-        applySelectedWindowHandleToLayouts()
 
         if let activeInteractionMonitorId,
            layoutsByMonitor[activeInteractionMonitorId] == nil
@@ -1118,15 +1117,7 @@ final class OverviewController {
             searchQuery: searchQuery,
             scale: scale
         )
-        var sections = layout.workspaceSections
-        for sectionIndex in sections.indices {
-            for windowIndex in sections[sectionIndex].windows.indices {
-                let handle = sections[sectionIndex].windows[windowIndex].handle
-                sections[sectionIndex].windows[windowIndex].groupCount =
-                    overviewSnapshot.groupCountByHandle[handle] ?? 1
-            }
-        }
-        layout.workspaceSections = sections
+        layout.updateGroupCounts(overviewSnapshot.groupCountByHandle)
         return layout
     }
 
@@ -1263,6 +1254,7 @@ final class OverviewController {
                 layout,
                 state: state,
                 searchQuery: searchQuery,
+                selectedWindowHandle: selectedWindowHandle,
                 palette: palette,
                 thumbnails: thumbnails
             )
@@ -1544,8 +1536,12 @@ final class OverviewController {
               let nextHandle = resolveNextHandle(layout, selectedWindowHandle)
         else { return }
 
-        setSelectedWindowHandle(nextHandle)
-        revealSelectedWindow(on: targetMonitorId)
+        let selectionChanged = nextHandle != selectedWindowHandle
+        if selectionChanged {
+            setSelectedWindowHandle(nextHandle)
+        }
+        let viewportChanged = revealSelectedWindow(on: targetMonitorId)
+        guard selectionChanged || viewportChanged else { return }
         updateWindowDisplays()
     }
 
@@ -1785,23 +1781,30 @@ final class OverviewController {
         }
     }
 
-    private func revealSelectedWindow(on monitorId: Monitor.ID?) {
-        guard let monitorId, let selectedWindowHandle else { return }
-
-        mutateLayout(for: monitorId) { layout in
-            guard let window = layout.window(for: selectedWindowHandle), window.matchesSearch else { return }
-            layout.scrollOffset = OverviewLayoutCalculator.scrollOffsetRevealing(
-                targetFrame: window.overviewFrame,
-                currentOffset: layout.scrollOffset,
-                layout: layout,
-                screenFrame: viewportFrame(for: monitorId)
-            )
+    @discardableResult
+    private func revealSelectedWindow(on monitorId: Monitor.ID?) -> Bool {
+        guard let monitorId,
+              let selectedWindowHandle,
+              var layout = layoutsByMonitor[monitorId],
+              let window = layout.window(for: selectedWindowHandle),
+              window.matchesSearch
+        else {
+            return false
         }
+        let scrollOffset = OverviewLayoutCalculator.scrollOffsetRevealing(
+            targetFrame: window.overviewFrame,
+            currentOffset: layout.scrollOffset,
+            layout: layout,
+            screenFrame: viewportFrame(for: monitorId)
+        )
+        guard scrollOffset != layout.scrollOffset else { return false }
+        layout.scrollOffset = scrollOffset
+        layoutsByMonitor[monitorId] = layout
+        return true
     }
 
     private func setSelectedWindowHandle(_ handle: WindowHandle?) {
         selectedWindowHandle = handle
-        applySelectedWindowHandleToLayouts()
     }
 
     private func reconcileSelectedWindowHandle() {
@@ -1818,14 +1821,6 @@ final class OverviewController {
         }
 
         selectedWindowHandle = OverviewSearchFilter.firstMatchingWindow(in: layout)?.handle
-    }
-
-    private func applySelectedWindowHandleToLayouts() {
-        for monitorId in layoutsByMonitor.keys {
-            mutateLayout(for: monitorId) { layout in
-                layout.setSelected(handle: selectedWindowHandle)
-            }
-        }
     }
 
     private func mutateLayout(

@@ -94,7 +94,7 @@ struct InteractiveResize {
 }
 
 struct ResizeHitTestResult {
-    let windowHandle: WindowHandle
+    let windowToken: WindowToken
 
     let nodeId: NodeId
 

@@ -131,7 +131,8 @@ struct WindowState: Equatable {
         mode: TrackedWindowMode,
         managedReplacementMetadata: ManagedReplacementMetadata?,
         ruleEffects: ManagedWindowRuleEffects,
-        admissionHints: ManagedWindowAdmissionHints
+        admissionHints: ManagedWindowAdmissionHints,
+        interactionPolicy: WindowInteractionPolicy = .full
     ) {
         self.token = token
         self.axRef = axRef
@@ -150,5 +151,6 @@ struct WindowState: Equatable {
         self.managedReplacementMetadata = managedReplacementMetadata
         self.ruleEffects = ruleEffects
         self.admissionHints = admissionHints
+        self.interactionPolicy = interactionPolicy
     }
 }

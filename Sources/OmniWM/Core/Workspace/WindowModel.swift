@@ -71,13 +71,23 @@ final class WindowModel {
         tokensByKey: inout [Key: [WindowToken]],
         tokenIndexByKey: inout [Key: [WindowToken: Int]]
     ) {
-        var tokens = tokensByKey[key, default: []]
-        var indexByToken = tokenIndexByKey[key, default: [:]]
-        guard indexByToken[token] == nil else { return }
-        indexByToken[token] = tokens.count
-        tokens.append(token)
-        tokensByKey[key] = tokens
-        tokenIndexByKey[key] = indexByToken
+        guard tokenIndexByKey[key]?[token] == nil else { return }
+        let index = tokensByKey[key]?.count ?? 0
+        tokensByKey[key, default: []].append(token)
+        tokenIndexByKey[key, default: [:]][token] = index
+    }
+
+    private func removeTokenFromBucket(
+        _ token: WindowToken,
+        tokens: inout [WindowToken],
+        indexByToken: inout [WindowToken: Int]
+    ) -> Bool {
+        guard let index = indexByToken.removeValue(forKey: token) else { return tokens.isEmpty }
+        tokens.remove(at: index)
+        for position in index ..< tokens.count {
+            indexByToken[tokens[position]] = position
+        }
+        return tokens.isEmpty
     }
 
     private func removeToken<Key: Hashable>(
@@ -86,26 +96,32 @@ final class WindowModel {
         tokensByKey: inout [Key: [WindowToken]],
         tokenIndexByKey: inout [Key: [WindowToken: Int]]
     ) {
-        guard var tokens = tokensByKey[key],
-              var indexByToken = tokenIndexByKey[key],
-              let index = indexByToken[token] else { return }
-
-        tokens.remove(at: index)
-        indexByToken.removeValue(forKey: token)
-
-        if index < tokens.count {
-            for i in index ..< tokens.count {
-                indexByToken[tokens[i]] = i
-            }
+        guard tokensByKey[key] != nil,
+              tokenIndexByKey[key]?[token] != nil
+        else {
+            return
         }
 
-        if tokens.isEmpty {
+        let bucketIsEmpty = removeTokenFromBucket(
+            token,
+            tokens: &tokensByKey[key]!,
+            indexByToken: &tokenIndexByKey[key]!
+        )
+        if bucketIsEmpty {
             tokensByKey.removeValue(forKey: key)
             tokenIndexByKey.removeValue(forKey: key)
-        } else {
-            tokensByKey[key] = tokens
-            tokenIndexByKey[key] = indexByToken
         }
+    }
+
+    private func replaceTokenInBucket(
+        from oldToken: WindowToken,
+        to newToken: WindowToken,
+        tokens: inout [WindowToken],
+        indexByToken: inout [WindowToken: Int]
+    ) {
+        guard let index = indexByToken.removeValue(forKey: oldToken) else { return }
+        tokens[index] = newToken
+        indexByToken[newToken] = index
     }
 
     private func replaceToken<Key: Hashable>(
@@ -115,17 +131,17 @@ final class WindowModel {
         tokensByKey: inout [Key: [WindowToken]],
         tokenIndexByKey: inout [Key: [WindowToken: Int]]
     ) {
-        guard var tokens = tokensByKey[key],
-              var indexByToken = tokenIndexByKey[key],
-              let index = indexByToken.removeValue(forKey: oldToken)
+        guard tokensByKey[key] != nil,
+              tokenIndexByKey[key]?[oldToken] != nil
         else {
             return
         }
-
-        tokens[index] = newToken
-        indexByToken[newToken] = index
-        tokensByKey[key] = tokens
-        tokenIndexByKey[key] = indexByToken
+        replaceTokenInBucket(
+            from: oldToken,
+            to: newToken,
+            tokens: &tokensByKey[key]!,
+            indexByToken: &tokenIndexByKey[key]!
+        )
     }
 
     private func appendIndexes(for entry: WindowState) {
@@ -208,6 +224,7 @@ final class WindowModel {
         mode: TrackedWindowMode = .tiling,
         ruleEffects: ManagedWindowRuleEffects = .none,
         admissionHints: ManagedWindowAdmissionHints = .none,
+        interactionPolicy: WindowInteractionPolicy = .full,
         managedReplacementMetadata: ManagedReplacementMetadata? = nil
     ) -> WindowToken {
         let token = WindowToken(pid: pid, windowId: windowId)
@@ -229,6 +246,7 @@ final class WindowModel {
                 constraintsCacheByToken.removeValue(forKey: token)
             }
             entries[token]?.admissionHints = admissionHints
+            entries[token]?.interactionPolicy = interactionPolicy
             return token
         }
 
@@ -239,7 +257,8 @@ final class WindowModel {
             mode: mode,
             managedReplacementMetadata: managedReplacementMetadata,
             ruleEffects: ruleEffects,
-            admissionHints: admissionHints
+            admissionHints: admissionHints,
+            interactionPolicy: interactionPolicy
         )
         entries[token] = entry
         handleByToken[token] = WindowHandle(id: token)
@@ -331,6 +350,10 @@ final class WindowModel {
     func windows(in workspace: WorkspaceDescriptor.ID) -> [WindowState] {
         guard let tokens = tokensByWorkspace[workspace] else { return [] }
         return tokens.compactMap { entries[$0] }
+    }
+
+    func windowCount(in workspace: WorkspaceDescriptor.ID) -> Int {
+        tokensByWorkspace[workspace]?.count ?? 0
     }
 
     func windows(

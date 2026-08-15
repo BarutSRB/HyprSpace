@@ -164,6 +164,8 @@ import QuartzCore
     private var nextPendingRevealTransactionId: UInt64 = 1
     private var pendingRevealTransactionsByWindowId: [Int: PendingRevealTransaction] = [:]
     private var pendingRevealVerificationTasksByWindowId: [Int: Task<Void, Never>] = [:]
+    private var closingAnimationIdsByObjectId: [ObjectIdentifier: UUID] = [:]
+    private var lastSubmittedClosingFramesByAnimationId: [UUID: CGRect] = [:]
     var nativeFullscreenRestoredFrameApplyTokens: Set<WindowToken> = []
 
     var fastFrameProvider: (WindowToken, AXWindowRef) -> CGRect? = { _, axRef in
@@ -229,7 +231,11 @@ import QuartzCore
             link.invalidate()
         }
 
-        layoutState.closingAnimationsByDisplay.removeValue(forKey: displayId)
+        if let animations = layoutState.closingAnimationsByDisplay.removeValue(forKey: displayId) {
+            for animation in animations.values {
+                forgetClosingAnimation(animation)
+            }
+        }
 
         if migrateAnimations {
             if let wsId = niriHandler.scrollAnimationByDisplay.removeValue(forKey: displayId) {
@@ -344,6 +350,7 @@ import QuartzCore
 
     func startWindowCloseAnimation(entry: WindowState, monitor: Monitor) {
         guard controller?.motionPolicy.animationsEnabled != false else { return }
+        guard entry.interactionPolicy.mayWriteFrame else { return }
         guard let controller else { return }
         guard !controller.workspaceManager.isAppHidden(entry.token) else { return }
         guard let frame = fastFrame(for: entry.token, axRef: entry.axRef) else { return }
@@ -370,6 +377,7 @@ import QuartzCore
             displacement: displacement,
             animation: animation
         )
+        _ = closingAnimationId(for: animation)
         layoutState.closingAnimationsByDisplay[monitor.displayId] = animations
 
         if let displayLink = getOrCreateDisplayLink(for: monitor.displayId) {
@@ -380,13 +388,21 @@ import QuartzCore
     func cancelFrameAnimations(forPID pid: pid_t) {
         let displayIds = Array(layoutState.closingAnimationsByDisplay.keys)
         for displayId in displayIds {
-            guard let animations = layoutState.closingAnimationsByDisplay[displayId] else { continue }
-            let remaining = animations.filter { $0.value.pid != pid }
-            if remaining.isEmpty {
+            guard var animations = layoutState.closingAnimationsByDisplay.removeValue(forKey: displayId)
+            else { continue }
+            let removedWindowIds = animations.compactMap { windowId, animation in
+                animation.pid == pid ? windowId : nil
+            }
+            for windowId in removedWindowIds {
+                if let animation = animations.removeValue(forKey: windowId) {
+                    forgetClosingAnimation(animation)
+                }
+            }
+            if animations.isEmpty {
                 layoutState.closingAnimationsByDisplay.removeValue(forKey: displayId)
                 stopDisplayLinkIfIdle(for: displayId)
             } else {
-                layoutState.closingAnimationsByDisplay[displayId] = remaining
+                layoutState.closingAnimationsByDisplay[displayId] = animations
             }
         }
     }
@@ -431,40 +447,6 @@ import QuartzCore
                 guard !Task.isCancelled, let self else { return }
                 self.auditParkVisibility(displayId: displayId)
             }
-        }
-    }
-
-    private func tickClosingAnimations(targetTime: CFTimeInterval, displayId: CGDirectDisplayID) {
-        guard let animations = layoutState.closingAnimationsByDisplay[displayId], !animations.isEmpty else {
-            return
-        }
-
-        var remaining: [Int: LayoutRefreshState.ClosingAnimation] = [:]
-
-        for (windowId, animation) in animations {
-            if controller?.workspaceManager.isAppHidden(pid: animation.pid) == true {
-                continue
-            }
-            if animation.isComplete(at: targetTime) {
-                _ = AXWindowService.setFrame(
-                    animation.axRef,
-                    frame: animation.currentFrame(at: targetTime)
-                )
-                continue
-            }
-
-            let frame = animation.currentFrame(at: targetTime)
-            if !AXWindowService.setFrame(animation.axRef, frame: frame).isVerifiedSuccess {
-                continue
-            }
-            remaining[windowId] = animation
-        }
-
-        if remaining.isEmpty {
-            layoutState.closingAnimationsByDisplay.removeValue(forKey: displayId)
-            stopDisplayLinkIfIdle(for: displayId)
-        } else {
-            layoutState.closingAnimationsByDisplay[displayId] = remaining
         }
     }
 
@@ -1239,6 +1221,8 @@ import QuartzCore
         niriHandler.scrollAnimationByDisplay.removeAll()
         dwindleHandler.dwindleAnimationByDisplay.removeAll()
         layoutState.closingAnimationsByDisplay.removeAll()
+        closingAnimationIdsByObjectId.removeAll(keepingCapacity: true)
+        lastSubmittedClosingFramesByAnimationId.removeAll(keepingCapacity: true)
 
         controller?.axManager.clearInactiveWorkspaceWindows()
 
@@ -1766,7 +1750,9 @@ import QuartzCore
                     || evaluation.facts.degradedWindowServerChildEvidence
             )
 
+            let interactionPolicy = WindowInteractionPolicy.resolve(for: evaluation)
             let admittedToken: WindowToken
+            let reusedTrackedEntry: Bool
             if let refreshedEntry,
                !Self.shouldReadmitTrackedWindow(
                    entry: refreshedEntry,
@@ -1782,6 +1768,7 @@ import QuartzCore
                     for: refreshedEntry.token
                 )
                 admittedToken = refreshedEntry.token
+                reusedTrackedEntry = true
             } else {
                 admittedToken = controller.workspaceManager.addWindow(
                     ax,
@@ -1791,8 +1778,10 @@ import QuartzCore
                     mode: admittedMode,
                     ruleEffects: ruleEffects,
                     admissionHints: admissionHints,
+                    interactionPolicy: interactionPolicy,
                     managedReplacementMetadata: managedReplacementMetadata
                 )
+                reusedTrackedEntry = false
             }
             guard admittedToken == token else {
                 seenKeys.insert(admittedToken)
@@ -1810,8 +1799,9 @@ import QuartzCore
                 candidate.enumeratedWindow.decisionEvidence.sizeConstraints,
                 for: admittedToken
             )
-            let interactionPolicy = WindowInteractionPolicy.resolve(for: evaluation)
-            controller.workspaceManager.setInteractionPolicy(interactionPolicy, for: admittedToken)
+            if reusedTrackedEntry {
+                controller.workspaceManager.setInteractionPolicy(interactionPolicy, for: admittedToken)
+            }
             if refreshedEntry != nil {
                 _ = controller.workspaceManager.updateAdmissionHints(admissionHints, for: admittedToken)
             }
@@ -3794,6 +3784,77 @@ import QuartzCore
         }
 
         return CGPoint(x: clampedX, y: clampedTopLeftY - windowSize.height)
+    }
+}
+
+private extension LayoutRefreshController {
+    func closingAnimationId(for animation: SpringAnimation) -> UUID {
+        let objectId = ObjectIdentifier(animation)
+        if let animationId = closingAnimationIdsByObjectId[objectId] {
+            return animationId
+        }
+        let animationId = UUID()
+        closingAnimationIdsByObjectId[objectId] = animationId
+        return animationId
+    }
+
+    func forgetClosingAnimation(_ animation: LayoutRefreshState.ClosingAnimation) {
+        guard let animationId = closingAnimationIdsByObjectId.removeValue(
+            forKey: ObjectIdentifier(animation.animation)
+        ) else {
+            return
+        }
+        lastSubmittedClosingFramesByAnimationId.removeValue(forKey: animationId)
+    }
+
+    func tickClosingAnimations(targetTime: CFTimeInterval, displayId: CGDirectDisplayID) {
+        guard var animations = layoutState.closingAnimationsByDisplay.removeValue(forKey: displayId),
+              !animations.isEmpty
+        else {
+            return
+        }
+
+        var completedWindowIds: [Int] = []
+        completedWindowIds.reserveCapacity(animations.count)
+        var targets: [AXClosingFrameTarget] = []
+        targets.reserveCapacity(animations.count)
+
+        for (windowId, animation) in animations {
+            if controller?.workspaceManager.isAppHidden(pid: animation.pid) == true {
+                completedWindowIds.append(windowId)
+                continue
+            }
+            let frame = animation.currentFrame(at: targetTime)
+            let animationId = closingAnimationId(for: animation.animation)
+            targets.append(
+                AXClosingFrameTarget(
+                    animationId: animationId,
+                    pid: animation.pid,
+                    expectedWindow: animation.axRef,
+                    frame: frame,
+                    currentFrameHint: lastSubmittedClosingFramesByAnimationId[animationId]
+                        ?? animation.fromFrame
+                )
+            )
+            lastSubmittedClosingFramesByAnimationId[animationId] = frame
+            if animation.isComplete(at: targetTime) {
+                completedWindowIds.append(windowId)
+            }
+        }
+
+        controller?.axManager.applyClosingFrames(targets)
+
+        for windowId in completedWindowIds {
+            if let animation = animations.removeValue(forKey: windowId) {
+                forgetClosingAnimation(animation)
+            }
+        }
+
+        if animations.isEmpty {
+            stopDisplayLinkIfIdle(for: displayId)
+        } else {
+            layoutState.closingAnimationsByDisplay[displayId] = animations
+        }
     }
 }
 

@@ -107,6 +107,7 @@ enum WMEvent: Equatable {
         axRef: AXWindowRef,
         ruleEffects: ManagedWindowRuleEffects,
         admissionHints: ManagedWindowAdmissionHints,
+        interactionPolicy: WindowInteractionPolicy,
         managedReplacementMetadata: ManagedReplacementMetadata?,
         source: WMEventSource
     )
@@ -336,6 +337,7 @@ enum WMEvent: Equatable {
             axRef,
             ruleEffects,
             admissionHints,
+            interactionPolicy,
             metadata,
             source
         ):
@@ -347,6 +349,7 @@ enum WMEvent: Equatable {
                 axRef: AXWindowRef(element: Self.placeholderAXElement, windowId: axRef.windowId),
                 ruleEffects: ruleEffects,
                 admissionHints: admissionHints,
+                interactionPolicy: interactionPolicy,
                 managedReplacementMetadata: metadata,
                 source: source
             )
@@ -368,7 +371,7 @@ enum WMEvent: Equatable {
 
     var token: WindowToken? {
         switch self {
-        case let .windowAdmitted(token, _, _, _, _, _, _, _, _),
+        case let .windowAdmitted(token, _, _, _, _, _, _, _, _, _),
              let .windowRemoved(token, _, _),
              let .workspaceAssigned(token, _, _, _, _),
              let .windowModeChanged(token, _, _, _, _),
@@ -419,7 +422,7 @@ enum WMEvent: Equatable {
 
     var source: WMEventSource {
         switch self {
-        case let .windowAdmitted(_, _, _, _, _, _, _, _, source),
+        case let .windowAdmitted(_, _, _, _, _, _, _, _, _, source),
              let .windowRekeyed(_, _, _, _, _, _, _, source),
              let .windowRemoved(_, _, source),
              let .workspaceAssigned(_, _, _, _, source),
@@ -467,7 +470,7 @@ enum WMEvent: Equatable {
 
     var summary: String {
         switch self {
-        case let .windowAdmitted(token, workspaceId, _, mode, _, _, _, _, _):
+        case let .windowAdmitted(token, workspaceId, _, mode, _, _, _, _, _, _):
             "window_admitted token=\(token) workspace=\(workspaceId.uuidString) mode=\(mode)"
         case let .windowRekeyed(from, to, workspaceId, _, reason, _, _, _):
             "window_rekeyed from=\(from) to=\(to) workspace=\(workspaceId.uuidString) reason=\(reason.rawValue)"

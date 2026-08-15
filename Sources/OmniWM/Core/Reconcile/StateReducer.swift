@@ -14,7 +14,7 @@ enum StateReducer {
         var plan = ActionPlan()
 
         switch event {
-        case let .windowAdmitted(_, workspaceId, monitorId, mode, _, _, _, _, _):
+        case let .windowAdmitted(_, workspaceId, monitorId, mode, _, _, _, _, _, _):
             plan.lifecyclePhase = lifecyclePhase(for: mode)
             plan.observedState = baseObservedState(
                 from: existingEntry,

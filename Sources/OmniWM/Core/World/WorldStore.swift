@@ -210,7 +210,18 @@ final class WorldStore {
 
     private func applyWindowMutation(_ event: WMEvent, phase: MutationPhase, monitors: [Monitor]) {
         switch event {
-        case let .windowAdmitted(token, workspaceId, _, mode, axRef, ruleEffects, admissionHints, metadata, _):
+        case let .windowAdmitted(
+            token,
+            workspaceId,
+            _,
+            mode,
+            axRef,
+            ruleEffects,
+            admissionHints,
+            interactionPolicy,
+            metadata,
+            _
+        ):
             guard phase == .beforePlan else { return }
             let resolvedAdmissionHints = canUpdateAdmissionHints(for: token)
                 ? admissionHints
@@ -223,6 +234,7 @@ final class WorldStore {
                 mode: mode,
                 ruleEffects: ruleEffects,
                 admissionHints: resolvedAdmissionHints,
+                interactionPolicy: interactionPolicy,
                 managedReplacementMetadata: metadata
             )
             reconcileNiriMembership(
@@ -443,6 +455,10 @@ extension WorldStore {
 
     func windows(in workspace: WorkspaceDescriptor.ID) -> [WindowState] {
         model.windows(in: workspace)
+    }
+
+    func windowCount(in workspace: WorkspaceDescriptor.ID) -> Int {
+        model.windowCount(in: workspace)
     }
 
     func windows(in workspace: WorkspaceDescriptor.ID, mode: TrackedWindowMode) -> [WindowState] {

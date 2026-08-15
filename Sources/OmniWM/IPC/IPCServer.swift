@@ -5,6 +5,20 @@ import Darwin
 import Foundation
 import OmniWMIPC
 
+struct OwnedFileDescriptor: ~Copyable {
+    let rawValue: Int32
+
+    deinit {
+        Darwin.close(rawValue)
+    }
+
+    consuming func relinquish() -> Int32 {
+        let descriptor = rawValue
+        discard self
+        return descriptor
+    }
+}
+
 protocol IPCServerLifecycle: AnyObject {
     @MainActor func start() throws
     @MainActor func stop()
@@ -39,7 +53,7 @@ final class IPCServer: IPCServerLifecycle {
     private let connectionRegistry = IPCConnectionRegistry()
     private let queue = DispatchQueue(label: "com.barut.OmniWM.ipc.server")
     private let fileManager: FileManager
-    private var listenFD: Int32 = -1
+    private var listenSocket: OwnedFileDescriptor?
     private var acceptSource: DispatchSourceRead?
 
     @MainActor
@@ -72,8 +86,9 @@ final class IPCServer: IPCServerLifecycle {
         var bindError: Error?
         queue.sync {
             do {
-                let fd = try Self.makeListeningSocket(at: socketPath)
-                listenFD = fd
+                let listeningSocket = try Self.makeListeningSocket(at: socketPath)
+                let fd = listeningSocket.rawValue
+                listenSocket = consume listeningSocket
 
                 let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
                 source.setEventHandler(handler: makeAcceptSourceHandler())
@@ -113,11 +128,7 @@ final class IPCServer: IPCServerLifecycle {
         queue.sync {
             acceptSource?.cancel()
             acceptSource = nil
-
-            if listenFD >= 0 {
-                close(listenFD)
-                listenFD = -1
-            }
+            listenSocket = nil
 
             _ = unlink(socketPath)
             _ = unlink(secretPath)
@@ -131,7 +142,7 @@ final class IPCServer: IPCServerLifecycle {
     }
 
     private func acceptConnections() {
-        guard listenFD >= 0 else { return }
+        guard let listenFD = listenSocket?.rawValue else { return }
 
         while true {
             let clientFD = accept(listenFD, nil, nil)
@@ -142,17 +153,17 @@ final class IPCServer: IPCServerLifecycle {
                 return
             }
 
-            guard Self.isCurrentUser(clientFD) else {
-                close(clientFD)
-                continue
-            }
-
-            Self.configureSocket(clientFD, nonBlocking: false)
+            let clientSocket = OwnedFileDescriptor(rawValue: clientFD)
+            let authorized = Self.isCurrentUser(clientSocket.rawValue)
+            guard let handle = Self.makeConnectionHandle(
+                from: clientSocket,
+                authorized: authorized
+            ) else { continue }
             let connectionRegistry = self.connectionRegistry
             let bridge = self.bridge
             Task {
                 let connection = IPCConnection(
-                    handle: FileHandle(fileDescriptor: clientFD, closeOnDealloc: true),
+                    handle: handle,
                     bridge: bridge,
                     onClose: { id in
                         Task {
@@ -217,17 +228,17 @@ final class IPCServer: IPCServerLifecycle {
         }
     }
 
-    private static func isActiveSocket(at path: String) throws -> Bool {
-        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
-        guard fd >= 0 else {
+    static func isActiveSocket(at path: String) throws -> Bool {
+        let rawDescriptor = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard rawDescriptor >= 0 else {
             throw POSIXError(.EIO)
         }
-        defer { close(fd) }
+        let socket = OwnedFileDescriptor(rawValue: rawDescriptor)
 
         var address = try socketAddress(for: path)
         let result = withUnsafePointer(to: &address) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { pointer in
-                connect(fd, pointer, socklen_t(MemoryLayout<sockaddr_un>.size))
+                connect(socket.rawValue, pointer, socklen_t(MemoryLayout<sockaddr_un>.size))
             }
         }
 
@@ -245,39 +256,49 @@ final class IPCServer: IPCServerLifecycle {
         }
     }
 
-    private static func makeListeningSocket(at path: String) throws -> Int32 {
-        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
-        guard fd >= 0 else {
+    static func makeListeningSocket(at path: String) throws -> OwnedFileDescriptor {
+        let rawDescriptor = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard rawDescriptor >= 0 else {
             throw POSIXError(.EIO)
         }
+        let socket = OwnedFileDescriptor(rawValue: rawDescriptor)
 
-        configureSocket(fd, nonBlocking: true)
+        configureSocket(socket.rawValue, nonBlocking: true)
 
         var address = try socketAddress(for: path)
         let bindResult = withUnsafePointer(to: &address) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { pointer in
-                bind(fd, pointer, socklen_t(MemoryLayout<sockaddr_un>.size))
+                bind(socket.rawValue, pointer, socklen_t(MemoryLayout<sockaddr_un>.size))
             }
         }
         guard bindResult == 0 else {
             let error = POSIXErrorCode(rawValue: errno) ?? .EADDRINUSE
-            close(fd)
             throw POSIXError(error)
         }
 
         if chmod(path, 0o600) != 0 {
             let error = POSIXErrorCode(rawValue: errno) ?? .EPERM
-            close(fd)
             throw POSIXError(error)
         }
 
-        guard listen(fd, SOMAXCONN) == 0 else {
+        guard listen(socket.rawValue, SOMAXCONN) == 0 else {
             let error = POSIXErrorCode(rawValue: errno) ?? .ECONNREFUSED
-            close(fd)
             throw POSIXError(error)
         }
 
-        return fd
+        return socket
+    }
+
+    static func makeConnectionHandle(
+        from socket: consuming OwnedFileDescriptor,
+        authorized: Bool
+    ) -> FileHandle? {
+        guard authorized else { return nil }
+        configureSocket(socket.rawValue, nonBlocking: false)
+        return FileHandle(
+            fileDescriptor: socket.relinquish(),
+            closeOnDealloc: true
+        )
     }
 
     private static func socketAddress(for path: String) throws -> sockaddr_un {

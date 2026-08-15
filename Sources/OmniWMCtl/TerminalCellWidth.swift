@@ -4,7 +4,7 @@
 import wchar_h
 import xlocale
 
-private final class TerminalWidthLocale: @unchecked Sendable {
+private struct TerminalWidthLocale: ~Copyable, @unchecked Sendable {
     let value: locale_t
 
     init() {

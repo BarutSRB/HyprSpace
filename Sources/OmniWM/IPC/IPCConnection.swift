@@ -157,24 +157,19 @@ actor IPCConnection {
     private nonisolated static func readNextLine(from fileDescriptor: Int32, buffer: inout Data) throws -> String? {
         while true {
             if let newlineIndex = buffer.firstIndex(of: 0x0A) {
-                guard newlineIndex <= maxRequestLineBytes else {
+                let lineByteCount = buffer.distance(from: buffer.startIndex, to: newlineIndex)
+                guard lineByteCount <= maxRequestLineBytes else {
                     throw ReadLoopError.requestTooLarge
                 }
-                let lineData = buffer.prefix(upTo: newlineIndex)
+                let line = try decodeUTF8(buffer.span.extracting(first: lineByteCount))
                 buffer.removeSubrange(...newlineIndex)
-                guard let line = String(data: lineData, encoding: .utf8) else {
-                    throw POSIXError(.EINVAL)
-                }
                 return line
             }
 
             guard let chunk = try readChunk(from: fileDescriptor), !chunk.isEmpty else {
                 guard !buffer.isEmpty else { return nil }
-                let remaining = buffer
-                buffer.removeAll()
-                guard let line = String(data: remaining, encoding: .utf8) else {
-                    throw POSIXError(.EINVAL)
-                }
+                let line = try decodeUTF8(buffer.span)
+                buffer.removeAll(keepingCapacity: true)
                 return line
             }
 
@@ -190,6 +185,14 @@ actor IPCConnection {
             if buffer.count > maxRequestLineBytes {
                 throw ReadLoopError.requestTooLarge
             }
+        }
+    }
+
+    private nonisolated static func decodeUTF8(_ bytes: Span<UInt8>) throws -> String {
+        do {
+            return String(copying: try UTF8Span(validating: bytes))
+        } catch {
+            throw POSIXError(.EINVAL)
         }
     }
 

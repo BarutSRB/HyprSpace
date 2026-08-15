@@ -772,10 +772,11 @@ extension NiriLayoutEngine {
         case .vertical: contentRect.width
         }
 
-        let resolvedSpans = if let secondarySpanOverride, windows.count == 1 {
-            [secondarySpanOverride]
+        let resolvedSpans: [NiriAxisSolver.Output] = if let secondarySpanOverride, windows.count == 1 {
+            [.init(value: secondarySpanOverride, wasConstrained: false)]
         } else {
             resolveWindowSpans(
+                container: container,
                 windows: windows,
                 availableSpace: availableSpace,
                 gap: secondaryGap,
@@ -784,10 +785,6 @@ extension NiriLayoutEngine {
             )
         }
 
-        let sizingModes = windows.map { $0.sizingMode }
-        let windowRenderOffsets = windows.map { $0.renderOffset(at: time) }
-        let windowTokens = windows.map { $0.token }
-
         var pos: CGFloat = switch orientation {
         case .horizontal: contentRect.origin.y
         case .vertical: contentRect.origin.x
@@ -795,8 +792,9 @@ extension NiriLayoutEngine {
         pos += secondaryGap
 
         for i in 0 ..< windows.count {
-            let span = resolvedSpans[i]
-            let sizingMode = sizingModes[i]
+            let window = windows[i]
+            let span = resolvedSpans[i].value
+            let sizingMode = window.sizingMode
 
             let frame: CGRect
             let renderedBaseFrame: CGRect
@@ -835,12 +833,12 @@ extension NiriLayoutEngine {
                 resolvedSpan = span
             }
 
-            windows[i].frame = frame
+            window.frame = frame
             switch orientation {
             case .horizontal:
-                windows[i].resolvedHeight = resolvedSpan
+                window.resolvedHeight = resolvedSpan
             case .vertical:
-                windows[i].resolvedWidth = resolvedSpan
+                window.resolvedWidth = resolvedSpan
             }
 
             var animatedFrame: CGRect
@@ -849,7 +847,7 @@ extension NiriLayoutEngine {
                  .maximized:
                 animatedFrame = renderedBaseFrame
             case .normal:
-                let windowOffset = windowRenderOffsets[i]
+                let windowOffset = window.renderOffset(at: time)
                 var offsetFrame = renderedBaseFrame.offsetBy(dx: windowOffset.x, dy: windowOffset.y)
                 switch orientation {
                 case .horizontal:
@@ -864,7 +862,7 @@ extension NiriLayoutEngine {
                     if maxX >= minX {
                         offsetFrame.origin.x = min(max(offsetFrame.origin.x, minX), maxX)
                     }
-                    if let containmentFrame = windows[i].moveYContainmentFrame,
+                    if let containmentFrame = window.moveYContainmentFrame,
                        renderedBaseFrame.minY >= containmentFrame.minY,
                        renderedBaseFrame.maxY <= containmentFrame.maxY
                     {
@@ -883,8 +881,8 @@ extension NiriLayoutEngine {
                 orientation: orientation
             )
             let roundedAnimatedFrame = animatedFrame.roundedToPhysicalPixels(scale: scale)
-            windows[i].renderedFrame = roundedAnimatedFrame
-            result[windowTokens[i]] = roundedAnimatedFrame
+            window.renderedFrame = roundedAnimatedFrame
+            result[window.token] = roundedAnimatedFrame
 
             if !isTabbed {
                 pos += span
@@ -896,85 +894,88 @@ extension NiriLayoutEngine {
     }
 
     private func resolveWindowSpans(
+        container: NiriContainer,
         windows: [NiriWindow],
         availableSpace: CGFloat,
         gap: CGFloat,
         isTabbed: Bool,
         orientation: Monitor.Orientation
-    ) -> [CGFloat] {
+    ) -> [NiriAxisSolver.Output] {
         guard !windows.isEmpty else { return [] }
 
-        let inputs: [NiriAxisSolver.Input] = windows.map { window in
-            switch orientation {
-            case .horizontal:
-                let isFixed: Bool
-                let fixedValue: CGFloat?
-                switch window.height {
-                case let .fixed(h):
-                    isFixed = true
-                    fixedValue = h
-                case .auto:
-                    isFixed = false
-                    fixedValue = nil
-                case let .preset(index):
-                    isFixed = true
-                    fixedValue = resolvePresetSpan(
-                        presetWindowSecondarySpans,
-                        index: index,
-                        availableSpace: availableSpace,
-                        gap: gap
-                    )
-                }
-                return NiriAxisSolver.Input(
-                    weight: max(0.1, window.heightWeight),
-                    minConstraint: window.constraints.minSize.height,
-                    maxConstraint: window.constraints.maxSize.height,
-                    hasMaxConstraint: window.constraints.hasMaxHeight,
-                    isConstraintFixed: window.constraints.isFixed,
-                    hasFixedValue: isFixed,
-                    fixedValue: fixedValue
-                )
-            case .vertical:
-                let isFixed: Bool
-                let fixedValue: CGFloat?
-                switch window.windowWidth {
-                case let .fixed(w):
-                    isFixed = true
-                    fixedValue = w
-                case .auto:
-                    isFixed = false
-                    fixedValue = nil
-                case let .preset(index):
-                    isFixed = true
-                    fixedValue = resolvePresetSpan(
-                        presetWindowSecondarySpans,
-                        index: index,
-                        availableSpace: availableSpace,
-                        gap: gap
-                    )
-                }
-                return NiriAxisSolver.Input(
-                    weight: max(0.1, window.widthWeight),
-                    minConstraint: window.constraints.minSize.width,
-                    maxConstraint: window.constraints.maxSize.width,
-                    hasMaxConstraint: window.constraints.hasMaxWidth,
-                    isConstraintFixed: window.constraints.isFixed,
-                    hasFixedValue: isFixed,
-                    fixedValue: fixedValue
-                )
-            }
-        }
-
         let cacheKey = NiriAxisSolveKey(
-            inputs: inputs,
+            containerId: container.id,
+            containerRevision: container.axisSolveRevision,
+            configurationRevision: axisSolveConfigurationRevision,
             availableSpace: availableSpace,
             gap: gap,
-            isTabbed: isTabbed
+            isTabbed: isTabbed,
+            isVertical: orientation == .vertical
         )
         let outputs: [NiriAxisSolver.Output]
         if let cached = axisSolveCache[cacheKey] {
             outputs = cached
         } else {
+            let inputs: [NiriAxisSolver.Input] = windows.map { window in
+                switch orientation {
+                case .horizontal:
+                    let isFixed: Bool
+                    let fixedValue: CGFloat?
+                    switch window.height {
+                    case let .fixed(h):
+                        isFixed = true
+                        fixedValue = h
+                    case .auto:
+                        isFixed = false
+                        fixedValue = nil
+                    case let .preset(index):
+                        isFixed = true
+                        fixedValue = resolvePresetSpan(
+                            presetWindowSecondarySpans,
+                            index: index,
+                            availableSpace: availableSpace,
+                            gap: gap
+                        )
+                    }
+                    return NiriAxisSolver.Input(
+                        weight: max(0.1, window.heightWeight),
+                        minConstraint: window.constraints.minSize.height,
+                        maxConstraint: window.constraints.maxSize.height,
+                        hasMaxConstraint: window.constraints.hasMaxHeight,
+                        isConstraintFixed: window.constraints.isFixed,
+                        hasFixedValue: isFixed,
+                        fixedValue: fixedValue
+                    )
+                case .vertical:
+                    let isFixed: Bool
+                    let fixedValue: CGFloat?
+                    switch window.windowWidth {
+                    case let .fixed(w):
+                        isFixed = true
+                        fixedValue = w
+                    case .auto:
+                        isFixed = false
+                        fixedValue = nil
+                    case let .preset(index):
+                        isFixed = true
+                        fixedValue = resolvePresetSpan(
+                            presetWindowSecondarySpans,
+                            index: index,
+                            availableSpace: availableSpace,
+                            gap: gap
+                        )
+                    }
+                    return NiriAxisSolver.Input(
+                        weight: max(0.1, window.widthWeight),
+                        minConstraint: window.constraints.minSize.width,
+                        maxConstraint: window.constraints.maxSize.width,
+                        hasMaxConstraint: window.constraints.hasMaxWidth,
+                        isConstraintFixed: window.constraints.isFixed,
+                        hasFixedValue: isFixed,
+                        fixedValue: fixedValue
+                    )
+                }
+            }
             outputs = NiriAxisSolver.solve(
                 windows: inputs,
                 availableSpace: availableSpace,
@@ -996,7 +997,7 @@ extension NiriLayoutEngine {
             }
         }
 
-        return outputs.map(\.value)
+        return outputs
     }
 
     private func resolvePresetSpan(

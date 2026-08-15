@@ -17,6 +17,42 @@ final class EventIntakeReplayTests: XCTestCase {
     }
 
     @MainActor
+    private final class ReentrantSink: EventIntakeSink {
+        let intake: EventIntake
+        var received: [StampedIntakeEvent] = []
+        var didReenter = false
+
+        init(intake: EventIntake) {
+            self.intake = intake
+        }
+
+        func handleIntakeEvent(_ stamped: StampedIntakeEvent) {
+            received.append(stamped)
+            guard !didReenter else { return }
+            didReenter = true
+            intake.enqueue(.appHidden(pid: 3))
+        }
+    }
+
+    @MainActor
+    private final class ClosingSink: EventIntakeSink {
+        let intake: EventIntake
+        var received: [StampedIntakeEvent] = []
+        var didClose = false
+
+        init(intake: EventIntake) {
+            self.intake = intake
+        }
+
+        func handleIntakeEvent(_ stamped: StampedIntakeEvent) {
+            received.append(stamped)
+            guard !didClose else { return }
+            didClose = true
+            intake.close()
+        }
+    }
+
+    @MainActor
     func testIntakeStampsMonotonicallyAndPreservesOrder() {
         let intake = EventIntake()
         let sink = RecordingSink()
@@ -41,6 +77,42 @@ final class EventIntakeReplayTests: XCTestCase {
         else {
             return XCTFail("Events drained out of order: \(sink.received)")
         }
+    }
+
+    @MainActor
+    func testReentrantEnqueuePreservesBothBatches() {
+        let intake = EventIntake()
+        let sink = ReentrantSink(intake: intake)
+        intake.open(sink: sink)
+        defer { intake.close() }
+
+        intake.enqueue(.appActivated(pid: 1))
+        intake.enqueue(.appDeactivated(pid: 2))
+        intake.drainNow()
+        intake.drainNow()
+
+        XCTAssertEqual(sink.received.map(\.seq), [1, 2, 3])
+        guard case .appActivated = sink.received[0].event,
+              case .appDeactivated = sink.received[1].event,
+              case .appHidden = sink.received[2].event
+        else {
+            return XCTFail("Reentrant enqueue lost or reordered a batch: \(sink.received)")
+        }
+    }
+
+    @MainActor
+    func testCloseDuringDrainFinishesDetachedBatchAndRejectsNewEvents() {
+        let intake = EventIntake()
+        let sink = ClosingSink(intake: intake)
+        intake.open(sink: sink)
+
+        intake.enqueue(.appActivated(pid: 1))
+        intake.enqueue(.appDeactivated(pid: 2))
+        intake.drainNow()
+
+        XCTAssertEqual(sink.received.map(\.seq), [1, 2])
+        XCTAssertFalse(intake.enqueue(.appHidden(pid: 3)))
+        XCTAssertFalse(intake.hasPendingEvents)
     }
 
     @MainActor

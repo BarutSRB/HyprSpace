@@ -213,4 +213,21 @@ final class DwindleMinimumSizeTests: XCTestCase {
 
         XCTAssertEqual(frame, screen)
     }
+
+    func testCalculationSettingsDoNotMutateStoredSettings() {
+        let (engine, ws, token) = makeSingleWindowEngine(minWidth: 200, minHeight: 200)
+        var calculationSettings = engine.settings
+        calculationSettings.singleWindowFit = SingleWindowFit(mode: .custom, width: 600, height: 500)
+
+        let customFrame = engine.calculateLayout(
+            for: ws,
+            screen: screen,
+            calculationSettings: calculationSettings
+        )[token]
+        let storedFrame = engine.calculateLayout(for: ws, screen: screen)[token]
+
+        XCTAssertEqual(customFrame?.size, CGSize(width: 600, height: 500))
+        XCTAssertEqual(storedFrame, screen)
+        XCTAssertEqual(engine.settings.singleWindowFit, .fullScreen)
+    }
 }

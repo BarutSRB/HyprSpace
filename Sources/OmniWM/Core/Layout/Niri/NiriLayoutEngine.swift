@@ -134,6 +134,7 @@ final class NiriLayoutEngine {
     var hiddenPool: [WindowToken: HideSide] = [:]
 
     var axisSolveCache: [NiriAxisSolveKey: [NiriAxisSolver.Output]] = [:]
+    private(set) var axisSolveConfigurationRevision: UInt64 = 0
 
     var excludedTokensByWorkspace: [WorkspaceDescriptor.ID: Set<WindowToken>] = [:]
 
@@ -190,7 +191,14 @@ final class NiriLayoutEngine {
     }
 
     var presetContainerPrimarySpans: [PresetSize] = NiriLayoutEngine.defaultPresetContainerPrimarySpans
-    var presetWindowSecondarySpans: [PresetSize] = NiriLayoutEngine.defaultPresetWindowSecondarySpans
+    var presetWindowSecondarySpans: [PresetSize] = NiriLayoutEngine.defaultPresetWindowSecondarySpans {
+        didSet {
+            if oldValue != presetWindowSecondarySpans {
+                axisSolveConfigurationRevision &+= 1
+            }
+        }
+    }
+
     var defaultContainerPrimarySpan: CGFloat? = 0.5
 
     init(visibleContainerCount: Int = 2, infiniteLoop: Bool = false) {
@@ -406,7 +414,7 @@ final class NiriLayoutEngine {
     }
 
     func findNode(for handle: WindowHandle, in workspaceId: WorkspaceDescriptor.ID) -> NiriWindow? {
-        findNode(for: handle.id, in: workspaceId)
+        findNode(for: handle.token, in: workspaceId)
     }
 
     func isWindowFullscreen(_ token: WindowToken, in workspaceId: WorkspaceDescriptor.ID) -> Bool {
