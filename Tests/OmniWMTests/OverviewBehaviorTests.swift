@@ -133,7 +133,7 @@ final class OverviewBehaviorTests: XCTestCase {
         }
     }
 
-    func testNavigationRevealsThirdWorkspaceAndWrapsHorizontally() throws {
+    func testNavigationRevealsThirdWorkspaceAndKeepsSingleWindowRowSelection() throws {
         let fixture = makeProjectionFixture()
         var layout = projectedLayout(fixture: fixture, scale: 1, query: "")
         let first = try XCTUnwrap(layout.allWindows.first?.handle)
@@ -157,14 +157,149 @@ final class OverviewBehaviorTests: XCTestCase {
 
         assertVisible(thirdWindow.overviewFrame, in: layout, offset: layout.scrollOffset)
         XCTAssertTrue(layout.scrollOffset < 0)
+        // Each workspace row holds a single window, so horizontal navigation at
+        // either edge must keep the selection inside that row instead of
+        // wrapping into another workspace's row.
         XCTAssertEqual(
             OverviewLayoutCalculator.findNextWindow(in: layout, from: third, direction: .right),
-            first
+            third
         )
         XCTAssertEqual(
             OverviewLayoutCalculator.findNextWindow(in: layout, from: first, direction: .left),
-            third
+            first
         )
+    }
+
+    func testHorizontalWrapStaysInsideCurrentWorkspaceRow() throws {
+        let fixture = makeProjectionFixture(windowCountsPerWorkspace: [3, 3, 3])
+        let layout = projectedLayout(fixture: fixture, scale: 1, query: "")
+
+        for (rowIndex, row) in fixture.rowHandles.enumerated() {
+            let leftEdge = try XCTUnwrap(row.first)
+            let rightEdge = try XCTUnwrap(row.last)
+
+            XCTAssertEqual(
+                OverviewLayoutCalculator.findNextWindow(in: layout, from: leftEdge, direction: .left),
+                rightEdge,
+                "left edge of workspace row \(rowIndex) must wrap to the row's right-most window"
+            )
+            XCTAssertEqual(
+                OverviewLayoutCalculator.findNextWindow(in: layout, from: rightEdge, direction: .right),
+                leftEdge,
+                "right edge of workspace row \(rowIndex) must wrap to the row's left-most window"
+            )
+        }
+
+        let firstRow = fixture.rowHandles[0]
+        XCTAssertEqual(
+            OverviewLayoutCalculator.findNextWindow(in: layout, from: firstRow[0], direction: .right),
+            firstRow[1]
+        )
+        XCTAssertEqual(
+            OverviewLayoutCalculator.findNextWindow(in: layout, from: firstRow[2], direction: .left),
+            firstRow[1]
+        )
+    }
+
+    func testHorizontalNavigationKeepsLoneWindowRowSelectionInPlace() throws {
+        let fixture = makeProjectionFixture(windowCountsPerWorkspace: [3, 1, 2])
+        let layout = projectedLayout(fixture: fixture, scale: 1, query: "")
+        let loneWindow = try XCTUnwrap(fixture.rowHandles[1].first)
+
+        XCTAssertEqual(
+            OverviewLayoutCalculator.findNextWindow(in: layout, from: loneWindow, direction: .right),
+            loneWindow
+        )
+        XCTAssertEqual(
+            OverviewLayoutCalculator.findNextWindow(in: layout, from: loneWindow, direction: .left),
+            loneWindow
+        )
+
+        let multiWindowRow = fixture.rowHandles[0]
+        XCTAssertEqual(
+            OverviewLayoutCalculator.findNextWindow(in: layout, from: multiWindowRow.first, direction: .left),
+            multiWindowRow.last
+        )
+        XCTAssertEqual(
+            OverviewLayoutCalculator.findNextWindow(in: layout, from: multiWindowRow.last, direction: .right),
+            multiWindowRow.first
+        )
+    }
+
+    func testHorizontalNavigationStaysInRowAcrossDifferingRowHeights() throws {
+        let tallDescriptor = WorkspaceDescriptor(name: "Tall")
+        let shortDescriptor = WorkspaceDescriptor(name: "Short")
+        let workspaces: [OverviewWorkspaceLayoutItem] = [
+            (id: tallDescriptor.id, name: tallDescriptor.name, isActive: true),
+            (id: shortDescriptor.id, name: shortDescriptor.name, isActive: false)
+        ]
+        var windows: [WindowHandle: OverviewWindowLayoutData] = [:]
+        let tallToken = WindowToken(pid: 1, windowId: 1)
+        let tallHandle = WindowHandle(id: tallToken)
+        windows[tallHandle] = (
+            token: tallToken,
+            workspaceId: tallDescriptor.id,
+            title: "Tall 1",
+            appName: "App 1",
+            appIcon: nil,
+            frame: CGRect(x: 0, y: 0, width: 1000, height: 700)
+        )
+        var shortHandles: [WindowHandle] = []
+        for slot in 0 ..< 2 {
+            let token = WindowToken(pid: pid_t(2 + slot), windowId: 2 + slot)
+            let handle = WindowHandle(id: token)
+            windows[handle] = (
+                token: token,
+                workspaceId: shortDescriptor.id,
+                title: "Short \(slot + 1)",
+                appName: "App \(2 + slot)",
+                appIcon: nil,
+                frame: CGRect(x: CGFloat(slot) * 500, y: 0, width: 500, height: 233)
+            )
+            shortHandles.append(handle)
+        }
+        let layout = projectedLayout(
+            fixture: ProjectionFixture(workspaces: workspaces, windows: windows),
+            scale: 1,
+            query: ""
+        )
+
+        // The tall row's window vertically overlaps the shorter row's band, so
+        // an unscoped geometric neighbor search would treat the short row's
+        // windows as same-row candidates.
+        XCTAssertEqual(
+            OverviewLayoutCalculator.findNextWindow(in: layout, from: tallHandle, direction: .left),
+            tallHandle
+        )
+        XCTAssertEqual(
+            OverviewLayoutCalculator.findNextWindow(in: layout, from: tallHandle, direction: .right),
+            tallHandle
+        )
+        XCTAssertEqual(
+            OverviewLayoutCalculator.findNextWindow(in: layout, from: shortHandles[0], direction: .right),
+            shortHandles[1]
+        )
+    }
+
+    func testHorizontalNavigationKeepsLoneRowMatchSelectionWhileSearching() throws {
+        let fixture = makeProjectionFixture(windowCountsPerWorkspace: [3, 3, 3])
+        let layout = projectedLayout(fixture: fixture, scale: 1, query: "2")
+
+        for (rowIndex, row) in fixture.rowHandles.enumerated() {
+            // Only the row's middle window ("… 2") survives the search filter.
+            let loneMatch = row[1]
+
+            XCTAssertEqual(
+                OverviewLayoutCalculator.findNextWindow(in: layout, from: loneMatch, direction: .right),
+                loneMatch,
+                "workspace row \(rowIndex)"
+            )
+            XCTAssertEqual(
+                OverviewLayoutCalculator.findNextWindow(in: layout, from: loneMatch, direction: .left),
+                loneMatch,
+                "workspace row \(rowIndex)"
+            )
+        }
     }
 
     func testZoomPreservesSelectedMidpointsIndependentlyUntilClamped() throws {
@@ -733,6 +868,7 @@ final class OverviewBehaviorTests: XCTestCase {
     private struct ProjectionFixture {
         var workspaces: [OverviewWorkspaceLayoutItem]
         var windows: [WindowHandle: OverviewWindowLayoutData]
+        var rowHandles: [[WindowHandle]] = []
     }
 
     private struct RuntimeOverviewFixture {
@@ -804,24 +940,38 @@ final class OverviewBehaviorTests: XCTestCase {
     }
 
     private func makeProjectionFixture() -> ProjectionFixture {
+        makeProjectionFixture(windowCountsPerWorkspace: [1, 1, 1])
+    }
+
+    private func makeProjectionFixture(windowCountsPerWorkspace: [Int]) -> ProjectionFixture {
         let descriptors = ["First", "Second", "Third"].map { WorkspaceDescriptor(name: $0) }
         let workspaces = descriptors.enumerated().map { index, descriptor in
             (id: descriptor.id, name: descriptor.name, isActive: index == 0)
         }
         var windows: [WindowHandle: OverviewWindowLayoutData] = [:]
+        var rowHandles: [[WindowHandle]] = []
+        var tokenSeed = 0
         for (index, descriptor) in descriptors.enumerated() {
-            let token = WindowToken(pid: pid_t(index + 1), windowId: index + 1)
-            let handle = WindowHandle(id: token)
-            windows[handle] = (
-                token: token,
-                workspaceId: descriptor.id,
-                title: descriptor.name.lowercased(),
-                appName: "App \(index + 1)",
-                appIcon: nil,
-                frame: CGRect(x: 0, y: 0, width: 1000, height: 700)
-            )
+            let windowCount = windowCountsPerWorkspace[index]
+            let columnWidth = 1000.0 / CGFloat(windowCount)
+            var row: [WindowHandle] = []
+            for slot in 0 ..< windowCount {
+                tokenSeed += 1
+                let token = WindowToken(pid: pid_t(tokenSeed), windowId: tokenSeed)
+                let handle = WindowHandle(id: token)
+                windows[handle] = (
+                    token: token,
+                    workspaceId: descriptor.id,
+                    title: "\(descriptor.name) \(slot + 1)",
+                    appName: "App \(tokenSeed)",
+                    appIcon: nil,
+                    frame: CGRect(x: columnWidth * CGFloat(slot), y: 0, width: columnWidth, height: 700)
+                )
+                row.append(handle)
+            }
+            rowHandles.append(row)
         }
-        return ProjectionFixture(workspaces: workspaces, windows: windows)
+        return ProjectionFixture(workspaces: workspaces, windows: windows, rowHandles: rowHandles)
     }
 
     private func projectedLayout(
