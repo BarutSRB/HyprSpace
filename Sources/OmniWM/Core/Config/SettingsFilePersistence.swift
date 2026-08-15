@@ -128,7 +128,7 @@ final class SettingsFilePersistence {
 
         let previous = FileManager.default.fileExists(atPath: fileURL.path) ? try? Data(contentsOf: fileURL) : nil
         let data = try SettingsTOMLCodec.encode(export, preservingUnknownKeysFrom: previous)
-        try data.write(to: fileURL, options: .atomic)
+        try data.write(to: Self.resolvingSymlink(fileURL), options: .atomic)
 
         let fingerprint = currentFingerprint()
         lastWrittenFingerprint = fingerprint
@@ -333,6 +333,21 @@ final class SettingsFilePersistence {
 
     private static func nanoseconds(from timestamp: timespec) -> Int64 {
         Int64(timestamp.tv_sec) * nanosecondsPerSecond + Int64(timestamp.tv_nsec)
+    }
+
+    private static func resolvingSymlink(_ url: URL) throws -> URL {
+        var resolved = url.standardizedFileURL
+        var visitedPaths = Set<String>()
+        while let destination = try? FileManager.default.destinationOfSymbolicLink(atPath: resolved.path) {
+            guard visitedPaths.insert(resolved.path).inserted else {
+                throw POSIXError(.ELOOP)
+            }
+            resolved = (destination.hasPrefix("/")
+                ? URL(fileURLWithPath: destination)
+                : resolved.deletingLastPathComponent().appendingPathComponent(destination)
+            ).standardizedFileURL
+        }
+        return resolved
     }
 
     private func moveCorruptFileAsideIfPresent() {
