@@ -157,9 +157,6 @@ final class OverviewBehaviorTests: XCTestCase {
 
         assertVisible(thirdWindow.overviewFrame, in: layout, offset: layout.scrollOffset)
         XCTAssertTrue(layout.scrollOffset < 0)
-        // Each workspace row holds a single window, so horizontal navigation at
-        // either edge must keep the selection inside that row instead of
-        // wrapping into another workspace's row.
         XCTAssertEqual(
             OverviewLayoutCalculator.findNextWindow(in: layout, from: third, direction: .right),
             third
@@ -167,6 +164,14 @@ final class OverviewBehaviorTests: XCTestCase {
         XCTAssertEqual(
             OverviewLayoutCalculator.findNextWindow(in: layout, from: first, direction: .left),
             first
+        )
+        XCTAssertEqual(
+            OverviewLayoutCalculator.findCycledWindow(in: layout, from: third, forward: true),
+            first
+        )
+        XCTAssertEqual(
+            OverviewLayoutCalculator.findCycledWindow(in: layout, from: first, forward: false),
+            third
         )
     }
 
@@ -226,7 +231,7 @@ final class OverviewBehaviorTests: XCTestCase {
         )
     }
 
-    func testHorizontalNavigationStaysInRowAcrossDifferingRowHeights() throws {
+    func testHorizontalNavigationDoesNotCrossVerticallyOverlappingWorkspaces() throws {
         let tallDescriptor = WorkspaceDescriptor(name: "Tall")
         let shortDescriptor = WorkspaceDescriptor(name: "Short")
         let workspaces: [OverviewWorkspaceLayoutItem] = [
@@ -264,9 +269,6 @@ final class OverviewBehaviorTests: XCTestCase {
             query: ""
         )
 
-        // The tall row's window vertically overlaps the shorter row's band, so
-        // an unscoped geometric neighbor search would treat the short row's
-        // windows as same-row candidates.
         XCTAssertEqual(
             OverviewLayoutCalculator.findNextWindow(in: layout, from: tallHandle, direction: .left),
             tallHandle
@@ -286,7 +288,6 @@ final class OverviewBehaviorTests: XCTestCase {
         let layout = projectedLayout(fixture: fixture, scale: 1, query: "2")
 
         for (rowIndex, row) in fixture.rowHandles.enumerated() {
-            // Only the row's middle window ("… 2") survives the search filter.
             let loneMatch = row[1]
 
             XCTAssertEqual(
@@ -300,6 +301,24 @@ final class OverviewBehaviorTests: XCTestCase {
                 "workspace row \(rowIndex)"
             )
         }
+
+        let matchingHandles = fixture.rowHandles.map { $0[1] }
+        XCTAssertEqual(
+            OverviewLayoutCalculator.findCycledWindow(
+                in: layout,
+                from: matchingHandles[0],
+                forward: true
+            ),
+            matchingHandles[1]
+        )
+        XCTAssertEqual(
+            OverviewLayoutCalculator.findCycledWindow(
+                in: layout,
+                from: matchingHandles[0],
+                forward: false
+            ),
+            matchingHandles[2]
+        )
     }
 
     func testZoomPreservesSelectedMidpointsIndependentlyUntilClamped() throws {
@@ -401,7 +420,7 @@ final class OverviewBehaviorTests: XCTestCase {
         assertViewportInvariant(layout)
     }
 
-    func testActivationAndDismissalDoNotRepeatWhileNavigationDoes() {
+    func testActivationAndDismissalDoNotRepeatWhileNavigationAndCyclingDo() {
         let repeatedReturn = OverviewInputHandler.keyHandlingResult(
             keyCode: UInt16(kVK_Return),
             modifierFlags: [],
@@ -430,13 +449,20 @@ final class OverviewBehaviorTests: XCTestCase {
             searchQuery: "",
             isRepeat: true
         )
+        let forwardTab = OverviewInputHandler.keyHandlingResult(
+            keyCode: UInt16(kVK_Tab),
+            modifierFlags: [],
+            charactersIgnoringModifiers: "\t",
+            searchQuery: ""
+        )
 
         XCTAssertEqual(repeatedReturn.action, .consume)
         XCTAssertTrue(repeatedReturn.shouldConsume)
         XCTAssertEqual(repeatedEscape.action, .consume)
         XCTAssertTrue(repeatedEscape.shouldConsume)
         XCTAssertEqual(repeatedArrow.action, .navigate(.down))
-        XCTAssertEqual(repeatedTab.action, .navigate(.left))
+        XCTAssertEqual(repeatedTab.action, .cycleSelection(forward: false))
+        XCTAssertEqual(forwardTab.action, .cycleSelection(forward: true))
     }
 
     func testEscapeDismissesSelectionEvenWithSearch() {
@@ -647,30 +673,16 @@ final class OverviewBehaviorTests: XCTestCase {
         overview.prepareOpenState()
         overview.updateAnimationProgress(1, state: .open)
         let originalSelection = try XCTUnwrap(overview.selectedWindowHandle)
-        let directions: [Direction] = [.left, .right, .up, .down]
-        var returnDirection: Direction?
-
-        for direction in directions {
-            overview.navigateSelection(direction)
-            if overview.selectedWindowHandle != originalSelection {
-                returnDirection = switch direction {
-                case .left: .right
-                case .right: .left
-                case .up: .down
-                case .down: .up
-                }
-                break
-            }
-        }
+        overview.cycleSelection(forward: true)
 
         let closingSelection = try XCTUnwrap(overview.selectedWindowHandle)
-        let direction = try XCTUnwrap(returnDirection)
+        XCTAssertNotEqual(closingSelection, originalSelection)
         overview.updateAnimationProgress(
             0,
             state: .closing(targetWindow: closingSelection, progress: 0)
         )
 
-        overview.navigateSelection(direction)
+        overview.cycleSelection(forward: false)
         overview.selectAndActivateWindow(originalSelection)
 
         XCTAssertEqual(overview.selectedWindowHandle, closingSelection)
@@ -945,6 +957,7 @@ final class OverviewBehaviorTests: XCTestCase {
 
     private func makeProjectionFixture(windowCountsPerWorkspace: [Int]) -> ProjectionFixture {
         let descriptors = ["First", "Second", "Third"].map { WorkspaceDescriptor(name: $0) }
+        precondition(windowCountsPerWorkspace.count == descriptors.count)
         let workspaces = descriptors.enumerated().map { index, descriptor in
             (id: descriptor.id, name: descriptor.name, isActive: index == 0)
         }

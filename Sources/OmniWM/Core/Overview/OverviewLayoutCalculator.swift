@@ -37,6 +37,8 @@ enum OverviewLayoutMetrics {
 
 @MainActor
 struct OverviewLayoutCalculator {
+    private static let navigationGeometryEpsilon: CGFloat = 0.5
+
     struct BuildContext {
         let screenFrame: CGRect
         let metricsScale: CGFloat
@@ -56,6 +58,15 @@ struct OverviewLayoutCalculator {
         let section: OverviewWorkspaceSection
         let columns: [OverviewNiriColumn]
         let columnDropZones: [OverviewColumnDropZone]
+    }
+
+    private struct HorizontalCandidate {
+        let handle: WindowHandle
+        let midX: CGFloat
+        let midY: CGFloat
+        let horizontalDistance: CGFloat
+        let verticalDistance: CGFloat
+        let verticalOverlap: CGFloat
     }
 
     static func clampedScale(_ scale: CGFloat) -> CGFloat {
@@ -746,22 +757,18 @@ struct OverviewLayoutCalculator {
 
         switch direction {
         case .left:
-            let leftWindows = visibleWindows.filter {
-                $0.workspaceId == currentWindow.workspaceId &&
-                    $0.overviewFrame.midX < currentWindow.overviewFrame.midX &&
-                    abs($0.overviewFrame.midY - currentWindow.overviewFrame.midY) < currentWindow.overviewFrame.height
-            }.sorted { $0.overviewFrame.midX > $1.overviewFrame.midX }
-            return leftWindows.first?.handle
-                ?? findRowWrappedWindow(in: visibleWindows, of: currentWindow, movingLeft: true)
+            return findHorizontalWindow(
+                in: visibleWindows,
+                from: currentWindow,
+                movingLeft: true
+            )
 
         case .right:
-            let rightWindows = visibleWindows.filter {
-                $0.workspaceId == currentWindow.workspaceId &&
-                    $0.overviewFrame.midX > currentWindow.overviewFrame.midX &&
-                    abs($0.overviewFrame.midY - currentWindow.overviewFrame.midY) < currentWindow.overviewFrame.height
-            }.sorted { $0.overviewFrame.midX < $1.overviewFrame.midX }
-            return rightWindows.first?.handle
-                ?? findRowWrappedWindow(in: visibleWindows, of: currentWindow, movingLeft: false)
+            return findHorizontalWindow(
+                in: visibleWindows,
+                from: currentWindow,
+                movingLeft: false
+            )
 
         case .up:
             let upWindows = visibleWindows.filter {
@@ -805,22 +812,111 @@ struct OverviewLayoutCalculator {
         }
     }
 
-    /// Wraps Left/Right navigation inside the current window's workspace row so
-    /// edge navigation never escapes into another workspace's row. A row with a
-    /// single visible window keeps the current selection. The geometric neighbor
-    /// search in `findNextWindow` is scoped to the same row.
-    private static func findRowWrappedWindow(
-        in windows: [OverviewWindowItem],
-        of currentWindow: OverviewWindowItem,
-        movingLeft: Bool
+    static func findCycledWindow(
+        in layout: OverviewLayout,
+        from currentHandle: WindowHandle?,
+        forward: Bool
     ) -> WindowHandle? {
-        let rowWindows = windows.filter { $0.workspaceId == currentWindow.workspaceId }
-        guard let rowIndex = rowWindows.firstIndex(where: { $0.handle == currentWindow.handle }) else {
-            return currentWindow.handle
+        let visibleWindows = layout.allWindows.filter(\.matchesSearch)
+        guard !visibleWindows.isEmpty else { return nil }
+        guard let currentHandle,
+              let currentIndex = visibleWindows.firstIndex(where: { $0.handle == currentHandle })
+        else {
+            return visibleWindows.first?.handle
         }
-        return movingLeft
-            ? findWrappedPrevious(in: rowWindows, from: rowIndex)
-            : findWrappedNext(in: rowWindows, from: rowIndex)
+
+        return forward
+            ? findWrappedNext(in: visibleWindows, from: currentIndex)
+            : findWrappedPrevious(in: visibleWindows, from: currentIndex)
+    }
+
+    private static func findHorizontalWindow(
+        in windows: [OverviewWindowItem],
+        from currentWindow: OverviewWindowItem,
+        movingLeft: Bool
+    ) -> WindowHandle {
+        let currentFrame = currentWindow.overviewFrame
+        var directCandidate: HorizontalCandidate?
+        var wrappedCandidate: HorizontalCandidate?
+
+        for window in windows {
+            guard window.workspaceId == currentWindow.workspaceId,
+                  window.handle != currentWindow.handle
+            else {
+                continue
+            }
+
+            let frame = window.overviewFrame
+            let horizontalDelta = frame.midX - currentFrame.midX
+            let verticalOverlap = min(frame.maxY, currentFrame.maxY) - max(frame.minY, currentFrame.minY)
+            guard abs(horizontalDelta) > navigationGeometryEpsilon,
+                  verticalOverlap > navigationGeometryEpsilon
+            else {
+                continue
+            }
+
+            let candidate = HorizontalCandidate(
+                handle: window.handle,
+                midX: frame.midX,
+                midY: frame.midY,
+                horizontalDistance: abs(horizontalDelta),
+                verticalDistance: abs(frame.midY - currentFrame.midY),
+                verticalOverlap: verticalOverlap
+            )
+            let isDirect = movingLeft ? horizontalDelta < 0 : horizontalDelta > 0
+            if isDirect,
+               directCandidate.map({ isBetterAligned(candidate, than: $0) }) ?? true
+            {
+                directCandidate = candidate
+            }
+            if wrappedCandidate.map({
+                isBetterWrapped(candidate, than: $0, movingLeft: movingLeft)
+            }) ?? true {
+                wrappedCandidate = candidate
+            }
+        }
+
+        return directCandidate?.handle ?? wrappedCandidate?.handle ?? currentWindow.handle
+    }
+
+    private static func isBetterAligned(
+        _ candidate: HorizontalCandidate,
+        than current: HorizontalCandidate
+    ) -> Bool {
+        if candidate.horizontalDistance != current.horizontalDistance {
+            return candidate.horizontalDistance < current.horizontalDistance
+        }
+        return isBetterVerticalMatch(candidate, than: current)
+    }
+
+    private static func isBetterWrapped(
+        _ candidate: HorizontalCandidate,
+        than current: HorizontalCandidate,
+        movingLeft: Bool
+    ) -> Bool {
+        if candidate.midX != current.midX {
+            return movingLeft ? candidate.midX > current.midX : candidate.midX < current.midX
+        }
+        return isBetterVerticalMatch(candidate, than: current)
+    }
+
+    private static func isBetterVerticalMatch(
+        _ candidate: HorizontalCandidate,
+        than current: HorizontalCandidate
+    ) -> Bool {
+        if candidate.verticalOverlap != current.verticalOverlap {
+            return candidate.verticalOverlap > current.verticalOverlap
+        }
+        if candidate.verticalDistance != current.verticalDistance {
+            return candidate.verticalDistance < current.verticalDistance
+        }
+        if candidate.midY != current.midY {
+            return candidate.midY > current.midY
+        }
+        if candidate.handle.pid != current.handle.pid {
+            return candidate.handle.pid < current.handle.pid
+        }
+        return candidate.handle.windowId < current.handle.windowId
     }
 
     private static func findWrappedNext(in windows: [OverviewWindowItem], from index: Int) -> WindowHandle? {

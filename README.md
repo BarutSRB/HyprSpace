@@ -696,7 +696,7 @@ See all windows at once with thumbnails:
 - Click a window to focus it
 - Type to filter/search windows; `Backspace` deletes search text
 - `Alt (Option) + Shift + Mouse Scroll` temporarily zooms the current overview; the next opening starts from the configured baseline
-- `Arrow Keys` navigate the selection; `Tab` / `Shift + Tab` move horizontally, and keyboard navigation automatically scrolls the selected thumbnail into view
+- `Arrow Keys` navigate spatially; `Left` / `Right` stay within the current workspace. `Tab` / `Shift + Tab` cycle forward or backward through matching windows, and keyboard navigation automatically scrolls the selected thumbnail into view
 - Assigned structural move, reorder, consume/expel, and workspace-transfer shortcuts operate on the selected thumbnail while Overview is open
 - In Niri workspaces, reorder windows and columns, consume or expel windows, move windows into or out of columns, move windows across workspaces and monitors, and move whole columns between Niri workspaces
 - Adjacent-workspace fallback actions can create the next compatible unused numeric workspace when moving past the current workspace edge

@@ -12,6 +12,7 @@ final class OverviewInputHandler {
         case activateSelection
         case closeSelection
         case navigate(Direction)
+        case cycleSelection(forward: Bool)
         case deleteBackward
         case appendToSearch(String)
         case consume
@@ -69,6 +70,7 @@ final class OverviewInputHandler {
                 controller.dismissToSelection(animated: true)
             case .closeSelection,
                  .navigate,
+                 .cycleSelection,
                  .deleteBackward,
                  .appendToSearch,
                  .consume:
@@ -88,6 +90,8 @@ final class OverviewInputHandler {
             controller.closeSelectedWindow()
         case let .navigate(direction):
             controller.navigateSelection(direction)
+        case let .cycleSelection(forward):
+            controller.cycleSelection(forward: forward)
         case .deleteBackward:
             if !searchQuery.isEmpty {
                 searchQuery = String(searchQuery.dropLast())
@@ -134,8 +138,10 @@ final class OverviewInputHandler {
             return .init(action: .navigate(.up), shouldConsume: true)
         case KeyCode.tab:
             guard relevantModifiers.isEmpty || relevantModifiers == .shift else { break }
-            let direction: Direction = relevantModifiers.contains(.shift) ? .left : .right
-            return .init(action: .navigate(direction), shouldConsume: true)
+            return .init(
+                action: .cycleSelection(forward: !relevantModifiers.contains(.shift)),
+                shouldConsume: true
+            )
         case KeyCode.delete:
             guard relevantModifiers.isEmpty else { break }
             return .init(action: .deleteBackward, shouldConsume: true)

@@ -1511,22 +1511,42 @@ final class OverviewController {
     }
 
     func navigateSelection(_ direction: Direction, on monitorId: Monitor.ID? = nil) {
+        performSelectionNavigation(on: monitorId) { layout, currentHandle in
+            OverviewLayoutCalculator.findNextWindow(
+                in: layout,
+                from: currentHandle,
+                direction: direction
+            )
+        }
+    }
+
+    func cycleSelection(forward: Bool, on monitorId: Monitor.ID? = nil) {
+        performSelectionNavigation(on: monitorId) { layout, currentHandle in
+            OverviewLayoutCalculator.findCycledWindow(
+                in: layout,
+                from: currentHandle,
+                forward: forward
+            )
+        }
+    }
+
+    private func performSelectionNavigation(
+        on monitorId: Monitor.ID?,
+        resolveNextHandle: (OverviewLayout, WindowHandle?) -> WindowHandle?
+    ) {
         guard case .open = state else { return }
         let targetMonitorId = monitorId ?? activeInteractionMonitorId
         if let targetMonitorId {
             activeInteractionMonitorId = targetMonitorId
         }
 
-        guard let layout = canonicalLayout(preferredMonitorId: targetMonitorId) else { return }
-        if let nextHandle = OverviewLayoutCalculator.findNextWindow(
-            in: layout,
-            from: selectedWindowHandle,
-            direction: direction
-        ) {
-            setSelectedWindowHandle(nextHandle)
-            revealSelectedWindow(on: targetMonitorId)
-            updateWindowDisplays()
-        }
+        guard let layout = canonicalLayout(preferredMonitorId: targetMonitorId),
+              let nextHandle = resolveNextHandle(layout, selectedWindowHandle)
+        else { return }
+
+        setSelectedWindowHandle(nextHandle)
+        revealSelectedWindow(on: targetMonitorId)
+        updateWindowDisplays()
     }
 
     func activateSelectedWindow() {
