@@ -267,8 +267,8 @@ omniwmctl command <command-path> [arguments...]
 | `command focus-window bottom` | — | niri | Focus the bottom window in the focused Niri column |
 | `command focus-window down-or-top` | — | shared | Focus the next window in the active Niri column or Dwindle group, wrapping locally |
 | `command focus-window up-or-bottom` | — | shared | Focus the previous window in the active Niri column or Dwindle group, wrapping locally |
-| `command focus-window-or-workspace-down` | — | niri | Focus down in the focused Niri column, or switch to the workspace below at the column edge |
-| `command focus-window-or-workspace-up` | — | niri | Focus up in the focused Niri column, or switch to the workspace above at the column edge |
+| `command focus-window-or-workspace-down` | — | niri | Focus down using the active Niri orientation; if no target exists, switch without wrapping to the workspace below |
+| `command focus-window-or-workspace-up` | — | niri | Focus up using the active Niri orientation; if no target exists, switch without wrapping to the workspace above |
 | `command focus previous` | — | niri | Focus the previously focused window |
 | `command focus down-or-left` | — | niri | Traverse backward through the active Niri workspace |
 | `command focus up-or-right` | — | niri | Traverse forward through the active Niri workspace |
@@ -288,7 +288,7 @@ omniwmctl command <command-path> [arguments...]
 | `command consume-or-expel-window-left` | — | niri | Consume or expel using the previous Niri column without wrapping or crossing monitors |
 | `command consume-or-expel-window-right` | — | niri | Consume or expel using the next Niri column without wrapping or crossing monitors |
 | `command consume-window-into-column` | — | niri | Consume the top window from the next Niri column into the focused column |
-| `command expel-window-from-column` | — | niri | Expel the bottom window from the focused Niri column into a new column to the right |
+| `command expel-window-from-column` | — | niri | Expel the bottom window from the focused Niri column into a new following column |
 
 `command move <direction>` follows the active layout's orientation and configured edge behavior, including optional monitor crossing. The explicit consume-or-expel commands use fixed Niri column order, never wrap or cross monitors, and cannot be assigned as shortcuts.
 
@@ -332,12 +332,12 @@ Workspace IDs are positive numeric strings. Direct hotkeys stay limited to `1-9`
 | Command | Arguments | Layout | Description |
 |---------|-----------|--------|-------------|
 | `command center-column` | — | niri | Center the focused Niri column without changing focus |
-| `command center-visible-columns` | — | niri | Center the fully visible Niri columns around the active column |
+| `command center-visible-columns` | — | niri | Center the current block of fully visible Niri columns in the viewport |
 | `command move-column` | `<left\|right\|up\|down>` | shared left/right; dwindle up/down | Move a Niri column horizontally or swap a complete Dwindle tile/group without monitor fallback |
 | `command move-column-to-first` | — | niri | Move the focused Niri column to the first position |
 | `command move-column-to-last` | — | niri | Move the focused Niri column to the last position |
 | `command move-column-to-index` | `<number>` | niri | Move the focused Niri column to a one-based index |
-| `command move-column-to-workspace` | `<number>` | niri | Move the focused Niri column to a workspace by workspace ID |
+| `command move-column-to-workspace` | `<number>` | niri | Move the focused Niri column to a Niri workspace by workspace ID |
 | `command move-column-to-workspace up` | — | niri | Move focused column to the adjacent workspace above |
 | `command move-column-to-workspace down` | — | niri | Move focused column to the adjacent workspace below |
 | `command toggle-column-tabbed` | — | niri | Toggle tabbed mode for the focused column |
@@ -398,7 +398,7 @@ Workspace IDs are positive numeric strings. Direct hotkeys stay limited to `1-9`
 | `command hidden-bar panel` | — | shared | Toggle the panel containing configured hidden menu-bar items |
 | `command toggle-quake-terminal` | — | shared | Toggle the configured Quake terminal |
 | `command toggle-overview` | — | shared | Open Overview when it is closed; see the modal-routing note below |
-| `command toggle-system-stats` | — | shared | Toggle the system stats popup |
+| `command toggle-system-stats` | — | shared | Toggle the system stats popup when a workspace-bar System Stats button is available |
 
 For example, run `omniwmctl command hidden-bar panel` to show or dismiss the Hidden Bar panel.
 

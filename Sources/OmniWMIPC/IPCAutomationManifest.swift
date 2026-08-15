@@ -495,13 +495,13 @@ public enum IPCAutomationManifest {
         command(
             ["focus-window-or-workspace-down"],
             name: .focusWindowOrWorkspaceDown,
-            summary: "Focus down in the focused Niri column, or switch to the workspace below at the column edge.",
+            summary: "Focus down using the active Niri orientation; if no target exists, switch without wrapping to the workspace below.",
             layoutCompatibility: .niri
         ),
         command(
             ["focus-window-or-workspace-up"],
             name: .focusWindowOrWorkspaceUp,
-            summary: "Focus up in the focused Niri column, or switch to the workspace above at the column edge.",
+            summary: "Focus up using the active Niri orientation; if no target exists, switch without wrapping to the workspace above.",
             layoutCompatibility: .niri
         ),
         command(
@@ -532,7 +532,7 @@ public enum IPCAutomationManifest {
         command(
             ["center-visible-columns"],
             name: .centerVisibleColumns,
-            summary: "Center the fully visible Niri columns around the active column.",
+            summary: "Center the current block of fully visible Niri columns in the viewport.",
             layoutCompatibility: .niri
         ),
         command(
@@ -584,7 +584,7 @@ public enum IPCAutomationManifest {
         command(
             ["expel-window-from-column"],
             name: .expelWindowFromColumn,
-            summary: "Expel the bottom window from the focused Niri column into a new column to the right.",
+            summary: "Expel the bottom window from the focused Niri column into a new following column.",
             layoutCompatibility: .niri
         ),
         command(
@@ -685,7 +685,7 @@ public enum IPCAutomationManifest {
         command(
             ["move-column-to-workspace"],
             name: .moveColumnToWorkspace,
-            summary: "Move the focused Niri column to a workspace by workspace ID.",
+            summary: "Move the focused Niri column to a Niri workspace by workspace ID.",
             arguments: [workspaceNumberArgument],
             layoutCompatibility: .niri
         ),
@@ -884,7 +884,11 @@ public enum IPCAutomationManifest {
             summary: "Toggle native macOS fullscreen."
         ),
         command(["toggle-overview"], name: .toggleOverview, summary: "Toggle the overview surface."),
-        command(["toggle-system-stats"], name: .toggleSystemStats, summary: "Toggle the system stats popup.")
+        command(
+            ["toggle-system-stats"],
+            name: .toggleSystemStats,
+            summary: "Toggle the system stats popup when a workspace-bar System Stats button is available."
+        )
     ]
 
     public static let workspaceActionDescriptors: [IPCWorkspaceActionDescriptor] = [
