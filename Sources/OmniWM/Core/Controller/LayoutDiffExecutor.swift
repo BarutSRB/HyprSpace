@@ -18,6 +18,14 @@ final class LayoutDiffExecutor {
         self.refreshController = refreshController
     }
 
+    static func frameBackedLayoutTransientRestoreFrame(
+        hiddenState: HiddenState,
+        frameChange: CGRect?
+    ) -> CGRect? {
+        guard hiddenState.offscreenSide != nil else { return nil }
+        return frameChange
+    }
+
     func execute(_ plan: WorkspaceLayoutPlan) {
         guard let controller = refreshController.controller,
               let monitor = resolveMonitor(from: plan.monitor, controller: controller)
@@ -145,19 +153,35 @@ final class LayoutDiffExecutor {
             preserveWorkspaceInactive: !plan.isActiveWorkspace
         )
 
+        var deferredVisibleAXTokens: Set<WindowToken> = []
         if !restoreEntries.isEmpty {
+            var frameBackedLayoutTransientTokens: Set<WindowToken> = []
+            frameBackedLayoutTransientTokens.reserveCapacity(restoreEntries.count)
             let restorePlans: [LayoutRefreshController.WindowPositionPlan] = restoreEntries
                 .compactMap { entry, hiddenState in
                     guard !blockedRevealTokens.contains(entry.token),
                           pendingRevealTransactionIdsByToken[entry.token] == nil
                     else { return nil }
+                    if let plannedFrame = Self.frameBackedLayoutTransientRestoreFrame(
+                        hiddenState: hiddenState,
+                        frameChange: frameChangeByToken[entry.token]
+                    ) {
+                        frameBackedLayoutTransientTokens.insert(entry.token)
+                        return LayoutRefreshController.WindowPositionPlan(
+                            entry: entry,
+                            frame: plannedFrame
+                        )
+                    }
                     return refreshController.makeRestorePositionPlan(
                         for: entry,
                         monitor: monitor,
                         hiddenState: hiddenState
                     )
                 }
-            refreshController.applyPositionPlans(restorePlans)
+            deferredVisibleAXTokens = refreshController.applyPositionPlans(
+                restorePlans,
+                deferringVisibleAXFor: frameBackedLayoutTransientTokens
+            )
 
             for (entry, _) in restoreEntries
                 where pendingRevealTransactionIdsByToken[entry.token] == nil
@@ -223,6 +247,10 @@ final class LayoutDiffExecutor {
                 continue
             }
             guard entry.layoutReason != .nativeFullscreen else { continue }
+            if deferredVisibleAXTokens.contains(change.token) {
+                controller.axManager.markWindowActive(entry.windowId)
+                controller.axManager.forceApplyNextFrame(for: entry.windowId)
+            }
             if pendingRevealTransactionIdsByToken[change.token] != nil {
                 controller.axManager.forceApplyNextFrame(for: entry.windowId)
             }

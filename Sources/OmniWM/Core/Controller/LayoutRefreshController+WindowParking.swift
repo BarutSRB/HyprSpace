@@ -5,12 +5,16 @@ import Foundation
 
 @MainActor
 extension LayoutRefreshController {
-    func applyPositionPlans(_ plans: [WindowPositionPlan]) {
-        guard let controller, !plans.isEmpty else { return }
+    @discardableResult
+    func applyPositionPlans(
+        _ plans: [WindowPositionPlan],
+        deferringVisibleAXFor deferredTokens: Set<WindowToken> = []
+    ) -> Set<WindowToken> {
+        guard let controller, !plans.isEmpty else { return [] }
         let plans = plans.filter { !controller.workspaceManager.isAppHidden(pid: $0.entry.pid) }
-        guard !plans.isEmpty else { return }
+        guard !plans.isEmpty else { return [] }
 
-        let requiresVisibleAXTokens = controller.axManager.cancelParkFrameJobs(
+        var requiresVisibleAXTokens = controller.axManager.cancelParkFrameJobs(
             plans.map { (pid: $0.entry.pid, windowId: $0.entry.windowId) },
             reason: "revealed"
         )
@@ -20,6 +24,9 @@ extension LayoutRefreshController {
         )
         let visibleFrames = plans.compactMap { plan -> AXFrameApplicationTarget? in
             guard requiresVisibleAXTokens.contains(plan.entry.token) else { return nil }
+            if deferredTokens.contains(plan.entry.token) {
+                return nil
+            }
             controller.axManager.markWindowActive(plan.entry.windowId)
             controller.axManager.forceApplyNextFrame(for: plan.entry.windowId)
             return .init(pid: plan.entry.pid, window: plan.entry.axRef, frame: plan.frame)
@@ -30,6 +37,8 @@ extension LayoutRefreshController {
             )
             controller.axManager.applyFramesParallel(visibleFrames)
         }
+        requiresVisibleAXTokens.formIntersection(deferredTokens)
+        return requiresVisibleAXTokens
     }
 
     func applyParkPositionPlans(

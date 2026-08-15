@@ -148,6 +148,101 @@ final class DurableParkTests: XCTestCase {
         XCTAssertEqual(controller.workspaceManager.invariantViolationCountsDump(), "clean")
     }
 
+    func testLayoutTransientShowUsesCurrentLayoutFrameInsteadOfHistoricalRestore() throws {
+        let controller = Self.controller()
+        let monitor = Self.monitor()
+        controller.workspaceManager.applyMonitorConfigurationChange([monitor])
+        let workspaceId = try XCTUnwrap(controller.workspaceManager.workspaceId(for: "1", createIfMissing: true))
+        _ = controller.workspaceManager.focusWorkspace(named: "1")
+
+        let pid: pid_t = 967_001
+        let windowId = 967_101
+        let axRef = AXWindowRef(element: AXUIElementCreateApplication(pid), windowId: windowId)
+        let token = controller.workspaceManager.addWindow(
+            axRef,
+            pid: pid,
+            windowId: windowId,
+            to: workspaceId
+        )
+        let historicalFrame = CGRect(x: 1304, y: 16, width: 1256, height: 1378)
+        let plannedFrame = CGRect(x: 2559, y: 16, width: 1256, height: 1378)
+        let proportionalPosition = controller.layoutRefreshController.proportionalPosition(
+            topLeft: historicalFrame.topLeftCorner,
+            in: monitor.frame
+        )
+        let hiddenState = HiddenState(
+            proportionalPosition: proportionalPosition,
+            referenceMonitorId: monitor.id,
+            reason: .layoutTransient(.right)
+        )
+        XCTAssertEqual(
+            LayoutDiffExecutor.frameBackedLayoutTransientRestoreFrame(
+                hiddenState: hiddenState,
+                frameChange: plannedFrame
+            ),
+            plannedFrame
+        )
+        XCTAssertNotEqual(
+            LayoutDiffExecutor.frameBackedLayoutTransientRestoreFrame(
+                hiddenState: hiddenState,
+                frameChange: plannedFrame
+            ),
+            historicalFrame
+        )
+        for reason in [HiddenReason.workspaceInactive, .scratchpad] {
+            XCTAssertNil(
+                LayoutDiffExecutor.frameBackedLayoutTransientRestoreFrame(
+                    hiddenState: HiddenState(
+                        proportionalPosition: proportionalPosition,
+                        referenceMonitorId: monitor.id,
+                        reason: reason
+                    ),
+                    frameChange: plannedFrame
+                )
+            )
+        }
+        controller.workspaceManager.setHiddenState(hiddenState, for: token)
+        controller.layoutRefreshController.fastFrameProvider = { queriedToken, _ in
+            queriedToken == token ? plannedFrame : nil
+        }
+        let parkRequest = try XCTUnwrap(
+            controller.axManager.prepareParkFrameApplications([
+                AXFrameApplicationTarget(pid: pid, window: axRef, frame: plannedFrame)
+            ]).first
+        )
+        XCTAssertTrue(
+            controller.axManager.processParkFrameApplyResults([
+                WindowAdmissionTestSupport.successfulFrameResult(request: parkRequest)
+            ]).isEmpty
+        )
+        XCTAssertEqual(controller.axManager.verifiedParkFrame(for: windowId), plannedFrame)
+
+        var diff = WorkspaceLayoutDiff()
+        diff.visibilityChanges.append(.show(token))
+        diff.frameChanges.append(
+            LayoutFrameChange(token: token, frame: plannedFrame, forceApply: false)
+        )
+        FrameApplyTrace.shared.beginCapture()
+        defer { FrameApplyTrace.shared.endCapture() }
+        XCTAssertTrue(
+            controller.layoutRefreshController.executeLayoutPlan(
+                Self.plan(workspaceId: workspaceId, monitor: monitor, diff: diff)
+            )
+        )
+
+        let trace = FrameApplyTrace.shared.dump()
+        XCTAssertFalse(trace.contains("target=\(TraceFormat.rect(historicalFrame))"))
+        XCTAssertTrue(trace.contains("target=\(TraceFormat.rect(plannedFrame))"))
+        let plannedApplications = trace.split(separator: "\n").filter {
+            $0.contains("win=\(windowId) ")
+                && $0.contains("outcome=skip/contextUnavailable")
+                && $0.contains("target=\(TraceFormat.rect(plannedFrame))")
+        }
+        XCTAssertEqual(plannedApplications.count, 1)
+        XCTAssertNil(controller.workspaceManager.hiddenState(for: token))
+        XCTAssertFalse(controller.axManager.pendingParkWindowIds.contains(windowId))
+    }
+
     func testPendingRevealSuccessClearsParkRemarkedByOrdinaryWriteCallback() throws {
         let controller = Self.controller()
         let monitor = Self.monitor()
@@ -347,6 +442,35 @@ final class DurableParkTests: XCTestCase {
             manager.processParkFrameApplyResults([
                 WindowAdmissionTestSupport.successfulFrameResult(request: staleRequest)
             ]).isEmpty
+        )
+        XCTAssertNil(manager.verifiedParkFrame(for: windowId))
+    }
+
+    func testVerifiedParkStillRequiresVisibleAXSettlementOnReveal() throws {
+        let manager = AXManager()
+        defer { manager.cleanup() }
+        let pid: pid_t = 966_001
+        let windowId = 966_101
+        let token = WindowToken(pid: pid, windowId: windowId)
+        let target = AXFrameApplicationTarget(
+            pid: pid,
+            window: AXWindowRef(
+                element: AXUIElementCreateApplication(pid),
+                windowId: windowId
+            ),
+            frame: CGRect(x: 2559, y: 16, width: 800, height: 600)
+        )
+        let request = try XCTUnwrap(manager.prepareParkFrameApplications([target]).first)
+        XCTAssertTrue(
+            manager.processParkFrameApplyResults([
+                WindowAdmissionTestSupport.successfulFrameResult(request: request)
+            ]).isEmpty
+        )
+        XCTAssertEqual(manager.verifiedParkFrame(for: windowId), target.frame)
+
+        XCTAssertEqual(
+            manager.cancelParkFrameJobs([(pid: pid, windowId: windowId)], reason: "revealed"),
+            [token]
         )
         XCTAssertNil(manager.verifiedParkFrame(for: windowId))
     }

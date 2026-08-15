@@ -2283,7 +2283,7 @@ final class AXManager {
                     WindowToken(pid: pending.request.pid, windowId: windowId)
                 )
             }
-            if let targetState, !targetState.isVerified {
+            if let targetState {
                 requiresVisibleAXTokens.insert(
                     WindowToken(pid: targetState.target.pid, windowId: windowId)
                 )
