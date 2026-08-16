@@ -19,16 +19,20 @@ struct AXFrameTerminalDelivery {
 }
 
 struct AXFrameRetryRequest: Equatable, Sendable {
+    let requestId: AXFrameRequestId
     let pid: pid_t
     let windowId: Int
     let expectedWindow: AXWindowRef
     let frame: CGRect
+    let currentFrameHint: CGRect?
 
     static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.pid == rhs.pid
+        lhs.requestId == rhs.requestId
+            && lhs.pid == rhs.pid
             && lhs.windowId == rhs.windowId
             && sameAXWindowIdentity(lhs.expectedWindow, rhs.expectedWindow)
             && lhs.frame == rhs.frame
+            && lhs.currentFrameHint == rhs.currentFrameHint
     }
 }
 
@@ -50,6 +54,12 @@ struct AXFrameApplyOutcome {
     var deliveries: [AXFrameTerminalDelivery] = []
     var retries: [AXFrameRetryRequest] = []
     var terminalRefusals: [AXFrameTerminalRefusal] = []
+    var terminalFailures: [AXFrameApplyResult] = []
+}
+
+struct AXFrameJobCancellationOutcome {
+    var deliveries: [AXFrameTerminalDelivery] = []
+    var terminalFailure: AXFrameApplyResult?
 }
 
 @MainActor
@@ -161,6 +171,11 @@ final class AXFrameApplicationLedger {
         forceApplyWindowIds.insert(windowId)
     }
 
+    func invalidateAppliedFrame(for windowId: Int) {
+        appliedFrameStates.removeValue(forKey: windowId)
+        assumedAppliedWindowIds.remove(windowId)
+    }
+
     func lastAppliedFrame(for windowId: Int) -> CGRect? {
         appliedFrameStates[windowId]?.frame
     }
@@ -227,9 +242,7 @@ final class AXFrameApplicationLedger {
             to: appliedState.frame,
             tolerance: FrameTolerance.frameWrite
         ) else {
-            if appliedState.convergedTargetFrame != nil {
-                appliedFrameStates.removeValue(forKey: windowId)
-            }
+            appliedFrameStates.removeValue(forKey: windowId)
             return false
         }
         return true
@@ -323,7 +336,41 @@ final class AXFrameApplicationLedger {
     }
 
     func cancelFrameJob(windowId: Int) -> [AXFrameTerminalDelivery] {
+        cancelFrameJob(pid: nil, windowId: windowId).deliveries
+    }
+
+    func cancelFrameJob(pid: pid_t, windowId: Int) -> AXFrameJobCancellationOutcome {
+        cancelFrameJob(pid: Optional(pid), windowId: windowId)
+    }
+
+    private func cancelFrameJob(pid: pid_t?, windowId: Int) -> AXFrameJobCancellationOutcome {
+        let requestId = pendingFrameRequestIdByWindowId[windowId]
+        let targetFrame = pendingFrameWrites[windowId]
+        let expectedWindow = pendingFrameWindows[windowId]
+        let currentFrameHint = appliedFrameStates[windowId]?.frame
         let deliveries = cancelObserver(for: windowId)
+        let terminalFailure: AXFrameApplyResult? = if let pid,
+                                                      let requestId,
+                                                      let targetFrame,
+                                                      let expectedWindow
+        {
+            AXFrameApplyResult(
+                requestId: requestId,
+                pid: pid,
+                windowId: windowId,
+                expectedWindow: expectedWindow,
+                targetFrame: targetFrame,
+                currentFrameHint: currentFrameHint,
+                writeResult: .skipped(
+                    targetFrame: targetFrame,
+                    currentFrameHint: currentFrameHint,
+                    failureReason: .cancelled,
+                    observedFrame: currentFrameHint
+                )
+            )
+        } else {
+            nil
+        }
         pendingFrameWrites.removeValue(forKey: windowId)
         pendingFrameWindows.removeValue(forKey: windowId)
         pendingFrameRequestIdByWindowId.removeValue(forKey: windowId)
@@ -331,7 +378,10 @@ final class AXFrameApplicationLedger {
         retryBudgetByWindowId.removeValue(forKey: windowId)
         forceApplyWindowIds.remove(windowId)
         clearSettledRekeyMappings(to: windowId)
-        return deliveries
+        return AXFrameJobCancellationOutcome(
+            deliveries: deliveries,
+            terminalFailure: terminalFailure
+        )
     }
 
     func suppressFrameWrite(windowId: Int) -> [AXFrameTerminalDelivery] {
@@ -576,7 +626,9 @@ final class AXFrameApplicationLedger {
                         )
                     )
                 }
-                outcome.deliveries.append(contentsOf: notifyPendingFrameObserver(with: resolvedResult))
+                let deliveries = notifyPendingFrameObserver(with: resolvedResult)
+                outcome.deliveries.append(contentsOf: deliveries)
+                outcome.terminalFailures.append(resolvedResult)
                 clearSettledRekeyMappings(to: resolvedWindowId)
                 continue
             }
@@ -586,10 +638,12 @@ final class AXFrameApplicationLedger {
 
             outcome.retries.append(
                 AXFrameRetryRequest(
+                    requestId: resolvedResult.requestId,
                     pid: resolvedResult.pid,
                     windowId: resolvedWindowId,
                     expectedWindow: resolvedResult.expectedWindow,
-                    frame: resolvedResult.targetFrame
+                    frame: resolvedResult.targetFrame,
+                    currentFrameHint: resolvedResult.currentFrameHint
                 )
             )
         }

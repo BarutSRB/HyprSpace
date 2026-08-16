@@ -1786,6 +1786,7 @@ final class WMController {
                 allowLiveFrameFallback: allowLiveFrameFallback
             )
             _ = workspaceManager.setWindowMode(.floating, for: token)
+            mouseEventHandler.discardNativeTitleBarDrag(for: token)
             if let targetFrame {
                 workspaceManager.updateFloatingGeometry(
                     frame: targetFrame,
@@ -2393,6 +2394,7 @@ final class WMController {
                     let removesScratchpadResources = workspaceManager.isScratchpadToken(token)
                         || workspaceManager.hiddenState(for: token)?.isScratchpad == true
                     _ = workspaceManager.removeWindow(pid: token.pid, windowId: token.windowId)
+                    mouseEventHandler.discardNativeTitleBarDrag(for: token)
                     axManager.removeWindowState(pid: token.pid, expectedWindow: existingEntry.axRef)
                     if removesScratchpadResources {
                         cleanupScratchpadWindowResources(for: token)
@@ -2689,6 +2691,7 @@ final class WMController {
             let removesScratchpadResources = workspaceManager.isScratchpadToken(token)
                 || workspaceManager.hiddenState(for: token)?.isScratchpad == true
             _ = workspaceManager.removeWindow(pid: token.pid, windowId: token.windowId)
+            mouseEventHandler.discardNativeTitleBarDrag(for: token)
             axManager.removeWindowState(pid: token.pid, expectedWindow: entry.axRef)
             if removesScratchpadResources {
                 cleanupScratchpadWindowResources(for: token)

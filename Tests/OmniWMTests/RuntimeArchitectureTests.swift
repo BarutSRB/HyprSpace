@@ -2997,7 +2997,14 @@ final class RuntimeArchitectureTests: XCTestCase {
 
         XCTAssertTrue(cancelledOutcome.deliveries.isEmpty)
         XCTAssertEqual(cancelledOutcome.retries, [
-            AXFrameRetryRequest(pid: getpid(), windowId: 20, expectedWindow: rekeyedWindow, frame: frame)
+            AXFrameRetryRequest(
+                requestId: firstRequest.requestId,
+                pid: getpid(),
+                windowId: 20,
+                expectedWindow: rekeyedWindow,
+                frame: frame,
+                currentFrameHint: firstRequest.currentFrameHint
+            )
         ])
 
         let retryDecision = ledger.prepareFrameApplication(
@@ -3042,7 +3049,14 @@ final class RuntimeArchitectureTests: XCTestCase {
         ])
         XCTAssertTrue(failedOutcome.deliveries.isEmpty)
         XCTAssertEqual(failedOutcome.retries, [
-            AXFrameRetryRequest(pid: getpid(), windowId: 10, expectedWindow: window, frame: frame)
+            AXFrameRetryRequest(
+                requestId: firstRequest.requestId,
+                pid: getpid(),
+                windowId: 10,
+                expectedWindow: window,
+                frame: frame,
+                currentFrameHint: firstRequest.currentFrameHint
+            )
         ])
 
         let retryDecision = ledger.prepareFrameApplication(
@@ -3093,7 +3107,14 @@ final class RuntimeArchitectureTests: XCTestCase {
             Self.frameResult(for: firstRequest, failureReason: .staleElement)
         ])
         XCTAssertEqual(failedOutcome.retries, [
-            AXFrameRetryRequest(pid: getpid(), windowId: 10, expectedWindow: window, frame: frame)
+            AXFrameRetryRequest(
+                requestId: firstRequest.requestId,
+                pid: getpid(),
+                windowId: 10,
+                expectedWindow: window,
+                frame: frame,
+                currentFrameHint: firstRequest.currentFrameHint
+            )
         ])
 
         let secondDecision = ledger.prepareFrameApplication(
@@ -3148,10 +3169,12 @@ final class RuntimeArchitectureTests: XCTestCase {
                 Self.frameResult(for: cancelRequest, failureReason: .cancelled)
             ]).retries,
             [AXFrameRetryRequest(
+                requestId: cancelRequest.requestId,
                 pid: getpid(),
                 windowId: 20,
                 expectedWindow: rekeyedCancelWindow,
-                frame: frame
+                frame: frame,
+                currentFrameHint: cancelRequest.currentFrameHint
             )]
         )
 
@@ -3277,7 +3300,14 @@ final class RuntimeArchitectureTests: XCTestCase {
             ledger.handleFrameApplyResults([
                 Self.frameResult(for: request, failureReason: .cancelled)
             ]).retries,
-            [AXFrameRetryRequest(pid: getpid(), windowId: 20, expectedWindow: rekeyedWindow, frame: frame)]
+            [AXFrameRetryRequest(
+                requestId: request.requestId,
+                pid: getpid(),
+                windowId: 20,
+                expectedWindow: rekeyedWindow,
+                frame: frame,
+                currentFrameHint: request.currentFrameHint
+            )]
         )
     }
 
@@ -5847,6 +5877,36 @@ final class RuntimeArchitectureTests: XCTestCase {
             "manual float must keep the current tiled size, not replay the stale remembered floating size"
         )
         XCTAssertNotEqual(floatedSize, staleFrame.size)
+    }
+
+    @MainActor
+    func testTilingToFloatingCancelsTransientNativeTitleBarDragOwnership() throws {
+        let controller = Self.controller()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let token = controller.workspaceManager.addWindow(
+            AXWindowRef(element: AXUIElementCreateApplication(943_002), windowId: 943_102),
+            pid: 943_002,
+            windowId: 943_102,
+            to: workspaceId
+        )
+        controller.mouseEventHandler.state.nativeTitleBarDrag = .init(token: token)
+        controller.axManager.beginNativeTitleBarDrag(for: token)
+
+        XCTAssertTrue(
+            controller.transitionWindowMode(
+                for: token,
+                to: .floating,
+                applyFloatingFrame: false,
+                observedFrame: CGRect(x: 100, y: 100, width: 800, height: 600),
+                allowLiveFrameFallback: false
+            )
+        )
+
+        XCTAssertEqual(controller.workspaceManager.entry(for: token)?.mode, .floating)
+        XCTAssertNil(controller.mouseEventHandler.state.nativeTitleBarDrag)
+        XCTAssertFalse(controller.axManager.isNativeTitleBarDragActive(for: token))
     }
 
     @MainActor

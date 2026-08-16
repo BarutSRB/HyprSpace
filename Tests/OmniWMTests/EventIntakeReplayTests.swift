@@ -165,6 +165,28 @@ final class EventIntakeReplayTests: XCTestCase {
     }
 
     @MainActor
+    func testCGSFrameBurstForLiveWindowDeliversOnce() {
+        let intake = EventIntake()
+        let sink = RecordingSink()
+        intake.open(sink: sink)
+        defer { intake.close() }
+
+        for _ in 0 ..< 32 {
+            intake.enqueue(.cgs(.frameChanged(windowId: 7)))
+        }
+        intake.drainNow()
+
+        let frameWindowIds = sink.received.compactMap { stamped -> UInt32? in
+            if case let .cgs(.frameChanged(windowId)) = stamped.event {
+                return windowId
+            }
+            return nil
+        }
+        XCTAssertEqual(frameWindowIds, [7])
+        XCTAssertEqual(sink.received.count, 1)
+    }
+
+    @MainActor
     func testMouseMovedCoalescesLatestPayloadInPlace() {
         let intake = EventIntake()
         let sink = RecordingSink()

@@ -93,6 +93,22 @@ final class MouseEventHandler {
             case committed
         }
 
+        enum NativeTitleBarDragPhase {
+            case armed
+            case dragging
+            case awaitingFrameChange
+            case awaitingFrameWrite
+            case awaitingCorrection
+        }
+
+        struct NativeTitleBarDrag {
+            let token: WindowToken
+            var phase: NativeTitleBarDragPhase = .armed
+            var receivedFrameChange = false
+            var issuedUnreadableCorrection = false
+            var terminalFailureRetryRequestId: AXFrameRequestId?
+        }
+
         var eventTap: CFMachPort?
         var runLoopSource: CFRunLoopSource?
         var moveTap: CFMachPort?
@@ -103,6 +119,10 @@ final class MouseEventHandler {
         var activeInteractionButton: MouseButton?
         var capturedInteractionButton: MouseButton?
         var resizeLayout: LayoutType?
+        var awaitsNativeTitleBarDragTarget = false
+        var nativeTitleBarDragFallbackToken: WindowToken?
+        var nativeTitleBarDragFallbackReleased = false
+        var nativeTitleBarDrag: NativeTitleBarDrag?
 
         var lastFocusFollowsMouseTime: Date = .distantPast
         let focusFollowsMouseDebounce: TimeInterval = 0.1
@@ -130,6 +150,9 @@ final class MouseEventHandler {
     var state = State()
     private var multitouchSource: MultitouchGestureSource?
     var pressedMouseButtonsProvider: @MainActor () -> Int = { Int(NSEvent.pressedMouseButtons) }
+    var nativeWindowFrameProvider: @MainActor (AXWindowRef) -> CGRect? = {
+        AXWindowService.framePreferFast($0)
+    }
 
     init(controller: WMController) {
         self.controller = controller
@@ -162,7 +185,18 @@ final class MouseEventHandler {
                 return Unmanaged.passUnretained(event)
             }
 
-            _ = MouseEventHandler.processTapCallback(type: type, event: event)
+            if type == .leftMouseDragged, Thread.isMainThread {
+                MainActor.assumeIsolated {
+                    guard let handler = MouseEventHandler._instance,
+                          handler.state.awaitsNativeTitleBarDragTarget
+                    else { return }
+                    handler.receiveAnnotatedNativeMouseDragged(
+                        windowIdUnderPointer: MouseEventHandler.eventWindowIdUnderPointer(event)
+                    )
+                }
+            } else {
+                _ = MouseEventHandler.processTapCallback(type: type, event: event)
+            }
             return Unmanaged.passUnretained(event)
         }
 
@@ -170,7 +204,8 @@ final class MouseEventHandler {
             tap: .cgAnnotatedSessionEventTap,
             place: .headInsertEventTap,
             options: .listenOnly,
-            eventsOfInterest: 1 << CGEventType.mouseMoved.rawValue,
+            eventsOfInterest: (1 << CGEventType.mouseMoved.rawValue)
+                | (1 << CGEventType.leftMouseDragged.rawValue),
             callback: moveCallback,
             userInfo: nil
         )
@@ -262,6 +297,7 @@ final class MouseEventHandler {
     }
 
     func cleanup() {
+        clearNativeTitleBarDrag()
         cancelActiveMouseInteraction()
         state.capturedInteractionButton = nil
         if let source = state.moveTapRunLoopSource {
@@ -335,7 +371,8 @@ final class MouseEventHandler {
     func dispatchMouseDown(
         at location: CGPoint,
         modifiers: CGEventFlags,
-        button: MouseButton = .left
+        button: MouseButton = .left,
+        windowIdUnderPointer: Int? = nil
     ) -> Bool {
         guard !isInputSuppressed else {
             handleInputSuppressionBegan()
@@ -354,7 +391,15 @@ final class MouseEventHandler {
         if blocked {
             return false
         }
-        return handleMouseDownFromTap(at: location, modifiers: modifiers, button: button)
+        if button == .left {
+            clearNativeTitleBarDrag()
+        }
+        return handleMouseDownFromTap(
+            at: location,
+            modifiers: modifiers,
+            button: button,
+            windowIdUnderPointer: windowIdUnderPointer
+        )
     }
 
     func dispatchMouseDragged(at location: CGPoint, button: MouseButton = .left) {
@@ -362,6 +407,7 @@ final class MouseEventHandler {
             handleInputSuppressionBegan()
             return
         }
+        beginNativeTitleBarDragIfNeeded(button: button)
         if !isCapturedInteraction(button), shouldBlockOwnWindowInput(at: location) {
             cancelActiveMouseInteraction()
             return
@@ -374,6 +420,8 @@ final class MouseEventHandler {
             handleInputSuppressionBegan()
             return
         }
+        markNativeTitleBarDragFallbackReleased(button: button)
+        finishNativeTitleBarDragIfNeeded(button: button)
         if !isCapturedInteraction(button), shouldBlockOwnWindowInput(at: location) {
             cancelActiveMouseInteraction()
             return
@@ -423,6 +471,7 @@ final class MouseEventHandler {
     }
 
     func handleInputSuppressionBegan() {
+        clearNativeTitleBarDrag()
         cancelActiveMouseInteraction()
         dropPendingTapEvents()
         resetMouseWheelTrackers()
@@ -431,6 +480,7 @@ final class MouseEventHandler {
     }
 
     func handleAppVisibilityChanged() {
+        clearNativeTitleBarDrag()
         cancelActiveMouseInteraction()
         dropPendingTapEvents()
         resetMouseWheelTrackers()
@@ -462,15 +512,47 @@ final class MouseEventHandler {
             dropPendingTapEvents()
         } else {
             flushQueuedTapEventsBeforeImmediateDispatch()
+            if button == .left, !isInputSuppressed {
+                retireNativeTitleBarDragAtInputBoundary()
+            }
         }
-        return dispatchMouseDown(at: location, modifiers: modifiers, button: button)
+        return dispatchMouseDown(
+            at: location,
+            modifiers: modifiers,
+            button: button
+        )
     }
 
     func receiveTapMouseDragged(at location: CGPoint, button: MouseButton = .left) {
+        if !isInputSuppressed {
+            beginNativeTitleBarDragIfNeeded(button: button)
+        }
         EventIntake.post(.mouseDragged(button: button, location: location))
     }
 
+    func receiveAnnotatedNativeMouseDragged(windowIdUnderPointer: Int?) {
+        guard state.awaitsNativeTitleBarDragTarget,
+              state.nativeTitleBarDrag == nil,
+              let windowIdUnderPointer,
+              let entry = controller?.workspaceManager.entry(forWindowId: windowIdUnderPointer),
+              entry.mode == .tiling
+        else {
+            if windowIdUnderPointer != nil {
+                state.awaitsNativeTitleBarDragTarget = false
+                state.nativeTitleBarDragFallbackToken = nil
+                state.nativeTitleBarDragFallbackReleased = false
+            }
+            return
+        }
+        state.awaitsNativeTitleBarDragTarget = false
+        state.nativeTitleBarDragFallbackToken = nil
+        state.nativeTitleBarDragFallbackReleased = false
+        state.nativeTitleBarDrag = .init(token: entry.token)
+        beginNativeTitleBarDragIfNeeded(button: .left)
+    }
+
     func receiveTapMouseUp(at location: CGPoint, button: MouseButton = .left) {
+        markNativeTitleBarDragFallbackReleased(button: button)
         defer {
             if state.capturedInteractionButton == button {
                 state.capturedInteractionButton = nil
@@ -640,6 +722,9 @@ final class MouseEventHandler {
 
     private func recoverAfterTapDisable() {
         cancelActiveMouseInteraction()
+        if pressedMouseButtonsProvider() & MouseButton.left.pressedMask == 0 {
+            finishNativeTitleBarDragIfNeeded(button: .left)
+        }
         guard let button = state.capturedInteractionButton,
               pressedMouseButtonsProvider() & button.pressedMask == 0
         else {
@@ -731,6 +816,7 @@ final class MouseEventHandler {
             handleInputSuppressionBegan()
             return
         }
+        beginNativeTitleBarDragIfNeeded(button: button)
         if shouldBlockOwnWindowInput(at: location) {
             cancelActiveMouseInteraction()
             return
@@ -781,7 +867,8 @@ final class MouseEventHandler {
     private func handleMouseDownFromTap(
         at location: CGPoint,
         modifiers: CGEventFlags,
-        button: MouseButton
+        button: MouseButton,
+        windowIdUnderPointer: Int?
     ) -> Bool {
         guard let controller else { return false }
         guard controller.isEnabled else {
@@ -803,18 +890,20 @@ final class MouseEventHandler {
         }
 
         if button == .left, modifiers.intersection(mouseRelevantModifierFlags).isEmpty {
-            let layoutType = controller.workspaceManager.descriptor(for: wsId)
-                .map { controller.settings.layoutType(for: $0.name) }
-            if layoutType == .dwindle {
-                if let token = controller.dwindleEngine?.hitTestFocusableWindow(
-                    point: location,
-                    in: wsId,
-                    at: controller.animationClock.now()
-                ) {
-                    controller.axEventHandler.noteMouseFocusIntent(token: token)
-                }
-            } else if let window = controller.niriEngine?.hitTestFocusableWindow(point: location, in: wsId) {
-                controller.axEventHandler.noteMouseFocusIntent(token: window.token)
+            state.awaitsNativeTitleBarDragTarget = windowIdUnderPointer == nil
+            state.nativeTitleBarDragFallbackReleased = false
+            let exactToken = nativeTitleBarDragCandidate(windowIdUnderPointer: windowIdUnderPointer)
+            let focusIntentToken = exactToken ?? (windowIdUnderPointer == nil
+                ? geometricFocusIntentCandidate(at: location, workspaceId: wsId)
+                : nil)
+            if let token = focusIntentToken {
+                controller.axEventHandler.noteMouseFocusIntent(token: token)
+            }
+            state.nativeTitleBarDragFallbackToken = exactToken == nil ? focusIntentToken : nil
+            if let exactToken {
+                state.awaitsNativeTitleBarDragTarget = false
+                let token = exactToken
+                state.nativeTitleBarDrag = .init(token: token)
             }
         }
 
@@ -1079,6 +1168,461 @@ final class MouseEventHandler {
         ) {
             controller.layoutRefreshController.renderInteractiveResize(for: wsId)
         }
+    }
+
+    private func nativeTitleBarDragCandidate(
+        windowIdUnderPointer: Int?
+    ) -> WindowToken? {
+        guard let windowIdUnderPointer,
+              let entry = controller?.workspaceManager.entry(forWindowId: windowIdUnderPointer),
+              entry.mode == .tiling
+        else { return nil }
+        return entry.token
+    }
+
+    private func geometricFocusIntentCandidate(
+        at location: CGPoint,
+        workspaceId: WorkspaceDescriptor.ID
+    ) -> WindowToken? {
+        guard let controller else { return nil }
+        let layoutType = controller.workspaceManager.descriptor(for: workspaceId)
+            .map { controller.settings.layoutType(for: $0.name) }
+        let token: WindowToken?
+        if layoutType == .dwindle {
+            token = controller.dwindleEngine?.hitTestFocusableWindow(
+                point: location,
+                in: workspaceId,
+                at: controller.animationClock.now()
+            )
+        } else {
+            token = controller.niriEngine?.hitTestFocusableWindow(
+                point: location,
+                in: workspaceId
+            )?.token
+        }
+        guard let token,
+              controller.workspaceManager.entry(for: token)?.mode == .tiling
+        else { return nil }
+        return token
+    }
+
+    private func beginNativeTitleBarDragIfNeeded(button: MouseButton) {
+        guard button == .left,
+              var drag = state.nativeTitleBarDrag,
+              drag.phase == .armed,
+              let controller,
+              controller.workspaceManager.entry(for: drag.token)?.mode == .tiling
+        else { return }
+        drag.phase = .dragging
+        state.nativeTitleBarDrag = drag
+        controller.axManager.beginNativeTitleBarDrag(for: drag.token)
+    }
+
+    private func finishNativeTitleBarDragIfNeeded(button: MouseButton) {
+        guard button == .left else { return }
+        markNativeTitleBarDragFallbackReleased(button: button)
+        if state.nativeTitleBarDrag == nil,
+           state.nativeTitleBarDragFallbackReleased
+        {
+            return
+        }
+        state.awaitsNativeTitleBarDragTarget = false
+        state.nativeTitleBarDragFallbackToken = nil
+        state.nativeTitleBarDragFallbackReleased = false
+        guard var drag = state.nativeTitleBarDrag else { return }
+        switch drag.phase {
+        case .armed,
+             .dragging:
+            break
+        case .awaitingFrameChange,
+             .awaitingFrameWrite,
+             .awaitingCorrection:
+            return
+        }
+        guard let controller else {
+            state.nativeTitleBarDrag = nil
+            return
+        }
+        let excludedFrameWrite = controller.axManager.endNativeTitleBarDrag(for: drag.token)
+        guard drag.phase == .dragging,
+              controller.hasStartedServices,
+              let entry = controller.workspaceManager.entry(for: drag.token),
+              entry.mode == .tiling
+        else {
+            state.nativeTitleBarDrag = nil
+            return
+        }
+
+        let observedFrame = nativeWindowFrameProvider(entry.axRef)
+        let lastAppliedFrame = controller.axManager.lastAppliedFrame(for: entry.windowId)
+        let observedDisplacement: Bool
+        if let observedFrame, let lastAppliedFrame {
+            observedDisplacement = !observedFrame.approximatelyEqual(
+                to: lastAppliedFrame,
+                tolerance: FrameTolerance.frameWrite
+            )
+        } else if observedFrame != nil {
+            observedDisplacement = true
+        } else {
+            observedDisplacement = drag.receivedFrameChange
+        }
+        guard excludedFrameWrite || observedDisplacement else {
+            if drag.receivedFrameChange {
+                state.nativeTitleBarDrag = nil
+            } else {
+                drag.phase = .awaitingFrameChange
+                state.nativeTitleBarDrag = drag
+            }
+            return
+        }
+
+        drag.phase = .awaitingCorrection
+        state.nativeTitleBarDrag = drag
+        requestNativeTitleBarDragCorrection(for: entry)
+    }
+
+    private func retireNativeTitleBarDragAtInputBoundary() {
+        guard let drag = state.nativeTitleBarDrag else {
+            discardNativeTitleBarDragState()
+            return
+        }
+        guard drag.phase != .armed,
+              let controller,
+              let entry = controller.workspaceManager.entry(for: drag.token),
+              entry.mode == .tiling
+        else {
+            discardNativeTitleBarDragState()
+            return
+        }
+        if drag.phase == .awaitingFrameChange,
+           controller.axManager.pendingFrameWrite(for: entry.windowId) == nil,
+           let lastAppliedFrame = controller.axManager.lastAppliedFrame(for: entry.windowId),
+           let observedFrame = nativeWindowFrameProvider(entry.axRef),
+           observedFrame.approximatelyEqual(
+               to: lastAppliedFrame,
+               tolerance: FrameTolerance.frameWrite
+           )
+        {
+            discardNativeTitleBarDragState()
+            return
+        }
+        let priorTerminalFailureRequestId = drag.terminalFailureRetryRequestId
+        var correctionScheduledDuringCancellation = false
+        if controller.axManager.pendingFrameWrite(for: entry.windowId) != nil {
+            controller.axManager.cancelPendingFrameJobs([
+                (pid: entry.pid, windowId: entry.windowId)
+            ])
+            if let currentDrag = state.nativeTitleBarDrag,
+               currentDrag.token == drag.token,
+               currentDrag.terminalFailureRetryRequestId != nil,
+               currentDrag.terminalFailureRetryRequestId != priorTerminalFailureRequestId
+            {
+                correctionScheduledDuringCancellation = true
+            }
+        }
+        discardNativeTitleBarDragState()
+        if !correctionScheduledDuringCancellation {
+            controller.axManager.invalidateAppliedFrame(for: entry.windowId)
+            requestNativeTitleBarDragCorrection(for: entry)
+        }
+    }
+
+    private func discardNativeTitleBarDragState() {
+        state.awaitsNativeTitleBarDragTarget = false
+        state.nativeTitleBarDragFallbackToken = nil
+        state.nativeTitleBarDragFallbackReleased = false
+        if let drag = state.nativeTitleBarDrag {
+            _ = controller?.axManager.endNativeTitleBarDrag(for: drag.token)
+        }
+        state.nativeTitleBarDrag = nil
+    }
+
+    private func clearNativeTitleBarDrag() {
+        guard let drag = state.nativeTitleBarDrag else {
+            discardNativeTitleBarDragState()
+            return
+        }
+        discardNativeTitleBarDragState()
+        if drag.phase != .armed || drag.receivedFrameChange,
+           let controller,
+           controller.workspaceManager.entry(for: drag.token)?.mode == .tiling
+        {
+            controller.axManager.invalidateAppliedFrame(for: drag.token.windowId)
+            controller.axManager.forceApplyNextFrame(for: drag.token.windowId)
+        }
+    }
+
+    func discardNativeTitleBarDrag(for token: WindowToken) {
+        guard state.nativeTitleBarDrag?.token == token
+            || state.nativeTitleBarDragFallbackToken == token
+        else { return }
+        discardNativeTitleBarDragState()
+    }
+
+    private func requestNativeTitleBarDragCorrection(for entry: WindowState) {
+        guard let controller else { return }
+        controller.axManager.forceApplyNextFrame(for: entry.windowId)
+        controller.layoutRefreshController.requestImmediateRelayout(
+            reason: .interactiveGesture,
+            affectedWorkspaceIds: [entry.workspaceId]
+        )
+    }
+
+    private func markNativeTitleBarDragFallbackReleased(button: MouseButton) {
+        guard button == .left,
+              state.nativeTitleBarDrag == nil,
+              state.awaitsNativeTitleBarDragTarget,
+              state.nativeTitleBarDragFallbackToken != nil,
+              state.moveTap == nil
+        else { return }
+        state.nativeTitleBarDragFallbackReleased = true
+    }
+
+    func handleNativeTitleBarDragFrameChanged(for entry: WindowState) -> Bool {
+        if state.nativeTitleBarDrag == nil,
+           state.awaitsNativeTitleBarDragTarget,
+           state.moveTap == nil,
+           (state.nativeTitleBarDragFallbackReleased
+               || pressedMouseButtonsProvider() & MouseButton.left.pressedMask != 0),
+           state.nativeTitleBarDragFallbackToken == entry.token,
+           entry.mode == .tiling,
+           let controller
+        {
+            guard !controller.niriLayoutHandler.hasScrollAnimation(for: entry.workspaceId) else {
+                return false
+            }
+            guard let observedFrame = terminalNativeWindowFrame(for: entry),
+                  !nativeWindowFrameMatchesManagedTarget(observedFrame, entry: entry)
+            else { return false }
+            let released = state.nativeTitleBarDragFallbackReleased
+            state.awaitsNativeTitleBarDragTarget = false
+            state.nativeTitleBarDragFallbackToken = nil
+            state.nativeTitleBarDragFallbackReleased = false
+            var drag = State.NativeTitleBarDrag(token: entry.token)
+            if released {
+                if let pendingFrame = controller.axManager.pendingFrameWrite(for: entry.windowId) {
+                    awaitNativeTitleBarDragFrameWrite(
+                        pendingFrame,
+                        entry: entry,
+                        drag: drag
+                    )
+                } else {
+                    drag.phase = .awaitingCorrection
+                    state.nativeTitleBarDrag = drag
+                    requestNativeTitleBarDragCorrection(for: entry)
+                }
+            } else {
+                drag.phase = .dragging
+                drag.receivedFrameChange = true
+                state.nativeTitleBarDrag = drag
+                controller.axManager.beginNativeTitleBarDrag(for: entry.token)
+            }
+            return true
+        }
+        guard var drag = state.nativeTitleBarDrag,
+              drag.token == entry.token
+        else { return false }
+        switch drag.phase {
+        case .armed:
+            return false
+        case .dragging:
+            drag.receivedFrameChange = true
+            state.nativeTitleBarDrag = drag
+            return true
+        case .awaitingFrameChange:
+            if controller?.niriLayoutHandler.hasScrollAnimation(for: entry.workspaceId) == true {
+                return false
+            }
+            let observedFrame = terminalNativeWindowFrame(for: entry)
+            if let observedFrame,
+               nativeWindowFrameMatchesManagedTarget(observedFrame, entry: entry)
+            {
+                drag.receivedFrameChange = false
+                drag.issuedUnreadableCorrection = false
+                state.nativeTitleBarDrag = drag
+                return true
+            }
+            if let pendingFrame = controller?.axManager.pendingFrameWrite(for: entry.windowId) {
+                awaitNativeTitleBarDragFrameWrite(
+                    pendingFrame,
+                    entry: entry,
+                    drag: drag
+                )
+                return true
+            }
+            if observedFrame == nil, drag.issuedUnreadableCorrection {
+                drag.receivedFrameChange = true
+                state.nativeTitleBarDrag = drag
+                controller?.axManager.invalidateAppliedFrame(for: entry.windowId)
+                return true
+            }
+            drag.issuedUnreadableCorrection = observedFrame == nil
+            drag.phase = .awaitingCorrection
+            drag.receivedFrameChange = false
+            state.nativeTitleBarDrag = drag
+            requestNativeTitleBarDragCorrection(for: entry)
+            return true
+        case .awaitingFrameWrite:
+            drag.receivedFrameChange = true
+            if controller?.axManager.pendingFrameWrite(for: entry.windowId) == nil {
+                drag.phase = .awaitingCorrection
+                state.nativeTitleBarDrag = drag
+                requestNativeTitleBarDragCorrection(for: entry)
+            } else {
+                state.nativeTitleBarDrag = drag
+            }
+            return true
+        case .awaitingCorrection:
+            drag.receivedFrameChange = true
+            state.nativeTitleBarDrag = drag
+            return true
+        }
+    }
+
+    private func awaitNativeTitleBarDragFrameWrite(
+        _ pendingFrame: CGRect,
+        entry: WindowState,
+        drag: State.NativeTitleBarDrag
+    ) {
+        guard let controller else { return }
+        var drag = drag
+        drag.phase = .awaitingFrameWrite
+        drag.receivedFrameChange = true
+        state.nativeTitleBarDrag = drag
+        controller.axManager.applyFramesParallel(
+            [AXFrameApplicationTarget(pid: entry.pid, window: entry.axRef, frame: pendingFrame)],
+            terminalObserver: { [weak self] result in
+                self?.handleNativeTitleBarDragPendingFrameSettled(result)
+            }
+        )
+    }
+
+    private func nativeWindowFrameMatchesManagedTarget(
+        _ observedFrame: CGRect,
+        entry: WindowState
+    ) -> Bool {
+        if let pendingFrame = controller?.axManager.pendingFrameWrite(for: entry.windowId),
+           pendingFrame.approximatelyEqual(
+               to: observedFrame,
+               tolerance: FrameTolerance.frameWrite
+           )
+        {
+            return true
+        }
+        return controller?.axManager.lastAppliedFrame(for: entry.windowId)?.approximatelyEqual(
+            to: observedFrame,
+            tolerance: FrameTolerance.frameWrite
+        ) == true
+    }
+
+    private func terminalNativeWindowFrame(for entry: WindowState) -> CGRect? {
+        nativeWindowFrameProvider(entry.axRef)
+            ?? (try? AXWindowService.frame(entry.axRef))
+    }
+
+    func handleNativeTitleBarDragFrameApplySucceeded(_ result: AXFrameApplyResult) {
+        guard var drag = state.nativeTitleBarDrag,
+              drag.phase == .awaitingCorrection || drag.phase == .awaitingFrameWrite,
+              drag.token == WindowToken(pid: result.pid, windowId: result.windowId),
+              let controller
+        else { return }
+        guard let entry = controller.workspaceManager.entry(for: drag.token),
+              entry.mode == .tiling
+        else {
+            discardNativeTitleBarDragState()
+            return
+        }
+        guard sameAXWindowIdentity(result.expectedWindow, entry.axRef) else { return }
+        guard let confirmedFrame = result.confirmedFrame else {
+            discardNativeTitleBarDragState()
+            return
+        }
+        drag.phase = .awaitingCorrection
+        var retainUnreadableFrameChange = false
+        if drag.receivedFrameChange {
+            let observedFrame = terminalNativeWindowFrame(for: entry)
+            if let observedFrame,
+               !observedFrame.approximatelyEqual(
+                   to: confirmedFrame,
+                   tolerance: FrameTolerance.frameWrite
+               )
+            {
+                drag.issuedUnreadableCorrection = false
+                drag.receivedFrameChange = false
+                state.nativeTitleBarDrag = drag
+                requestNativeTitleBarDragCorrection(for: entry)
+                return
+            }
+            if observedFrame == nil {
+                controller.axManager.invalidateAppliedFrame(for: entry.windowId)
+                if !drag.issuedUnreadableCorrection {
+                    drag.issuedUnreadableCorrection = true
+                    drag.receivedFrameChange = false
+                    state.nativeTitleBarDrag = drag
+                    requestNativeTitleBarDragCorrection(for: entry)
+                    return
+                }
+                retainUnreadableFrameChange = true
+            } else {
+                drag.issuedUnreadableCorrection = false
+            }
+        }
+        drag.phase = .awaitingFrameChange
+        drag.receivedFrameChange = retainUnreadableFrameChange
+        state.nativeTitleBarDrag = drag
+    }
+
+    func handleNativeTitleBarDragPendingFrameSettled(_ result: AXFrameApplyResult) {
+        guard let drag = state.nativeTitleBarDrag,
+              drag.phase == .awaitingFrameWrite,
+              drag.token == WindowToken(pid: result.pid, windowId: result.windowId)
+        else { return }
+        guard let controller,
+              let entry = controller.workspaceManager.entry(for: drag.token),
+              entry.mode == .tiling
+        else {
+            discardNativeTitleBarDragState()
+            return
+        }
+        guard sameAXWindowIdentity(result.expectedWindow, entry.axRef) else { return }
+        if result.confirmedFrame != nil {
+            handleNativeTitleBarDragFrameApplySucceeded(result)
+            return
+        }
+        handleNativeTitleBarDragFrameApplyTerminated(result, allowsAwaitingFrameWrite: true)
+    }
+
+    func handleNativeTitleBarDragFrameApplyTerminated(_ result: AXFrameApplyResult) {
+        handleNativeTitleBarDragFrameApplyTerminated(result, allowsAwaitingFrameWrite: false)
+    }
+
+    private func handleNativeTitleBarDragFrameApplyTerminated(
+        _ result: AXFrameApplyResult,
+        allowsAwaitingFrameWrite: Bool
+    ) {
+        guard var drag = state.nativeTitleBarDrag,
+              drag.token == WindowToken(pid: result.pid, windowId: result.windowId),
+              drag.phase == .awaitingCorrection
+              || (allowsAwaitingFrameWrite && drag.phase == .awaitingFrameWrite),
+              let controller
+        else { return }
+        guard let entry = controller.workspaceManager.entry(for: drag.token),
+              entry.mode == .tiling
+        else {
+            discardNativeTitleBarDragState()
+            return
+        }
+        guard sameAXWindowIdentity(result.expectedWindow, entry.axRef) else { return }
+        guard drag.terminalFailureRetryRequestId != result.requestId else { return }
+        controller.axManager.invalidateAppliedFrame(for: entry.windowId)
+        guard drag.terminalFailureRetryRequestId == nil else {
+            discardNativeTitleBarDragState()
+            return
+        }
+        drag.terminalFailureRetryRequestId = result.requestId
+        drag.phase = .awaitingCorrection
+        state.nativeTitleBarDrag = drag
+        requestNativeTitleBarDragCorrection(for: entry)
     }
 
     private func handleMouseUpFromTap(at location: CGPoint, button: MouseButton) {

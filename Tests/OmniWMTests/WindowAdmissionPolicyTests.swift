@@ -356,6 +356,93 @@ final class WindowAdmissionPolicyTests: XCTestCase {
         XCTAssertNil(controller.axEventHandler.admissionRetryStateByWindowId[UInt32(windowId)])
         controller.axEventHandler.handleCGSEvent(.destroyed(windowId: UInt32(windowId), spaceId: 0))
     }
+
+    func testSingleToggleTileableFloatingDecisionTransitionsToTilingWithoutSecondInvocation() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        defer {
+            controller.hasStartedServices = false
+            controller.layoutRefreshController.resetState()
+            controller.surfaceReconciler.cleanup()
+            controller.axManager.cleanup()
+        }
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let token = WindowToken(pid: 467_920, windowId: 467_921)
+        let axRef = AXWindowRef(
+            element: AXUIElementCreateApplication(token.pid),
+            windowId: token.windowId
+        )
+        _ = controller.workspaceManager.addWindow(
+            axRef,
+            pid: token.pid,
+            windowId: token.windowId,
+            to: workspaceId,
+            mode: .floating
+        )
+        XCTAssertTrue(
+            controller.workspaceManager.confirmManagedFocus(
+                token,
+                in: workspaceId,
+                activateWorkspaceOnMonitor: false
+            )
+        )
+
+        XCTAssertEqual(controller.toggleFocusedWindowFloating(), .executed)
+        XCTAssertEqual(controller.workspaceManager.manualLayoutOverride(for: token), .forceTile)
+        controller.axEventHandler.cancelTrackedTilingPromotionRetry(windowId: token.windowId)
+
+        let frame = CGRect(x: 100, y: 100, width: 800, height: 600)
+        let tileableEvaluation = controller.evaluateWindowDisposition(
+            token: token,
+            evidence: AXWindowDecisionEvidence(
+                facts: AXWindowFacts(
+                    role: kAXWindowRole as String,
+                    subrole: kAXStandardWindowSubrole as String,
+                    title: "Tileable",
+                    hasCloseButton: true,
+                    hasFullscreenButton: true,
+                    fullscreenButtonEnabled: true,
+                    hasZoomButton: true,
+                    hasMinimizeButton: true,
+                    appPolicy: .regular,
+                    bundleId: "com.example.tileable",
+                    attributeFetchSucceeded: true
+                ),
+                sizeConstraints: .unconstrained
+            ),
+            appFullscreen: false,
+            windowInfo: WindowServerInfo(
+                id: UInt32(token.windowId),
+                pid: token.pid,
+                level: 0,
+                frame: frame
+            ),
+            admissionGeometry: WindowAdmissionGeometryEvidence(
+                isSizeSettable: true,
+                frame: frame
+            )
+        )
+        XCTAssertEqual(tileableEvaluation.decision.trackedMode, .tiling)
+        XCTAssertFalse(
+            controller.shouldDeferAdmission(
+                evaluation: tileableEvaluation,
+                axRef: axRef,
+                mode: .tiling,
+                windowInfo: tileableEvaluation.facts.windowServer
+            )
+        )
+
+        XCTAssertTrue(
+            controller.transitionWindowMode(
+                for: token,
+                to: .tiling,
+                applyFloatingFrame: false
+            )
+        )
+        XCTAssertEqual(controller.workspaceManager.entry(for: token)?.mode, .tiling)
+        XCTAssertEqual(controller.workspaceManager.manualLayoutOverride(for: token), .forceTile)
+    }
 }
 
 private func explicitProxyEvaluation(

@@ -16,9 +16,17 @@ final class WindowAdmissionFrameLifecycleTests: XCTestCase {
         let observed = CGRect(x: 0, y: 0, width: 1, height: 1)
         let failure = AXFrameWriteFailureReason.sizeWriteFailed(.attributeUnsupported)
         let window = AXWindowRef(element: AXUIElementCreateApplication(pid), windowId: windowId)
+        var observerResults: [AXFrameApplyResult] = []
 
         let firstRequest = try XCTUnwrap(
-            WindowAdmissionTestSupport.frameRequest(ledger, pid: pid, window: window, frame: target)
+            ledger.prepareFrameApplication(
+                pid: pid,
+                windowId: windowId,
+                expectedWindow: window,
+                frame: target,
+                isRetry: false,
+                terminalObserver: { observerResults.append($0) }
+            ).request
         )
         let firstOutcome = ledger.handleFrameApplyResults([
             WindowAdmissionTestSupport.frameResult(
@@ -28,22 +36,31 @@ final class WindowAdmissionFrameLifecycleTests: XCTestCase {
             )
         ])
         XCTAssertEqual(firstOutcome.retries, [
-            AXFrameRetryRequest(pid: pid, windowId: windowId, expectedWindow: window, frame: target)
+            AXFrameRetryRequest(
+                requestId: firstRequest.requestId,
+                pid: pid,
+                windowId: windowId,
+                expectedWindow: window,
+                frame: target,
+                currentFrameHint: firstRequest.currentFrameHint
+            )
         ])
+        XCTAssertEqual(firstOutcome.retries.first?.requestId, firstRequest.requestId)
+        XCTAssertTrue(firstOutcome.deliveries.isEmpty)
         XCTAssertTrue(firstOutcome.terminalRefusals.isEmpty)
+        XCTAssertTrue(firstOutcome.terminalFailures.isEmpty)
 
         let retryRequest = try XCTUnwrap(
             WindowAdmissionTestSupport.frameRequest(
                 ledger, pid: pid, window: window, frame: target, isRetry: true
             )
         )
-        let retryOutcome = ledger.handleFrameApplyResults([
-            WindowAdmissionTestSupport.frameResult(
-                request: retryRequest,
-                observed: observed,
-                failure: failure
-            )
-        ])
+        let retryResult = WindowAdmissionTestSupport.frameResult(
+            request: retryRequest,
+            observed: observed,
+            failure: failure
+        )
+        let retryOutcome = ledger.handleFrameApplyResults([retryResult])
 
         XCTAssertEqual(
             retryOutcome.terminalRefusals,
@@ -58,6 +75,21 @@ final class WindowAdmissionFrameLifecycleTests: XCTestCase {
             ]
         )
         XCTAssertTrue(retryOutcome.retries.isEmpty)
+        XCTAssertEqual(retryOutcome.deliveries.count, 1)
+        XCTAssertEqual(retryOutcome.terminalFailures, [retryResult])
+        let terminalFailure = try XCTUnwrap(retryOutcome.terminalFailures.first)
+        XCTAssertEqual(terminalFailure.requestId, retryRequest.requestId)
+        XCTAssertEqual(terminalFailure.pid, pid)
+        XCTAssertEqual(terminalFailure.windowId, windowId)
+        XCTAssertTrue(sameAXWindowIdentity(terminalFailure.expectedWindow, window))
+        XCTAssertEqual(terminalFailure.targetFrame, target)
+        XCTAssertEqual(terminalFailure.writeResult.failureReason, failure)
+        XCTAssertTrue(observerResults.isEmpty)
+        for delivery in retryOutcome.deliveries {
+            delivery.deliver()
+        }
+        XCTAssertEqual(observerResults, [retryResult])
+        XCTAssertFalse(ledger.hasPendingFrameWrite(for: windowId))
     }
 
     func testRepeatedTerminalSizeConvergenceNormalizesObserverAndDeduplicatesExactTarget() throws {
@@ -188,6 +220,225 @@ final class WindowAdmissionFrameLifecycleTests: XCTestCase {
                 terminalObserver: nil
             ).request
         )
+    }
+
+    func testOrdinaryAppliedFrameDriftInvalidatesCachedTargetAndReappliesOnlyAffectedWindow() throws {
+        let ledger = AXFrameApplicationLedger()
+        let pid: pid_t = 467_319
+        let firstWindow = AXWindowRef(
+            element: AXUIElementCreateApplication(pid),
+            windowId: 467_419
+        )
+        let secondWindow = AXWindowRef(
+            element: AXUIElementCreateApplication(pid),
+            windowId: 467_420
+        )
+        let firstTarget = CGRect(x: 20, y: 30, width: 640, height: 480)
+        let secondTarget = CGRect(x: 680, y: 30, width: 640, height: 480)
+        ledger.confirmFrameWrite(for: firstWindow.windowId, frame: firstTarget)
+        ledger.confirmFrameWrite(for: secondWindow.windowId, frame: secondTarget)
+
+        XCTAssertNil(
+            WindowAdmissionTestSupport.frameRequest(
+                ledger,
+                pid: pid,
+                window: firstWindow,
+                frame: firstTarget
+            )
+        )
+        XCTAssertFalse(
+            ledger.shouldSuppressFrameChangeRelayout(
+                for: firstWindow.windowId,
+                observedFrame: firstTarget.offsetBy(dx: 5, dy: 0)
+            )
+        )
+
+        let correctiveRequest = try XCTUnwrap(
+            WindowAdmissionTestSupport.frameRequest(
+                ledger,
+                pid: pid,
+                window: firstWindow,
+                frame: firstTarget
+            )
+        )
+        XCTAssertEqual(correctiveRequest.frame, firstTarget)
+        XCTAssertNil(
+            WindowAdmissionTestSupport.frameRequest(
+                ledger,
+                pid: pid,
+                window: secondWindow,
+                frame: secondTarget
+            )
+        )
+
+        _ = ledger.handleFrameApplyResults([
+            WindowAdmissionTestSupport.successfulFrameResult(request: correctiveRequest)
+        ])
+        XCTAssertTrue(
+            ledger.shouldSuppressFrameChangeRelayout(
+                for: firstWindow.windowId,
+                observedFrame: firstTarget
+            )
+        )
+        XCTAssertNil(
+            WindowAdmissionTestSupport.frameRequest(
+                ledger,
+                pid: pid,
+                window: firstWindow,
+                frame: firstTarget
+            )
+        )
+    }
+
+    func testDirectPendingFrameCancellationReturnsExactTerminalFailure() throws {
+        let ledger = AXFrameApplicationLedger()
+        let pid: pid_t = 467_319
+        let window = AXWindowRef(
+            element: AXUIElementCreateApplication(pid),
+            windowId: 467_419
+        )
+        let target = CGRect(x: 20, y: 30, width: 640, height: 480)
+        let request = try XCTUnwrap(
+            WindowAdmissionTestSupport.frameRequest(
+                ledger,
+                pid: pid,
+                window: window,
+                frame: target
+            )
+        )
+        XCTAssertNil(
+            WindowAdmissionTestSupport.frameRequest(
+                ledger,
+                pid: pid,
+                window: window,
+                frame: target
+            )
+        )
+
+        let cancellation = ledger.cancelFrameJob(pid: pid, windowId: window.windowId)
+
+        XCTAssertTrue(cancellation.deliveries.isEmpty)
+        let terminalFailure = try XCTUnwrap(cancellation.terminalFailure)
+        XCTAssertEqual(terminalFailure.requestId, request.requestId)
+        XCTAssertEqual(terminalFailure.pid, pid)
+        XCTAssertEqual(terminalFailure.windowId, window.windowId)
+        XCTAssertTrue(sameAXWindowIdentity(terminalFailure.expectedWindow, window))
+        XCTAssertEqual(terminalFailure.targetFrame, target)
+        XCTAssertEqual(terminalFailure.writeResult.failureReason, .cancelled)
+        XCTAssertNil(ledger.cancelFrameJob(pid: pid, windowId: window.windowId).terminalFailure)
+        XCTAssertFalse(ledger.hasPendingFrameWrite(for: window.windowId))
+        let replacement = try XCTUnwrap(
+            WindowAdmissionTestSupport.frameRequest(
+                ledger,
+                pid: pid,
+                window: window,
+                frame: target
+            )
+        )
+        XCTAssertNotEqual(replacement.requestId, request.requestId)
+    }
+
+    func testObserverSupersedingPendingFrameWriteReceivesCancellationSettlement() throws {
+        let ledger = AXFrameApplicationLedger()
+        let pid: pid_t = 467_320
+        let window = AXWindowRef(
+            element: AXUIElementCreateApplication(pid),
+            windowId: 467_421
+        )
+        let target = CGRect(x: 20, y: 30, width: 640, height: 480)
+        XCTAssertNotNil(
+            WindowAdmissionTestSupport.frameRequest(
+                ledger,
+                pid: pid,
+                window: window,
+                frame: target
+            )
+        )
+        var terminalResults: [AXFrameApplyResult] = []
+
+        let observerDecision = ledger.prepareFrameApplication(
+            pid: pid,
+            windowId: window.windowId,
+            expectedWindow: window,
+            frame: target,
+            isRetry: false,
+            terminalObserver: { terminalResults.append($0) }
+        )
+        XCTAssertNotNil(observerDecision.request)
+        XCTAssertTrue(observerDecision.deliveries.isEmpty)
+
+        let cancellation = ledger.cancelFrameJob(pid: pid, windowId: window.windowId)
+        XCTAssertEqual(cancellation.deliveries.count, 1)
+        XCTAssertEqual(cancellation.terminalFailure?.writeResult.failureReason, .cancelled)
+        XCTAssertEqual(cancellation.terminalFailure?.requestId, observerDecision.request?.requestId)
+        for delivery in cancellation.deliveries {
+            delivery.deliver()
+        }
+        XCTAssertEqual(terminalResults.map(\.writeResult.failureReason), [.cancelled])
+        XCTAssertFalse(ledger.hasPendingFrameWrite(for: window.windowId))
+    }
+
+    func testScheduledRetryCancellationPreservesObserverRequestIdentityForGenericFailure() async throws {
+        let manager = AXManager()
+        let pid: pid_t = 467_321
+        let window = AXWindowRef(
+            element: AXUIElementCreateApplication(pid),
+            windowId: 467_421
+        )
+        let target = CGRect(x: 20, y: 30, width: 640, height: 480)
+        var observerResults: [AXFrameApplyResult] = []
+        var genericFailures: [AXFrameApplyResult] = []
+        manager.onFrameApplyTerminated = { genericFailures.append($0) }
+
+        manager.applyFramesParallel(
+            [AXFrameApplicationTarget(pid: pid, window: window, frame: target)],
+            terminalObserver: { observerResults.append($0) }
+        )
+        XCTAssertTrue(observerResults.isEmpty)
+        XCTAssertTrue(genericFailures.isEmpty)
+
+        manager.cancelPendingFrameJobs([(pid: pid, windowId: window.windowId)])
+        await Task.yield()
+
+        let observerResult = try XCTUnwrap(observerResults.first)
+        let genericFailure = try XCTUnwrap(genericFailures.first)
+        XCTAssertEqual(observerResults.count, 1)
+        XCTAssertEqual(genericFailures.count, 1)
+        XCTAssertGreaterThan(observerResult.requestId, 0)
+        XCTAssertEqual(genericFailure.requestId, observerResult.requestId)
+        XCTAssertEqual(genericFailure.pid, pid)
+        XCTAssertEqual(genericFailure.windowId, window.windowId)
+        XCTAssertTrue(sameAXWindowIdentity(genericFailure.expectedWindow, window))
+        XCTAssertEqual(genericFailure.targetFrame, target)
+        XCTAssertEqual(genericFailure.writeResult.failureReason, .cancelled)
+    }
+
+    func testRetryExhaustionInvokesManagerTerminalFailureCallback() async throws {
+        let manager = AXManager()
+        let pid: pid_t = 467_322
+        let window = AXWindowRef(
+            element: AXUIElementCreateApplication(pid),
+            windowId: 467_422
+        )
+        let target = CGRect(x: 20, y: 30, width: 640, height: 480)
+        var genericFailures: [AXFrameApplyResult] = []
+        manager.onFrameApplyTerminated = { genericFailures.append($0) }
+
+        manager.applyFramesParallel([
+            AXFrameApplicationTarget(pid: pid, window: window, frame: target)
+        ])
+        XCTAssertTrue(genericFailures.isEmpty)
+
+        await Task.yield()
+
+        let genericFailure = try XCTUnwrap(genericFailures.first)
+        XCTAssertEqual(genericFailures.count, 1)
+        XCTAssertGreaterThan(genericFailure.requestId, 0)
+        XCTAssertEqual(genericFailure.pid, pid)
+        XCTAssertEqual(genericFailure.windowId, window.windowId)
+        XCTAssertTrue(sameAXWindowIdentity(genericFailure.expectedWindow, window))
+        XCTAssertEqual(genericFailure.targetFrame, target)
+        XCTAssertEqual(genericFailure.writeResult.failureReason, .contextUnavailable)
     }
 
     func testAcceptedSizeConvergenceIsInvalidatedWhenExternalFrameCannotBeRead() throws {
@@ -556,6 +807,7 @@ final class WindowAdmissionFrameLifecycleTests: XCTestCase {
         XCTAssertTrue(forgedOutcome.deliveries.isEmpty)
         XCTAssertTrue(forgedOutcome.retries.isEmpty)
         XCTAssertTrue(forgedOutcome.terminalRefusals.isEmpty)
+        XCTAssertTrue(forgedOutcome.terminalFailures.isEmpty)
         XCTAssertTrue(acceptedResults.isEmpty)
         XCTAssertTrue(ledger.hasPendingFrameWrite(for: windowId))
         XCTAssertNil(ledger.lastAppliedFrame(for: windowId))
@@ -652,11 +904,12 @@ final class WindowAdmissionFrameLifecycleTests: XCTestCase {
         )
         var acceptedWindowIds: [Int] = []
 
-        _ = ledger.handleFrameApplyResults(
+        let staleOutcome = ledger.handleFrameApplyResults(
             [WindowAdmissionTestSupport.successfulFrameResult(request: firstRequest)],
             onAcceptedSuccess: { acceptedWindowIds.append($0.windowId) }
         )
         XCTAssertTrue(acceptedWindowIds.isEmpty)
+        XCTAssertTrue(staleOutcome.terminalFailures.isEmpty)
 
         _ = ledger.handleFrameApplyResults(
             [WindowAdmissionTestSupport.successfulFrameResult(request: secondRequest)],
@@ -689,11 +942,12 @@ final class WindowAdmissionFrameLifecycleTests: XCTestCase {
         )
         var acceptedWindowIds: [Int] = []
 
-        _ = ledger.handleFrameApplyResults(
+        let forgedOutcome = ledger.handleFrameApplyResults(
             [forgedResult],
             onAcceptedSuccess: { acceptedWindowIds.append($0.windowId) }
         )
         XCTAssertTrue(acceptedWindowIds.isEmpty)
+        XCTAssertTrue(forgedOutcome.terminalFailures.isEmpty)
         XCTAssertTrue(ledger.hasPendingFrameWrite(for: windowId))
 
         _ = ledger.handleFrameApplyResults(
@@ -939,10 +1193,12 @@ final class WindowAdmissionFrameLifecycleTests: XCTestCase {
         ])
         XCTAssertEqual(firstOutcome.retries, [
             AXFrameRetryRequest(
+                requestId: firstRequest.requestId,
                 pid: pid,
                 windowId: window.windowId,
                 expectedWindow: window,
-                frame: target
+                frame: target,
+                currentFrameHint: firstRequest.currentFrameHint
             )
         ])
         XCTAssertTrue(firstOutcome.deliveries.isEmpty)
@@ -988,10 +1244,12 @@ final class WindowAdmissionFrameLifecycleTests: XCTestCase {
         let firstOutcome = ledger.handleFrameApplyResults([makeResult(firstRequest)])
         XCTAssertEqual(firstOutcome.retries, [
             AXFrameRetryRequest(
+                requestId: firstRequest.requestId,
                 pid: pid,
                 windowId: window.windowId,
                 expectedWindow: window,
-                frame: target
+                frame: target,
+                currentFrameHint: firstRequest.currentFrameHint
             )
         ])
         XCTAssertTrue(firstOutcome.terminalRefusals.isEmpty)

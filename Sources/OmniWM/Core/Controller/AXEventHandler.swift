@@ -972,7 +972,8 @@ final class AXEventHandler {
         if retryAdmissionAfterFrameChangeRequiresEarlyReturn(windowId: windowId) { return }
         if let trackedEntry = controller.workspaceManager.entry(forWindowId: Int(windowId)),
            trackedEntry.mode == .tiling,
-           controller.niriLayoutHandler.hasScrollAnimation(for: trackedEntry.workspaceId)
+           controller.mouseEventHandler.handleNativeTitleBarDragFrameChanged(for: trackedEntry)
+           || controller.niriLayoutHandler.hasScrollAnimation(for: trackedEntry.workspaceId)
         {
             return
         }

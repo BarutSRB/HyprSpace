@@ -193,6 +193,7 @@ final class AXManager {
     var onAppTerminated: ((pid_t) -> Void)?
     var isWindowParked: ((Int) -> Bool)?
     var onTerminalFrameRefusal: ((AXFrameTerminalRefusal) -> Void)?
+    var onFrameApplyTerminated: ((AXFrameApplyResult) -> Void)?
     var onFrameApplySucceeded: ((AXFrameApplyResult) -> Void)?
     var onManagedWindowBindingFailed: ((pid_t) -> Void)?
     var managedWindowBindingRetryDelayProvider: (Int) -> Duration? = {
@@ -204,7 +205,9 @@ final class AXManager {
     private var frameApplicationBufferInUse = false
     private var pendingFrameRetryTasksByWindowId: [Int: Task<Void, Never>] = [:]
     private var pendingFrameRetryGenerationByWindowId: [Int: UInt64] = [:]
+    private var pendingFrameRetryRequestsByWindowId: [Int: AXFrameRetryRequest] = [:]
     private var nextFrameRetryGeneration: UInt64 = 1
+    private var nativeTitleBarDrag: (token: WindowToken, excludedFrameWrite: Bool)?
     private struct ManagedWindowBindingRetryState {
         let generation: UInt64
         var failures: Int
@@ -327,6 +330,28 @@ final class AXManager {
 
     func forceApplyNextFrame(for windowId: Int) {
         frameLedger.forceApplyNextFrame(for: windowId)
+    }
+
+    func invalidateAppliedFrame(for windowId: Int) {
+        frameLedger.invalidateAppliedFrame(for: windowId)
+        clearSkyLightLivePosition(for: windowId)
+    }
+
+    func beginNativeTitleBarDrag(for token: WindowToken) {
+        let hadPendingFrameWrite = frameLedger.hasPendingFrameWrite(for: token.windowId)
+        nativeTitleBarDrag = (token: token, excludedFrameWrite: hadPendingFrameWrite)
+        cancelPendingFrameJobs([(pid: token.pid, windowId: token.windowId)])
+    }
+
+    func endNativeTitleBarDrag(for token: WindowToken) -> Bool {
+        guard nativeTitleBarDrag?.token == token else { return false }
+        let excludedFrameWrite = nativeTitleBarDrag?.excludedFrameWrite == true
+        nativeTitleBarDrag = nil
+        return excludedFrameWrite
+    }
+
+    func isNativeTitleBarDragActive(for token: WindowToken) -> Bool {
+        nativeTitleBarDrag?.token == token
     }
 
     func lastAppliedFrame(for windowId: Int) -> CGRect? {
@@ -700,6 +725,9 @@ final class AXManager {
 
     func removeWindowState(pid: pid_t, expectedWindow: AXWindowRef) {
         let windowId = expectedWindow.windowId
+        if nativeTitleBarDrag?.token == WindowToken(pid: pid, windowId: windowId) {
+            nativeTitleBarDrag = nil
+        }
         cancelParkFrameJobs([(pid: pid, windowId: windowId)], reason: "removed")
         AppAXContext.contexts[pid]?.prepareWindowRemoval(for: windowId)
         let deliveries = takeRemovedWindowLedgerState(windowId: windowId)
@@ -710,6 +738,9 @@ final class AXManager {
     }
 
     func removeWindowLedgerState(pid: pid_t, windowId: Int) {
+        if nativeTitleBarDrag?.token == WindowToken(pid: pid, windowId: windowId) {
+            nativeTitleBarDrag = nil
+        }
         cancelParkFrameJobs([(pid: pid, windowId: windowId)], reason: "removed")
         if let context = AppAXContext.contexts[pid] {
             context.prepareWindowRemoval(for: windowId)
@@ -1936,10 +1967,25 @@ final class AXManager {
             return frames.filter {
                 !macOSHiddenAppPIDs.contains($0.pid)
                     && interactionPolicyForWindowId($0.windowId).mayWriteFrame
+                    && !excludeFrameWriteForNativeTitleBarDrag(
+                        pid: $0.pid,
+                        windowId: $0.windowId
+                    )
             }
         }
-        guard !macOSHiddenAppPIDs.isEmpty else { return frames }
-        return frames.filter { !macOSHiddenAppPIDs.contains($0.pid) }
+        guard !macOSHiddenAppPIDs.isEmpty || nativeTitleBarDrag != nil else { return frames }
+        return frames.filter {
+            !macOSHiddenAppPIDs.contains($0.pid)
+                && !excludeFrameWriteForNativeTitleBarDrag(pid: $0.pid, windowId: $0.windowId)
+        }
+    }
+
+    func excludeFrameWriteForNativeTitleBarDrag(pid: pid_t, windowId: Int) -> Bool {
+        guard nativeTitleBarDrag?.token == WindowToken(pid: pid, windowId: windowId) else {
+            return false
+        }
+        nativeTitleBarDrag?.excludedFrameWrite = true
+        return true
     }
 
     func pendingParkFrameRequest(for windowId: Int) -> AXFrameApplicationRequest? {
@@ -2278,13 +2324,21 @@ final class AXManager {
 
     func cancelPendingFrameJobs(_ entries: [(pid: pid_t, windowId: Int)]) {
         var deliveries: [AXFrameTerminalDelivery] = []
+        var terminalFailures: [AXFrameApplyResult] = []
         for (pid, windowId) in uniqueFrameEntries(entries) {
             AppAXContext.contexts[pid]?.cancelFrameJob(for: windowId)
-            deliveries.append(contentsOf: frameLedger.cancelFrameJob(windowId: windowId))
-            cancelPendingFrameRetry(for: windowId)
+            let cancellation = frameLedger.cancelFrameJob(pid: pid, windowId: windowId)
+            let retryCancellation = cancelPendingFrameRetry(for: windowId)
+            deliveries.append(contentsOf: cancellation.deliveries)
+            if let terminalFailure = cancellation.terminalFailure ?? retryCancellation {
+                terminalFailures.append(terminalFailure)
+            }
         }
         for delivery in deliveries {
             delivery.deliver()
+        }
+        for terminalFailure in terminalFailures {
+            handleTerminalFrameApplyFailure(terminalFailure)
         }
     }
 
@@ -2415,6 +2469,7 @@ final class AXManager {
             (allowInactive || !inactiveWorkspaceWindowIds.contains($0.windowId))
                 && !macOSHiddenAppPIDs.contains($0.pid)
                 && (interactionPolicyForWindowId?($0.windowId).mayWriteFrame ?? true)
+                && !excludeFrameWriteForNativeTitleBarDrag(pid: $0.pid, windowId: $0.windowId)
         }
         guard !filtered.isEmpty else { return }
         SkyLight.shared.batchMoveWindows(
@@ -2545,12 +2600,7 @@ final class AXManager {
                 outcome: "outcome=retry-scheduled",
                 target: retry.frame
             )
-            scheduleFrameRetry(
-                pid: retry.pid,
-                windowId: retry.windowId,
-                expectedWindow: retry.expectedWindow,
-                frame: retry.frame
-            )
+            scheduleFrameRetry(retry)
         }
         for delivery in outcome.deliveries {
             delivery.deliver()
@@ -2563,6 +2613,9 @@ final class AXManager {
                 target: refusal.targetFrame
             )
             onTerminalFrameRefusal?(refusal)
+        }
+        for terminalFailure in outcome.terminalFailures {
+            handleTerminalFrameApplyFailure(terminalFailure)
         }
     }
 
@@ -2578,16 +2631,27 @@ final class AXManager {
         onFrameApplySucceeded?(result)
     }
 
-    private func scheduleFrameRetry(
-        pid: pid_t,
-        windowId: Int,
-        expectedWindow: AXWindowRef,
-        frame: CGRect
-    ) {
+    private func handleTerminalFrameApplyFailure(_ result: AXFrameApplyResult) {
+        let reason = result.writeResult.failureReason?.traceDescription ?? "unconfirmed"
+        FrameApplyTrace.recordEvent(
+            pid: result.pid,
+            windowId: result.windowId,
+            outcome: "outcome=terminal-failure/\(reason)",
+            target: result.targetFrame
+        )
+        onFrameApplyTerminated?(result)
+    }
+
+    private func scheduleFrameRetry(_ retry: AXFrameRetryRequest) {
+        let pid = retry.pid
+        let windowId = retry.windowId
+        let expectedWindow = retry.expectedWindow
+        let frame = retry.frame
         cancelPendingFrameRetry(for: windowId)
         let generation = nextFrameRetryGeneration
         nextFrameRetryGeneration &+= 1
         pendingFrameRetryGenerationByWindowId[windowId] = generation
+        pendingFrameRetryRequestsByWindowId[windowId] = retry
         pendingFrameRetryTasksByWindowId[windowId] = Task { @MainActor [weak self] in
             guard let self, !Task.isCancelled else { return }
             let currentWindowId = self.frameLedger.resolvedWindowId(for: windowId)
@@ -2595,6 +2659,7 @@ final class AXManager {
             guard !self.frameLedger.hasPendingFrameWrite(for: currentWindowId) else { return }
             self.pendingFrameRetryGenerationByWindowId.removeValue(forKey: currentWindowId)
             self.pendingFrameRetryTasksByWindowId.removeValue(forKey: currentWindowId)
+            self.pendingFrameRetryRequestsByWindowId.removeValue(forKey: currentWindowId)
             self.enqueueFrameApplications(
                 [
                     AXFrameApplicationTarget(
@@ -2612,14 +2677,29 @@ final class AXManager {
     }
 
     @discardableResult
-    private func cancelPendingFrameRetry(for windowId: Int) -> Bool {
+    private func cancelPendingFrameRetry(for windowId: Int) -> AXFrameApplyResult? {
+        let retry = pendingFrameRetryRequestsByWindowId.removeValue(forKey: windowId)
         guard let task = pendingFrameRetryTasksByWindowId.removeValue(forKey: windowId) else {
             pendingFrameRetryGenerationByWindowId.removeValue(forKey: windowId)
-            return false
+            return nil
         }
         task.cancel()
         pendingFrameRetryGenerationByWindowId.removeValue(forKey: windowId)
-        return true
+        guard let retry else { return nil }
+        return AXFrameApplyResult(
+            requestId: retry.requestId,
+            pid: retry.pid,
+            windowId: retry.windowId,
+            expectedWindow: retry.expectedWindow,
+            targetFrame: retry.frame,
+            currentFrameHint: retry.currentFrameHint,
+            writeResult: .skipped(
+                targetFrame: retry.frame,
+                currentFrameHint: retry.currentFrameHint,
+                failureReason: .cancelled,
+                observedFrame: retry.currentFrameHint
+            )
+        )
     }
 
     private func cancelAllPendingFrameState() {
@@ -2635,6 +2715,7 @@ final class AXManager {
         }
         pendingFrameRetryTasksByWindowId.removeAll()
         pendingFrameRetryGenerationByWindowId.removeAll()
+        pendingFrameRetryRequestsByWindowId.removeAll()
         macOSHiddenAppPIDs.removeAll()
 
         let deliveries = frameLedger.cancelAllPendingFrameState()

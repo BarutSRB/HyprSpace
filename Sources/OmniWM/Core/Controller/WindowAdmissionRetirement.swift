@@ -53,6 +53,7 @@ extension AXEventHandler {
         cancelPostCreateLifecycleVerification(for: token)
         cancelSameAppCloseProbe(matchingFocusedToken: token, reason: policy.traceReason)
         clearManagedFocusState(matching: token, workspaceId: workspaceId)
+        controller.mouseEventHandler.discardNativeTitleBarDrag(for: token)
         _ = controller.workspaceManager.removeWindow(pid: token.pid, windowId: token.windowId)
         finishDeferredReplacementAfterTracking(windowId: token.windowId)
         controller.axManager.removeWindowState(pid: token.pid, expectedWindow: entry.axRef)

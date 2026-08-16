@@ -225,6 +225,9 @@ final class ServiceLifecycleManager {
         controller.axManager.onTerminalFrameRefusal = { [weak controller] refusal in
             controller?.axEventHandler.handleTerminalFrameRefusal(refusal)
         }
+        controller.axManager.onFrameApplyTerminated = { [weak controller] result in
+            controller?.mouseEventHandler.handleNativeTitleBarDragFrameApplyTerminated(result)
+        }
         controller.axManager.onFrameApplySucceeded = { [weak self] result in
             self?.handleFrameApplySucceeded(result)
         }
@@ -257,6 +260,7 @@ final class ServiceLifecycleManager {
     func handleFrameApplySucceeded(_ result: AXFrameApplyResult) {
         guard let controller else { return }
         controller.axEventHandler.clearTerminalFrameFailure(windowId: result.windowId)
+        controller.mouseEventHandler.handleNativeTitleBarDragFrameApplySucceeded(result)
         guard result.writeResult.observedFrame != nil, result.confirmedFrame != nil else { return }
         controller.surfaceReconciler.handleVerifiedFrameApplySuccess(result)
     }
@@ -404,6 +408,7 @@ final class ServiceLifecycleManager {
             controller.workspaceManager.setAppHidden(false, pid: pid, source: .service)
         }
         for entry in removedEntries {
+            controller.mouseEventHandler.discardNativeTitleBarDrag(for: entry.token)
             controller.axManager.removeWindowState(pid: entry.pid, expectedWindow: entry.axRef)
             if scratchpadTokens.contains(entry.token) {
                 controller.cleanupScratchpadWindowResources(for: entry.token)
@@ -751,6 +756,7 @@ final class ServiceLifecycleManager {
         controller.axManager.onAppLaunched = nil
         controller.axManager.onAppTerminated = nil
         controller.axManager.onTerminalFrameRefusal = nil
+        controller.axManager.onFrameApplyTerminated = nil
         controller.axManager.onFrameApplySucceeded = nil
         controller.axManager.onManagedWindowBindingFailed = nil
         controller.workspaceManager.onGapsChanged = nil

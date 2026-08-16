@@ -690,6 +690,10 @@ final class ManagedWindowIdentityTests: XCTestCase {
             for: pending.oldWindow.token.windowId,
             frame: staleFrame
         )
+        controller.mouseEventHandler.state.nativeTitleBarDrag = .init(
+            token: pending.oldWindow.token
+        )
+        controller.axManager.beginNativeTitleBarDrag(for: pending.oldWindow.token)
         controller.axEventHandler.managedWindowIdentityRebindAcknowledgementProvider = { oldWindow, newWindow in
             acknowledgementObserved = oldWindow.token == newWindow.token
                 && !CFEqual(oldWindow.axRef.element, newWindow.axRef.element)
@@ -724,6 +728,10 @@ final class ManagedWindowIdentityTests: XCTestCase {
             controller.axManager.lastAppliedFrame(for: pending.oldWindow.token.windowId),
             staleFrame
         )
+        XCTAssertNotNil(controller.mouseEventHandler.state.nativeTitleBarDrag)
+        XCTAssertTrue(
+            controller.axManager.isNativeTitleBarDragActive(for: pending.oldWindow.token)
+        )
 
         acknowledgementGate.release()
         await fulfillment(of: [finalizationEntered], timeout: 2)
@@ -734,6 +742,10 @@ final class ManagedWindowIdentityTests: XCTestCase {
         XCTAssertTrue(CFEqual(committedEntry.axRef.element, pending.newWindow.axRef.element))
         XCTAssertFalse(CFEqual(committedEntry.axRef.element, pending.oldWindow.axRef.element))
         XCTAssertNil(controller.axManager.lastAppliedFrame(for: pending.newWindow.token.windowId))
+        XCTAssertNil(controller.mouseEventHandler.state.nativeTitleBarDrag)
+        XCTAssertFalse(
+            controller.axManager.isNativeTitleBarDragActive(for: pending.newWindow.token)
+        )
 
         finalizationGate.release()
         await completion.value
@@ -1025,6 +1037,9 @@ final class ManagedWindowIdentityTests: XCTestCase {
             finalizationCount += 1
             return true
         }
+        controller.mouseEventHandler.state.nativeTitleBarDrag = .init(
+            token: pending.oldWindow.token
+        )
         controller.axManager.applyFramesParallel([
             .init(
                 pid: pending.oldWindow.token.pid,
@@ -1033,6 +1048,7 @@ final class ManagedWindowIdentityTests: XCTestCase {
             )
         ]) { _ in
             terminalDeliveryCount += 1
+            XCTAssertNil(controller.mouseEventHandler.state.nativeTitleBarDrag)
             _ = controller.workspaceManager.removeWindow(
                 pid: pending.newWindow.token.pid,
                 windowId: pending.newWindow.token.windowId
