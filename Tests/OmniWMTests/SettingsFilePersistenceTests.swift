@@ -6,124 +6,201 @@ import Foundation
 import XCTest
 
 final class SettingsFilePersistenceTests: XCTestCase {
+    private struct Fixture {
+        let root: URL
+        let configDirectory: URL
+        let dotfilesDirectory: URL
+
+        func remove() {
+            try? FileManager.default.removeItem(at: root)
+        }
+    }
+
     @MainActor
-    func testSaveThroughSymlinkPreservesSymlink() throws {
+    func testSaveThroughAbsoluteSymlinkPreservesLinkTargetAndPermissions() throws {
+        let fixture = try makeFixture()
+        defer { fixture.remove() }
+
+        let targetURL = fixture.dotfilesDirectory.appendingPathComponent("omniwm.toml", isDirectory: false)
+        try SettingsTOMLCodec.encode(SettingsExport.defaults()).write(to: targetURL)
+        try FileManager.default.setAttributes([.posixPermissions: 0o640], ofItemAtPath: targetURL.path)
+
+        let linkURL = settingsURL(in: fixture)
+        try FileManager.default.createSymbolicLink(at: linkURL, withDestinationURL: targetURL)
+
+        let persistence = makePersistence(in: fixture)
+        var export = persistence.load()
+        export.gapSize += 1
+        try persistence.saveImmediately(export)
+
+        try assertSymlink(at: linkURL, destination: targetURL.path)
+        XCTAssertEqual(try SettingsTOMLCodec.decode(Data(contentsOf: targetURL)).gapSize, export.gapSize)
+        let attributes = try FileManager.default.attributesOfItem(atPath: targetURL.path)
+        XCTAssertEqual((attributes[.posixPermissions] as? NSNumber)?.intValue, 0o640)
+    }
+
+    @MainActor
+    func testSaveThroughRelativeSymlinkUsesFilesystemResolution() throws {
+        let fixture = try makeFixture()
+        defer { fixture.remove() }
+
+        let storeURL = fixture.root.appendingPathComponent("store", isDirectory: true)
+        let nestedURL = storeURL.appendingPathComponent("nested", isDirectory: true)
+        try FileManager.default.createDirectory(at: nestedURL, withIntermediateDirectories: true)
+
+        let targetURL = storeURL.appendingPathComponent("omniwm.toml", isDirectory: false)
+        try SettingsTOMLCodec.encode(SettingsExport.defaults()).write(to: targetURL)
+
+        let directoryLinkURL = fixture.root.appendingPathComponent("dotfiles-link", isDirectory: false)
+        try FileManager.default.createSymbolicLink(at: directoryLinkURL, withDestinationURL: nestedURL)
+
+        let destination = "../dotfiles-link/../omniwm.toml"
+        let linkURL = settingsURL(in: fixture)
+        try FileManager.default.createSymbolicLink(atPath: linkURL.path, withDestinationPath: destination)
+
+        let persistence = makePersistence(in: fixture)
+        var export = persistence.load()
+        export.gapSize += 1
+        try persistence.saveImmediately(export)
+
+        try assertSymlink(at: linkURL, destination: destination)
+        XCTAssertEqual(try SettingsTOMLCodec.decode(Data(contentsOf: targetURL)).gapSize, export.gapSize)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent("omniwm.toml").path))
+    }
+
+    @MainActor
+    func testDanglingSymlinkSaveAndLoadPreserveLinkWithoutCreatingTarget() throws {
+        let fixture = try makeFixture()
+        defer { fixture.remove() }
+
+        let targetURL = fixture.dotfilesDirectory.appendingPathComponent("missing.toml", isDirectory: false)
+        let linkURL = settingsURL(in: fixture)
+        try FileManager.default.createSymbolicLink(at: linkURL, withDestinationURL: targetURL)
+
+        let persistence = makePersistence(in: fixture)
+        assertPOSIXError(.ENOENT) {
+            try persistence.saveImmediately(SettingsExport.defaults())
+        }
+        XCTAssertEqual(makePersistence(in: fixture).load(), SettingsExport.defaults())
+
+        try assertSymlink(at: linkURL, destination: targetURL.path)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: targetURL.path))
+    }
+
+    @MainActor
+    func testCrossDirectorySymlinkCycleThrowsELOOPAndPreservesLinks() throws {
+        let fixture = try makeFixture()
+        defer { fixture.remove() }
+
+        let otherDirectory = fixture.root.appendingPathComponent("other", isDirectory: true)
+        try FileManager.default.createDirectory(at: otherDirectory, withIntermediateDirectories: true)
+
+        let settingsDestination = "../other/link2"
+        let otherDestination = "../config/\(SettingsFilePersistence.fileName)"
+        let linkURL = settingsURL(in: fixture)
+        let otherLinkURL = otherDirectory.appendingPathComponent("link2", isDirectory: false)
+        try FileManager.default.createSymbolicLink(atPath: linkURL.path, withDestinationPath: settingsDestination)
+        try FileManager.default.createSymbolicLink(atPath: otherLinkURL.path, withDestinationPath: otherDestination)
+
+        let persistence = makePersistence(in: fixture)
+        assertPOSIXError(.ELOOP) {
+            try persistence.saveImmediately(SettingsExport.defaults())
+        }
+
+        try assertSymlink(at: linkURL, destination: settingsDestination)
+        try assertSymlink(at: otherLinkURL, destination: otherDestination)
+    }
+
+    @MainActor
+    func testSymlinkToDirectoryThrowsEFTYPEAndPreservesLink() throws {
+        let fixture = try makeFixture()
+        defer { fixture.remove() }
+
+        let linkURL = settingsURL(in: fixture)
+        try FileManager.default.createSymbolicLink(at: linkURL, withDestinationURL: fixture.dotfilesDirectory)
+
+        let persistence = makePersistence(in: fixture)
+        assertPOSIXError(.EFTYPE) {
+            try persistence.saveImmediately(SettingsExport.defaults())
+        }
+
+        try assertSymlink(at: linkURL, destination: fixture.dotfilesDirectory.path)
+        var isDirectory = ObjCBool(false)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.dotfilesDirectory.path, isDirectory: &isDirectory))
+        XCTAssertTrue(isDirectory.boolValue)
+    }
+
+    @MainActor
+    func testCorruptSymlinkTargetRecoveryPreservesLinkBackupAndPermissions() throws {
+        let fixture = try makeFixture()
+        defer { fixture.remove() }
+
+        let corruptData = Data([0xFF, 0x00, 0xFE])
+        let targetURL = fixture.dotfilesDirectory.appendingPathComponent("omniwm.toml", isDirectory: false)
+        try corruptData.write(to: targetURL)
+        try FileManager.default.setAttributes([.posixPermissions: 0o640], ofItemAtPath: targetURL.path)
+
+        let linkURL = settingsURL(in: fixture)
+        try FileManager.default.createSymbolicLink(at: linkURL, withDestinationURL: targetURL)
+
+        let loaded = makePersistence(in: fixture).load()
+
+        XCTAssertEqual(loaded, SettingsExport.defaults())
+        try assertSymlink(at: linkURL, destination: targetURL.path)
+        XCTAssertEqual(
+            try Data(contentsOf: fixture.configDirectory
+                .appendingPathComponent(SettingsFilePersistence.corruptFileName)),
+            corruptData
+        )
+        XCTAssertEqual(try SettingsTOMLCodec.decode(Data(contentsOf: targetURL)), SettingsExport.defaults())
+        let attributes = try FileManager.default.attributesOfItem(atPath: targetURL.path)
+        XCTAssertEqual((attributes[.posixPermissions] as? NSNumber)?.intValue, 0o640)
+    }
+
+    private func makeFixture() throws -> Fixture {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("OmniWMSettingsSymlinkTests-\(UUID().uuidString)", isDirectory: true)
         let configDirectory = root.appendingPathComponent("config", isDirectory: true)
         let dotfilesDirectory = root.appendingPathComponent("dotfiles", isDirectory: true)
         try FileManager.default.createDirectory(at: configDirectory, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: dotfilesDirectory, withIntermediateDirectories: true)
-
-        let realFileURL = dotfilesDirectory.appendingPathComponent("omniwm.toml", isDirectory: false)
-        let initialExport = SettingsExport.defaults()
-        let initialData = try SettingsTOMLCodec.encode(initialExport)
-        try initialData.write(to: realFileURL)
-
-        let symlinkURL = configDirectory.appendingPathComponent(SettingsFilePersistence.fileName, isDirectory: false)
-        try FileManager.default.createSymbolicLink(at: symlinkURL, withDestinationURL: realFileURL)
-
-        let persistence = SettingsFilePersistence(directory: configDirectory, startWatching: false, deferSaves: false)
-        var export = persistence.load()
-        export.gapSize += 1
-        try persistence.saveImmediately(export)
-
-        let attributes = try FileManager.default.attributesOfItem(atPath: symlinkURL.path)
-        XCTAssertEqual(attributes[.type] as? FileAttributeType, .typeSymbolicLink)
-        XCTAssertEqual(
-            try FileManager.default.destinationOfSymbolicLink(atPath: symlinkURL.path),
-            realFileURL.path
-        )
-
-        let persisted = try SettingsTOMLCodec.decode(try Data(contentsOf: realFileURL))
-        XCTAssertEqual(persisted.gapSize, export.gapSize)
+        return Fixture(root: root, configDirectory: configDirectory, dotfilesDirectory: dotfilesDirectory)
     }
 
     @MainActor
-    func testSaveThroughDanglingSymlinkPreservesSymlink() throws {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("OmniWMSettingsDanglingSymlinkTests-\(UUID().uuidString)", isDirectory: true)
-        let configDirectory = root.appendingPathComponent("config", isDirectory: true)
-        let dotfilesDirectory = root.appendingPathComponent("dotfiles", isDirectory: true)
-        try FileManager.default.createDirectory(at: configDirectory, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: dotfilesDirectory, withIntermediateDirectories: true)
-
-        let realFileURL = dotfilesDirectory.appendingPathComponent("omniwm.toml", isDirectory: false)
-        let initialData = try SettingsTOMLCodec.encode(SettingsExport.defaults())
-        try initialData.write(to: realFileURL)
-
-        let symlinkURL = configDirectory.appendingPathComponent(SettingsFilePersistence.fileName, isDirectory: false)
-        try FileManager.default.createSymbolicLink(at: symlinkURL, withDestinationURL: realFileURL)
-
-        // Target removed after the symlink was created, but before the write: settings.toml
-        // is now a dangling symlink, which is what should still be preserved.
-        try FileManager.default.removeItem(at: realFileURL)
-
-        let persistence = SettingsFilePersistence(directory: configDirectory, startWatching: false, deferSaves: false)
-        var export = SettingsExport.defaults()
-        export.gapSize += 1
-        try persistence.saveImmediately(export)
-
-        let attributes = try FileManager.default.attributesOfItem(atPath: symlinkURL.path)
-        XCTAssertEqual(attributes[.type] as? FileAttributeType, .typeSymbolicLink)
-        XCTAssertEqual(
-            try FileManager.default.destinationOfSymbolicLink(atPath: symlinkURL.path),
-            realFileURL.path
-        )
-
-        let persisted = try SettingsTOMLCodec.decode(try Data(contentsOf: realFileURL))
-        XCTAssertEqual(persisted.gapSize, export.gapSize)
+    private func makePersistence(in fixture: Fixture) -> SettingsFilePersistence {
+        SettingsFilePersistence(directory: fixture.configDirectory, startWatching: false, deferSaves: false)
     }
 
-    @MainActor
-    func testSaveThroughCyclicSymlinkThrowsAndPreservesSymlink() throws {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("OmniWMSettingsCyclicSymlinkTests-\(UUID().uuidString)", isDirectory: true)
-        let configDirectory = root.appendingPathComponent("config", isDirectory: true)
-        try FileManager.default.createDirectory(at: configDirectory, withIntermediateDirectories: true)
+    private func settingsURL(in fixture: Fixture) -> URL {
+        fixture.configDirectory.appendingPathComponent(SettingsFilePersistence.fileName, isDirectory: false)
+    }
 
-        let symlinkURL = configDirectory.appendingPathComponent(SettingsFilePersistence.fileName, isDirectory: false)
-        try FileManager.default.createSymbolicLink(at: symlinkURL, withDestinationURL: symlinkURL)
-
-        let persistence = SettingsFilePersistence(directory: configDirectory, startWatching: false, deferSaves: false)
-        XCTAssertThrowsError(try persistence.saveImmediately(SettingsExport.defaults()))
-
-        let attributes = try FileManager.default.attributesOfItem(atPath: symlinkURL.path)
-        XCTAssertEqual(attributes[.type] as? FileAttributeType, .typeSymbolicLink)
+    private func assertSymlink(
+        at linkURL: URL,
+        destination: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        let attributes = try FileManager.default.attributesOfItem(atPath: linkURL.path)
+        XCTAssertEqual(attributes[.type] as? FileAttributeType, .typeSymbolicLink, file: file, line: line)
         XCTAssertEqual(
-            try FileManager.default.destinationOfSymbolicLink(atPath: symlinkURL.path),
-            symlinkURL.path
+            try FileManager.default.destinationOfSymbolicLink(atPath: linkURL.path),
+            destination,
+            file: file,
+            line: line
         )
     }
 
     @MainActor
-    func testSaveThroughCrossDirectoryCyclicSymlinkThrowsAndPreservesSymlink() throws {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("OmniWMSettingsCrossDirCyclicSymlinkTests-\(UUID().uuidString)", isDirectory: true)
-        let configDirectory = root.appendingPathComponent("config", isDirectory: true)
-        let otherDirectory = root.appendingPathComponent("other", isDirectory: true)
-        try FileManager.default.createDirectory(at: configDirectory, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: otherDirectory, withIntermediateDirectories: true)
-
-        // Two relative symlinks pointing at each other across sibling directories: each hop's
-        // resolved path grows a fresh `../` segment, so this only trips the cycle guard if
-        // resolvingSymlink normalizes paths between hops instead of comparing them raw.
-        let symlinkURL = configDirectory.appendingPathComponent(SettingsFilePersistence.fileName, isDirectory: false)
-        let otherLinkURL = otherDirectory.appendingPathComponent("link2", isDirectory: false)
-        try FileManager.default.createSymbolicLink(atPath: symlinkURL.path, withDestinationPath: "../other/link2")
-        try FileManager.default.createSymbolicLink(
-            atPath: otherLinkURL.path,
-            withDestinationPath: "../config/\(SettingsFilePersistence.fileName)"
-        )
-
-        let persistence = SettingsFilePersistence(directory: configDirectory, startWatching: false, deferSaves: false)
-        XCTAssertThrowsError(try persistence.saveImmediately(SettingsExport.defaults()))
-
-        let attributes = try FileManager.default.attributesOfItem(atPath: symlinkURL.path)
-        XCTAssertEqual(attributes[.type] as? FileAttributeType, .typeSymbolicLink)
-        XCTAssertEqual(
-            try FileManager.default.destinationOfSymbolicLink(atPath: symlinkURL.path),
-            "../other/link2"
-        )
+    private func assertPOSIXError(
+        _ expected: POSIXErrorCode,
+        file: StaticString = #filePath,
+        line: UInt = #line,
+        operation: () throws -> Void
+    ) {
+        XCTAssertThrowsError(try operation(), file: file, line: line) { error in
+            XCTAssertEqual((error as? POSIXError)?.code, expected, file: file, line: line)
+        }
     }
 }

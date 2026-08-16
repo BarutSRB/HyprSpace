@@ -86,6 +86,7 @@ final class SettingsFilePersistence {
     }
 
     func load() -> SettingsExport {
+        var targetURL: URL?
         do {
             try ensureDirectoryExists()
             guard FileManager.default.fileExists(atPath: fileURL.path) else {
@@ -94,15 +95,18 @@ final class SettingsFilePersistence {
                 return defaults
             }
 
-            let snapshot = try readSnapshot()
+            let resolvedTargetURL = try Self.settingsTarget(for: fileURL)
+            targetURL = resolvedTargetURL
+            let snapshot = try readSnapshot(at: resolvedTargetURL)
             lastObservedFingerprint = snapshot.fingerprint
             lastPersistedExport = snapshot.export
             return snapshot.export
         } catch {
             report("Failed to load \(fileURL.path): \(error.localizedDescription)")
-            moveCorruptFileAsideIfPresent()
             let defaults = SettingsExport.defaults()
-            save(defaults)
+            if let targetURL {
+                recoverCorruptFile(at: targetURL, with: defaults)
+            }
             return defaults
         }
     }
@@ -117,6 +121,11 @@ final class SettingsFilePersistence {
 
     func saveImmediately(_ export: SettingsExport) throws {
         try ensureDirectoryExists()
+        let targetURL = try Self.settingsTarget(for: fileURL)
+        try saveImmediately(export, to: targetURL)
+    }
+
+    private func saveImmediately(_ export: SettingsExport, to targetURL: URL) throws {
         let observedFingerprint = currentFingerprint()
         if let fingerprint = observedFingerprint,
            fingerprint == lastObservedFingerprint,
@@ -126,9 +135,9 @@ final class SettingsFilePersistence {
             return
         }
 
-        let previous = FileManager.default.fileExists(atPath: fileURL.path) ? try? Data(contentsOf: fileURL) : nil
+        let previous = FileManager.default.fileExists(atPath: targetURL.path) ? try? Data(contentsOf: targetURL) : nil
         let data = try SettingsTOMLCodec.encode(export, preservingUnknownKeysFrom: previous)
-        try data.write(to: Self.resolvingSymlink(fileURL), options: .atomic)
+        try data.write(to: targetURL, options: .atomic)
 
         let fingerprint = currentFingerprint()
         lastWrittenFingerprint = fingerprint
@@ -169,7 +178,8 @@ final class SettingsFilePersistence {
         }
 
         do {
-            let snapshot = try readSnapshot()
+            let targetURL = try Self.settingsTarget(for: fileURL)
+            let snapshot = try readSnapshot(at: targetURL)
             lastObservedFingerprint = snapshot.fingerprint
             lastPersistedExport = snapshot.export
             return snapshot.export
@@ -289,8 +299,8 @@ final class SettingsFilePersistence {
         try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
     }
 
-    private func readSnapshot() throws -> FileSnapshot {
-        let handle = try FileHandle(forReadingFrom: fileURL)
+    private func readSnapshot(at targetURL: URL) throws -> FileSnapshot {
+        let handle = try FileHandle(forReadingFrom: targetURL)
         defer {
             try? handle.close()
         }
@@ -335,31 +345,66 @@ final class SettingsFilePersistence {
         Int64(timestamp.tv_sec) * nanosecondsPerSecond + Int64(timestamp.tv_nsec)
     }
 
-    private static func resolvingSymlink(_ url: URL) throws -> URL {
-        var resolved = url.standardizedFileURL
-        var visitedPaths = Set<String>()
-        while let destination = try? FileManager.default.destinationOfSymbolicLink(atPath: resolved.path) {
-            guard visitedPaths.insert(resolved.path).inserted else {
-                throw POSIXError(.ELOOP)
-            }
-            resolved = (destination.hasPrefix("/")
-                ? URL(fileURLWithPath: destination)
-                : resolved.deletingLastPathComponent().appendingPathComponent(destination)
-            ).standardizedFileURL
+    private static func settingsTarget(for url: URL) throws -> URL {
+        var fileStatus = stat()
+        let result = url.withUnsafeFileSystemRepresentation { path -> CInt in
+            guard let path else { return -1 }
+            return Darwin.lstat(path, &fileStatus)
         }
-        return resolved
+
+        guard result == 0 else {
+            let code = errno
+            guard code != ENOENT else { return url }
+            throw POSIXError(POSIXErrorCode(rawValue: code) ?? .EIO)
+        }
+
+        let fileType = fileStatus.st_mode & S_IFMT
+        guard fileType == S_IFLNK else {
+            guard fileType == S_IFREG else { throw POSIXError(.EFTYPE) }
+            return url
+        }
+
+        let resolvedURL = try canonicalURL(for: url)
+        var targetStatus = stat()
+        let targetResult = resolvedURL.withUnsafeFileSystemRepresentation { path -> CInt in
+            guard let path else { return -1 }
+            return Darwin.lstat(path, &targetStatus)
+        }
+
+        guard targetResult == 0 else {
+            let code = errno
+            throw POSIXError(POSIXErrorCode(rawValue: code) ?? .EIO)
+        }
+        guard targetStatus.st_mode & S_IFMT == S_IFREG else { throw POSIXError(.EFTYPE) }
+        return resolvedURL
     }
 
-    private func moveCorruptFileAsideIfPresent() {
-        guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
+    private static func canonicalURL(for url: URL) throws -> URL {
+        try url.withUnsafeFileSystemRepresentation { path in
+            guard let path else { throw CocoaError(.fileReadInvalidFileName) }
+            errno = 0
+            guard let resolvedPath = Darwin.realpath(path, nil) else {
+                let code = errno
+                throw POSIXError(POSIXErrorCode(rawValue: code) ?? .EIO)
+            }
+            defer { Darwin.free(resolvedPath) }
+            return URL(
+                fileURLWithFileSystemRepresentation: resolvedPath,
+                isDirectory: false,
+                relativeTo: nil
+            )
+        }
+    }
 
+    private func recoverCorruptFile(at targetURL: URL, with defaults: SettingsExport) {
         let corruptURL = directoryURL.appendingPathComponent(Self.corruptFileName, isDirectory: false)
-        try? FileManager.default.removeItem(at: corruptURL)
 
         do {
-            try FileManager.default.moveItem(at: fileURL, to: corruptURL)
+            let corruptData = try Data(contentsOf: targetURL)
+            try corruptData.write(to: corruptURL, options: .atomic)
+            try saveImmediately(defaults, to: targetURL)
         } catch {
-            report("Failed to move corrupt settings file aside: \(error.localizedDescription)")
+            report("Failed to recover corrupt settings file: \(error.localizedDescription)")
         }
     }
 
