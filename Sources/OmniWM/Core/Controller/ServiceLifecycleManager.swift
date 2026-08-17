@@ -208,9 +208,6 @@ final class ServiceLifecycleManager {
             )
             EventIntake.post(.appLaunched(pid: app.processIdentifier))
         }
-        controller.axManager.onAppTerminated = { pid in
-            EventIntake.post(.appTerminated(pid: pid))
-        }
         controller.axManager.installWorkspaceObservers()
         let runningApplications = NSWorkspace.shared.runningApplications.filter { !$0.isTerminated }
         reconcileStoppedApplicationTerminationsAndResumeTimeouts(
@@ -377,10 +374,21 @@ final class ServiceLifecycleManager {
             && monitors.allSatisfy { $0.frame.width > 1 && $0.frame.height > 1 }
     }
 
-    func handleAppTerminated(pid: pid_t) {
+    func handleAppTerminated(pid: pid_t, frontmostPID: pid_t? = nil) {
         guard let controller else { return }
-        controller.intentLedger.cancelAppRevealFocus(pid: pid)
         let allEntries = controller.workspaceManager.allEntries()
+        if !allEntries.contains(where: { $0.pid == pid }),
+           let recovery = controller.intentLedger.openAppTerminationFocusRecovery()?.payload,
+           recovery.departingToken.pid == pid,
+           recovery.terminationHandled
+        {
+            return
+        }
+        let focusRecovery = controller.axEventHandler.beginAppTerminationFocusRecovery(
+            pid: pid,
+            fallbackPID: frontmostPID
+        )
+        controller.intentLedger.cancelAppRevealFocus(pid: pid)
         let wasHidden = controller.workspaceManager.isAppHidden(pid: pid)
         if !wasHidden {
             controller.workspaceManager.invalidateAppVisibility(for: pid, source: .service)
@@ -414,11 +422,20 @@ final class ServiceLifecycleManager {
                 controller.cleanupScratchpadWindowResources(for: entry.token)
             }
         }
-        for workspaceId in affectedWorkspaces {
+        var focusValidationWorkspaces = affectedWorkspaces
+        if let focusRecovery {
+            focusValidationWorkspaces.insert(focusRecovery.workspaceId)
+        }
+        for workspaceId in focusValidationWorkspaces {
             if let monitorId = controller.workspaceManager.monitorId(for: workspaceId),
                controller.workspaceManager.activeWorkspace(on: monitorId)?.id == workspaceId
             {
-                controller.ensureFocusedTokenValid(in: workspaceId)
+                controller.ensureFocusedTokenValid(
+                    in: workspaceId,
+                    preferredRecoveryToken: focusRecovery?.workspaceId == workspaceId
+                        ? focusRecovery?.preferredToken
+                        : nil
+                )
             }
         }
         controller.surfaceReconciler.noteRestackOccurred()
@@ -443,7 +460,9 @@ final class ServiceLifecycleManager {
         let terminatedPIDs = trackedPIDs.subtracting(liveApplicationPIDs).sorted()
         if !terminatedPIDs.isEmpty {
             for pid in terminatedPIDs {
-                _ = controller.eventIntake.enqueue(.appTerminated(pid: pid))
+                _ = controller.eventIntake.enqueue(
+                    .appTerminated(pid: pid, frontmostPID: nil)
+                )
             }
             controller.eventIntake.drainNow()
         }
@@ -754,7 +773,6 @@ final class ServiceLifecycleManager {
         controller.intentLedger.reset()
         clearPendingManagedFocus(controller)
         controller.axManager.onAppLaunched = nil
-        controller.axManager.onAppTerminated = nil
         controller.axManager.onTerminalFrameRefusal = nil
         controller.axManager.onFrameApplyTerminated = nil
         controller.axManager.onFrameApplySucceeded = nil

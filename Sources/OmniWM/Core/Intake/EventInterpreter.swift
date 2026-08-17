@@ -54,8 +54,11 @@ final class EventInterpreter: EventIntakeSink {
         case let .appLaunched(pid):
             controller.serviceLifecycleManager.handleAppLaunched(pid: pid)
 
-        case let .appTerminated(pid):
-            controller.serviceLifecycleManager.handleAppTerminated(pid: pid)
+        case let .appTerminated(pid, frontmostPID):
+            controller.serviceLifecycleManager.handleAppTerminated(
+                pid: pid,
+                frontmostPID: frontmostPID
+            )
 
         case let .appUnhidden(pid):
             AppVisibilityTrace.record(

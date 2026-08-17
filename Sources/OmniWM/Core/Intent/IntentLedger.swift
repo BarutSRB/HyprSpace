@@ -39,6 +39,33 @@ struct SameAppCloseProbePayload: Equatable, Sendable {
     var observationGeneration: UInt64
 }
 
+enum AppTerminationFocusRecoveryPhase: Equatable, Sendable {
+    case verifying(
+        candidatePID: pid_t,
+        source: ActivationEventSource,
+        callbackGeneration: UInt64?
+    )
+    case recovering(fallbackPID: pid_t?)
+    case retiring(fallbackPID: pid_t?)
+}
+
+struct AppTerminationFocusRecoveryPayload: Equatable, Sendable {
+    var departingToken: WindowToken
+    let workspaceId: WorkspaceDescriptor.ID
+    var preferredTiledToken: WindowToken
+    var phase: AppTerminationFocusRecoveryPhase
+    var terminationHandled = false
+
+    mutating func rekey(from oldToken: WindowToken, to newToken: WindowToken) {
+        if departingToken == oldToken {
+            departingToken = newToken
+        }
+        if preferredTiledToken == oldToken {
+            preferredTiledToken = newToken
+        }
+    }
+}
+
 struct AppRevealFocusPayload: Equatable, Sendable {
     var token: WindowToken
     let workspaceId: WorkspaceDescriptor.ID
@@ -87,6 +114,7 @@ struct AppRevealFocusFingerprint: Equatable, Sendable {
 
 enum IntentKind: Equatable, Sendable {
     case activateApp(pid: pid_t)
+    case appTerminationFocusRecovery(AppTerminationFocusRecoveryPayload)
     case appRevealFocus(AppRevealFocusPayload)
     case focusPolicyLease(owner: FocusPolicyLeaseOwner)
     case focusWindow(token: WindowToken, workspaceId: WorkspaceDescriptor.ID)
@@ -96,6 +124,7 @@ enum IntentKind: Equatable, Sendable {
     var focusTargetToken: WindowToken? {
         switch self {
         case .activateApp,
+             .appTerminationFocusRecovery,
              .appRevealFocus,
              .focusPolicyLease,
              .replacementFocus,
@@ -117,6 +146,14 @@ enum IntentKind: Equatable, Sendable {
         switch self {
         case let .activateApp(pid):
             pid
+        case let .appTerminationFocusRecovery(payload):
+            switch payload.phase {
+            case let .verifying(candidatePID, _, _):
+                candidatePID
+            case let .recovering(fallbackPID),
+                 let .retiring(fallbackPID):
+                fallbackPID
+            }
         case let .appRevealFocus(payload):
             payload.token.pid
         case .focusPolicyLease:
@@ -488,6 +525,48 @@ final class IntentLedger {
         entries[index].kind = .sameAppCloseProbe(payload)
     }
 
+    @discardableResult
+    func registerAppTerminationFocusRecovery(_ payload: AppTerminationFocusRecoveryPayload) -> Intent {
+        if let open = openAppTerminationFocusRecovery() {
+            _ = cancel(id: open.intent.id)
+            deadlineWheel?.cancel(intentId: open.intent.id)
+        }
+        return append(kind: .appTerminationFocusRecovery(payload), origin: .keyboardOrProgrammatic)
+    }
+
+    func openAppTerminationFocusRecovery() -> (
+        intent: Intent,
+        payload: AppTerminationFocusRecoveryPayload
+    )? {
+        let open = entries.last { entry in
+            guard entry.phase == .pending,
+                  case .appTerminationFocusRecovery = entry.kind
+            else {
+                return false
+            }
+            return true
+        }
+        guard let open,
+              case let .appTerminationFocusRecovery(payload) = open.kind
+        else {
+            return nil
+        }
+        return (open, payload)
+    }
+
+    func updateAppTerminationFocusRecovery(
+        id: IntentID,
+        _ mutate: (inout AppTerminationFocusRecoveryPayload) -> Void
+    ) {
+        guard let index = entries.firstIndex(where: { $0.id == id && $0.phase == .pending }),
+              case var .appTerminationFocusRecovery(payload) = entries[index].kind
+        else {
+            return
+        }
+        mutate(&payload)
+        entries[index].kind = .appTerminationFocusRecovery(payload)
+    }
+
     func intent(id: IntentID) -> Intent? {
         entries.first { $0.id == id }
     }
@@ -536,6 +615,17 @@ final class IntentLedger {
         for index in entries.indices {
             if case let .focusWindow(token, workspaceId) = entries[index].kind, token == oldToken {
                 entries[index].kind = .focusWindow(token: newToken, workspaceId: workspaceId)
+            } else if case var .appTerminationFocusRecovery(payload) = entries[index].kind,
+                      payload.departingToken == oldToken || payload.preferredTiledToken == oldToken
+            {
+                if oldToken.pid == newToken.pid {
+                    payload.rekey(from: oldToken, to: newToken)
+                    entries[index].kind = .appTerminationFocusRecovery(payload)
+                } else if entries[index].phase == .pending {
+                    let intentId = entries[index].id
+                    _ = retire(id: intentId, phase: .cancelled, source: nil)
+                    deadlineWheel?.cancel(intentId: intentId)
+                }
             } else if case var .appRevealFocus(payload) = entries[index].kind,
                       payload.token == oldToken
             {

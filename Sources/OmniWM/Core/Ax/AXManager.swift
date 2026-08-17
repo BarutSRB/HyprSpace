@@ -190,7 +190,6 @@ final class AXManager {
     private var appTerminationObserver: NSObjectProtocol?
     private var appLaunchObserver: NSObjectProtocol?
     var onAppLaunched: ((NSRunningApplication) -> Void)?
-    var onAppTerminated: ((pid_t) -> Void)?
     var isWindowParked: ((Int) -> Bool)?
     var onTerminalFrameRefusal: ((AXFrameTerminalRefusal) -> Void)?
     var onFrameApplyTerminated: ((AXFrameApplyResult) -> Void)?
@@ -272,10 +271,15 @@ final class AXManager {
                     )
                 )
             }
+            EventIntake.post(
+                .appTerminated(
+                    pid: pid,
+                    frontmostPID: NSWorkspace.shared.frontmostApplication?.processIdentifier
+                )
+            )
             Task { @MainActor in
                 self?.clearManagedWindowBindingRetry(for: pid)
                 self?.clearParkFrameState(for: pid, reason: "context-teardown")
-                self?.onAppTerminated?(pid)
                 if let context = AppAXContext.contexts[pid] {
                     context.destroy()
                 }

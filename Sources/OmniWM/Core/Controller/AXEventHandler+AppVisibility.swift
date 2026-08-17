@@ -5,6 +5,27 @@ import Foundation
 
 @MainActor
 extension AXEventHandler {
+    func handleWindowMiniaturized(pid: pid_t, windowId: Int) {
+        controller?.workspaceManager.clearNonManagedFocusTarget(
+            matching: WindowToken(pid: pid, windowId: windowId)
+        )
+    }
+
+    func handleAppDeactivated(pid: pid_t) {
+        guard let controller else { return }
+        let workspaceManager = controller.workspaceManager
+        workspaceManager.clearNonManagedFocusTarget(pid: pid)
+
+        guard !workspaceManager.isNonManagedFocusActive,
+              let focusedToken = workspaceManager.focusedToken,
+              focusedToken.pid == pid,
+              let entry = workspaceManager.entry(for: focusedToken),
+              entry.mode == .floating
+        else { return }
+
+        workspaceManager.suppressFocusBorder(for: focusedToken)
+    }
+
     func handleAppHidden(pid: pid_t, source: WMEventSource = .ax) {
         guard let controller else {
             AppVisibilityTrace.record(

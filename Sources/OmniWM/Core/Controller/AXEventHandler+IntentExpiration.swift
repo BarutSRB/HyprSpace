@@ -15,6 +15,12 @@ extension AXEventHandler {
              .replacementFocus:
             _ = controller.intentLedger.markExpired(id: intentId)
 
+        case let .appTerminationFocusRecovery(payload):
+            handleAppTerminationFocusRecoveryDeadline(
+                intentId: intentId,
+                payload: payload
+            )
+
         case let .focusPolicyLease(owner):
             _ = controller.intentLedger.markExpired(id: intentId)
             controller.focusPolicyEngine.handleLeaseDeadlineExpired(owner: owner, intentId: intentId)

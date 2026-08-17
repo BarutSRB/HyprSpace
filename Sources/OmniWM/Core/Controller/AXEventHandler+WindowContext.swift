@@ -6,6 +6,18 @@ import Foundation
 
 @MainActor
 extension AXEventHandler {
+    func setup() {
+        CGSEventObserver.shared.start()
+    }
+
+    func requestTargetedFullRescan(for appPIDs: Set<pid_t>) {
+        guard let controller, !appPIDs.isEmpty else { return }
+        controller.layoutRefreshController.requestFullRescan(
+            reason: .staleFullRescan,
+            scope: .targeted(appPIDs: appPIDs, nativeSpaceIds: [])
+        )
+    }
+
     static func effectivePlacementOrigin(
         _ placementOrigin: WorkspacePlacementOrigin,
         createPlacementContext: WindowCreatePlacementContext?

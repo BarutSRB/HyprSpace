@@ -10,6 +10,7 @@ struct ManagedReplacementFocusKey: Hashable, Equatable {
 }
 
 enum ActivationCallOrigin: String {
+    case appTerminationProbe
     case external
     case probe
     case retry
@@ -325,6 +326,7 @@ final class AXEventHandler {
     private static let activationRetryLimit = 5
     private static let windowCloseFocusRecoveryDuration: TimeInterval = 0.6
     static let sameAppCloseProbeDelay: Duration = .milliseconds(80)
+    static let appTerminationFocusRecoveryTimeout: Duration = .milliseconds(600)
     private static let mouseFocusIntentDuration: TimeInterval = 0.35
     private static let createFocusTraceLimit = 128
     private static let managedReplacementTraceLimit = 128
@@ -372,6 +374,16 @@ final class AXEventHandler {
         NSWorkspace.shared.frontmostApplication?.processIdentifier
     }
 
+    var applicationIsTerminatedProvider: (pid_t) -> Bool = { pid in
+        if AppAXContext.contexts[pid]?.nsApp.isTerminated == true {
+            return true
+        }
+        guard let application = NSRunningApplication(processIdentifier: pid) else {
+            return true
+        }
+        return application.isTerminated
+    }
+
     init(
         controller: WMController,
         visibleWindowInfoProvider: @escaping () -> [WindowServerInfo] = {
@@ -384,10 +396,6 @@ final class AXEventHandler {
         self.controller = controller
         self.visibleWindowInfoProvider = visibleWindowInfoProvider
         self.windowInfoProvider = windowInfoProvider
-    }
-
-    func setup() {
-        CGSEventObserver.shared.start()
     }
 
     func cleanup() {
@@ -875,7 +883,7 @@ final class AXEventHandler {
         )
     }
 
-    private func clearManagedReplacementFocusTransactions(
+    func clearManagedReplacementFocusTransactions(
         pid: pid_t,
         reason _: String
     ) {
@@ -1265,14 +1273,6 @@ final class AXEventHandler {
         requestTargetedFullRescan(for: [token.pid])
     }
 
-    func requestTargetedFullRescan(for appPIDs: Set<pid_t>) {
-        guard let controller, !appPIDs.isEmpty else { return }
-        controller.layoutRefreshController.requestFullRescan(
-            reason: .staleFullRescan,
-            scope: .targeted(appPIDs: appPIDs, nativeSpaceIds: [])
-        )
-    }
-
     private func prepareManagedWindowRemoval(
         _ entry: WindowState
     ) -> (shouldRecoverFocus: Bool, closeRecoveryArmed: Bool) {
@@ -1544,6 +1544,15 @@ final class AXEventHandler {
         return intent.token == token
     }
 
+    func hasRecentMouseFocusIntent(forPID pid: pid_t) -> Bool {
+        guard let intent = recentMouseFocusIntent else { return false }
+        guard intent.expiresAt > Date() else {
+            recentMouseFocusIntent = nil
+            return false
+        }
+        return intent.token.pid == pid
+    }
+
     private func isWorkspaceActive(_ workspaceId: WorkspaceDescriptor.ID) -> Bool {
         guard let controller,
               let monitorId = controller.workspaceManager.monitorId(for: workspaceId)
@@ -1565,6 +1574,14 @@ final class AXEventHandler {
         guard let controller else { return false }
         guard controller.hasStartedServices else { return false }
         guard !controller.workspaceManager.isAppHidden(pid: pid) else { return false }
+        if handleAppTerminationFocusActivation(
+            pid: pid,
+            source: source,
+            origin: origin,
+            callbackGeneration: callbackGeneration
+        ) {
+            return false
+        }
         if let causalObservationGeneration,
            causalObservationGeneration != latestActivationObservationGeneration
         {
@@ -2262,6 +2279,7 @@ final class AXEventHandler {
                     )
                 )
             )
+            completeAppTerminationFocusRecoveryIfNeeded(entry.token)
         } else {
             _ = controller.workspaceManager.setManagedFocus(
                 entry.token,
@@ -2306,6 +2324,7 @@ final class AXEventHandler {
                 }
                 let preserveViewport = controller.workspaceManager.animationDriver.hasMotion(in: wsId)
                     || preservesPointerViewport
+                    || preservesAppTerminationRecoveryViewport(for: entry.token)
                 let preserveReplacementViewport = isProtectedManagedReplacementFocus(
                     token: entry.token,
                     workspaceId: wsId
@@ -2363,12 +2382,6 @@ final class AXEventHandler {
         {
             controller.moveMouseToWindow(entry.token, preferredFrame: preferredMouseFrame)
         }
-    }
-
-    func handleWindowMiniaturized(pid: pid_t, windowId: Int) {
-        controller?.workspaceManager.clearNonManagedFocusTarget(
-            matching: WindowToken(pid: pid, windowId: windowId)
-        )
     }
 
     @discardableResult
@@ -2451,21 +2464,6 @@ final class AXEventHandler {
             controller.layoutRefreshController.markNativeFullscreenRestoredForFrameApply(entry.token)
         }
         return restored
-    }
-
-    func handleAppDeactivated(pid: pid_t) {
-        guard let controller else { return }
-        let workspaceManager = controller.workspaceManager
-        workspaceManager.clearNonManagedFocusTarget(pid: pid)
-
-        guard !workspaceManager.isNonManagedFocusActive,
-              let focusedToken = workspaceManager.focusedToken,
-              focusedToken.pid == pid,
-              let entry = workspaceManager.entry(for: focusedToken),
-              entry.mode == .floating
-        else { return }
-
-        workspaceManager.suppressFocusBorder(for: focusedToken)
     }
 
     func awaitPendingManagedReplacementBursts(for appPIDs: Set<pid_t>? = nil) async {
@@ -3791,7 +3789,7 @@ final class AXEventHandler {
             return true
         case .workspaceDidActivateApplication,
              .cgsFrontAppChanged:
-            return origin == .external
+            return origin == .external || origin == .appTerminationProbe
         }
     }
 
@@ -3809,35 +3807,6 @@ final class AXEventHandler {
         case .external:
             return true
         }
-    }
-
-    func cleanupFocusStateForTerminatedApp(pid: pid_t) {
-        guard let controller else { return }
-
-        cleanupAdmissionStateForTerminatedApp(pid: pid)
-        admissionQuarantineByWindowId = admissionQuarantineByWindowId.filter { $0.value.token.pid != pid }
-        terminalFrameFailureStateByWindowId = terminalFrameFailureStateByWindowId.filter { windowId, _ in
-            controller.workspaceManager.entry(forWindowId: windowId)?.pid != pid
-        }
-        clearManagedReplacementFocusTransactions(pid: pid, reason: "app_terminated")
-        let entries = controller.workspaceManager.entries(forPid: pid)
-        for entry in entries {
-            clearManagedFocusState(
-                matching: entry.token,
-                workspaceId: controller.workspaceManager.workspace(for: entry.token) ?? entry.workspaceId
-            )
-        }
-
-        if let activeRequest = controller.intentLedger.activeManagedRequest,
-           activeRequest.token.pid == pid
-        {
-            clearManagedFocusState(
-                matching: activeRequest.token,
-                workspaceId: activeRequest.workspaceId
-            )
-        }
-
-        controller.workspaceManager.clearNonManagedFocusTarget(pid: pid)
     }
 
     private func continueManagedFocusRequest(
