@@ -4,19 +4,6 @@
 import AppKit
 import Foundation
 
-enum ActivationRetryReason: String, Equatable {
-    case missingFocusedWindow = "missing_focused_window"
-    case pendingFocusMismatch = "pending_focus_mismatch"
-    case pendingFocusUnmanagedToken = "pending_focus_unmanaged_token"
-    case retryExhausted = "retry_exhausted"
-}
-
-private enum ActivationRequestDisposition {
-    case matchesActiveRequest(ManagedFocusRequest)
-    case conflictsWithPendingRequest(ManagedFocusRequest)
-    case unrelatedNoRequest
-}
-
 struct ManagedReplacementFocusKey: Hashable, Equatable {
     let pid: pid_t
     let workspaceId: WorkspaceDescriptor.ID
@@ -241,42 +228,6 @@ final class AXEventHandler {
         case structural
     }
 
-    private enum PendingFocusedManagedActivationRequest {
-        case matchesActiveRequest(UInt64)
-        case conflictsWithPendingRequest(UInt64)
-        case unrelatedNoRequest
-
-        init(_ disposition: ActivationRequestDisposition) {
-            switch disposition {
-            case let .matchesActiveRequest(request):
-                self = .matchesActiveRequest(request.requestId)
-            case let .conflictsWithPendingRequest(request):
-                self = .conflictsWithPendingRequest(request.requestId)
-            case .unrelatedNoRequest:
-                self = .unrelatedNoRequest
-            }
-        }
-
-        var requestId: UInt64? {
-            switch self {
-            case let .matchesActiveRequest(requestId),
-                 let .conflictsWithPendingRequest(requestId):
-                requestId
-            case .unrelatedNoRequest:
-                nil
-            }
-        }
-    }
-
-    private struct PendingFocusedManagedActivation {
-        let source: ActivationEventSource
-        let origin: ActivationCallOrigin
-        let observationGeneration: UInt64
-        let appFullscreen: Bool
-        let request: PendingFocusedManagedActivationRequest
-        let callbackGeneration: UInt64?
-    }
-
     private struct WindowCloseFocusRecoveryContext {
         let workspaceId: WorkspaceDescriptor.ID
         let closedToken: WindowToken
@@ -417,6 +368,9 @@ final class AXEventHandler {
     var managedWindowIdentityRebindFinalizationProvider:
         ((AXManagedWindowIdentity, AXManagedWindowIdentity) async -> Bool)?
     var managedWindowIdentityRebindTargetIsAliveProvider: ((pid_t) -> Bool)?
+    var frontmostApplicationPIDProvider: () -> pid_t? = {
+        NSWorkspace.shared.frontmostApplication?.processIdentifier
+    }
 
     init(
         controller: WMController,
@@ -1706,6 +1660,16 @@ final class AXEventHandler {
         )
     }
 
+    func isCurrentFocusedAdmissionContinuation(
+        _ continuation: FocusedAdmissionRetryContinuation
+    ) -> Bool {
+        guard continuation.observationGeneration == latestActivationObservationGeneration else {
+            return false
+        }
+        guard let callbackGeneration = continuation.callbackGeneration else { return true }
+        return AppAXContext.contexts[continuation.token.pid]?.callbackGeneration == callbackGeneration
+    }
+
     func handleActivationFactsResolved(_ facts: ActivationFacts) {
         if let execution = facts.focusedAdmissionRetryExecution,
            !ownsFocusedAdmissionRetryExecution(execution, matching: facts)
@@ -1755,6 +1719,13 @@ final class AXEventHandler {
             return
         }
         let token = canonicalObservedWindowToken(pid: pid, axRef: axRef)
+        if source.isAuthoritative,
+           origin == .retry,
+           focusedWindow.isSystemModalSurface,
+           frontmostApplicationPIDProvider() != pid
+        {
+            return
+        }
         if let causality = facts.sameAppFocusCausality,
            controller.workspaceManager.entry(for: token) != nil,
            !hasRecentMouseFocusIntent(for: token),
@@ -1903,7 +1874,7 @@ final class AXEventHandler {
         if case let .admissionPending(reason) = admissionAttempt {
             let ownsProvisionalFocus = origin == .external
                 || controller.workspaceManager.nonManagedFocusToken == token
-                || NSWorkspace.shared.frontmostApplication?.processIdentifier == token.pid
+                || frontmostApplicationPIDProvider() == token.pid
             if ownsProvisionalFocus {
                 let provisionalTarget: WindowToken? = reason.suppressesNonManagedFocusTarget ? nil : token
                 _ = controller.workspaceManager.enterNonManagedFocus(target: provisionalTarget)
@@ -2021,7 +1992,18 @@ final class AXEventHandler {
         }
 
         cancelCreatedWindowRetry(windowId: windowId)
-        if completeLiveStructuralReplacementCreate(candidate) {
+        let focusedActivation = PendingFocusedManagedActivation(
+            source: source,
+            origin: origin,
+            observationGeneration: observationGeneration,
+            appFullscreen: appFullscreen,
+            request: .init(requestDisposition),
+            callbackGeneration: callbackGeneration
+        )
+        if completeLiveStructuralReplacementCreate(
+            candidate,
+            focusedActivation: focusedActivation
+        ) {
             guard let entry = controller.workspaceManager.entry(for: candidate.token) else {
                 return .handled
             }
@@ -2032,28 +2014,14 @@ final class AXEventHandler {
             return completeFocusedManagedAdmission(
                 entry: entry,
                 isWorkspaceActive: isWorkspaceActive,
-                activation: .init(
-                    source: source,
-                    origin: origin,
-                    observationGeneration: observationGeneration,
-                    appFullscreen: appFullscreen,
-                    request: .init(requestDisposition),
-                    callbackGeneration: callbackGeneration
-                ),
+                activation: focusedActivation,
                 requestDisposition: requestDisposition
             ) ? .handled : .rejected
         }
         if shouldDelayManagedReplacementCreate(candidate) {
             enqueueManagedReplacementCreate(
                 candidate,
-                focusedActivation: .init(
-                    source: source,
-                    origin: origin,
-                    observationGeneration: observationGeneration,
-                    appFullscreen: appFullscreen,
-                    request: .init(requestDisposition),
-                    callbackGeneration: callbackGeneration
-                )
+                focusedActivation: focusedActivation
             )
             return .handled
         }
@@ -2071,14 +2039,7 @@ final class AXEventHandler {
         return completeFocusedManagedAdmission(
             entry: entry,
             isWorkspaceActive: isWorkspaceActive,
-            activation: .init(
-                source: source,
-                origin: origin,
-                observationGeneration: observationGeneration,
-                appFullscreen: appFullscreen,
-                request: .init(requestDisposition),
-                callbackGeneration: callbackGeneration
-            ),
+            activation: focusedActivation,
             requestDisposition: requestDisposition
         ) ? .handled : .rejected
     }
@@ -2170,7 +2131,7 @@ final class AXEventHandler {
         case .unrelatedNoRequest:
             if activation.origin == .retry,
                controller.workspaceManager.nonManagedFocusToken != entry.token,
-               NSWorkspace.shared.frontmostApplication?.processIdentifier != entry.pid
+               frontmostApplicationPIDProvider() != entry.pid
             {
                 return true
             }
@@ -2228,6 +2189,9 @@ final class AXEventHandler {
         let wsId = entry.workspaceId
         let monitorId = controller.workspaceManager.monitorId(for: wsId)
         let shouldActivateWorkspace = !isWorkspaceActive && !controller.isTransferringWindow
+        let isRetriedAuthoritativeSystemModalFocus = source.isAuthoritative
+            && origin == .retry
+            && controller.workspaceManager.systemModalFocusToken == entry.token
         var activeRequest: ManagedFocusRequest?
         if let activeRequestId {
             activeRequest = controller.intentLedger.activeManagedRequest(requestId: activeRequestId)
@@ -2304,6 +2268,13 @@ final class AXEventHandler {
                 in: wsId,
                 onMonitor: monitorId
             )
+        }
+
+        if isRetriedAuthoritativeSystemModalFocus,
+           frontmostApplicationPIDProvider() == entry.pid,
+           controller.workspaceManager.focusedToken == entry.token
+        {
+            controller.performWindowOrdering(windowId: entry.windowId)
         }
 
         var preferredMouseFrame: CGRect?
@@ -2995,14 +2966,23 @@ final class AXEventHandler {
         return candidate.structuralReplacementMatch?.source == .pendingDestroy
     }
 
-    private func completeLiveStructuralReplacementCreate(_ candidate: PreparedCreate) -> Bool {
+    private func completeLiveStructuralReplacementCreate(
+        _ candidate: PreparedCreate,
+        focusedActivation: PendingFocusedManagedActivation? = nil
+    ) -> Bool {
         guard let match = candidate.structuralReplacementMatch,
               match.source == .liveInvisible
         else {
             return false
         }
 
-        return rekeyManagedReplacement(from: match.token, to: candidate).isHandled
+        return rekeyManagedReplacement(
+            from: match.token,
+            to: candidate,
+            focusedAdmissionContinuation: focusedActivation.map {
+                focusedAdmissionContinuation(for: candidate.token, activation: $0)
+            }
+        ).isHandled
     }
 
     private func shouldDelayManagedReplacementDestroy(_ candidate: PreparedDestroy) -> Bool {
@@ -3148,12 +3128,30 @@ final class AXEventHandler {
         destroy: PendingManagedDestroy,
         create: PendingManagedCreate
     ) -> ManagedWindowIdentityRebindResult {
-        let result = rekeyManagedReplacement(from: destroy.candidate.token, to: create.candidate)
+        let result = rekeyManagedReplacement(
+            from: destroy.candidate.token,
+            to: create.candidate,
+            focusedAdmissionContinuation: create.focusedActivation.map {
+                focusedAdmissionContinuation(for: create.candidate.token, activation: $0)
+            }
+        )
         guard result.isHandled else {
             return result
         }
         completeDelayedFocusedManagedAdmission(create)
         return result
+    }
+
+    private func focusedAdmissionContinuation(
+        for token: WindowToken,
+        activation: PendingFocusedManagedActivation
+    ) -> FocusedAdmissionRetryContinuation {
+        FocusedAdmissionRetryContinuation(
+            token: token,
+            source: activation.source,
+            observationGeneration: activation.observationGeneration,
+            callbackGeneration: activation.callbackGeneration
+        )
     }
 
     private func completeDelayedFocusedManagedAdmission(_ create: PendingManagedCreate) {
@@ -3214,7 +3212,8 @@ final class AXEventHandler {
 
     private func rekeyManagedReplacement(
         from oldToken: WindowToken,
-        to create: PreparedCreate
+        to create: PreparedCreate,
+        focusedAdmissionContinuation: FocusedAdmissionRetryContinuation? = nil
     ) -> ManagedWindowIdentityRebindResult {
         rekeyManagedWindowIdentity(
             from: oldToken,
@@ -3222,7 +3221,8 @@ final class AXEventHandler {
             windowId: create.windowId,
             axRef: create.axRef,
             managedReplacementMetadata: create.replacementMetadata,
-            admissionHints: create.admissionHints
+            admissionHints: create.admissionHints,
+            focusedAdmissionContinuation: focusedAdmissionContinuation
         )
     }
 

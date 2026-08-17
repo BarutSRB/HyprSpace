@@ -30,6 +30,13 @@ enum WindowAdmissionRejectionReason: String, Equatable {
     }
 }
 
+enum ActivationRetryReason: String, Equatable {
+    case missingFocusedWindow = "missing_focused_window"
+    case pendingFocusMismatch = "pending_focus_mismatch"
+    case pendingFocusUnmanagedToken = "pending_focus_unmanaged_token"
+    case retryExhausted = "retry_exhausted"
+}
+
 extension WindowDecision {
     @MainActor
     var admissionPendingReason: WindowAdmissionPendingReason {
@@ -47,6 +54,48 @@ extension WindowServerInfo {
         guard id == windowId else { return nil }
         return WindowToken(pid: pid_t(pid), windowId: Int(windowId))
     }
+}
+
+enum ActivationRequestDisposition {
+    case matchesActiveRequest(ManagedFocusRequest)
+    case conflictsWithPendingRequest(ManagedFocusRequest)
+    case unrelatedNoRequest
+}
+
+enum PendingFocusedManagedActivationRequest {
+    case matchesActiveRequest(UInt64)
+    case conflictsWithPendingRequest(UInt64)
+    case unrelatedNoRequest
+
+    init(_ disposition: ActivationRequestDisposition) {
+        switch disposition {
+        case let .matchesActiveRequest(request):
+            self = .matchesActiveRequest(request.requestId)
+        case let .conflictsWithPendingRequest(request):
+            self = .conflictsWithPendingRequest(request.requestId)
+        case .unrelatedNoRequest:
+            self = .unrelatedNoRequest
+        }
+    }
+
+    var requestId: UInt64? {
+        switch self {
+        case let .matchesActiveRequest(requestId),
+             let .conflictsWithPendingRequest(requestId):
+            requestId
+        case .unrelatedNoRequest:
+            nil
+        }
+    }
+}
+
+struct PendingFocusedManagedActivation {
+    let source: ActivationEventSource
+    let origin: ActivationCallOrigin
+    let observationGeneration: UInt64
+    let appFullscreen: Bool
+    let request: PendingFocusedManagedActivationRequest
+    let callbackGeneration: UInt64?
 }
 
 enum AdmissionRetryTrigger {
@@ -115,6 +164,18 @@ enum AdmissionRetryTrigger {
         if case .ruleReevaluation = self { return false }
         return true
     }
+
+    var focusedAdmissionContinuation: FocusedAdmissionRetryContinuation? {
+        guard case let .focused(token, source, observationGeneration, callbackGeneration) = self else {
+            return nil
+        }
+        return FocusedAdmissionRetryContinuation(
+            token: token,
+            source: source,
+            observationGeneration: observationGeneration,
+            callbackGeneration: callbackGeneration
+        )
+    }
 }
 
 enum ManagedWindowIdentityRebindResult {
@@ -144,6 +205,13 @@ struct FocusedAdmissionRetryExecution: Equatable, Sendable {
     let executionOwner: UInt64
 }
 
+struct FocusedAdmissionRetryContinuation: Equatable, Sendable {
+    let token: WindowToken
+    let source: ActivationEventSource
+    let observationGeneration: UInt64
+    let callbackGeneration: UInt64?
+}
+
 struct AdmissionRetryState {
     var expectedToken: WindowToken?
     var axRef: AXWindowRef?
@@ -151,9 +219,11 @@ struct AdmissionRetryState {
     var attempt: Int
     var generation: UInt64
     var trigger: AdmissionRetryTrigger
+    var focusedAdmissionContinuation: FocusedAdmissionRetryContinuation? = nil
     var exhausted: Bool
     var executionPhase: AdmissionRetryExecutionPhase = .waiting
     var identityRebindTargetDestroyed = false
+    var focusedAdmissionReplayExecutionOwner: UInt64? = nil
     var task: Task<Void, Never>?
 }
 
@@ -167,6 +237,7 @@ struct AdmissionRetrySchedule {
     let axRef: AXWindowRef?
     let reason: WindowAdmissionPendingReason
     let trigger: AdmissionRetryTrigger
+    let focusedAdmissionContinuation: FocusedAdmissionRetryContinuation?
 }
 
 struct DeferredReplacementProtection {

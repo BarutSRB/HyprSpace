@@ -95,9 +95,16 @@ extension LayoutRefreshController {
     func focusFullRescanFloatingCandidate(
         _ candidate: FullRescanFloatingFocusCandidate?
     ) -> FullRescanFloatingFocusResolution {
-        guard let candidate, let controller else {
+        guard let controller else {
             return .fallback
         }
+        if let token = controller.workspaceManager.systemModalFocusToken,
+           controller.workspaceManager.focusedToken != token,
+           controller.axEventHandler.hasLiveFocusedAdmissionContinuation(for: token)
+        {
+            return .systemModalBarrier
+        }
+        guard let candidate else { return .fallback }
         if candidate.createsSystemModalBarrier {
             return .systemModalBarrier
         }

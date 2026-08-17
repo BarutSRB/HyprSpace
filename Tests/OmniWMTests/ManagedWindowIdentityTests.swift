@@ -551,7 +551,121 @@ final class ManagedWindowIdentityTests: XCTestCase {
             return XCTFail("Expected higher-priority identity rebind retry")
         }
         XCTAssertEqual(state.generation, generation)
+        XCTAssertEqual(
+            state.focusedAdmissionContinuation,
+            FocusedAdmissionRetryContinuation(
+                token: pending.newWindow.token,
+                source: .focusedWindowChanged,
+                observationGeneration: 1,
+                callbackGeneration: nil
+            )
+        )
         controller.axEventHandler.cancelCreatedWindowRetry(windowId: pending.windowId)
+    }
+
+    func testIdentityRebindPromotionRetainsFocusedAdmissionContinuation() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let oldToken = WindowToken(pid: 467_410, windowId: 467_510)
+        let newToken = WindowToken(pid: oldToken.pid, windowId: 467_511)
+        let oldRef = WindowAdmissionTestSupport.track(oldToken, in: workspaceId, controller: controller)
+        let newRef = WindowAdmissionTestSupport.axRef(for: newToken)
+        controller.hasStartedServices = true
+        controller.axEventHandler.managedWindowIdentityRebindTargetIsAliveProvider = { _ in true }
+        XCTAssertTrue(
+            controller.axEventHandler.scheduleAdmissionRetry(
+                windowId: UInt32(newToken.windowId),
+                expectedToken: newToken,
+                axRef: newRef,
+                reason: .degenerateGeometry,
+                trigger: .focused(
+                    token: newToken,
+                    source: .focusedWindowChanged,
+                    observationGeneration: 0,
+                    callbackGeneration: nil
+                )
+            )
+        )
+        let focusedState = try XCTUnwrap(
+            controller.axEventHandler.admissionRetryStateByWindowId[UInt32(newToken.windowId)]
+        )
+
+        guard case .pending = controller.axEventHandler.rekeyManagedWindowIdentity(
+            from: oldToken,
+            to: newToken,
+            windowId: UInt32(newToken.windowId),
+            axRef: newRef
+        ) else {
+            return XCTFail("Expected identity rebind retry")
+        }
+        defer {
+            controller.axEventHandler.cancelCreatedWindowRetry(windowId: UInt32(newToken.windowId))
+        }
+
+        let state = try XCTUnwrap(
+            controller.axEventHandler.admissionRetryStateByWindowId[UInt32(newToken.windowId)]
+        )
+        guard case let .identityRebind(oldWindow, newWindow, _, _, _) = state.trigger else {
+            return XCTFail("Expected identity rebind ownership")
+        }
+        XCTAssertEqual(oldWindow.token, oldToken)
+        XCTAssertTrue(CFEqual(oldWindow.axRef.element, oldRef.element))
+        XCTAssertEqual(newWindow.token, newToken)
+        XCTAssertEqual(state.generation, focusedState.generation)
+        XCTAssertEqual(
+            state.focusedAdmissionContinuation,
+            FocusedAdmissionRetryContinuation(
+                token: newToken,
+                source: .focusedWindowChanged,
+                observationGeneration: 0,
+                callbackGeneration: nil
+            )
+        )
+    }
+
+    func testIdentityRebindStartsWithExplicitFocusedAdmissionContinuation() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let oldToken = WindowToken(pid: 467_412, windowId: 467_512)
+        let modalToken = WindowToken(pid: oldToken.pid, windowId: 467_513)
+        _ = WindowAdmissionTestSupport.track(oldToken, in: workspaceId, controller: controller)
+        let modalRef = WindowAdmissionTestSupport.axRef(for: modalToken)
+        let continuation = FocusedAdmissionRetryContinuation(
+            token: modalToken,
+            source: .focusedWindowChanged,
+            observationGeneration: 0,
+            callbackGeneration: nil
+        )
+        controller.hasStartedServices = true
+        controller.axEventHandler.managedWindowIdentityRebindTargetIsAliveProvider = { _ in true }
+
+        guard case .pending = controller.axEventHandler.rekeyManagedWindowIdentity(
+            from: oldToken,
+            to: modalToken,
+            windowId: UInt32(modalToken.windowId),
+            axRef: modalRef,
+            focusedAdmissionContinuation: continuation
+        ) else {
+            return XCTFail("Expected identity rebind retry")
+        }
+        defer {
+            controller.axEventHandler.cancelCreatedWindowRetry(windowId: UInt32(modalToken.windowId))
+        }
+
+        let state = try XCTUnwrap(
+            controller.axEventHandler.admissionRetryStateByWindowId[UInt32(modalToken.windowId)]
+        )
+        guard case let .identityRebind(oldWindow, newWindow, _, _, _) = state.trigger else {
+            return XCTFail("Expected identity rebind ownership")
+        }
+        XCTAssertEqual(oldWindow.token, oldToken)
+        XCTAssertEqual(newWindow.token, modalToken)
+        XCTAssertEqual(state.focusedAdmissionContinuation, continuation)
+        XCTAssertTrue(controller.axEventHandler.hasLiveFocusedAdmissionContinuation(for: modalToken))
     }
 
     func testReplacementIncarnationDisplacesStaleIdentityRebindRetry() throws {

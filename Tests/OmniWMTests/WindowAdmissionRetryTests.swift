@@ -726,6 +726,61 @@ final class WindowAdmissionRetryTests: XCTestCase {
         XCTAssertNotNil(controller.layoutRefreshController.layoutState.missingConfirmationTask)
     }
 
+    func testStaleFocusedContinuationRetiresWithoutCancellingIdentityRebind() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let oldToken = WindowToken(pid: 467_326, windowId: 467_426)
+        let newToken = WindowToken(pid: oldToken.pid, windowId: 467_427)
+        let newRef = WindowAdmissionTestSupport.axRef(for: newToken)
+        XCTAssertTrue(
+            controller.axEventHandler.scheduleAdmissionRetry(
+                windowId: UInt32(newToken.windowId),
+                expectedToken: newToken,
+                axRef: newRef,
+                reason: .factsDeferred,
+                trigger: .focused(
+                    token: newToken,
+                    source: .focusedWindowChanged,
+                    observationGeneration: 15,
+                    callbackGeneration: nil
+                )
+            )
+        )
+        XCTAssertTrue(
+            controller.axEventHandler.scheduleAdmissionRetry(
+                windowId: UInt32(newToken.windowId),
+                expectedToken: newToken,
+                axRef: newRef,
+                reason: .factsDeferred,
+                trigger: .identityRebind(
+                    oldWindow: AXManagedWindowIdentity(
+                        token: oldToken,
+                        axRef: WindowAdmissionTestSupport.axRef(for: oldToken)
+                    ),
+                    newWindow: AXManagedWindowIdentity(token: newToken, axRef: newRef),
+                    managedReplacementMetadata: nil,
+                    admissionHints: nil,
+                    sizeConstraints: nil
+                )
+            )
+        )
+        defer {
+            controller.axEventHandler.cancelCreatedWindowRetry(windowId: UInt32(newToken.windowId))
+        }
+
+        controller.axEventHandler.retireStaleFocusedAdmissionRetry(
+            pid: newToken.pid,
+            observationGeneration: 15
+        )
+
+        let state = try XCTUnwrap(
+            controller.axEventHandler.admissionRetryStateByWindowId[UInt32(newToken.windowId)]
+        )
+        guard case .identityRebind = state.trigger else {
+            return XCTFail("Expected identity rebind retry to remain live")
+        }
+        XCTAssertNil(state.focusedAdmissionContinuation)
+    }
+
     func testRuleReevaluationCancellationSettlesDeferredReplacementProtection() throws {
         let controller = WindowAdmissionTestSupport.controller()
         defer {
@@ -912,6 +967,158 @@ final class WindowAdmissionRetryTests: XCTestCase {
 
         XCTAssertNil(controller.axEventHandler.admissionRetryStateByWindowId[windowId])
         XCTAssertEqual(resolvedPIDs, [token.pid])
+    }
+
+    func testIdentityRebindCompletionReplaysRetainedFocusedContinuation() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let oldToken = WindowToken(pid: 467_328, windowId: 467_428)
+        let newToken = WindowToken(pid: oldToken.pid, windowId: 467_429)
+        let newRef = WindowAdmissionTestSupport.axRef(for: newToken)
+        var resolvedPIDs: [pid_t] = []
+        controller.factResolver.factProvider = { pid in
+            resolvedPIDs.append(pid)
+            return nil
+        }
+        controller.hasStartedServices = true
+        XCTAssertTrue(
+            controller.axEventHandler.scheduleAdmissionRetry(
+                windowId: UInt32(newToken.windowId),
+                expectedToken: newToken,
+                axRef: newRef,
+                reason: .degenerateGeometry,
+                trigger: .focused(
+                    token: newToken,
+                    source: .focusedWindowChanged,
+                    observationGeneration: 0,
+                    callbackGeneration: nil
+                )
+            )
+        )
+        XCTAssertTrue(
+            controller.axEventHandler.scheduleAdmissionRetry(
+                windowId: UInt32(newToken.windowId),
+                expectedToken: newToken,
+                axRef: newRef,
+                reason: .factsDeferred,
+                trigger: .identityRebind(
+                    oldWindow: AXManagedWindowIdentity(
+                        token: oldToken,
+                        axRef: WindowAdmissionTestSupport.axRef(for: oldToken)
+                    ),
+                    newWindow: AXManagedWindowIdentity(token: newToken, axRef: newRef),
+                    managedReplacementMetadata: nil,
+                    admissionHints: nil,
+                    sizeConstraints: nil
+                )
+            )
+        )
+        _ = controller.workspaceManager.addWindow(
+            newRef,
+            pid: newToken.pid,
+            windowId: newToken.windowId,
+            to: workspaceId,
+            mode: .floating
+        )
+
+        controller.axEventHandler.finishAdmissionRetryAfterTracking(
+            windowId: UInt32(newToken.windowId)
+        )
+
+        XCTAssertNil(
+            controller.axEventHandler.admissionRetryStateByWindowId[UInt32(newToken.windowId)]
+        )
+        XCTAssertEqual(resolvedPIDs, [newToken.pid])
+    }
+
+    func testIdentityRebindReplayRetainsFullRescanBarrierUntilFactResolution() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        defer { controller.eventIntake.close() }
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let oldToken = WindowToken(pid: 467_330, windowId: 467_430)
+        let modalToken = WindowToken(pid: oldToken.pid, windowId: 467_431)
+        let modalRef = WindowAdmissionTestSupport.axRef(for: modalToken)
+        controller.factResolver.factProvider = { _ in
+            FocusedWindowFact(
+                axRef: modalRef,
+                isFullscreen: false,
+                isSystemModalSurface: true
+            )
+        }
+        controller.axEventHandler.frontmostApplicationPIDProvider = { modalToken.pid }
+        controller.eventIntake.open(sink: controller.eventInterpreter)
+        controller.hasStartedServices = true
+        XCTAssertTrue(
+            controller.axEventHandler.scheduleAdmissionRetry(
+                windowId: UInt32(modalToken.windowId),
+                expectedToken: modalToken,
+                axRef: modalRef,
+                reason: .degenerateGeometry,
+                trigger: .focused(
+                    token: modalToken,
+                    source: .focusedWindowChanged,
+                    observationGeneration: 0,
+                    callbackGeneration: nil
+                )
+            )
+        )
+        XCTAssertTrue(
+            controller.axEventHandler.scheduleAdmissionRetry(
+                windowId: UInt32(modalToken.windowId),
+                expectedToken: modalToken,
+                axRef: modalRef,
+                reason: .factsDeferred,
+                trigger: .identityRebind(
+                    oldWindow: AXManagedWindowIdentity(
+                        token: oldToken,
+                        axRef: WindowAdmissionTestSupport.axRef(for: oldToken)
+                    ),
+                    newWindow: AXManagedWindowIdentity(token: modalToken, axRef: modalRef),
+                    managedReplacementMetadata: nil,
+                    admissionHints: nil,
+                    sizeConstraints: nil
+                )
+            )
+        )
+        _ = controller.workspaceManager.addWindow(
+            modalRef,
+            pid: modalToken.pid,
+            windowId: modalToken.windowId,
+            to: workspaceId,
+            mode: .floating
+        )
+        controller.workspaceManager.setSystemModalFocus(modalToken)
+
+        controller.axEventHandler.finishAdmissionRetryAfterTracking(
+            windowId: UInt32(modalToken.windowId)
+        )
+
+        XCTAssertTrue(controller.axEventHandler.hasLiveFocusedAdmissionContinuation(for: modalToken))
+        let replayExecutionPhase = controller.axEventHandler
+            .admissionRetryStateByWindowId[UInt32(modalToken.windowId)]?.executionPhase
+        controller.axEventHandler.finishAdmissionRetryAfterTracking(
+            windowId: UInt32(modalToken.windowId)
+        )
+        XCTAssertEqual(
+            controller.axEventHandler
+                .admissionRetryStateByWindowId[UInt32(modalToken.windowId)]?.executionPhase,
+            replayExecutionPhase
+        )
+        XCTAssertEqual(
+            controller.layoutRefreshController.focusFullRescanFloatingCandidate(nil),
+            .systemModalBarrier
+        )
+
+        controller.eventIntake.drainNow()
+
+        XCTAssertNil(
+            controller.axEventHandler.admissionRetryStateByWindowId[UInt32(modalToken.windowId)]
+        )
+        XCTAssertEqual(controller.workspaceManager.focusedToken, modalToken)
     }
 
     func testCollisionRequiresMatchingTokenAndAXElement() {

@@ -304,6 +304,128 @@ final class FullRescanReadmissionTests: XCTestCase {
         XCTAssertEqual(resolution, .fallback)
     }
 
+    func testPendingFocusedIdentityRebindCreatesPreAdmissionFullRescanBarrier() throws {
+        var operations: [String] = []
+        let controller = WindowAdmissionTestSupport.controller(
+            prefix: "OmniWMFullRescanPendingModalBarrierTests",
+            windowFocusOperations: WindowFocusOperations(
+                activateApp: { _ in operations.append("activate") },
+                focusSpecificWindow: { _, _, _ in operations.append("focus") },
+                raiseWindow: { _ in operations.append("raise") },
+                orderWindow: { _ in operations.append("order") }
+            )
+        )
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let focusedToken = WindowToken(pid: 9008, windowId: 11)
+        let ordinaryToken = WindowToken(pid: 9009, windowId: 12)
+        let modalToken = WindowToken(pid: 9010, windowId: 13)
+        let focusedRef = WindowAdmissionTestSupport.track(
+            focusedToken,
+            in: workspaceId,
+            controller: controller
+        )
+        _ = controller.workspaceManager.addWindow(
+            WindowAdmissionTestSupport.axRef(for: ordinaryToken),
+            pid: ordinaryToken.pid,
+            windowId: ordinaryToken.windowId,
+            to: workspaceId,
+            mode: .floating
+        )
+        XCTAssertTrue(
+            controller.workspaceManager.confirmManagedFocus(
+                focusedToken,
+                in: workspaceId,
+                activateWorkspaceOnMonitor: false
+            )
+        )
+        let modalRef = WindowAdmissionTestSupport.axRef(for: modalToken)
+        XCTAssertTrue(
+            controller.axEventHandler.scheduleAdmissionRetry(
+                windowId: UInt32(modalToken.windowId),
+                expectedToken: modalToken,
+                axRef: modalRef,
+                reason: .degenerateGeometry,
+                trigger: .focused(
+                    token: modalToken,
+                    source: .focusedWindowChanged,
+                    observationGeneration: 0,
+                    callbackGeneration: nil
+                )
+            )
+        )
+        XCTAssertTrue(
+            controller.axEventHandler.scheduleAdmissionRetry(
+                windowId: UInt32(modalToken.windowId),
+                expectedToken: modalToken,
+                axRef: modalRef,
+                reason: .factsDeferred,
+                trigger: .identityRebind(
+                    oldWindow: AXManagedWindowIdentity(token: focusedToken, axRef: focusedRef),
+                    newWindow: AXManagedWindowIdentity(token: modalToken, axRef: modalRef),
+                    managedReplacementMetadata: nil,
+                    admissionHints: nil,
+                    sizeConstraints: nil
+                )
+            )
+        )
+        defer {
+            controller.axEventHandler.cancelCreatedWindowRetry(windowId: UInt32(modalToken.windowId))
+        }
+        controller.workspaceManager.setSystemModalFocus(modalToken)
+        let candidate = try XCTUnwrap(
+            LayoutRefreshController.FullRescanFloatingFocusCandidate(
+                token: ordinaryToken,
+                workspaceId: workspaceId,
+                isNewAdmission: true,
+                mode: .floating,
+                interactionPolicy: .full,
+                createPlacementContext: createPlacementContext(createdAt: Date())
+            )
+        )
+
+        XCTAssertEqual(
+            controller.layoutRefreshController.focusFullRescanFloatingCandidate(candidate),
+            .systemModalBarrier
+        )
+        XCTAssertEqual(
+            controller.layoutRefreshController.focusFullRescanFloatingCandidate(nil),
+            .systemModalBarrier
+        )
+        XCTAssertEqual(controller.workspaceManager.focusedToken, focusedToken)
+        XCTAssertTrue(operations.isEmpty)
+        XCTAssertNil(controller.intentLedger.activeManagedRequest)
+        XCTAssertNil(controller.workspaceManager.pendingFocusedToken)
+
+        var state = try XCTUnwrap(
+            controller.axEventHandler.admissionRetryStateByWindowId[UInt32(modalToken.windowId)]
+        )
+        state.focusedAdmissionContinuation = FocusedAdmissionRetryContinuation(
+            token: modalToken,
+            source: .focusedWindowChanged,
+            observationGeneration: 1,
+            callbackGeneration: nil
+        )
+        controller.axEventHandler.admissionRetryStateByWindowId[UInt32(modalToken.windowId)] = state
+        XCTAssertEqual(
+            controller.layoutRefreshController.focusFullRescanFloatingCandidate(nil),
+            .fallback
+        )
+
+        state.focusedAdmissionContinuation = FocusedAdmissionRetryContinuation(
+            token: modalToken,
+            source: .focusedWindowChanged,
+            observationGeneration: 0,
+            callbackGeneration: 99
+        )
+        controller.axEventHandler.admissionRetryStateByWindowId[UInt32(modalToken.windowId)] = state
+        XCTAssertEqual(
+            controller.layoutRefreshController.focusFullRescanFloatingCandidate(nil),
+            .fallback
+        )
+    }
+
     func testFailedFullRescanFloatingFocusUsesFallbackWorkspace() throws {
         var operations: [String] = []
         let controller = WindowAdmissionTestSupport.controller(

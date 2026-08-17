@@ -14,7 +14,8 @@ extension AXEventHandler {
         axRef: AXWindowRef,
         managedReplacementMetadata: ManagedReplacementMetadata? = nil,
         admissionHints: ManagedWindowAdmissionHints? = nil,
-        sizeConstraints: WindowSizeConstraints? = nil
+        sizeConstraints: WindowSizeConstraints? = nil,
+        focusedAdmissionContinuation: FocusedAdmissionRetryContinuation? = nil
     ) -> ManagedWindowIdentityRebindResult {
         guard let controller else { return .rejected }
         guard let oldEntry = controller.workspaceManager.entry(for: oldToken),
@@ -39,7 +40,8 @@ extension AXEventHandler {
                 to: newWindow,
                 managedReplacementMetadata: managedReplacementMetadata,
                 admissionHints: admissionHints,
-                sizeConstraints: sizeConstraints
+                sizeConstraints: sizeConstraints,
+                focusedAdmissionContinuation: focusedAdmissionContinuation
             )
             return scheduled ? .pending : .rejected
         }
@@ -546,10 +548,11 @@ extension AXEventHandler {
         to newWindow: AXManagedWindowIdentity,
         managedReplacementMetadata: ManagedReplacementMetadata?,
         admissionHints: ManagedWindowAdmissionHints?,
-        sizeConstraints: WindowSizeConstraints?
+        sizeConstraints: WindowSizeConstraints?,
+        focusedAdmissionContinuation: FocusedAdmissionRetryContinuation? = nil
     ) -> Bool {
         guard let windowId = UInt32(exactly: newWindow.token.windowId) else { return false }
-        return scheduleAdmissionRetry(
+        let scheduled = scheduleAdmissionRetry(
             windowId: windowId,
             expectedToken: newWindow.token,
             axRef: newWindow.axRef,
@@ -562,5 +565,12 @@ extension AXEventHandler {
                 sizeConstraints: sizeConstraints
             )
         )
+        if scheduled, let focusedAdmissionContinuation {
+            _ = retainFocusedAdmissionContinuation(
+                focusedAdmissionContinuation,
+                windowId: windowId
+            )
+        }
+        return scheduled
     }
 }

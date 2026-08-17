@@ -243,6 +243,133 @@ final class ManagedFocusAdmissionTests: XCTestCase {
         XCTAssertNil(controller.axEventHandler.admissionRetryStateByWindowId[windowId])
     }
 
+    func testFrontmostRetriedAuthoritativeSystemModalUsesFocusNeutralOrdering() throws {
+        var operations: [String] = []
+        let controller = WindowAdmissionTestSupport.controller(
+            prefix: "OmniWMRetriedSystemModalOrderingTests",
+            windowFocusOperations: WindowFocusOperations(
+                activateApp: { _ in operations.append("activate") },
+                focusSpecificWindow: { _, _, _ in operations.append("focus") },
+                raiseWindow: { _ in operations.append("raise") },
+                orderWindow: { operations.append("order:\($0)") }
+            )
+        )
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let previousToken = WindowToken(pid: 467_923, windowId: 467_924)
+        let modalToken = WindowToken(pid: previousToken.pid, windowId: 467_925)
+        _ = WindowAdmissionTestSupport.track(previousToken, in: workspaceId, controller: controller)
+        let modalRef = WindowAdmissionTestSupport.track(
+            modalToken,
+            in: workspaceId,
+            controller: controller
+        )
+        XCTAssertTrue(
+            controller.workspaceManager.confirmManagedFocus(
+                previousToken,
+                in: workspaceId,
+                activateWorkspaceOnMonitor: false
+            )
+        )
+        controller.axEventHandler.frontmostApplicationPIDProvider = { modalToken.pid }
+        controller.hasStartedServices = true
+
+        controller.axEventHandler.handleActivationFactsResolved(
+            ActivationFacts(
+                pid: modalToken.pid,
+                source: .focusedWindowChanged,
+                origin: .retry,
+                observationGeneration: 0,
+                requestedAtSeq: 0,
+                focusedWindow: FocusedWindowFact(
+                    axRef: modalRef,
+                    isFullscreen: false,
+                    isSystemModalSurface: true
+                )
+            )
+        )
+
+        XCTAssertEqual(controller.workspaceManager.focusedToken, modalToken)
+        XCTAssertEqual(controller.workspaceManager.systemModalFocusToken, modalToken)
+        XCTAssertEqual(operations, ["order:\(modalToken.windowId)"])
+        XCTAssertNil(controller.intentLedger.activeManagedRequest)
+        XCTAssertNil(controller.workspaceManager.pendingFocusedToken)
+
+        operations.removeAll()
+        let entry = try XCTUnwrap(controller.workspaceManager.entry(for: modalToken))
+        controller.axEventHandler.handleManagedAppActivation(
+            entry: entry,
+            isWorkspaceActive: true,
+            appFullscreen: false,
+            source: .focusedWindowChanged,
+            origin: .external
+        )
+        controller.axEventHandler.handleManagedAppActivation(
+            entry: entry,
+            isWorkspaceActive: true,
+            appFullscreen: false,
+            source: .workspaceDidActivateApplication,
+            origin: .retry
+        )
+
+        XCTAssertTrue(operations.isEmpty)
+    }
+
+    func testBackgroundRetriedAuthoritativeSystemModalDoesNotMutateFocusOrOrder() throws {
+        var operations: [String] = []
+        let controller = WindowAdmissionTestSupport.controller(
+            prefix: "OmniWMBackgroundRetriedSystemModalTests",
+            windowFocusOperations: WindowFocusOperations(
+                activateApp: { _ in operations.append("activate") },
+                focusSpecificWindow: { _, _, _ in operations.append("focus") },
+                raiseWindow: { _ in operations.append("raise") },
+                orderWindow: { _ in operations.append("order") }
+            )
+        )
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let frontmostToken = WindowToken(pid: 467_926, windowId: 467_927)
+        let backgroundModalToken = WindowToken(pid: 467_928, windowId: 467_929)
+        _ = WindowAdmissionTestSupport.track(frontmostToken, in: workspaceId, controller: controller)
+        let backgroundModalRef = WindowAdmissionTestSupport.track(
+            backgroundModalToken,
+            in: workspaceId,
+            controller: controller
+        )
+        XCTAssertTrue(
+            controller.workspaceManager.confirmManagedFocus(
+                frontmostToken,
+                in: workspaceId,
+                activateWorkspaceOnMonitor: false
+            )
+        )
+        controller.axEventHandler.frontmostApplicationPIDProvider = { frontmostToken.pid }
+        controller.hasStartedServices = true
+
+        controller.axEventHandler.handleActivationFactsResolved(
+            ActivationFacts(
+                pid: backgroundModalToken.pid,
+                source: .focusedWindowChanged,
+                origin: .retry,
+                observationGeneration: 0,
+                requestedAtSeq: 0,
+                focusedWindow: FocusedWindowFact(
+                    axRef: backgroundModalRef,
+                    isFullscreen: false,
+                    isSystemModalSurface: true
+                )
+            )
+        )
+
+        XCTAssertEqual(controller.workspaceManager.focusedToken, frontmostToken)
+        XCTAssertNil(controller.workspaceManager.systemModalFocusToken)
+        XCTAssertTrue(operations.isEmpty)
+        XCTAssertNil(controller.intentLedger.activeManagedRequest)
+        XCTAssertNil(controller.workspaceManager.pendingFocusedToken)
+    }
+
     func testTraceShapedTransientDecisionSuppressesRenderableFocusTargetAndBorder() throws {
         let controller = WindowAdmissionTestSupport.controller()
         let workspaceId = try XCTUnwrap(

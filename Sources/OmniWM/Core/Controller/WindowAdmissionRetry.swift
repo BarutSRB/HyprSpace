@@ -237,10 +237,16 @@ extension AXEventHandler {
         trigger: AdmissionRetryTrigger
     ) -> Bool {
         let state = normalizedAdmissionRetryState(windowId: windowId, observedAXRef: axRef)
-        if let state,
-           !state.exhausted,
-           state.trigger.priority > trigger.priority
+        if var retainedState = state,
+           !retainedState.exhausted,
+           retainedState.trigger.priority > trigger.priority
         {
+            retainedState.focusedAdmissionContinuation = latestFocusedAdmissionRetryContinuation(
+                retainedState.focusedAdmissionContinuation
+                    ?? retainedState.trigger.focusedAdmissionContinuation,
+                trigger.focusedAdmissionContinuation
+            )
+            admissionRetryStateByWindowId[windowId] = retainedState
             return true
         }
         guard isAdmissionRetryEligible(
@@ -268,6 +274,34 @@ extension AXEventHandler {
             return existingResult
         }
         return startNextAdmissionRetry(state: state, schedule: schedule, windowId: windowId)
+    }
+
+    @discardableResult
+    func retainFocusedAdmissionContinuation(
+        _ continuation: FocusedAdmissionRetryContinuation,
+        windowId: UInt32
+    ) -> Bool {
+        guard var state = admissionRetryStateByWindowId[windowId],
+              !state.exhausted,
+              state.expectedToken.map({ $0 == continuation.token }) ?? true
+        else {
+            return false
+        }
+        state.focusedAdmissionContinuation = latestFocusedAdmissionRetryContinuation(
+            state.focusedAdmissionContinuation ?? state.trigger.focusedAdmissionContinuation,
+            continuation
+        )
+        admissionRetryStateByWindowId[windowId] = state
+        return true
+    }
+
+    private func latestFocusedAdmissionRetryContinuation(
+        _ current: FocusedAdmissionRetryContinuation?,
+        _ incoming: FocusedAdmissionRetryContinuation?
+    ) -> FocusedAdmissionRetryContinuation? {
+        guard let current else { return incoming }
+        guard let incoming else { return current }
+        return incoming.observationGeneration >= current.observationGeneration ? incoming : current
     }
 
     private func isAdmissionRetryEligible(
@@ -319,13 +353,20 @@ extension AXEventHandler {
         trigger: AdmissionRetryTrigger
     ) -> AdmissionRetrySchedule {
         let preservesPriorTrigger = state.map { $0.trigger.priority > trigger.priority } ?? false
+        let retainedFocusedContinuation = state.flatMap {
+            $0.focusedAdmissionContinuation ?? $0.trigger.focusedAdmissionContinuation
+        }
         return AdmissionRetrySchedule(
             expectedToken: preservesPriorTrigger
                 ? state?.expectedToken ?? expectedToken
                 : expectedToken ?? state?.expectedToken,
             axRef: preservesPriorTrigger ? state?.axRef ?? axRef : axRef ?? state?.axRef,
             reason: preservesPriorTrigger ? state?.reason ?? reason : reason,
-            trigger: preservesPriorTrigger ? state?.trigger ?? trigger : trigger
+            trigger: preservesPriorTrigger ? state?.trigger ?? trigger : trigger,
+            focusedAdmissionContinuation: latestFocusedAdmissionRetryContinuation(
+                retainedFocusedContinuation,
+                trigger.focusedAdmissionContinuation
+            )
         )
     }
 
@@ -340,6 +381,7 @@ extension AXEventHandler {
             state.axRef = schedule.axRef
             state.reason = schedule.reason
             state.trigger = schedule.trigger
+            state.focusedAdmissionContinuation = schedule.focusedAdmissionContinuation
             admissionRetryStateByWindowId[windowId] = state
             rejectDeferredReplacement(windowId: windowId)
             return false
@@ -368,6 +410,7 @@ extension AXEventHandler {
         state.axRef = schedule.axRef
         state.reason = schedule.reason
         state.trigger = schedule.trigger
+        state.focusedAdmissionContinuation = schedule.focusedAdmissionContinuation
         admissionRetryStateByWindowId[windowId] = state
         return !state.exhausted
     }
@@ -408,6 +451,7 @@ extension AXEventHandler {
             attempt: Self.createdWindowRetryLimit,
             generation: generation,
             trigger: schedule.trigger,
+            focusedAdmissionContinuation: schedule.focusedAdmissionContinuation,
             exhausted: true,
             executionPhase: .waiting,
             task: nil
@@ -450,6 +494,7 @@ extension AXEventHandler {
             attempt: attempt,
             generation: generation,
             trigger: schedule.trigger,
+            focusedAdmissionContinuation: schedule.focusedAdmissionContinuation,
             exhausted: false,
             executionPhase: .waiting,
             task: nil
@@ -599,20 +644,71 @@ extension AXEventHandler {
     }
 
     private func finishAdmissionRetry(windowId: UInt32) {
-        let state = admissionRetryStateByWindowId.removeValue(forKey: windowId)
-        state?.task?.cancel()
-        finishDeferredReplacementAfterTracking(windowId: windowId)
-        guard let state else { return }
-        guard case let .focused(token, source, observationGeneration, callbackGeneration) = state.trigger else {
+        guard var state = admissionRetryStateByWindowId[windowId] else {
+            finishDeferredReplacementAfterTracking(windowId: windowId)
             return
         }
-        handleAppActivation(
-            pid: token.pid,
-            source: source,
-            origin: .retry,
-            causalObservationGeneration: observationGeneration,
-            callbackGeneration: callbackGeneration
+        if let executionOwner = state.focusedAdmissionReplayExecutionOwner,
+           state.executionPhase == .running(executionOwner)
+        {
+            return
+        }
+        state.task?.cancel()
+        finishDeferredReplacementAfterTracking(windowId: windowId)
+        guard let continuation = state.focusedAdmissionContinuation
+            ?? state.trigger.focusedAdmissionContinuation
+        else {
+            admissionRetryStateByWindowId.removeValue(forKey: windowId)
+            return
+        }
+        let executionOwner = nextAdmissionRetryExecutionOwner
+        nextAdmissionRetryExecutionOwner &+= 1
+        state.task = nil
+        state.trigger = .focused(
+            token: continuation.token,
+            source: continuation.source,
+            observationGeneration: continuation.observationGeneration,
+            callbackGeneration: continuation.callbackGeneration
         )
+        state.focusedAdmissionContinuation = continuation
+        state.executionPhase = .running(executionOwner)
+        state.focusedAdmissionReplayExecutionOwner = executionOwner
+        admissionRetryStateByWindowId[windowId] = state
+        let execution = FocusedAdmissionRetryExecution(
+            windowId: windowId,
+            generation: state.generation,
+            executionOwner: executionOwner
+        )
+        let factRequestIssued = handleAppActivation(
+            pid: continuation.token.pid,
+            source: continuation.source,
+            origin: .retry,
+            causalObservationGeneration: continuation.observationGeneration,
+            callbackGeneration: continuation.callbackGeneration,
+            focusedAdmissionRetryExecution: execution
+        )
+        if !factRequestIssued {
+            finishFocusedAdmissionRetryExecution(execution)
+        }
+    }
+
+    func hasLiveFocusedAdmissionContinuation(for token: WindowToken) -> Bool {
+        guard let windowId = UInt32(exactly: token.windowId),
+              let state = admissionRetryStateByWindowId[windowId],
+              !state.exhausted,
+              let continuation = state.focusedAdmissionContinuation
+              ?? state.trigger.focusedAdmissionContinuation,
+              continuation.token == token,
+              isCurrentFocusedAdmissionContinuation(continuation)
+        else {
+            return false
+        }
+        switch state.executionPhase {
+        case .waiting:
+            return state.task != nil
+        case .running:
+            return true
+        }
     }
 
     func cancelTrackedTilingPromotionRetry(windowId: Int) {
@@ -627,18 +723,22 @@ extension AXEventHandler {
     }
 
     func retireStaleFocusedAdmissionRetry(pid: pid_t, observationGeneration: UInt64) {
-        let matchingWindowIds = admissionRetryStateByWindowId.compactMap { windowId, state -> UInt32? in
-            guard case let .focused(token, _, generation, _) = state.trigger,
-                  token.pid == pid,
-                  generation == observationGeneration
+        for windowId in Array(admissionRetryStateByWindowId.keys) {
+            guard var state = admissionRetryStateByWindowId[windowId],
+                  let continuation = state.focusedAdmissionContinuation
+                  ?? state.trigger.focusedAdmissionContinuation,
+                  continuation.token.pid == pid,
+                  continuation.observationGeneration == observationGeneration
             else {
-                return nil
+                continue
             }
-            return windowId
-        }
-        for windowId in matchingWindowIds {
-            cancelCreatedWindowRetry(windowId: windowId)
-            finishDeferredReplacementAfterTracking(windowId: windowId)
+            if case .focused = state.trigger {
+                cancelCreatedWindowRetry(windowId: windowId)
+                finishDeferredReplacementAfterTracking(windowId: windowId)
+            } else {
+                state.focusedAdmissionContinuation = nil
+                admissionRetryStateByWindowId[windowId] = state
+            }
         }
     }
 
