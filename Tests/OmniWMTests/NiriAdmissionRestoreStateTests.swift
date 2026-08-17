@@ -557,6 +557,145 @@ final class NiriAdmissionRestoreStateTests: XCTestCase {
         XCTAssertEqual(controller.workspaceManager.workspace(for: token), workspaceId)
     }
 
+    func testTiledModePersistsAcrossRestartWithRememberedFloatingGeometry() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("OmniWMTests-\(UUID().uuidString)", isDirectory: true)
+        let runtimeDirectory = root.appendingPathComponent("state", isDirectory: true)
+        let configDirectory = root.appendingPathComponent("config", isDirectory: true)
+        let firstSettings = SettingsStore(
+            persistence: SettingsFilePersistence(
+                directory: configDirectory,
+                startWatching: false,
+                deferSaves: false
+            ),
+            runtimeState: RuntimeStateStore(
+                directory: runtimeDirectory,
+                deferSaves: false
+            ),
+            autosaveEnabled: false
+        )
+        let firstController = Self.controller(settings: firstSettings)
+        let firstWorkspaceId = try XCTUnwrap(
+            firstController.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let firstToken = WindowToken(pid: 812, windowId: 104)
+        let firstMetadata = ManagedReplacementMetadata(
+            bundleId: "com.example.tiled-startup-mode",
+            workspaceId: firstWorkspaceId,
+            mode: .tiling,
+            role: kAXWindowRole as String,
+            subrole: kAXStandardWindowSubrole as String,
+            title: "Tiled Startup Mode",
+            windowLevel: 0,
+            parentWindowId: nil,
+            frame: CGRect(x: 120, y: 140, width: 640, height: 480)
+        )
+        _ = firstController.workspaceManager.addWindow(
+            AXWindowRef(
+                element: AXUIElementCreateApplication(firstToken.pid),
+                windowId: firstToken.windowId
+            ),
+            pid: firstToken.pid,
+            windowId: firstToken.windowId,
+            to: firstWorkspaceId,
+            managedReplacementMetadata: firstMetadata
+        )
+        let monitorFrame = try XCTUnwrap(firstController.workspaceManager.monitors.first?.visibleFrame)
+        let rememberedFrame = CGRect(
+            x: monitorFrame.minX + 40,
+            y: monitorFrame.minY + 40,
+            width: min(640, monitorFrame.width - 80),
+            height: min(480, monitorFrame.height - 80)
+        )
+
+        XCTAssertTrue(firstController.workspaceManager.setWindowMode(.floating, for: firstToken))
+        firstController.workspaceManager.updateFloatingGeometry(
+            frame: rememberedFrame,
+            for: firstToken,
+            restoreToFloating: true
+        )
+        XCTAssertTrue(firstController.workspaceManager.setWindowMode(.tiling, for: firstToken))
+        XCTAssertEqual(firstController.workspaceManager.windowMode(for: firstToken), .tiling)
+        XCTAssertEqual(
+            firstController.workspaceManager.floatingState(for: firstToken)?.restoreToFloating,
+            true
+        )
+        XCTAssertEqual(
+            firstController.workspaceManager.restoreIntent(for: firstToken)?.restoreToFloating,
+            false
+        )
+        XCTAssertEqual(
+            firstController.workspaceManager.restoreIntent(for: firstToken)?.floatingFrame,
+            rememberedFrame
+        )
+        XCTAssertEqual(
+            firstController.workspaceManager.restoreIntent(for: firstToken)?.rescueEligible,
+            true
+        )
+
+        firstController.workspaceManager.flushPersistedWindowRestoreCatalogNow()
+        let persistedEntry = try XCTUnwrap(
+            firstSettings.loadPersistedWindowRestoreCatalog().entries.first {
+                $0.key.matches(firstMetadata)
+            }
+        )
+        XCTAssertFalse(persistedEntry.restoreIntent.restoreToFloating)
+        XCTAssertEqual(persistedEntry.restoreIntent.floatingFrame, rememberedFrame)
+        XCTAssertTrue(persistedEntry.restoreIntent.rescueEligible)
+
+        let secondSettings = SettingsStore(
+            persistence: SettingsFilePersistence(
+                directory: configDirectory,
+                startWatching: false,
+                deferSaves: false
+            ),
+            runtimeState: RuntimeStateStore(
+                directory: runtimeDirectory,
+                deferSaves: false
+            ),
+            autosaveEnabled: false
+        )
+        let secondController = Self.controller(settings: secondSettings)
+        let secondWorkspaceId = try XCTUnwrap(
+            secondController.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let secondToken = WindowToken(pid: 813, windowId: 105)
+        var secondMetadata = firstMetadata
+        secondMetadata.workspaceId = secondWorkspaceId
+        _ = secondController.workspaceManager.addWindow(
+            AXWindowRef(
+                element: AXUIElementCreateApplication(secondToken.pid),
+                windowId: secondToken.windowId
+            ),
+            pid: secondToken.pid,
+            windowId: secondToken.windowId,
+            to: secondWorkspaceId,
+            managedReplacementMetadata: secondMetadata
+        )
+
+        XCTAssertEqual(secondController.workspaceManager.windowMode(for: secondToken), .tiling)
+        XCTAssertEqual(
+            secondController.workspaceManager.floatingState(for: secondToken)?.lastFrame,
+            rememberedFrame
+        )
+        XCTAssertEqual(
+            secondController.workspaceManager.floatingState(for: secondToken)?.restoreToFloating,
+            true
+        )
+        XCTAssertEqual(
+            secondController.workspaceManager.restoreIntent(for: secondToken)?.restoreToFloating,
+            false
+        )
+        XCTAssertEqual(
+            secondController.workspaceManager.restoreIntent(for: secondToken)?.floatingFrame,
+            rememberedFrame
+        )
+        XCTAssertEqual(
+            secondController.workspaceManager.restoreIntent(for: secondToken)?.rescueEligible,
+            true
+        )
+    }
+
     func testPersistedFloatingHydrationPreservesFullPlacementUntilTiling() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("OmniWMTests-\(UUID().uuidString)", isDirectory: true)
@@ -658,6 +797,7 @@ final class NiriAdmissionRestoreStateTests: XCTestCase {
         )
 
         XCTAssertEqual(controller.workspaceManager.windowMode(for: token), .floating)
+        XCTAssertEqual(controller.workspaceManager.restoreIntent(for: token)?.restoreToFloating, true)
         XCTAssertEqual(controller.workspaceManager.restoreIntent(for: token)?.niriPlacement, placement)
         XCTAssertEqual(
             controller.workspaceManager.restoreIntent(for: token)?.detachedNiriContainerSizingState,

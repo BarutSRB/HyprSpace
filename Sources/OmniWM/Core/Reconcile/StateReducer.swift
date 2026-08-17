@@ -409,7 +409,7 @@ enum StateReducer {
             preferredMonitor: preferredMonitor.map(DisplayFingerprint.init),
             floatingFrame: entry.desiredState.floatingFrame ?? floatingState?.lastFrame,
             normalizedFloatingOrigin: floatingState?.normalizedOrigin,
-            restoreToFloating: floatingState?.restoreToFloating ?? (entry.mode == .floating),
+            restoreToFloating: entry.mode == .floating,
             rescueEligible: entry.desiredState.rescueEligible || floatingState?.restoreToFloating == true,
             niriPlacement: niriPlacement,
             detachedNiriContainerSizingState: entry.restoreIntent?.detachedNiriContainerSizingState

@@ -401,7 +401,7 @@ struct RestorePlanner {
 
         let targetMode: TrackedWindowMode = persistedEntry.restoreIntent.restoreToFloating ? .floating : input.metadata
             .mode
-        let floatingFrame = persistedEntry.restoreIntent.restoreToFloating
+        let floatingFrame = persistedEntry.restoreIntent.rescueEligible
             ? resolvedPersistedFloatingFrame(
                 for: persistedEntry.restoreIntent,
                 preferredMonitor: preferredMonitor
