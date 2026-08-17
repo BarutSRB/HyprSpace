@@ -50,6 +50,7 @@ extension LayoutRefreshController {
         let token: WindowToken
         let workspaceId: WorkspaceDescriptor.ID
         let createdAt: Date
+        let createsSystemModalBarrier: Bool
 
         init?(
             token: WindowToken,
@@ -57,11 +58,12 @@ extension LayoutRefreshController {
             isNewAdmission: Bool,
             mode: TrackedWindowMode,
             interactionPolicy: WindowInteractionPolicy,
-            createPlacementContext: WindowCreatePlacementContext?
+            createPlacementContext: WindowCreatePlacementContext?,
+            isSystemModalSurface: Bool = false
         ) {
             guard isNewAdmission,
                   mode == .floating,
-                  interactionPolicy.mayFocus,
+                  interactionPolicy.mayFocus || isSystemModalSurface,
                   let createPlacementContext
             else {
                 return nil
@@ -69,7 +71,14 @@ extension LayoutRefreshController {
             self.token = token
             self.workspaceId = workspaceId
             createdAt = createPlacementContext.createdAt
+            createsSystemModalBarrier = isSystemModalSurface
         }
+    }
+
+    enum FullRescanFloatingFocusResolution: Equatable {
+        case focused(WorkspaceDescriptor.ID)
+        case fallback
+        case systemModalBarrier
     }
 
     static func newestFullRescanFloatingFocusCandidate(
@@ -77,19 +86,29 @@ extension LayoutRefreshController {
         considering candidate: FullRescanFloatingFocusCandidate
     ) -> FullRescanFloatingFocusCandidate {
         guard let current else { return candidate }
+        if current.createsSystemModalBarrier != candidate.createsSystemModalBarrier {
+            return current.createsSystemModalBarrier ? current : candidate
+        }
         return candidate.createdAt > current.createdAt ? candidate : current
     }
 
     func focusFullRescanFloatingCandidate(
-        _ candidate: FullRescanFloatingFocusCandidate?,
-        fallbackWorkspaceId: WorkspaceDescriptor.ID?
-    ) -> WorkspaceDescriptor.ID? {
-        guard let candidate,
-              controller?.windowActionHandler.focusCreatedFloatingWindow(candidate.token) == true
-        else {
-            return fallbackWorkspaceId
+        _ candidate: FullRescanFloatingFocusCandidate?
+    ) -> FullRescanFloatingFocusResolution {
+        guard let candidate, let controller else {
+            return .fallback
         }
-        return candidate.workspaceId
+        if candidate.createsSystemModalBarrier {
+            return .systemModalBarrier
+        }
+        switch controller.windowActionHandler.focusCreatedFloatingWindow(candidate.token) {
+        case .focused:
+            return .focused(candidate.workspaceId)
+        case .systemModalBarrier:
+            return .systemModalBarrier
+        case .rejected:
+            return .fallback
+        }
     }
 
     func yieldToDeferredCreate(

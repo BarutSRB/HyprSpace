@@ -853,13 +853,15 @@ import QuartzCore
 
     func requestRelayout(
         reason: RefreshReason,
-        affectedWorkspaceIds: Set<WorkspaceDescriptor.ID> = []
+        affectedWorkspaceIds: Set<WorkspaceDescriptor.ID> = [],
+        suppressWindowActivation: Bool = false
     ) {
         assert(reason.requestRoute == .relayout, "Invalid relayout reason: \(reason)")
         scheduleRefreshSession(
             reason.relayoutSchedulingPolicy,
             reason: reason,
-            affectedWorkspaceIds: affectedWorkspaceIds
+            affectedWorkspaceIds: affectedWorkspaceIds,
+            suppressWindowActivation: suppressWindowActivation
         )
     }
 
@@ -1053,7 +1055,8 @@ import QuartzCore
     private func scheduleRefreshSession(
         _ policy: RelayoutSchedulingPolicy,
         reason: RefreshReason,
-        affectedWorkspaceIds: Set<WorkspaceDescriptor.ID> = []
+        affectedWorkspaceIds: Set<WorkspaceDescriptor.ID> = [],
+        suppressWindowActivation: Bool = false
     ) {
         if policy.shouldDropWhileBusy {
             if layoutState.isIncrementalRefreshInProgress || layoutState.isImmediateLayoutInProgress {
@@ -1065,7 +1068,12 @@ import QuartzCore
                 return
             }
         }
-        let refresh = ScheduledRefresh(kind: .relayout, reason: reason, affectedWorkspaceIds: affectedWorkspaceIds)
+        let refresh = ScheduledRefresh(
+            kind: .relayout,
+            reason: reason,
+            affectedWorkspaceIds: affectedWorkspaceIds,
+            suppressesWindowActivation: suppressWindowActivation
+        )
         let debounce = policy.debounceInterval
         if debounce > 0 {
             enqueueDebouncedRelayout(refresh, debounce: debounce)
@@ -1812,7 +1820,11 @@ import QuartzCore
                 isNewAdmission: existingEntry == nil,
                 mode: admittedEntry?.mode ?? admittedMode,
                 interactionPolicy: interactionPolicy,
-                createPlacementContext: createPlacementContext
+                createPlacementContext: createPlacementContext,
+                isSystemModalSurface: AXWindowService.isSystemModalSurface(
+                    role: admittedEntry?.managedReplacementMetadata?.role,
+                    subrole: admittedEntry?.managedReplacementMetadata?.subrole
+                )
             ) {
                 floatingFocusCandidate = Self.newestFullRescanFloatingFocusCandidate(
                     floatingFocusCandidate,
@@ -1853,12 +1865,17 @@ import QuartzCore
             seenKeys.insert(admittedToken)
         }
 
-        let focusValidationWorkspaceId = controller.hasStartedServices
-            ? focusFullRescanFloatingCandidate(
-                floatingFocusCandidate,
-                fallbackWorkspaceId: focusedWorkspaceId
-            )
-            : focusedWorkspaceId
+        let floatingFocusResolution = controller.hasStartedServices
+            ? focusFullRescanFloatingCandidate(floatingFocusCandidate)
+            : FullRescanFloatingFocusResolution.fallback
+        let focusValidationWorkspaceId: WorkspaceDescriptor.ID? = switch floatingFocusResolution {
+        case let .focused(workspaceId):
+            workspaceId
+        case .fallback:
+            focusedWorkspaceId
+        case .systemModalBarrier:
+            nil
+        }
 
         controller.axEventHandler.updateIdentityAliases(
             enumerationSnapshot.identityAliasesByWindowId
@@ -2053,6 +2070,7 @@ import QuartzCore
         {
             effects.focusValidationWorkspaceIds = [focusValidationWorkspaceId]
         }
+        effects.suppressWindowActivation = floatingFocusResolution == .systemModalBarrier
         effects.markInitialRefreshComplete = true
         effects.drainDeferredCreatedWindows = true
         effects.subscribeManagedWindows = true

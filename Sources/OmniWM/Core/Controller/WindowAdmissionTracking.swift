@@ -118,10 +118,12 @@ extension AXEventHandler {
         } else {
             scheduleAXContextWarmup(for: liveTrackedEntry.pid)
         }
-        if liveTrackedEntry.mode == .floating,
-           candidate.interactionPolicy.mayFocus
+        let createdFloatingFocusResult = if liveTrackedEntry.mode == .floating,
+                                            candidate.interactionPolicy.mayFocus
         {
             controller.windowActionHandler.focusCreatedFloatingWindow(trackedToken)
+        } else {
+            WindowActionHandler.CreatedFloatingFocusResult.rejected
         }
         if candidate.requiresPostCreateLifecycleVerification {
             schedulePostCreateLifecycleVerification(for: trackedToken)
@@ -129,7 +131,8 @@ extension AXEventHandler {
 
         controller.layoutRefreshController.requestRelayout(
             reason: .axWindowCreated,
-            affectedWorkspaceIds: [trackedEntry.workspaceId]
+            affectedWorkspaceIds: [trackedEntry.workspaceId],
+            suppressWindowActivation: createdFloatingFocusResult == .systemModalBarrier
         )
         scheduleWindowRuleReevaluationIfNeeded(targets: [.pid(trackedEntry.pid)])
         finishAdmissionRetryAfterTracking(windowId: candidate.windowId)

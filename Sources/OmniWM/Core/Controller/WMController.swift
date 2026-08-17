@@ -3209,7 +3209,13 @@ extension WMController {
         ownedWindowRegistry.contains(windowNumber: windowNumber)
     }
 
+    var isSystemModalFocusActive: Bool {
+        guard let systemModalFocusToken = workspaceManager.systemModalFocusToken else { return false }
+        return systemModalFocusToken == workspaceManager.focusedToken
+    }
+
     var shouldSuppressManagedFocusRecovery: Bool {
+        if isSystemModalFocusActive { return true }
         guard workspaceManager.isNonManagedFocusActive else { return false }
         return hasFrontmostOwnedWindow || workspaceManager.nonManagedFocusToken != nil
     }

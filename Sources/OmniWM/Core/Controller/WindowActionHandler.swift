@@ -12,6 +12,12 @@ final class WindowActionHandler {
         case requestReportedNotSent
     }
 
+    enum CreatedFloatingFocusResult: Equatable {
+        case focused
+        case systemModalBarrier
+        case rejected
+    }
+
     private enum RaisableSurfaceBatchKey: Hashable {
         case application(pid_t)
         case ownedApplication
@@ -202,15 +208,16 @@ final class WindowActionHandler {
     }
 
     @discardableResult
-    func focusCreatedFloatingWindow(_ token: WindowToken) -> Bool {
+    func focusCreatedFloatingWindow(_ token: WindowToken) -> CreatedFloatingFocusResult {
         guard let controller,
               !controller.isLockScreenActive
         else {
-            return false
+            return .rejected
         }
         if controller.hasStartedServices {
-            guard !controller.isFrontmostAppLockScreen() else { return false }
+            guard !controller.isFrontmostAppLockScreen() else { return .rejected }
         }
+        guard !controller.isSystemModalFocusActive else { return .systemModalBarrier }
 
         guard let entry = controller.workspaceManager.entry(for: token),
               entry.mode == .floating,
@@ -220,7 +227,13 @@ final class WindowActionHandler {
               !controller.workspaceManager.isHiddenInCorner(token),
               controller.workspaceManager.visibleWorkspaceIds().contains(entry.workspaceId)
         else {
-            return false
+            return .rejected
+        }
+        if AXWindowService.isSystemModalSurface(
+            role: entry.managedReplacementMetadata?.role,
+            subrole: entry.managedReplacementMetadata?.subrole
+        ) {
+            return .systemModalBarrier
         }
 
         controller.focusPolicyEngine.beginLease(
@@ -231,7 +244,7 @@ final class WindowActionHandler {
         )
         controller.performWindowOrdering(windowId: entry.windowId)
         controller.focusWindow(token)
-        return true
+        return .focused
     }
 
     private func makeRaiseAllFloatingPlan() -> FloatingWindowRaisePlan? {

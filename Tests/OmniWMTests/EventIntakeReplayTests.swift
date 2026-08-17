@@ -780,6 +780,7 @@ final class EventIntakeReplayTests: XCTestCase {
 
         XCTAssertEqual(controller.workspaceManager.systemModalFocusToken, scenario.tokenB)
         XCTAssertEqual(WorldView(controller: controller).systemModalFocusToken, scenario.tokenB)
+        XCTAssertTrue(controller.shouldSuppressManagedFocusRecovery)
         XCTAssertNil(SurfaceDerivation.deriveBorder(world: WorldView(controller: controller)))
 
         reportSystemModal = false
@@ -809,6 +810,7 @@ final class EventIntakeReplayTests: XCTestCase {
 
         XCTAssertEqual(controller.workspaceManager.renderableFocusToken, scenario.tokenB)
         XCTAssertEqual(world.systemModalFocusToken, scenario.tokenA)
+        XCTAssertFalse(controller.shouldSuppressManagedFocusRecovery)
         XCTAssertNotNil(SurfaceDerivation.deriveBorder(world: world))
     }
 

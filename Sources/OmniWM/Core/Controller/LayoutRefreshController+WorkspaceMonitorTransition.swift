@@ -36,6 +36,8 @@ extension LayoutRefreshController {
         }
         if refresh.suppressesWindowActivation {
             plan.effects.suppressWindowActivation = true
+            plan.effects.focusValidationWorkspaceIds.removeAll(keepingCapacity: true)
+            plan.effects.focusValidationPreferredTokens.removeAll(keepingCapacity: true)
         }
     }
 

@@ -168,19 +168,140 @@ final class FullRescanReadmissionTests: XCTestCase {
         XCTAssertEqual(selected?.createdAt, olderDate)
     }
 
+    func testSystemModalBlocksOrdinaryFullRescanFloatingCandidatesInEitherOrder() throws {
+        let controller = WindowAdmissionTestSupport.controller(
+            prefix: "OmniWMFullRescanSystemModalBarrierTests"
+        )
+        let monitor = Monitor(
+            id: .init(displayId: 90_003),
+            displayId: 90_003,
+            frame: CGRect(x: 0, y: 0, width: 1440, height: 900),
+            visibleFrame: CGRect(x: 0, y: 0, width: 1440, height: 860),
+            hasNotch: false,
+            name: "Full Rescan System Modal Barrier"
+        )
+        controller.workspaceManager.applyMonitorConfigurationChange([monitor])
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        _ = controller.workspaceManager.focusWorkspace(named: "1")
+        let olderToken = WindowToken(pid: 9006, windowId: 8)
+        let newerModalToken = WindowToken(pid: olderToken.pid, windowId: 9)
+        _ = controller.workspaceManager.addWindow(
+            axRef(olderToken.pid, olderToken.windowId),
+            pid: olderToken.pid,
+            windowId: olderToken.windowId,
+            to: workspaceId,
+            mode: .floating
+        )
+        _ = controller.workspaceManager.addWindow(
+            axRef(newerModalToken.pid, newerModalToken.windowId),
+            pid: newerModalToken.pid,
+            windowId: newerModalToken.windowId,
+            to: workspaceId,
+            mode: .floating,
+            managedReplacementMetadata: ManagedReplacementMetadata(
+                bundleId: "Cisco-Systems.Spark",
+                workspaceId: workspaceId,
+                mode: .floating,
+                role: kAXWindowRole as String,
+                subrole: kAXSystemDialogSubrole as String,
+                title: nil,
+                windowLevel: 3,
+                parentWindowId: nil,
+                frame: CGRect(x: 0, y: 0, width: 280, height: 239),
+                transientWindowServerEvidence: false
+            )
+        )
+        let olderCandidate = try XCTUnwrap(
+            LayoutRefreshController.FullRescanFloatingFocusCandidate(
+                token: olderToken,
+                workspaceId: workspaceId,
+                isNewAdmission: true,
+                mode: .floating,
+                interactionPolicy: .full,
+                createPlacementContext: createPlacementContext(
+                    createdAt: Date(timeIntervalSince1970: 100)
+                )
+            )
+        )
+        let newerModalCandidate = try XCTUnwrap(
+            LayoutRefreshController.FullRescanFloatingFocusCandidate(
+                token: newerModalToken,
+                workspaceId: workspaceId,
+                isNewAdmission: true,
+                mode: .floating,
+                interactionPolicy: .full,
+                createPlacementContext: createPlacementContext(
+                    createdAt: Date(timeIntervalSince1970: 200)
+                ),
+                isSystemModalSurface: true
+            )
+        )
+        let selectedNewerModal = LayoutRefreshController.newestFullRescanFloatingFocusCandidate(
+            olderCandidate,
+            considering: newerModalCandidate
+        )
+        let newestOrdinaryCandidate = try XCTUnwrap(
+            LayoutRefreshController.FullRescanFloatingFocusCandidate(
+                token: olderToken,
+                workspaceId: workspaceId,
+                isNewAdmission: true,
+                mode: .floating,
+                interactionPolicy: .full,
+                createPlacementContext: createPlacementContext(
+                    createdAt: Date(timeIntervalSince1970: 300)
+                )
+            )
+        )
+        let selectedOlderModal = LayoutRefreshController.newestFullRescanFloatingFocusCandidate(
+            newerModalCandidate,
+            considering: newestOrdinaryCandidate
+        )
+
+        XCTAssertEqual(selectedNewerModal.token, newerModalToken)
+        XCTAssertEqual(selectedOlderModal.token, newerModalToken)
+        let resolution = controller.layoutRefreshController.focusFullRescanFloatingCandidate(
+            selectedOlderModal
+        )
+
+        XCTAssertEqual(resolution, .systemModalBarrier)
+        XCTAssertNil(controller.focusPolicyEngine.activeLease)
+        XCTAssertNil(controller.intentLedger.activeManagedRequest)
+        XCTAssertNil(controller.workspaceManager.pendingFocusedToken)
+    }
+
+    func testHandsOffSystemModalStillCreatesFullRescanFocusBarrier() throws {
+        let controller = WindowAdmissionTestSupport.controller(
+            prefix: "OmniWMFullRescanHandsOffSystemModalBarrierTests"
+        )
+        let modalCandidate = try XCTUnwrap(
+            LayoutRefreshController.FullRescanFloatingFocusCandidate(
+                token: WindowToken(pid: 9007, windowId: 10),
+                workspaceId: UUID(),
+                isNewAdmission: true,
+                mode: .floating,
+                interactionPolicy: .handsOffSurface,
+                createPlacementContext: createPlacementContext(
+                    createdAt: Date(timeIntervalSince1970: 100)
+                ),
+                isSystemModalSurface: true
+            )
+        )
+
+        XCTAssertEqual(
+            controller.layoutRefreshController.focusFullRescanFloatingCandidate(modalCandidate),
+            .systemModalBarrier
+        )
+    }
+
     func testNilFullRescanFloatingFocusCandidateUsesFallbackWorkspace() {
         let controller = WindowAdmissionTestSupport.controller(
             prefix: "OmniWMFullRescanNilFallbackTests"
         )
-        let fallbackWorkspaceId = UUID()
+        let resolution = controller.layoutRefreshController.focusFullRescanFloatingCandidate(nil)
 
-        XCTAssertEqual(
-            controller.layoutRefreshController.focusFullRescanFloatingCandidate(
-                nil,
-                fallbackWorkspaceId: fallbackWorkspaceId
-            ),
-            fallbackWorkspaceId
-        )
+        XCTAssertEqual(resolution, .fallback)
     }
 
     func testFailedFullRescanFloatingFocusUsesFallbackWorkspace() throws {
@@ -194,7 +315,6 @@ final class FullRescanReadmissionTests: XCTestCase {
                 orderWindow: { _ in operations.append("order") }
             )
         )
-        let fallbackWorkspaceId = UUID()
         let candidateWorkspaceId = UUID()
         let token = WindowToken(pid: 9000, windowId: 7)
         let candidate = try XCTUnwrap(
@@ -208,12 +328,9 @@ final class FullRescanReadmissionTests: XCTestCase {
             )
         )
 
-        let result = controller.layoutRefreshController.focusFullRescanFloatingCandidate(
-            candidate,
-            fallbackWorkspaceId: fallbackWorkspaceId
-        )
+        let result = controller.layoutRefreshController.focusFullRescanFloatingCandidate(candidate)
 
-        XCTAssertEqual(result, fallbackWorkspaceId)
+        XCTAssertEqual(result, .fallback)
         XCTAssertTrue(operations.isEmpty)
         XCTAssertNil(controller.intentLedger.activeManagedRequest)
         XCTAssertNil(controller.focusPolicyEngine.activeLease)
@@ -295,12 +412,9 @@ final class FullRescanReadmissionTests: XCTestCase {
             )
         )
 
-        let validationWorkspaceId = controller.layoutRefreshController.focusFullRescanFloatingCandidate(
-            candidate,
-            fallbackWorkspaceId: leftWorkspaceId
-        )
-        XCTAssertEqual(validationWorkspaceId, rightWorkspaceId)
-        controller.ensureFocusedTokenValid(in: try XCTUnwrap(validationWorkspaceId))
+        let resolution = controller.layoutRefreshController.focusFullRescanFloatingCandidate(candidate)
+        XCTAssertEqual(resolution, .focused(rightWorkspaceId))
+        controller.ensureFocusedTokenValid(in: rightWorkspaceId)
         XCTAssertEqual(
             operations,
             [

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Copyright (C) 2026 BarutSRB — https://github.com/BarutSRB/OmniWM
 
+import ApplicationServices
 import CoreGraphics
 import Foundation
 @testable import OmniWM
@@ -127,11 +128,196 @@ final class ForeignTransientFocusRecoveryTests: XCTestCase {
         let fixture = try makeFixture(prefix: "OmniWMForeignTransientCreatedFloatingTests")
         let popupToken = trackHandsOffPopup(in: fixture, pid: 559_008, windowId: 559_209)
 
-        XCTAssertFalse(fixture.controller.windowActionHandler.focusCreatedFloatingWindow(popupToken))
+        XCTAssertEqual(
+            fixture.controller.windowActionHandler.focusCreatedFloatingWindow(popupToken),
+            .rejected
+        )
         XCTAssertTrue(fixture.recorder.operations.isEmpty)
         XCTAssertNil(fixture.controller.focusPolicyEngine.activeLease)
         XCTAssertNil(fixture.controller.intentLedger.activeManagedRequest)
         XCTAssertNil(fixture.controller.workspaceManager.pendingFocusedToken)
+    }
+
+    func testCreatedFloatingFocusRejectsSystemModalBeforeLeaseOrManagedRequest() throws {
+        let fixture = try makeFixture(prefix: "OmniWMSystemModalCreatedFloatingTests")
+        let popupToken = WindowToken(pid: 559_013, windowId: 559_217)
+        _ = trackFloatingWindow(
+            in: fixture,
+            token: popupToken,
+            subrole: kAXSystemDialogSubrole as String,
+            windowLevel: 3
+        )
+
+        XCTAssertNotNil(fixture.controller.workspaceManager.entry(for: popupToken))
+        XCTAssertEqual(
+            fixture.controller.windowActionHandler.focusCreatedFloatingWindow(popupToken),
+            .systemModalBarrier
+        )
+        XCTAssertEqual(
+            fixture.controller.workspaceManager.lastFocusedToken(in: fixture.workspaceId),
+            fixture.mainToken
+        )
+        XCTAssertTrue(fixture.recorder.operations.isEmpty)
+        XCTAssertNil(fixture.controller.focusPolicyEngine.activeLease)
+        XCTAssertNil(fixture.controller.intentLedger.activeManagedRequest)
+        XCTAssertNil(fixture.controller.workspaceManager.pendingFocusedToken)
+    }
+
+    func testSystemModalAdmissionSchedulesFocusNeutralRelayout() throws {
+        let fixture = try makeFixture(prefix: "OmniWMSystemModalAdmissionBarrierTests")
+        defer { fixture.controller.layoutRefreshController.resetState() }
+        let popupToken = WindowToken(pid: 559_016, windowId: 559_222)
+        let axRef = WindowAdmissionTestSupport.axRef(for: popupToken)
+
+        fixture.controller.axEventHandler.trackPreparedCreate(
+            .init(
+                windowId: UInt32(popupToken.windowId),
+                token: popupToken,
+                axRef: axRef,
+                ruleEffects: .none,
+                admissionHints: .none,
+                replacementMetadata: .init(
+                    bundleId: "Cisco-Systems.Spark",
+                    workspaceId: fixture.workspaceId,
+                    mode: .floating,
+                    role: kAXWindowRole as String,
+                    subrole: kAXSystemDialogSubrole as String,
+                    title: nil,
+                    windowLevel: 3,
+                    parentWindowId: nil,
+                    frame: CGRect(x: 0, y: 0, width: 280, height: 239),
+                    transientWindowServerEvidence: false
+                ),
+                structuralReplacementMatch: nil,
+                requiresPostCreateLifecycleVerification: false,
+                interactionPolicy: .full
+            )
+        )
+
+        XCTAssertNotNil(fixture.controller.workspaceManager.entry(for: popupToken))
+        XCTAssertEqual(fixture.controller.workspaceManager.focusedToken, fixture.mainToken)
+        XCTAssertTrue(
+            try XCTUnwrap(
+                fixture.controller.layoutRefreshController.layoutState.pendingRefresh
+            ).suppressesWindowActivation
+        )
+        XCTAssertTrue(fixture.recorder.operations.isEmpty)
+        XCTAssertNil(fixture.controller.focusPolicyEngine.activeLease)
+        XCTAssertNil(fixture.controller.intentLedger.activeManagedRequest)
+        XCTAssertNil(fixture.controller.workspaceManager.pendingFocusedToken)
+    }
+
+    func testFocusNeutralRefreshMetadataClearsAutomaticRecovery() throws {
+        let fixture = try makeFixture(prefix: "OmniWMSystemModalRefreshMetadataTests")
+        var plan = EffectPlan()
+        plan.effects.focusValidationWorkspaceIds = [fixture.workspaceId]
+        plan.effects.focusValidationPreferredTokens[fixture.workspaceId] = fixture.mainToken
+
+        fixture.controller.layoutRefreshController.applyRefreshMetadata(
+            .init(
+                kind: .relayout,
+                reason: .axWindowCreated,
+                suppressesWindowActivation: true
+            ),
+            to: &plan
+        )
+
+        XCTAssertTrue(plan.effects.suppressWindowActivation)
+        XCTAssertTrue(plan.effects.focusValidationWorkspaceIds.isEmpty)
+        XCTAssertTrue(plan.effects.focusValidationPreferredTokens.isEmpty)
+    }
+
+    func testCreatedFloatingFocusDoesNotDisplaceFocusedSystemModal() throws {
+        let fixture = try makeFixture(prefix: "OmniWMFocusedSystemModalCreatedFloatingTests")
+        let modalToken = WindowToken(pid: 559_014, windowId: 559_218)
+        let floatingToken = WindowToken(pid: modalToken.pid, windowId: 559_219)
+        _ = trackFloatingWindow(
+            in: fixture,
+            token: modalToken,
+            subrole: kAXSystemDialogSubrole as String,
+            windowLevel: 3
+        )
+        XCTAssertTrue(
+            fixture.controller.workspaceManager.confirmManagedFocus(
+                modalToken,
+                in: fixture.workspaceId,
+                activateWorkspaceOnMonitor: false
+            )
+        )
+        fixture.controller.workspaceManager.setSystemModalFocus(modalToken)
+        _ = trackFloatingWindow(
+            in: fixture,
+            token: floatingToken,
+            subrole: kAXStandardWindowSubrole as String,
+            windowLevel: 0
+        )
+
+        XCTAssertTrue(fixture.controller.isSystemModalFocusActive)
+        XCTAssertEqual(
+            fixture.controller.windowActionHandler.focusCreatedFloatingWindow(floatingToken),
+            .systemModalBarrier
+        )
+        XCTAssertEqual(fixture.controller.workspaceManager.focusedToken, modalToken)
+        XCTAssertEqual(fixture.controller.workspaceManager.systemModalFocusToken, modalToken)
+        XCTAssertTrue(fixture.recorder.operations.isEmpty)
+        XCTAssertNil(fixture.controller.focusPolicyEngine.activeLease)
+        XCTAssertNil(fixture.controller.intentLedger.activeManagedRequest)
+        XCTAssertNil(fixture.controller.workspaceManager.pendingFocusedToken)
+    }
+
+    func testCreatedFloatingFocusIgnoresStaleSystemModalMarker() throws {
+        let fixture = try makeFixture(prefix: "OmniWMStaleSystemModalCreatedFloatingTests")
+        let modalToken = WindowToken(pid: 559_015, windowId: 559_220)
+        let floatingToken = WindowToken(pid: modalToken.pid, windowId: 559_221)
+        _ = trackFloatingWindow(
+            in: fixture,
+            token: modalToken,
+            subrole: kAXSystemDialogSubrole as String,
+            windowLevel: 3
+        )
+        XCTAssertTrue(
+            fixture.controller.workspaceManager.confirmManagedFocus(
+                modalToken,
+                in: fixture.workspaceId,
+                activateWorkspaceOnMonitor: false
+            )
+        )
+        fixture.controller.workspaceManager.setSystemModalFocus(modalToken)
+        XCTAssertTrue(
+            fixture.controller.workspaceManager.confirmManagedFocus(
+                fixture.mainToken,
+                in: fixture.workspaceId,
+                activateWorkspaceOnMonitor: false
+            )
+        )
+        _ = trackFloatingWindow(
+            in: fixture,
+            token: floatingToken,
+            subrole: kAXStandardWindowSubrole as String,
+            windowLevel: 0
+        )
+
+        XCTAssertFalse(fixture.controller.isSystemModalFocusActive)
+        XCTAssertEqual(fixture.controller.workspaceManager.focusedToken, fixture.mainToken)
+        XCTAssertEqual(fixture.controller.workspaceManager.systemModalFocusToken, modalToken)
+        XCTAssertEqual(
+            fixture.controller.windowActionHandler.focusCreatedFloatingWindow(floatingToken),
+            .focused
+        )
+        XCTAssertEqual(
+            fixture.recorder.operations,
+            [
+                "order:\(floatingToken.windowId)",
+                "activate:\(floatingToken.pid)",
+                "focus:\(floatingToken.pid):\(floatingToken.windowId)",
+                "raise"
+            ]
+        )
+        XCTAssertEqual(fixture.controller.focusPolicyEngine.activeLease?.owner, .ruleCreatedFloatingWindow)
+        XCTAssertEqual(fixture.controller.intentLedger.activeManagedRequest?.token, floatingToken)
+        XCTAssertEqual(fixture.controller.workspaceManager.focusedToken, fixture.mainToken)
+        XCTAssertEqual(fixture.controller.workspaceManager.systemModalFocusToken, modalToken)
+        XCTAssertEqual(fixture.controller.workspaceManager.pendingFocusedToken, floatingToken)
     }
 
     func testNativeFullscreenOwnerSuppressesAutomaticRecovery() throws {
@@ -357,6 +543,33 @@ final class ForeignTransientFocusRecoveryTests: XCTestCase {
         )
         fixture.controller.workspaceManager.setInteractionPolicy(.handsOffSurface, for: token)
         return token
+    }
+
+    private func trackFloatingWindow(
+        in fixture: Fixture,
+        token: WindowToken,
+        subrole: String,
+        windowLevel: Int32
+    ) -> WindowToken {
+        fixture.controller.workspaceManager.addWindow(
+            WindowAdmissionTestSupport.axRef(for: token),
+            pid: token.pid,
+            windowId: token.windowId,
+            to: fixture.workspaceId,
+            mode: .floating,
+            managedReplacementMetadata: ManagedReplacementMetadata(
+                bundleId: "Cisco-Systems.Spark",
+                workspaceId: fixture.workspaceId,
+                mode: .floating,
+                role: kAXWindowRole as String,
+                subrole: subrole,
+                title: nil,
+                windowLevel: windowLevel,
+                parentWindowId: nil,
+                frame: CGRect(x: 0, y: 0, width: 280, height: 239),
+                transientWindowServerEvidence: false
+            )
+        )
     }
 
     private func makeFixture(prefix: String) throws -> Fixture {

@@ -2585,6 +2585,66 @@ final class RuntimeArchitectureTests: XCTestCase {
     }
 
     @MainActor
+    func testLayoutPlanDoesNotActivateWindowOverFocusedSystemModal() throws {
+        var focusedTokens: [WindowToken] = []
+        let controller = Self.controller(
+            windowFocusOperations: WindowFocusOperations(
+                activateApp: { _ in },
+                focusSpecificWindow: { pid, windowId, _ in
+                    focusedTokens.append(WindowToken(pid: pid, windowId: Int(windowId)))
+                },
+                raiseWindow: { _ in }
+            )
+        )
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let monitor = try XCTUnwrap(controller.workspaceManager.monitor(for: workspaceId))
+        let modalToken = controller.workspaceManager.addWindow(
+            AXWindowRef(element: AXUIElementCreateApplication(765_009), windowId: 765_109),
+            pid: 765_009,
+            windowId: 765_109,
+            to: workspaceId,
+            mode: .floating
+        )
+        let layoutToken = controller.workspaceManager.addWindow(
+            AXWindowRef(element: AXUIElementCreateApplication(765_009), windowId: 765_110),
+            pid: 765_009,
+            windowId: 765_110,
+            to: workspaceId
+        )
+        XCTAssertTrue(
+            controller.workspaceManager.confirmManagedFocus(
+                modalToken,
+                in: workspaceId,
+                activateWorkspaceOnMonitor: false
+            )
+        )
+        controller.workspaceManager.setSystemModalFocus(modalToken)
+        let plannedSeq = controller.workspaceManager.worldSeq
+
+        let accepted = controller.layoutRefreshController.executeLayoutPlanReturningAcceptedSeq(
+            WorkspaceLayoutPlan(
+                workspaceId: workspaceId,
+                monitor: Self.layoutMonitorSnapshot(monitor),
+                sessionPatch: WorkspaceSessionPatch(
+                    workspaceId: workspaceId,
+                    plannedSeq: plannedSeq
+                ),
+                diff: WorkspaceLayoutDiff(),
+                animationDirectives: [.activateWindow(token: layoutToken)]
+            )
+        )
+
+        XCTAssertNotNil(accepted)
+        XCTAssertTrue(controller.shouldSuppressManagedFocusRecovery)
+        XCTAssertEqual(controller.workspaceManager.focusedToken, modalToken)
+        XCTAssertNil(controller.workspaceManager.pendingFocusedToken)
+        XCTAssertNil(controller.intentLedger.activeManagedRequest)
+        XCTAssertTrue(focusedTokens.isEmpty)
+    }
+
+    @MainActor
     func testLayoutPlanRejectsStaleFocusSeqBeforeApplyingEffects() throws {
         let controller = Self.controller()
         let workspaceId = try XCTUnwrap(controller.workspaceManager.workspaceId(for: "1", createIfMissing: true))
