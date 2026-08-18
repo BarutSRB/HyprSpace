@@ -53,11 +53,16 @@ struct GeneralSettingsTab: View {
 
     @State private var selectedGapMonitor: Monitor.ID?
     @State private var connectedMonitors: [Monitor] = Monitor.current()
+    @State private var loginItems = LoginItemManager()
 
     var body: some View {
         let animationsEnabled = Binding(
             get: { controller.motionPolicy.animationsEnabled },
             set: { controller.setAnimationsEnabled($0) }
+        )
+        let startAtLogin = Binding(
+            get: { loginItems.isEnabled || loginItems.requiresApproval },
+            set: { loginItems.setEnabled($0) }
         )
 
         Form {
@@ -95,6 +100,28 @@ struct GeneralSettingsTab: View {
                     }
                     .disabled(!settings.statusBarShowWorkspaceName)
                 SettingsCaption("Shows the active workspace and focused app beside the menu bar icon")
+            }
+
+            Section("Startup") {
+                Toggle("Start at Login", isOn: startAtLogin)
+                    .onReceive(
+                        NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
+                    ) { _ in
+                        loginItems.refresh()
+                    }
+                if loginItems.requiresApproval {
+                    Button("Open Login Items Settings...") {
+                        LoginItemManager.openLoginItemsSettings()
+                    }
+                    SettingsCaption(
+                        "macOS needs your approval before OmniWM can start at login. "
+                            + "Approve it under System Settings > General > Login Items."
+                    )
+                }
+                if let loginItemError = loginItems.lastErrorDescription {
+                    SettingsCaption("Could not update the login item: \(loginItemError)")
+                }
+                SettingsCaption("Launches OmniWM automatically when you log in.")
             }
 
             Section("Updates") {
