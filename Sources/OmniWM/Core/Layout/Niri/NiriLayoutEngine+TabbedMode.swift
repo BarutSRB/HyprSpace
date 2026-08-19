@@ -105,7 +105,7 @@ extension NiriLayoutEngine {
             }
         }
 
-        let currentTarget = column.targetWidth ?? column.cachedWidth
+        let currentTarget = column.settledWidth
         if currentTarget > 0 {
             let clampedTarget = column.clampedToWidthBounds(
                 currentTarget,

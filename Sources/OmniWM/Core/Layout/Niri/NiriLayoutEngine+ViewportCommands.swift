@@ -20,15 +20,10 @@ extension NiriLayoutEngine {
             gaps: gaps,
             orientation: orientation
         )
-        let sizeKeyPath: KeyPath<NiriContainer, CGFloat>
-        let viewportSpan: CGFloat
-        switch orientation {
-        case .horizontal:
-            sizeKeyPath = \.cachedWidth
-            viewportSpan = workingFrame.width
-        case .vertical:
-            sizeKeyPath = \.cachedHeight
-            viewportSpan = workingFrame.height
+        let sizeKeyPath = orientation.settledSpanKeyPath
+        let viewportSpan: CGFloat = switch orientation {
+        case .horizontal: workingFrame.width
+        case .vertical: workingFrame.height
         }
         let scale = displayScale(in: workspaceId)
         let viewFrame = monitorForWorkspace(workspaceId)?.frame
@@ -79,15 +74,10 @@ extension NiriLayoutEngine {
             gaps: gaps,
             orientation: orientation
         )
-        let sizeKeyPath: KeyPath<NiriContainer, CGFloat>
-        let viewportSpan: CGFloat
-        switch orientation {
-        case .horizontal:
-            sizeKeyPath = \.cachedWidth
-            viewportSpan = workingFrame.width
-        case .vertical:
-            sizeKeyPath = \.cachedHeight
-            viewportSpan = workingFrame.height
+        let sizeKeyPath = orientation.settledSpanKeyPath
+        let viewportSpan: CGFloat = switch orientation {
+        case .horizontal: workingFrame.width
+        case .vertical: workingFrame.height
         }
 
         let scale = displayScale(in: workspaceId)

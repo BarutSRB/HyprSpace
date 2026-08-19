@@ -268,15 +268,9 @@ extension NiriLayoutEngine {
 
         let prevIdx = fromContainerIndex ?? state.activeColumnIndex
 
-        let sizeKeyPath: KeyPath<NiriContainer, CGFloat>
-        let viewportSpan: CGFloat
-        switch orientation {
-        case .horizontal:
-            sizeKeyPath = \.cachedWidth
-            viewportSpan = workingFrame.width
-        case .vertical:
-            sizeKeyPath = \.cachedHeight
-            viewportSpan = workingFrame.height
+        let viewportSpan: CGFloat = switch orientation {
+        case .horizontal: workingFrame.width
+        case .vertical: workingFrame.height
         }
 
         let scale = displayScale(in: workspaceId)
@@ -286,13 +280,13 @@ extension NiriLayoutEngine {
                 at: state.activeColumnIndex,
                 containers: containers,
                 gap: gaps,
-                sizeKeyPath: sizeKeyPath
+                sizeKeyPath: orientation.renderedSpanKeyPath
             )
         let newActivePos = state.containerPosition(
             at: targetIdx,
             containers: containers,
             gap: gaps,
-            sizeKeyPath: sizeKeyPath
+            sizeKeyPath: orientation.renderedSpanKeyPath
         )
         let offsetDelta = oldActivePos - newActivePos
         state.rebaseOffset(by: offsetDelta)
@@ -308,7 +302,7 @@ extension NiriLayoutEngine {
             gap: gaps,
             viewportSpan: viewportSpan,
             motion: motion,
-            sizeKeyPath: sizeKeyPath,
+            sizeKeyPath: orientation.settledSpanKeyPath,
             animate: true,
             centerMode: settings.centerFocusedColumn,
             alwaysCenterSingleColumn: settings.alwaysCenterSingleColumn,

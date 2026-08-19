@@ -428,7 +428,7 @@ extension NiriLayoutEngine {
             spans.reserveCapacity(containers.count)
             for container in containers {
                 let span: CGFloat = switch orientation {
-                case .horizontal: container.targetWidth ?? container.cachedWidth
+                case .horizontal: container.settledWidth
                 case .vertical: container.cachedHeight
                 }
                 guard span > 0 else { return false }

@@ -47,6 +47,22 @@ extension SizingMode {
     }
 }
 
+extension Monitor.Orientation {
+    var renderedSpanKeyPath: KeyPath<NiriContainer, CGFloat> {
+        switch self {
+        case .horizontal: \.cachedWidth
+        case .vertical: \.cachedHeight
+        }
+    }
+
+    var settledSpanKeyPath: KeyPath<NiriContainer, CGFloat> {
+        switch self {
+        case .horizontal: \.settledWidth
+        case .vertical: \.cachedHeight
+        }
+    }
+}
+
 extension NiriContainer {
     var effectiveSizingMode: SizingMode {
         var anyFullscreen = false
@@ -75,10 +91,6 @@ extension NiriContainer {
 extension ViewportState {
     func columnX(at index: Int, columns: [NiriContainer], gap: CGFloat) -> CGFloat {
         containerPosition(at: index, containers: columns, gap: gap, sizeKeyPath: \.cachedWidth)
-    }
-
-    func totalWidth(columns: [NiriContainer], gap: CGFloat) -> CGFloat {
-        totalSpan(containers: columns, gap: gap, sizeKeyPath: \.cachedWidth)
     }
 
     func containerPosition(
@@ -415,58 +427,5 @@ extension ViewportState {
         }
 
         return targetOffset
-    }
-
-    func computeCenteredOffset(
-        columnIndex: Int,
-        columns: [NiriContainer],
-        gap: CGFloat,
-        viewportWidth: CGFloat,
-        workingArea: CGRect? = nil,
-        viewFrame: CGRect? = nil,
-        scale: CGFloat = 2.0
-    ) -> CGFloat {
-        computeCenteredOffset(
-            containerIndex: columnIndex,
-            containers: columns,
-            gap: gap,
-            viewportSpan: viewportWidth,
-            sizeKeyPath: \.cachedWidth,
-            workingArea: workingArea,
-            viewFrame: viewFrame,
-            orientation: .horizontal,
-            scale: scale
-        )
-    }
-
-    func computeVisibleOffset(
-        columnIndex: Int,
-        columns: [NiriContainer],
-        gap: CGFloat,
-        viewportWidth: CGFloat,
-        currentOffset: CGFloat,
-        centerMode: CenterFocusedColumn,
-        alwaysCenterSingleColumn: Bool = false,
-        fromColumnIndex: Int? = nil,
-        scale: CGFloat = 2.0,
-        workingArea: CGRect? = nil,
-        viewFrame: CGRect? = nil
-    ) -> CGFloat {
-        let colX = columnX(at: columnIndex, columns: columns, gap: gap)
-        return computeVisibleOffset(
-            containerIndex: columnIndex,
-            containers: columns,
-            gap: gap,
-            viewportSpan: viewportWidth,
-            sizeKeyPath: \.cachedWidth,
-            currentViewStart: colX + currentOffset,
-            centerMode: centerMode,
-            alwaysCenterSingleColumn: alwaysCenterSingleColumn,
-            fromContainerIndex: fromColumnIndex,
-            scale: scale,
-            workingArea: workingArea,
-            viewFrame: viewFrame,
-            orientation: .horizontal
-        )
     }
 }

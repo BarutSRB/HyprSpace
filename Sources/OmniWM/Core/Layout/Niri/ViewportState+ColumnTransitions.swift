@@ -21,22 +21,16 @@ extension ViewportState {
     ) {
         guard !columns.isEmpty else { return }
         let clampedIndex = newIndex.clamped(to: 0 ... (columns.count - 1))
-        let sizeKeyPath: KeyPath<NiriContainer, CGFloat>
-        let viewportSpan: CGFloat
-        switch orientation {
-        case .horizontal:
-            sizeKeyPath = \.cachedWidth
-            viewportSpan = workingArea.width
-        case .vertical:
-            sizeKeyPath = \.cachedHeight
-            viewportSpan = workingArea.height
+        let viewportSpan: CGFloat = switch orientation {
+        case .horizontal: workingArea.width
+        case .vertical: workingArea.height
         }
 
         let oldActivePosition = containerPosition(
             at: activeColumnIndex,
             containers: columns,
             gap: gap,
-            sizeKeyPath: sizeKeyPath
+            sizeKeyPath: orientation.renderedSpanKeyPath
         )
 
         let prevActiveColumn = activeColumnIndex
@@ -46,19 +40,25 @@ extension ViewportState {
             at: clampedIndex,
             containers: columns,
             gap: gap,
-            sizeKeyPath: sizeKeyPath
+            sizeKeyPath: orientation.renderedSpanKeyPath
         )
         let offsetDelta = oldActivePosition - newActivePosition
 
         rebaseOffset(by: offsetDelta)
 
+        let settledActivePosition = containerPosition(
+            at: clampedIndex,
+            containers: columns,
+            gap: gap,
+            sizeKeyPath: orientation.settledSpanKeyPath
+        )
         let targetOffset = computeVisibleOffset(
             containerIndex: clampedIndex,
             containers: columns,
             gap: gap,
             viewportSpan: viewportSpan,
-            sizeKeyPath: sizeKeyPath,
-            currentViewStart: newActivePosition + viewOffset,
+            sizeKeyPath: orientation.settledSpanKeyPath,
+            currentViewStart: settledActivePosition + viewOffset,
             centerMode: centerMode,
             alwaysCenterSingleColumn: alwaysCenterSingleColumn,
             fromContainerIndex: fromColumnIndex ?? prevActiveColumn,

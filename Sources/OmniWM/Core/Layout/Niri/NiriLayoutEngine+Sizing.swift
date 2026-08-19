@@ -182,7 +182,6 @@ extension NiriLayoutEngine {
         _ column: NiriContainer,
         width newWidth: ProportionalSize,
         presetIndex: Int?,
-        previousWidth: CGFloat,
         in workspaceId: WorkspaceDescriptor.ID,
         motion: MotionSnapshot,
         state: inout ViewportState,
@@ -206,7 +205,7 @@ extension NiriLayoutEngine {
             gaps: gaps
         )
 
-        let didStartWidthAnimation = column.animateWidthTo(
+        column.animateWidthTo(
             newWidth: targetPixels,
             clock: animationClock,
             config: windowMovementAnimationConfig,
@@ -214,11 +213,8 @@ extension NiriLayoutEngine {
             animated: motion.animationsEnabled
         )
 
-        ensureSelectionVisibleForPendingWidth(
+        ensureContainerSpanVisible(
             column,
-            targetWidth: targetPixels,
-            previousWidth: previousWidth,
-            restorePreviousWidthAfterFit: didStartWidthAnimation,
             in: workspaceId,
             motion: motion,
             state: &state,
@@ -238,11 +234,8 @@ extension NiriLayoutEngine {
         }
     }
 
-    private func ensureSelectionVisibleForPendingWidth(
+    private func ensureContainerSpanVisible(
         _ column: NiriContainer,
-        targetWidth: CGFloat,
-        previousWidth: CGFloat,
-        restorePreviousWidthAfterFit: Bool,
         in workspaceId: WorkspaceDescriptor.ID,
         motion: MotionSnapshot,
         state: inout ViewportState,
@@ -250,36 +243,21 @@ extension NiriLayoutEngine {
         gaps: CGFloat,
         orientation: Monitor.Orientation
     ) {
-        guard orientation == .horizontal else { return }
-        guard let window = column.windowNodes.first else { return }
-
-        // Expose the target width only for viewport-fit math. Animated width
-        // changes restore the previous cache so the spring can continue from
-        // the old span; immediate width changes keep the new target cached.
-        if restorePreviousWidthAfterFit {
-            column.cachedWidth = targetWidth
-            defer { column.cachedWidth = previousWidth }
-            ensureSelectionVisible(
-                node: window,
-                in: workspaceId,
-                motion: motion,
-                state: &state,
-                workingFrame: workingFrame,
-                gaps: gaps,
-                orientation: orientation
-            )
-        } else {
-            column.cachedWidth = targetWidth
-            ensureSelectionVisible(
-                node: window,
-                in: workspaceId,
-                motion: motion,
-                state: &state,
-                workingFrame: workingFrame,
-                gaps: gaps,
-                orientation: orientation
-            )
+        guard orientation == .horizontal,
+              let window = column.activeWindow ?? column.windowNodes.first
+        else {
+            return
         }
+
+        ensureSelectionVisible(
+            node: window,
+            in: workspaceId,
+            motion: motion,
+            state: &state,
+            workingFrame: workingFrame,
+            gaps: gaps,
+            orientation: orientation
+        )
     }
 
     private func applyContainerHeight(
@@ -631,7 +609,6 @@ extension NiriLayoutEngine {
             column,
             width: newWidth,
             presetIndex: nextIdx,
-            previousWidth: previousWidth,
             in: workspaceId,
             motion: motion,
             state: &state,
@@ -702,12 +679,6 @@ extension NiriLayoutEngine {
             return
         }
 
-        let previousWidth = cachedWidthForResizeStart(
-            column,
-            in: workspaceId,
-            workingFrame: workingFrame,
-            gaps: gaps
-        )
         let currentSpec = column.isFullWidth ? ProportionalSize.proportion(1) : column.width
         let currentPixels = resolvedColumnPixels(
             currentSpec,
@@ -727,7 +698,6 @@ extension NiriLayoutEngine {
             column,
             width: newWidth,
             presetIndex: nil,
-            previousWidth: previousWidth,
             in: workspaceId,
             motion: motion,
             state: &state,
@@ -783,12 +753,6 @@ extension NiriLayoutEngine {
             return
         }
 
-        let previousWidth = cachedWidthForResizeStart(
-            column,
-            in: workspaceId,
-            workingFrame: workingFrame,
-            gaps: gaps
-        )
         let targetPixels: CGFloat
         cancelInteractiveResize(for: column, in: workspaceId)
 
@@ -808,7 +772,7 @@ extension NiriLayoutEngine {
             targetPixels = resolvedColumnPixels(.proportion(1), for: column, workingFrame: workingFrame, gaps: gaps)
         }
 
-        let didStartWidthAnimation = column.animateWidthTo(
+        column.animateWidthTo(
             newWidth: targetPixels,
             clock: animationClock,
             config: windowMovementAnimationConfig,
@@ -816,11 +780,8 @@ extension NiriLayoutEngine {
             animated: motion.animationsEnabled
         )
 
-        ensureSelectionVisibleForPendingWidth(
+        ensureContainerSpanVisible(
             column,
-            targetWidth: targetPixels,
-            previousWidth: previousWidth,
-            restorePreviousWidthAfterFit: didStartWidthAnimation,
             in: workspaceId,
             motion: motion,
             state: &state,
@@ -934,18 +895,11 @@ extension NiriLayoutEngine {
             }
 
             guard let leftmostColX, let activeColX else { return }
-            let previousWidth = cachedWidthForResizeStart(
-                column,
-                in: workspaceId,
-                workingFrame: workingFrame,
-                gaps: gaps
-            )
             let targetWidth = (column.cachedWidth + availableWidth).clamped(to: 1 ... NiriSizeChange.maxPixels)
             applyColumnWidth(
                 column,
                 width: .fixed(targetWidth),
                 presetIndex: nil,
-                previousWidth: previousWidth,
                 in: workspaceId,
                 motion: motion,
                 state: &projectedState,

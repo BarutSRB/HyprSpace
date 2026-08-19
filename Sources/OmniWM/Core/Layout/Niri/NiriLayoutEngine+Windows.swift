@@ -555,21 +555,16 @@ extension NiriLayoutEngine {
         guard !cols.isEmpty else { return false }
 
         let monitor = monitorForWorkspace(workspaceId)
-        let sizeKeyPath: KeyPath<NiriContainer, CGFloat>
-        let viewportSpan: CGFloat
         resolvePrimaryContainerSpans(
             in: workspaceId,
             workingFrame: workingFrame,
             gaps: gaps,
             orientation: orientation
         )
-        switch orientation {
-        case .horizontal:
-            sizeKeyPath = \.cachedWidth
-            viewportSpan = workingFrame.width
-        case .vertical:
-            sizeKeyPath = \.cachedHeight
-            viewportSpan = workingFrame.height
+        let sizeKeyPath = orientation.settledSpanKeyPath
+        let viewportSpan: CGFloat = switch orientation {
+        case .horizontal: workingFrame.width
+        case .vertical: workingFrame.height
         }
 
         let activeIdx = state.activeColumnIndex.clamped(to: 0 ... (cols.count - 1))

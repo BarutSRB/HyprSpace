@@ -386,6 +386,10 @@ class NiriContainer: NiriNode {
     var widthAnimation: SpringAnimation?
     var targetWidth: CGFloat?
 
+    var settledWidth: CGFloat {
+        targetWidth ?? cachedWidth
+    }
+
     private var _cachedWindowNodes: [NiriWindow]?
 
     private(set) var axisSolveRevision: UInt64 = 0
