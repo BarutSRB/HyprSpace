@@ -44,17 +44,22 @@ enum KeyWindowEventRecord {
     private static let declaredLength: UInt8 = 0xF8
     private static let declaredLengthOffset = 0x04
     private static let eventTypeOffset = 0x08
-    private static let mouseDownEventType: UInt8 = 0x01
+    private static let mouseDown: UInt8 = 0x01
+    private static let mouseUp: UInt8 = 0x02
     private static let windowLocationOffset = 0x20
     private static let keyWindowFlagOffset = 0x3A
     private static let keyWindowFlag: UInt8 = 0x10
     private static let windowIdOffset = 0x3C
     private static let farOffContentLocation = CGPoint(x: 300_000, y: 300_000)
 
-    static func make(windowId: UInt32) -> [UInt8] {
+    static func pressAndRelease(windowId: UInt32) -> [[UInt8]] {
+        [make(windowId: windowId, eventType: mouseDown), make(windowId: windowId, eventType: mouseUp)]
+    }
+
+    private static func make(windowId: UInt32, eventType: UInt8) -> [UInt8] {
         var bytes = [UInt8](repeating: 0, count: bufferSize)
         bytes[declaredLengthOffset] = declaredLength
-        bytes[eventTypeOffset] = mouseDownEventType
+        bytes[eventTypeOffset] = eventType
         bytes[keyWindowFlagOffset] = keyWindowFlag
         encode(farOffContentLocation, in: &bytes, at: windowLocationOffset)
         encode(windowId, in: &bytes, at: windowIdOffset)
@@ -71,9 +76,11 @@ enum KeyWindowEventRecord {
 }
 
 func makeKeyWindow(psn: inout ProcessSerialNumber, windowId: UInt32) {
-    var eventBytes = KeyWindowEventRecord.make(windowId: windowId)
-    if SLPSPostEventRecordTo(&psn, &eventBytes) != noErr {
-        FallbackFiringRecorder.shared.note(.skylight, "postEventRecordFailed")
+    for var eventBytes in KeyWindowEventRecord.pressAndRelease(windowId: windowId) {
+        let status = SLPSPostEventRecordTo(&psn, &eventBytes)
+        if status != noErr {
+            FallbackFiringRecorder.shared.note(.skylight, "postEventRecordFailed")
+        }
     }
 }
 

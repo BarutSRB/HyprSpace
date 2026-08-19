@@ -1037,11 +1037,11 @@ final class CommandPaletteController: NSObject, NSWindowDelegate {
                 SkyLight.shared.orderWindow(UInt32(windowId), relativeTo: 0, order: .above)
             }
 
-            var psn = ProcessSerialNumber()
-            if GetProcessForPID(target.app.processIdentifier, &psn) == noErr {
-                _ = _SLPSSetFrontProcessWithOptions(&psn, UInt32(windowId), kCPSUserGenerated)
-                makeKeyWindow(psn: &psn, windowId: UInt32(windowId))
-            }
+            focusWindow(
+                pid: target.app.processIdentifier,
+                windowId: UInt32(windowId),
+                windowRef: focusedWindow
+            )
         }
 
         app.activate(options: [])
