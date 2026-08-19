@@ -207,6 +207,99 @@ final class ForeignTransientFocusRecoveryTests: XCTestCase {
         XCTAssertNil(fixture.controller.workspaceManager.pendingFocusedToken)
     }
 
+    func testHandsOffAdmissionArmsNonManagedFocusTargetAndSurvivesRelayout() async throws {
+        let fixture = try makeFixture(prefix: "OmniWMHandsOffAdmissionArmsTargetTests")
+        defer { fixture.controller.layoutRefreshController.resetState() }
+        let popupToken = WindowToken(pid: 559_020, windowId: 559_230)
+        fixture.controller.axEventHandler.frontmostApplicationPIDProvider = { popupToken.pid }
+
+        trackHandsOffAdmission(in: fixture, token: popupToken)
+
+        XCTAssertEqual(fixture.controller.workspaceManager.nonManagedFocusToken, popupToken)
+        XCTAssertEqual(fixture.controller.workspaceManager.focusedToken, fixture.mainToken)
+        XCTAssertTrue(fixture.controller.shouldSuppressManagedFocusRecovery)
+
+        await WindowAdmissionTestSupport.drainLayoutRefreshes(fixture.controller)
+
+        XCTAssertTrue(fixture.recorder.operations.isEmpty)
+        XCTAssertNil(fixture.controller.intentLedger.activeManagedRequest)
+        XCTAssertNil(fixture.controller.workspaceManager.pendingFocusedToken)
+    }
+
+    func testHandsOffAdmissionDoesNotArmWhenOwningAppIsNotFrontmost() async throws {
+        let fixture = try makeFixture(prefix: "OmniWMHandsOffAdmissionNotFrontmostTests")
+        defer { fixture.controller.layoutRefreshController.resetState() }
+        let popupToken = WindowToken(pid: 559_021, windowId: 559_231)
+        fixture.controller.axEventHandler.frontmostApplicationPIDProvider = { fixture.mainToken.pid }
+
+        trackHandsOffAdmission(in: fixture, token: popupToken)
+
+        XCTAssertNil(fixture.controller.workspaceManager.nonManagedFocusToken)
+        XCTAssertFalse(fixture.controller.shouldSuppressManagedFocusRecovery)
+
+        await WindowAdmissionTestSupport.drainLayoutRefreshes(fixture.controller)
+
+        XCTAssertEqual(fixture.controller.workspaceManager.focusedToken, fixture.mainToken)
+    }
+
+    func testClosingAdmittedHandsOffSurfaceRestoresManagedFocus() async throws {
+        let fixture = try makeFixture(prefix: "OmniWMHandsOffAdmissionCloseTests")
+        defer { fixture.controller.layoutRefreshController.resetState() }
+        let popupToken = WindowToken(pid: 559_022, windowId: 559_232)
+        fixture.controller.axEventHandler.frontmostApplicationPIDProvider = { popupToken.pid }
+        trackHandsOffAdmission(in: fixture, token: popupToken)
+        XCTAssertEqual(fixture.controller.workspaceManager.nonManagedFocusToken, popupToken)
+        await WindowAdmissionTestSupport.drainLayoutRefreshes(fixture.controller)
+
+        XCTAssertNotNil(
+            fixture.controller.workspaceManager.removeWindow(
+                pid: popupToken.pid,
+                windowId: popupToken.windowId
+            )
+        )
+
+        XCTAssertNil(fixture.controller.workspaceManager.entry(for: popupToken))
+        XCTAssertNil(fixture.controller.workspaceManager.nonManagedFocusToken)
+        XCTAssertFalse(fixture.controller.shouldSuppressManagedFocusRecovery)
+
+        fixture.controller.ensureFocusedTokenValid(in: fixture.workspaceId)
+        await WindowAdmissionTestSupport.drainLayoutRefreshes(fixture.controller)
+
+        XCTAssertEqual(fixture.controller.workspaceManager.focusedToken, fixture.mainToken)
+        XCTAssertTrue(fixture.recorder.operations.isEmpty)
+    }
+
+    func testFullPolicyAdmissionStillRecoversManagedFocus() async throws {
+        let fixture = try makeFixture(prefix: "OmniWMFullPolicyAdmissionRecoveryTests")
+        defer { fixture.controller.layoutRefreshController.resetState() }
+        let floatingToken = WindowToken(pid: 559_023, windowId: 559_233)
+        fixture.controller.axEventHandler.frontmostApplicationPIDProvider = { floatingToken.pid }
+
+        trackHandsOffAdmission(in: fixture, token: floatingToken, interactionPolicy: .full)
+
+        XCTAssertNil(fixture.controller.workspaceManager.nonManagedFocusToken)
+        XCTAssertFalse(fixture.controller.shouldSuppressManagedFocusRecovery)
+        await WindowAdmissionTestSupport.drainLayoutRefreshes(fixture.controller)
+    }
+
+    func testRepeatedExternalActivationDoesNotStripHandsOffTarget() throws {
+        let fixture = try makeFixture(prefix: "OmniWMHandsOffRepeatedActivationTests")
+        defer { fixture.controller.layoutRefreshController.resetState() }
+        let popupToken = WindowToken(pid: 559_024, windowId: 559_234)
+        fixture.controller.axEventHandler.frontmostApplicationPIDProvider = { popupToken.pid }
+        trackHandsOffAdmission(in: fixture, token: popupToken)
+        XCTAssertEqual(fixture.controller.workspaceManager.nonManagedFocusToken, popupToken)
+
+        fixture.controller.axEventHandler.handleAppActivation(
+            pid: popupToken.pid,
+            source: .workspaceDidActivateApplication,
+            origin: .external
+        )
+
+        XCTAssertEqual(fixture.controller.workspaceManager.nonManagedFocusToken, popupToken)
+        XCTAssertTrue(fixture.controller.shouldSuppressManagedFocusRecovery)
+    }
+
     func testFocusNeutralRefreshMetadataClearsAutomaticRecovery() throws {
         let fixture = try makeFixture(prefix: "OmniWMSystemModalRefreshMetadataTests")
         var plan = EffectPlan()
@@ -527,6 +620,37 @@ final class ForeignTransientFocusRecoveryTests: XCTestCase {
             "focus:\(fixture.mainToken.pid):\(fixture.mainToken.windowId)",
             "raise"
         ]
+    }
+
+    private func trackHandsOffAdmission(
+        in fixture: Fixture,
+        token: WindowToken,
+        interactionPolicy: WindowInteractionPolicy = .handsOffSurface
+    ) {
+        fixture.controller.axEventHandler.trackPreparedCreate(
+            .init(
+                windowId: UInt32(token.windowId),
+                token: token,
+                axRef: WindowAdmissionTestSupport.axRef(for: token),
+                ruleEffects: .none,
+                admissionHints: .none,
+                replacementMetadata: .init(
+                    bundleId: "com.tddworks.claudebar",
+                    workspaceId: fixture.workspaceId,
+                    mode: .floating,
+                    role: kAXWindowRole as String,
+                    subrole: kAXUnknownSubrole as String,
+                    title: nil,
+                    windowLevel: 101,
+                    parentWindowId: nil,
+                    frame: CGRect(x: 0, y: 0, width: 400, height: 595),
+                    transientWindowServerEvidence: false
+                ),
+                structuralReplacementMatch: nil,
+                requiresPostCreateLifecycleVerification: false,
+                interactionPolicy: interactionPolicy
+            )
+        )
     }
 
     private func trackHandsOffPopup(

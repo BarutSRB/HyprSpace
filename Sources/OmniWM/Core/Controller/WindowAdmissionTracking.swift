@@ -128,6 +128,14 @@ extension AXEventHandler {
         if candidate.requiresPostCreateLifecycleVerification {
             schedulePostCreateLifecycleVerification(for: trackedToken)
         }
+        if candidate.interactionPolicy.isHandsOff,
+           frontmostApplicationPIDProvider() == trackedToken.pid
+        {
+            controller.workspaceManager.enterNonManagedFocus(
+                preserveFocusedToken: true,
+                target: trackedToken
+            )
+        }
 
         controller.layoutRefreshController.requestRelayout(
             reason: .axWindowCreated,
