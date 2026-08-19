@@ -501,8 +501,9 @@ For setup, installation options, commands, queries, rules, subscriptions, and se
 6. Keep one macOS Space per display and navigate with OmniWM workspaces; extra native Spaces are tolerated (their windows are left to macOS, not tiled)
 7. Use the default shortcuts in `Keyboard Shortcuts` to navigate between windows
 8. Click the menu bar icon to access Settings, including `Settings > General > Updates`
-9. Use `Check for Updates...` from the status bar menu whenever you want to run a manual update check
-10. In case you freak out and don't see all your status bar icons, relax, OmniWM hides the menu-bar icons you selected in `Settings > Hidden Bar`. Right-click OmniWM's status bar icon to open the Hidden Icons Bar and click any icon to use it.
+9. Enable `Start at Login` under `Settings > General > Startup` to launch OmniWM automatically when you log in
+10. Use `Check for Updates...` from the status bar menu whenever you want to run a manual update check
+11. In case you freak out and don't see all your status bar icons, relax, OmniWM hides the menu-bar icons you selected in `Settings > Hidden Bar`. Right-click OmniWM's status bar icon to open the Hidden Icons Bar and click any icon to use it.
 
 
 ## User Guide
