@@ -25,17 +25,15 @@ final class LoginItemManager {
 
     init(service: any LoginItemService = SMAppService.mainApp) {
         self.service = service
-        refresh()
     }
 
     func refresh() {
-        let status = service.status
-        isEnabled = status == .enabled
-        requiresApproval = status == .requiresApproval
+        lastErrorDescription = nil
+        updateStatus()
     }
 
     func setEnabled(_ enabled: Bool) {
-        guard enabled != (isEnabled || requiresApproval) else { return }
+        guard enabled != isEnabled else { return }
         do {
             if enabled {
                 try service.register()
@@ -46,7 +44,13 @@ final class LoginItemManager {
         } catch {
             lastErrorDescription = error.localizedDescription
         }
-        refresh()
+        updateStatus()
+    }
+
+    private func updateStatus() {
+        let status = service.status
+        isEnabled = status == .enabled
+        requiresApproval = status == .requiresApproval
     }
 
     static func openLoginItemsSettings() {

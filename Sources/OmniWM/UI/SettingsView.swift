@@ -61,7 +61,7 @@ struct GeneralSettingsTab: View {
             set: { controller.setAnimationsEnabled($0) }
         )
         let startAtLogin = Binding(
-            get: { loginItems.isEnabled || loginItems.requiresApproval },
+            get: { loginItems.isEnabled },
             set: { loginItems.setEnabled($0) }
         )
 
@@ -104,6 +104,7 @@ struct GeneralSettingsTab: View {
 
             Section("Startup") {
                 Toggle("Start at Login", isOn: startAtLogin)
+                    .onAppear { loginItems.refresh() }
                     .onReceive(
                         NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
                     ) { _ in

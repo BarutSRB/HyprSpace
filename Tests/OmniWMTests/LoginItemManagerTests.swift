@@ -8,7 +8,9 @@ import XCTest
 @MainActor
 final class LoginItemManagerTests: XCTestCase {
     private struct StubError: LocalizedError {
-        var errorDescription: String? { "registration denied" }
+        var errorDescription: String? {
+            "registration denied"
+        }
     }
 
     private final class FakeLoginItemService: LoginItemService {
@@ -30,11 +32,12 @@ final class LoginItemManagerTests: XCTestCase {
         }
     }
 
-    func testInitReflectsCurrentStatus() {
+    func testRefreshReflectsCurrentStatus() {
         let service = FakeLoginItemService()
         service.status = .enabled
 
         let manager = LoginItemManager(service: service)
+        manager.refresh()
 
         XCTAssertTrue(manager.isEnabled)
         XCTAssertFalse(manager.requiresApproval)
@@ -55,6 +58,7 @@ final class LoginItemManagerTests: XCTestCase {
         let service = FakeLoginItemService()
         service.status = .enabled
         let manager = LoginItemManager(service: service)
+        manager.refresh()
 
         manager.setEnabled(false)
 
@@ -67,6 +71,7 @@ final class LoginItemManagerTests: XCTestCase {
         let service = FakeLoginItemService()
         service.status = .enabled
         let manager = LoginItemManager(service: service)
+        manager.refresh()
 
         manager.setEnabled(true)
 
@@ -74,19 +79,33 @@ final class LoginItemManagerTests: XCTestCase {
         XCTAssertEqual(service.unregisterCalls, 0)
     }
 
-    func testPendingApprovalCountsAsRequestedState() {
+    func testRequiresApprovalIsNotReportedAsEnabled() {
         let service = FakeLoginItemService()
         service.status = .requiresApproval
         let manager = LoginItemManager(service: service)
+        manager.refresh()
 
         XCTAssertFalse(manager.isEnabled)
         XCTAssertTrue(manager.requiresApproval)
 
         manager.setEnabled(true)
-        XCTAssertEqual(service.registerCalls, 0)
+        XCTAssertEqual(service.registerCalls, 1)
+    }
 
-        manager.setEnabled(false)
-        XCTAssertEqual(service.unregisterCalls, 1)
+    func testRefreshClearsStaleError() {
+        let service = FakeLoginItemService()
+        service.errorToThrow = StubError()
+        let manager = LoginItemManager(service: service)
+
+        manager.setEnabled(true)
+        XCTAssertEqual(manager.lastErrorDescription, "registration denied")
+
+        service.errorToThrow = nil
+        service.status = .enabled
+        manager.refresh()
+
+        XCTAssertNil(manager.lastErrorDescription)
+        XCTAssertTrue(manager.isEnabled)
     }
 
     func testRegistrationFailureIsSurfacedAndStateRefreshed() {
