@@ -9,6 +9,7 @@ final class IPCQueryRouter {
     let controller: WMController
     private let appVersion: String?
     private let sessionToken: String
+    var windowOrderedInProvider: (UInt32) -> Bool? = { SkyLight.shared.isWindowOrderedIn($0) }
 
     init(
         controller: WMController,
@@ -468,9 +469,13 @@ final class IPCQueryRouter {
         hiddenState: HiddenState?,
         isAppHidden: Bool
     ) -> Bool {
-        visibleWorkspaceIds.contains(entry.workspaceId)
-            && hiddenState == nil
-            && !isAppHidden
+        guard visibleWorkspaceIds.contains(entry.workspaceId),
+              hiddenState == nil,
+              !isAppHidden
+        else {
+            return false
+        }
+        return windowOrderedInProvider(UInt32(entry.windowId)) ?? true
     }
 
     private func matchesWorkspaceQuery(
