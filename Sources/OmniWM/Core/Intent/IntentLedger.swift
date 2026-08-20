@@ -5,6 +5,13 @@ import Foundation
 
 typealias IntentID = UInt64
 
+struct ManagedFocusRetryRuntimeSnapshot: Equatable, Sendable {
+    var attempts: UInt64 = 0
+    var sourceChanges: UInt64 = 0
+    var deadlineRearms: UInt64 = 0
+    var exhaustions: UInt64 = 0
+}
+
 struct ReplacementFocusPayload: Equatable, Sendable {
     var pid: pid_t
     let workspaceId: WorkspaceDescriptor.ID
@@ -216,6 +223,8 @@ final class IntentLedger {
     static let activationSettleDeadline: Duration = .milliseconds(100)
     static let appRevealDeadline: Duration = .seconds(2)
     private static let lateEchoWindow: Duration = .seconds(1)
+    private var managedFocusRetryMetricsActive = false
+    private var managedFocusRetryMetrics = ManagedFocusRetryRuntimeSnapshot()
 
     var seqProvider: () -> UInt64 = { 0 }
     var clock: () -> ContinuousClock.Instant = { ContinuousClock().now }
@@ -291,16 +300,40 @@ final class IntentLedger {
         guard let index = entries.firstIndex(where: { $0.id == requestId && $0.phase == .pending }) else {
             return nil
         }
-        let retryCount = entries[index].lastActivationSource == source
-            ? entries[index].retryCount
-            : 0
-        let nextAttempt = retryCount + 1
-        guard nextAttempt <= retryLimit else { return nil }
+        if managedFocusRetryMetricsActive {
+            managedFocusRetryMetrics.attempts += 1
+            if let lastSource = entries[index].lastActivationSource, lastSource != source {
+                managedFocusRetryMetrics.sourceChanges += 1
+            }
+        }
+        let nextAttempt = entries[index].retryCount + 1
+        guard nextAttempt <= retryLimit else {
+            if managedFocusRetryMetricsActive {
+                managedFocusRetryMetrics.exhaustions += 1
+            }
+            return nil
+        }
 
         entries[index].retryCount = nextAttempt
         entries[index].lastActivationSource = source
         deadlineWheel?.schedule(intentId: requestId, after: Self.activationSettleDeadline)
+        if managedFocusRetryMetricsActive {
+            managedFocusRetryMetrics.deadlineRearms += 1
+        }
         return entries[index].asManagedFocusRequest
+    }
+
+    func beginManagedFocusRetryRuntimeCapture() {
+        managedFocusRetryMetrics = ManagedFocusRetryRuntimeSnapshot()
+        managedFocusRetryMetricsActive = true
+    }
+
+    func endManagedFocusRetryRuntimeCapture() {
+        managedFocusRetryMetricsActive = false
+    }
+
+    func managedFocusRetryRuntimeSnapshot() -> ManagedFocusRetryRuntimeSnapshot {
+        managedFocusRetryMetrics
     }
 
     @discardableResult

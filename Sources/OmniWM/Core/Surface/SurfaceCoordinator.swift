@@ -25,6 +25,7 @@ final class SurfaceCoordinator {
                 id: id,
                 policy: policy,
                 window: window,
+                windowObjectIdentifier: ObjectIdentifier(window),
                 windowNumber: window.windowNumber > 0 ? window.windowNumber : nil,
                 frameProvider: nil,
                 visibilityProvider: nil
@@ -44,6 +45,7 @@ final class SurfaceCoordinator {
                 id: id,
                 policy: policy,
                 window: nil,
+                windowObjectIdentifier: nil,
                 windowNumber: windowNumber,
                 frameProvider: frameProvider,
                 visibilityProvider: visibilityProvider
@@ -113,5 +115,17 @@ final class SurfaceCoordinator {
             capturePolicy: capturePolicy,
             suppressesManagedFocusRecovery: suppressesManagedFocusRecovery
         )
+    }
+
+    func beginRuntimeCapture() {
+        scene.beginRuntimeCapture()
+    }
+
+    func endRuntimeCapture() {
+        scene.endRuntimeCapture()
+    }
+
+    func runtimeSnapshot() -> SurfaceSceneRuntimeSnapshot {
+        scene.runtimeSnapshot()
     }
 }

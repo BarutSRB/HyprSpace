@@ -6,8 +6,12 @@ import AppKit
 @MainActor
 final class DragGhostWindow: NSPanel {
     private let imageView: NSImageView
+    private let surfaceCoordinator: SurfaceCoordinator
+    private var surfaceId: String?
+    private var isDestroyed = false
 
-    init() {
+    init(surfaceCoordinator: SurfaceCoordinator = .shared) {
+        self.surfaceCoordinator = surfaceCoordinator
         imageView = NSImageView(frame: .zero)
         imageView.imageScaling = .scaleProportionallyUpOrDown
         imageView.imageAlignment = .alignCenter
@@ -35,9 +39,11 @@ final class DragGhostWindow: NSPanel {
 
         contentView = imageView
 
-        SurfaceCoordinator.shared.register(
+        let surfaceId = "drag-ghost-\(ObjectIdentifier(self).hashValue)"
+        self.surfaceId = surfaceId
+        surfaceCoordinator.register(
             window: self,
-            id: "drag-ghost-\(ObjectIdentifier(self).hashValue)",
+            id: surfaceId,
             policy: SurfacePolicy(
                 kind: .dragGhost,
                 hitTestPolicy: .passthrough,
@@ -45,6 +51,10 @@ final class DragGhostWindow: NSPanel {
                 suppressesManagedFocusRecovery: false
             )
         )
+    }
+
+    isolated deinit {
+        destroy()
     }
 
     override var canBecomeKey: Bool {
@@ -77,5 +87,17 @@ final class DragGhostWindow: NSPanel {
 
     func hideGhost() {
         orderOut(nil)
+    }
+
+    func destroy() {
+        guard !isDestroyed else { return }
+        isDestroyed = true
+        if let surfaceId {
+            surfaceCoordinator.unregister(id: surfaceId)
+            self.surfaceId = nil
+        }
+        imageView.image = nil
+        orderOut(nil)
+        close()
     }
 }
