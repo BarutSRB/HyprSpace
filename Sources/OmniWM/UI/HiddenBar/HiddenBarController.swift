@@ -10,6 +10,54 @@ struct HiddenBarActivationOwner: Equatable, Sendable {
 
 @MainActor
 final class HiddenBarController {
+    private enum ObserverEvent: Sendable {
+        case didBecomeActive
+        case runningApplicationChanged(bundleID: String?, terminated: Bool)
+        case applicationActivated
+        case screenParametersChanged
+    }
+
+    enum MenuGuardTerminalReason: Equatable, Sendable {
+        case concealed
+        case noRevealedItems
+        case unknownStateLimit
+        case watchdog
+        case cancelled
+        case superseded
+    }
+
+    struct PerformanceSnapshot: Equatable, Sendable {
+        let refreshEvents: UInt64
+        let menuGuardQueries: UInt64
+        let reconcealTasksStarted: UInt64
+        let reconcealTasksCancelled: UInt64
+        let menuGuardDeferrals: UInt64
+        let maximumConsecutiveDeferrals: Int
+        let terminalReason: MenuGuardTerminalReason?
+    }
+
+    private struct PerformanceCounters {
+        var refreshEvents: UInt64 = 0
+        var menuGuardQueries: UInt64 = 0
+        var reconcealTasksStarted: UInt64 = 0
+        var reconcealTasksCancelled: UInt64 = 0
+        var menuGuardDeferrals: UInt64 = 0
+        var maximumConsecutiveDeferrals = 0
+        var terminalReason: MenuGuardTerminalReason?
+
+        var snapshot: PerformanceSnapshot {
+            PerformanceSnapshot(
+                refreshEvents: refreshEvents,
+                menuGuardQueries: menuGuardQueries,
+                reconcealTasksStarted: reconcealTasksStarted,
+                reconcealTasksCancelled: reconcealTasksCancelled,
+                menuGuardDeferrals: menuGuardDeferrals,
+                maximumConsecutiveDeferrals: maximumConsecutiveDeferrals,
+                terminalReason: terminalReason
+            )
+        }
+    }
+
     private struct ActiveActivation: Equatable {
         let bundleID: String
         let pid: pid_t
@@ -26,8 +74,18 @@ final class HiddenBarController {
 
     var onFallbackIconClick: ((NSEvent, NSView) -> Void)?
     var fallbackPlacementsProvider: (() -> [HiddenBarFallbackIconPlacement])?
+    var menuGuardSleeper: @MainActor (Duration) async throws -> Void = {
+        try await Task.sleep(for: $0)
+    }
 
-    private var refreshTimer: Timer?
+    var menuGuardNow: @MainActor () -> ContinuousClock.Instant = { ContinuousClock().now }
+    var menuOpenProviderForTests: (@MainActor (Set<pid_t>) async -> Bool?)?
+    var topologyRefreshSleeper: @MainActor (Duration) async throws -> Void = {
+        try await Task.sleep(for: $0)
+    }
+
+    var onTopologyRefreshForTests: (() -> Void)?
+
     private var reconcealTask: Task<Void, Never>?
     private var reconcealGeneration = 0
     private var activationTask: Task<Void, Never>?
@@ -40,12 +98,25 @@ final class HiddenBarController {
     private var didBecomeActiveObserver: NSObjectProtocol?
     private var appLaunchObserver: NSObjectProtocol?
     private var appTerminationObserver: NSObjectProtocol?
+    private var appActivationObserver: NSObjectProtocol?
+    private var screenParametersObserver: NSObjectProtocol?
+    private var topologyRefreshTask: Task<Void, Never>?
+    private var topologyRefreshGeneration = 0
+    private var observerGeneration = 0
     private weak var omniButton: NSStatusBarButton?
     private weak var omniStatusItem: NSStatusItem?
+    private var performanceCounters: PerformanceCounters?
 
-    private static let refreshInterval: TimeInterval = 1
-    private static let menuGuardPollInterval: Duration = .milliseconds(250)
+    private nonisolated static let menuGuardRetryDelays: [Duration] = [
+        .milliseconds(250),
+        .milliseconds(500),
+        .seconds(1),
+        .seconds(2)
+    ]
+    private nonisolated static let maximumConsecutiveUnknownMenuStates = 3
+    private nonisolated static let menuGuardWatchdogDuration: Duration = .seconds(60)
     private static let captureDeadline: Duration = .milliseconds(500)
+    private static let topologyRefreshDelay: Duration = .milliseconds(150)
 
     init(settings: SettingsStore) {
         self.settings = settings
@@ -120,9 +191,18 @@ final class HiddenBarController {
     }
 
     func setup() {
+        if didBecomeActiveObserver == nil,
+           appLaunchObserver == nil,
+           appTerminationObserver == nil,
+           screenParametersObserver == nil
+        {
+            observerGeneration &+= 1
+        }
         itemService.start()
-        installDidBecomeActiveObserver()
-        installRunningApplicationObservers()
+        installDidBecomeActiveObserver(generation: observerGeneration)
+        installRunningApplicationObservers(generation: observerGeneration)
+        installApplicationActivationObserver(generation: observerGeneration)
+        installScreenParametersObserver(generation: observerGeneration)
         applySettings()
     }
 
@@ -144,11 +224,11 @@ final class HiddenBarController {
             available: hider.available,
             hiddenBundleIDs: configured
         ) else {
+            cancelTopologyRefresh()
             clearTemporaryReveals()
             hider.drop()
             panel.dismiss()
             iconCache.prune(keeping: [])
-            reconcileRefreshTimer()
             return
         }
 
@@ -158,10 +238,10 @@ final class HiddenBarController {
         cancelReconcealIfNoTemporaryReveals()
         let hiddenRunning = configured.intersection(snapshot.bundleIDs)
         iconCache.prune(keeping: hiddenRunning)
-        reconcileRefreshTimer()
         let unresolved = hiddenRunning.filter { !iconCache.hasResolvedItems(for: $0) }
         reconcileConcealment(snapshot: snapshot, captureBundleIDs: Set(unresolved))
         refreshPanelIfVisible()
+        syncFallbackIcon()
     }
 
     func setEnabled(_ enabled: Bool) {
@@ -171,6 +251,11 @@ final class HiddenBarController {
 
     func togglePanel(placement: HiddenBarPanelPlacement?) {
         guard settings.hiddenBarEnabled, hider.available, let placement else { return }
+        if panel.isVisible {
+            panel.dismiss()
+            return
+        }
+        handleRefreshEvent()
         panel.toggle(placement: placement, items: currentGlyphs())
     }
 
@@ -184,8 +269,8 @@ final class HiddenBarController {
     }
 
     func cleanup() {
-        refreshTimer?.invalidate()
-        refreshTimer = nil
+        observerGeneration &+= 1
+        cancelTopologyRefresh()
         cancelCapture()
         forwarder.cancel()
         clearTemporaryReveals()
@@ -196,33 +281,27 @@ final class HiddenBarController {
             self.didBecomeActiveObserver = nil
         }
         removeRunningApplicationObservers()
+        removeScreenParametersObserver()
         hider.drop()
         itemService.stop()
     }
 
-    private func reconcileRefreshTimer() {
-        let wantsRefresh = Self.wantsRefresh(
-            enabled: settings.hiddenBarEnabled,
-            available: hider.available,
-            hiddenBundleIDs: Set(settings.hiddenBarHiddenBundleIDs)
-        )
-        if wantsRefresh {
-            if refreshTimer == nil {
-                let timer = Timer(timeInterval: Self.refreshInterval, repeats: true) { [weak self] _ in
-                    MainActor.assumeIsolated {
-                        self?.handleRefreshTick()
-                    }
-                }
-                RunLoop.main.add(timer, forMode: .common)
-                refreshTimer = timer
-            }
-        } else {
-            refreshTimer?.invalidate()
-            refreshTimer = nil
-        }
+    func beginPerformanceCapture() {
+        performanceCounters = PerformanceCounters()
     }
 
-    private func handleRefreshTick() {
+    func performanceSnapshot() -> PerformanceSnapshot? {
+        performanceCounters?.snapshot
+    }
+
+    func endPerformanceCapture() -> PerformanceSnapshot? {
+        let snapshot = performanceCounters?.snapshot
+        performanceCounters = nil
+        return snapshot
+    }
+
+    private func handleRefreshEvent() {
+        performanceCounters?.refreshEvents &+= 1
         syncFallbackIcon()
         let configured = Set(settings.hiddenBarHiddenBundleIDs)
         guard Self.wantsRefresh(
@@ -707,32 +786,47 @@ final class HiddenBarController {
     }
 
     private func suspendReconceal() {
+        if reconcealTask != nil {
+            performanceCounters?.reconcealTasksCancelled &+= 1
+            performanceCounters?.terminalReason = .cancelled
+        }
         reconcealGeneration += 1
         reconcealTask?.cancel()
         reconcealTask = nil
     }
 
     private func scheduleReconceal() {
+        if reconcealTask != nil {
+            performanceCounters?.reconcealTasksCancelled &+= 1
+            performanceCounters?.terminalReason = .superseded
+        }
         reconcealTask?.cancel()
         reconcealGeneration += 1
         let generation = reconcealGeneration
         let interval = SettingsStore.validatedHiddenBarRehideIntervalSeconds(
             settings.hiddenBarRehideIntervalSeconds
         )
-        let poll = Self.menuGuardPollInterval
+        performanceCounters?.reconcealTasksStarted &+= 1
         reconcealTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            let clock = ContinuousClock()
+            let startedAt = menuGuardNow()
             var remaining = Duration.seconds(interval)
-            var lastSample = clock.now
+            var lastSample = startedAt
             var previousMenuOpen: Bool?
+            var consecutiveDeferrals = 0
+            var consecutiveUnknownStates = 0
             while remaining > .zero, !Task.isCancelled {
-                try? await Task.sleep(for: poll)
+                try? await menuGuardSleeper(
+                    Self.menuGuardRetryDelay(consecutiveDeferrals: consecutiveDeferrals)
+                )
                 guard !Task.isCancelled, generation == reconcealGeneration else { return }
+                guard !terminateMenuGuardIfWatchdogExpired(startedAt: startedAt) else { return }
                 let ownerPIDs = menuOwnerPIDs(for: temporarilyRevealed)
-                let menuOpen = await itemService.isMenuOpen(ownerPIDs: ownerPIDs)
+                performanceCounters?.menuGuardQueries &+= 1
+                let menuOpen = await menuOpen(ownerPIDs: ownerPIDs)
                 guard !Task.isCancelled, generation == reconcealGeneration else { return }
-                let now = clock.now
+                guard !terminateMenuGuardIfWatchdogExpired(startedAt: startedAt) else { return }
+                let now = menuGuardNow()
                 remaining = Self.rehideRemaining(
                     remaining: remaining,
                     elapsed: lastSample.duration(to: now),
@@ -741,33 +835,68 @@ final class HiddenBarController {
                 )
                 lastSample = now
                 previousMenuOpen = menuOpen
+                guard !recordMenuGuardResult(
+                    menuOpen,
+                    consecutiveDeferrals: &consecutiveDeferrals,
+                    consecutiveUnknownStates: &consecutiveUnknownStates
+                ) else { return }
             }
             guard !Task.isCancelled, generation == reconcealGeneration else { return }
             while !Task.isCancelled, generation == reconcealGeneration {
+                guard !terminateMenuGuardIfWatchdogExpired(startedAt: startedAt) else { return }
                 let revealed = temporarilyRevealed
                 guard !revealed.isEmpty else {
+                    performanceCounters?.terminalReason = .noRevealedItems
                     reconcealTask = nil
                     return
                 }
                 let ownerPIDs = menuOwnerPIDs(for: revealed)
-                let menuOpenBeforeRefresh = await itemService.isMenuOpen(ownerPIDs: ownerPIDs)
+                performanceCounters?.menuGuardQueries &+= 1
+                let menuOpenBeforeRefresh = await menuOpen(ownerPIDs: ownerPIDs)
                 guard !Task.isCancelled, generation == reconcealGeneration else { return }
+                guard !terminateMenuGuardIfWatchdogExpired(startedAt: startedAt) else { return }
                 if menuOpenBeforeRefresh != false {
-                    try? await Task.sleep(for: poll)
+                    guard !recordMenuGuardResult(
+                        menuOpenBeforeRefresh,
+                        consecutiveDeferrals: &consecutiveDeferrals,
+                        consecutiveUnknownStates: &consecutiveUnknownStates
+                    ) else { return }
+                    try? await menuGuardSleeper(
+                        Self.menuGuardRetryDelay(consecutiveDeferrals: consecutiveDeferrals)
+                    )
                     continue
                 }
+                _ = recordMenuGuardResult(
+                    menuOpenBeforeRefresh,
+                    consecutiveDeferrals: &consecutiveDeferrals,
+                    consecutiveUnknownStates: &consecutiveUnknownStates
+                )
                 await refreshVisibleIcons(revealed)
                 guard !Task.isCancelled, generation == reconcealGeneration else { return }
-                let menuOpenAfterRefresh = await itemService.isMenuOpen(
+                guard !terminateMenuGuardIfWatchdogExpired(startedAt: startedAt) else { return }
+                performanceCounters?.menuGuardQueries &+= 1
+                let menuOpenAfterRefresh = await menuOpen(
                     ownerPIDs: menuOwnerPIDs(for: temporarilyRevealed)
                 )
                 guard !Task.isCancelled, generation == reconcealGeneration else { return }
-                guard menuOpenAfterRefresh == false else { continue }
+                guard !terminateMenuGuardIfWatchdogExpired(startedAt: startedAt) else { return }
+                guard menuOpenAfterRefresh == false else {
+                    guard !recordMenuGuardResult(
+                        menuOpenAfterRefresh,
+                        consecutiveDeferrals: &consecutiveDeferrals,
+                        consecutiveUnknownStates: &consecutiveUnknownStates
+                    ) else { return }
+                    try? await menuGuardSleeper(
+                        Self.menuGuardRetryDelay(consecutiveDeferrals: consecutiveDeferrals)
+                    )
+                    continue
+                }
                 temporarilyRevealed.subtract(revealed)
                 applyConcealment(
                     runningBundleIDs: runningAppsSnapshot().bundleIDs,
                     bypassHysteresis: true
                 )
+                performanceCounters?.terminalReason = .concealed
                 reconcealTask = nil
                 return
             }
@@ -775,6 +904,10 @@ final class HiddenBarController {
     }
 
     private func clearTemporaryReveals() {
+        if reconcealTask != nil {
+            performanceCounters?.reconcealTasksCancelled &+= 1
+            performanceCounters?.terminalReason = .cancelled
+        }
         reconcealGeneration += 1
         reconcealTask?.cancel()
         reconcealTask = nil
@@ -788,6 +921,8 @@ final class HiddenBarController {
     private func cancelReconcealIfNoTemporaryReveals() {
         guard temporarilyRevealed.isEmpty, reconcealTask != nil else { return }
         reconcealGeneration += 1
+        performanceCounters?.reconcealTasksCancelled &+= 1
+        performanceCounters?.terminalReason = .noRevealedItems
         reconcealTask?.cancel()
         reconcealTask = nil
     }
@@ -848,22 +983,96 @@ final class HiddenBarController {
         return max(.zero, remaining - max(.zero, elapsed))
     }
 
-    private func installDidBecomeActiveObserver() {
+    nonisolated static func menuGuardRetryDelay(consecutiveDeferrals: Int) -> Duration {
+        menuGuardRetryDelays[min(max(0, consecutiveDeferrals), menuGuardRetryDelays.count - 1)]
+    }
+
+    nonisolated static func shouldTerminateMenuGuardForUnknownState(consecutiveUnknownStates: Int) -> Bool {
+        consecutiveUnknownStates >= maximumConsecutiveUnknownMenuStates
+    }
+
+    nonisolated static func menuGuardWatchdogExpired(elapsed: Duration) -> Bool {
+        elapsed >= menuGuardWatchdogDuration
+    }
+
+    private func recordMenuGuardDeferral(_ consecutiveDeferrals: Int) {
+        guard var counters = performanceCounters else { return }
+        counters.menuGuardDeferrals &+= 1
+        counters.maximumConsecutiveDeferrals = max(
+            counters.maximumConsecutiveDeferrals,
+            consecutiveDeferrals
+        )
+        performanceCounters = counters
+    }
+
+    private func recordMenuGuardResult(
+        _ menuOpen: Bool?,
+        consecutiveDeferrals: inout Int,
+        consecutiveUnknownStates: inout Int
+    ) -> Bool {
+        guard menuOpen != false else {
+            consecutiveDeferrals = 0
+            consecutiveUnknownStates = 0
+            return false
+        }
+        consecutiveDeferrals += 1
+        consecutiveUnknownStates = menuOpen == nil ? consecutiveUnknownStates + 1 : 0
+        recordMenuGuardDeferral(consecutiveDeferrals)
+        guard Self.shouldTerminateMenuGuardForUnknownState(
+            consecutiveUnknownStates: consecutiveUnknownStates
+        ) else { return false }
+        forceTerminalConcealment(reason: .unknownStateLimit)
+        return true
+    }
+
+    private func terminateMenuGuardIfWatchdogExpired(
+        startedAt: ContinuousClock.Instant
+    ) -> Bool {
+        guard Self.menuGuardWatchdogExpired(elapsed: startedAt.duration(to: menuGuardNow())) else {
+            return false
+        }
+        forceTerminalConcealment(reason: .watchdog)
+        return true
+    }
+
+    private func forceTerminalConcealment(reason: MenuGuardTerminalReason) {
+        temporarilyRevealed.removeAll(keepingCapacity: true)
+        applyConcealment(
+            runningBundleIDs: runningAppsSnapshot().bundleIDs,
+            bypassHysteresis: true
+        )
+        performanceCounters?.terminalReason = reason
+        reconcealTask = nil
+    }
+
+    private func menuOpen(ownerPIDs: Set<pid_t>) async -> Bool? {
+        if let menuOpenProviderForTests {
+            return await menuOpenProviderForTests(ownerPIDs)
+        }
+        return await itemService.isMenuOpen(ownerPIDs: ownerPIDs)
+    }
+
+    func startReconcealForTests(revealedBundleIDs: Set<String>) {
+        temporarilyRevealed = revealedBundleIDs
+        scheduleReconceal()
+    }
+
+    var temporarilyRevealedBundleIDsForTests: Set<String> {
+        temporarilyRevealed
+    }
+
+    private func installDidBecomeActiveObserver(generation: Int) {
         guard didBecomeActiveObserver == nil else { return }
         didBecomeActiveObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didBecomeActiveNotification,
             object: nil,
             queue: nil
         ) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.hider.refreshAvailability()
-                self?.reconcileRefreshTimer()
-                self?.handleRefreshTick()
-            }
+            self?.enqueueObserverEvent(.didBecomeActive, generation: generation)
         }
     }
 
-    private func installRunningApplicationObservers() {
+    private func installRunningApplicationObservers(generation: Int) {
         let notificationCenter = NSWorkspace.shared.notificationCenter
         if appLaunchObserver == nil {
             appLaunchObserver = notificationCenter.addObserver(
@@ -873,9 +1082,10 @@ final class HiddenBarController {
             ) { [weak self] notification in
                 let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
                 let bundleID = app?.bundleIdentifier
-                Task { @MainActor [weak self] in
-                    self?.handleRunningApplicationChanged(bundleID: bundleID, terminated: false)
-                }
+                self?.enqueueObserverEvent(
+                    .runningApplicationChanged(bundleID: bundleID, terminated: false),
+                    generation: generation
+                )
             }
         }
         if appTerminationObserver == nil {
@@ -886,11 +1096,91 @@ final class HiddenBarController {
             ) { [weak self] notification in
                 let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
                 let bundleID = app?.bundleIdentifier
-                Task { @MainActor [weak self] in
-                    self?.handleRunningApplicationChanged(bundleID: bundleID, terminated: true)
-                }
+                self?.enqueueObserverEvent(
+                    .runningApplicationChanged(bundleID: bundleID, terminated: true),
+                    generation: generation
+                )
             }
         }
+    }
+
+    private func installApplicationActivationObserver(generation: Int) {
+        guard appActivationObserver == nil else { return }
+        appActivationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.enqueueObserverEvent(.applicationActivated, generation: generation)
+        }
+    }
+
+    private func installScreenParametersObserver(generation: Int) {
+        guard screenParametersObserver == nil else { return }
+        screenParametersObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.enqueueObserverEvent(.screenParametersChanged, generation: generation)
+        }
+    }
+
+    private nonisolated func enqueueObserverEvent(_ event: ObserverEvent, generation: Int) {
+        Task { @MainActor [weak self] in
+            guard let self, generation == observerGeneration else { return }
+            switch event {
+            case .didBecomeActive:
+                hider.refreshAvailability()
+                handleRefreshEvent()
+            case .applicationActivated:
+                handleRefreshEvent()
+            case let .runningApplicationChanged(bundleID, terminated):
+                handleRunningApplicationChanged(bundleID: bundleID, terminated: terminated)
+            case .screenParametersChanged:
+                guard hider.isConcealing else { return }
+                scheduleTopologyRefresh()
+            }
+        }
+    }
+
+    func enqueueDidBecomeActiveForTests() {
+        enqueueObserverEvent(.didBecomeActive, generation: observerGeneration)
+    }
+
+    private func removeScreenParametersObserver() {
+        if let screenParametersObserver {
+            NotificationCenter.default.removeObserver(screenParametersObserver)
+            self.screenParametersObserver = nil
+        }
+    }
+
+    func scheduleTopologyRefresh() {
+        topologyRefreshTask?.cancel()
+        topologyRefreshGeneration += 1
+        let generation = topologyRefreshGeneration
+        topologyRefreshTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            try? await topologyRefreshSleeper(Self.topologyRefreshDelay)
+            guard !Task.isCancelled, generation == topologyRefreshGeneration else { return }
+            topologyRefreshTask = nil
+            onTopologyRefreshForTests?()
+            syncFallbackIcon()
+        }
+    }
+
+    private func cancelTopologyRefresh() {
+        topologyRefreshGeneration += 1
+        topologyRefreshTask?.cancel()
+        topologyRefreshTask = nil
+    }
+
+    var hasPendingTopologyRefreshForTests: Bool {
+        topologyRefreshTask != nil
+    }
+
+    var hasScreenParametersObserverForTests: Bool {
+        screenParametersObserver != nil
     }
 
     private func removeRunningApplicationObservers() {
@@ -902,6 +1192,10 @@ final class HiddenBarController {
         if let appTerminationObserver {
             notificationCenter.removeObserver(appTerminationObserver)
             self.appTerminationObserver = nil
+        }
+        if let appActivationObserver {
+            notificationCenter.removeObserver(appActivationObserver)
+            self.appActivationObserver = nil
         }
     }
 
