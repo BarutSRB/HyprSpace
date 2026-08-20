@@ -539,6 +539,50 @@ final class MultitouchLifecycleTests: XCTestCase {
         await drainMultitouchTasks()
     }
 
+    func testFeatureReenableRetriesRetainedSourceAfterDisableCleanupFailure() async {
+        let harness = makeHarness([
+            FakeMultitouchBackend.enumeration([deviceA]),
+            FakeMultitouchBackend.enumeration([deviceA])
+        ])
+        let controller = WindowAdmissionTestSupport.controller(prefix: "MultitouchDisableRecovery")
+        controller.settings.scrollGestureEnabled = true
+        controller.settings.workspaceSwipeEnabled = false
+        controller.hasStartedServices = true
+        let handler = controller.mouseEventHandler
+        var replacementCreations = 0
+        handler.multitouchSourceFactory = {
+            replacementCreations += 1
+            return MultitouchGestureSource(operations: nil)
+        }
+
+        XCTAssertTrue(handler.installMultitouchSource(harness.source))
+        await runNext(harness)
+        harness.backend.stopResults[101] = [-1, KERN_SUCCESS]
+
+        controller.settings.scrollGestureEnabled = false
+        handler.reconcileMultitouchSource()
+
+        XCTAssertEqual(handler.multitouchDiagnosticsSnapshot?.state, .stopped)
+        XCTAssertEqual(handler.multitouchDiagnosticsSnapshot?.lastStop, .status(-1))
+        XCTAssertTrue(MultitouchGestureSource.shared === harness.source)
+
+        controller.settings.scrollGestureEnabled = true
+        handler.reconcileMultitouchSource()
+        await runNext(harness)
+
+        XCTAssertEqual(handler.multitouchDiagnosticsSnapshot?.state, .running)
+        XCTAssertEqual(harness.backend.callCount(.stop(101)), 2)
+        XCTAssertEqual(harness.backend.callCount(.register(101)), 2)
+        XCTAssertEqual(replacementCreations, 0)
+        XCTAssertTrue(MultitouchGestureSource.shared === harness.source)
+
+        controller.hasStartedServices = false
+        controller.layoutRefreshController.resetState()
+        handler.cleanup()
+        harness.sleeper.resumeAll()
+        await drainMultitouchTasks()
+    }
+
     func testCleanupDiagnosticsPreserveFailureAcrossDevices() async {
         let harness = makeHarness([FakeMultitouchBackend.enumeration([deviceA, deviceB])])
         harness.source.startLifecycle()

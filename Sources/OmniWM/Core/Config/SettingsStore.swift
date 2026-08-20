@@ -9,6 +9,12 @@ import OmniWMIPC
 @MainActor @Observable
 final class SettingsStore {
     private nonisolated static let defaultExport = SettingsExport.defaults()
+    private nonisolated static let scrollSensitivityRange = 0.1 ... 100.0
+
+    private nonisolated static func normalizedScrollSensitivity(_ value: Double) -> Double {
+        guard value.isFinite else { return defaultExport.scrollSensitivity }
+        return min(max(value, scrollSensitivityRange.lowerBound), scrollSensitivityRange.upperBound)
+    }
 
     private struct NormalizedWorkspaceBarIconOverride {
         let foldedBundleID: String
@@ -24,6 +30,7 @@ final class SettingsStore {
 
     var onIPCEnabledChanged: (@MainActor (Bool) -> Void)?
     var onExternalSettingsReloaded: (@MainActor () -> Void)?
+    var onTrackpadGestureAvailabilityChanged: (@MainActor (Bool) -> Void)?
 
     var hotkeysEnabled = SettingsStore.defaultExport.hotkeysEnabled {
         didSet { scheduleSave() }
@@ -403,11 +410,26 @@ final class SettingsStore {
     }
 
     var scrollGestureEnabled = SettingsStore.defaultExport.scrollGestureEnabled {
-        didSet { scheduleSave() }
+        didSet {
+            guard oldValue != scrollGestureEnabled else { return }
+            if !isApplyingExport,
+               (oldValue || workspaceSwipeEnabled) != (scrollGestureEnabled || workspaceSwipeEnabled)
+            {
+                onTrackpadGestureAvailabilityChanged?(scrollGestureEnabled || workspaceSwipeEnabled)
+            }
+            scheduleSave()
+        }
     }
 
     var scrollSensitivity = SettingsStore.defaultExport.scrollSensitivity {
-        didSet { scheduleSave() }
+        didSet {
+            let normalized = SettingsStore.normalizedScrollSensitivity(scrollSensitivity)
+            guard normalized == scrollSensitivity else {
+                scrollSensitivity = normalized
+                return
+            }
+            scheduleSave()
+        }
     }
 
     var scrollModifierKey = ScrollModifierKey(
@@ -445,7 +467,15 @@ final class SettingsStore {
     }
 
     var workspaceSwipeEnabled = SettingsStore.defaultExport.workspaceSwipeEnabled {
-        didSet { scheduleSave() }
+        didSet {
+            guard oldValue != workspaceSwipeEnabled else { return }
+            if !isApplyingExport,
+               (scrollGestureEnabled || oldValue) != (scrollGestureEnabled || workspaceSwipeEnabled)
+            {
+                onTrackpadGestureAvailabilityChanged?(scrollGestureEnabled || workspaceSwipeEnabled)
+            }
+            scheduleSave()
+        }
     }
 
     var workspaceSwipeFingerCount = GestureFingerCount(
@@ -804,8 +834,15 @@ final class SettingsStore {
 
     func applyExport(_ export: SettingsExport) {
         let baseline = SettingsStore.defaultExport
+        let trackpadGesturesWereAvailable = scrollGestureEnabled || workspaceSwipeEnabled
         isApplyingExport = true
-        defer { isApplyingExport = false }
+        defer {
+            isApplyingExport = false
+            let trackpadGesturesAreAvailable = scrollGestureEnabled || workspaceSwipeEnabled
+            if trackpadGesturesWereAvailable != trackpadGesturesAreAvailable {
+                onTrackpadGestureAvailabilityChanged?(trackpadGesturesAreAvailable)
+            }
+        }
 
         hotkeysEnabled = export.hotkeysEnabled
         focusFollowsMouse = export.focusFollowsMouse

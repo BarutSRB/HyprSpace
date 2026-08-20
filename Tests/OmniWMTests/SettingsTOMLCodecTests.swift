@@ -353,6 +353,38 @@ final class SettingsTOMLCodecTests: XCTestCase {
         XCTAssertEqual(decoded.workspaceSwipeAxis, WorkspaceSwipeAxis.horizontal.rawValue)
     }
 
+    @MainActor
+    func testNonfiniteTOMLScrollSensitivityNormalizesWhenApplied() throws {
+        for literal in ["nan", "inf", "-inf"] {
+            let data = try defaultsWithReplacements(
+                ("scrollSensitivity = 5.0\n", "scrollSensitivity = \(literal)\n")
+            )
+            let export = try SettingsTOMLCodec.decode(data)
+            let settings = makeSettingsStore()
+
+            XCTAssertFalse(export.scrollSensitivity.isFinite)
+            settings.applyExport(export)
+
+            XCTAssertEqual(settings.scrollSensitivity, SettingsExport.defaults().scrollSensitivity)
+            XCTAssertEqual(settings.toExport().scrollSensitivity, SettingsExport.defaults().scrollSensitivity)
+        }
+    }
+
+    @MainActor
+    func testProgrammaticScrollSensitivityNormalizesBeforeExport() {
+        let settings = makeSettingsStore()
+
+        settings.scrollSensitivity = .nan
+        XCTAssertEqual(settings.scrollSensitivity, SettingsExport.defaults().scrollSensitivity)
+        settings.scrollSensitivity = .infinity
+        XCTAssertEqual(settings.scrollSensitivity, SettingsExport.defaults().scrollSensitivity)
+        settings.scrollSensitivity = 0
+        XCTAssertEqual(settings.scrollSensitivity, 0.1)
+        settings.scrollSensitivity = 101
+        XCTAssertEqual(settings.scrollSensitivity, 100)
+        XCTAssertEqual(settings.toExport().scrollSensitivity, 100)
+    }
+
     func testWorkspaceSwipeSettingsRecoverToDefaultsWhenMissing() throws {
         let withoutKeys = try defaultsWithReplacements(
             ("workspaceSwipeEnabled = false\n", ""),

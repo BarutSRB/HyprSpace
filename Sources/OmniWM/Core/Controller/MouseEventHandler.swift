@@ -26,6 +26,40 @@ final class MouseEventHandler {
         case viewportAlreadySettled
     }
 
+    struct PerformanceSnapshot: Equatable, Sendable {
+        let cgEvents: UInt64
+        let mouseMovedEvents: UInt64
+        let mouseDraggedEvents: UInt64
+        let scrollEvents: UInt64
+        let buttonEvents: UInt64
+        let droppedTrackpadScrollEvents: UInt64
+        let mouseWarpSamples: UInt64
+        let multitouch: MultitouchFrameMailbox.PerformanceSnapshot?
+    }
+
+    private struct PerformanceCounters {
+        var cgEvents: UInt64 = 0
+        var mouseMovedEvents: UInt64 = 0
+        var mouseDraggedEvents: UInt64 = 0
+        var scrollEvents: UInt64 = 0
+        var buttonEvents: UInt64 = 0
+        var droppedTrackpadScrollEvents: UInt64 = 0
+        var mouseWarpSamples: UInt64 = 0
+
+        func snapshot(multitouch: MultitouchFrameMailbox.PerformanceSnapshot?) -> PerformanceSnapshot {
+            PerformanceSnapshot(
+                cgEvents: cgEvents,
+                mouseMovedEvents: mouseMovedEvents,
+                mouseDraggedEvents: mouseDraggedEvents,
+                scrollEvents: scrollEvents,
+                buttonEvents: buttonEvents,
+                droppedTrackpadScrollEvents: droppedTrackpadScrollEvents,
+                mouseWarpSamples: mouseWarpSamples,
+                multitouch: multitouch
+            )
+        }
+    }
+
     enum MouseButton: Hashable {
         case left
         case right
@@ -156,6 +190,8 @@ final class MouseEventHandler {
     weak var controller: WMController?
     var state = State()
     private var multitouchSource: MultitouchGestureSource?
+    private var performanceCounters: PerformanceCounters?
+    var multitouchSourceFactory: @MainActor () -> MultitouchGestureSource = { MultitouchGestureSource() }
     var pressedMouseButtonsProvider: @MainActor () -> Int = { Int(NSEvent.pressedMouseButtons) }
     var nativeWindowFrameProvider: @MainActor (AXWindowRef) -> CGRect? = {
         AXWindowService.framePreferFast($0)
@@ -181,6 +217,7 @@ final class MouseEventHandler {
     }
 
     func setup() {
+        tearDownEventTaps()
         MouseEventHandler._instance = self
 
         let moveCallback: CGEventTapCallBack = { _, type, event, _ in
@@ -197,6 +234,9 @@ final class MouseEventHandler {
                     guard let handler = MouseEventHandler._instance,
                           handler.state.awaitsNativeTitleBarDragTarget
                     else { return }
+                    if handler.performanceCounters != nil {
+                        handler.recordCGEvent(type)
+                    }
                     handler.receiveAnnotatedNativeMouseDragged(
                         windowIdUnderPointer: MouseEventHandler.eventWindowIdUnderPointer(event)
                     )
@@ -225,8 +265,7 @@ final class MouseEventHandler {
                 CGEvent.tapEnable(tap: tap, enable: true)
                 annotatedMoveTapInstalled = true
             } else {
-                CGEvent.tapEnable(tap: tap, enable: false)
-                state.moveTap = nil
+                tearDownMoveEventTap()
                 FallbackFiringRecorder.shared.note(.input, "mouseMoveTapRunLoopSourceFailed")
             }
         } else {
@@ -268,10 +307,11 @@ final class MouseEventHandler {
             state.runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
             if let source = state.runLoopSource {
                 CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+                CGEvent.tapEnable(tap: tap, enable: true)
             } else {
+                tearDownSessionEventTap()
                 FallbackFiringRecorder.shared.note(.input, "mouseTapRunLoopSourceFailed")
             }
-            CGEvent.tapEnable(tap: tap, enable: true)
         } else {
             FallbackFiringRecorder.shared.note(.input, "mouseTapCreateFailed")
         }
@@ -279,9 +319,10 @@ final class MouseEventHandler {
             name: state.eventTap != nil ? "mouse.tap.installed" : "mouse.tap.failed"
         )
 
-        if !installMultitouchSource(MultitouchGestureSource()) {
-            FallbackFiringRecorder.shared.note(.input, "multitouchSourceCleanupBlocked")
+        controller?.settings.onTrackpadGestureAvailabilityChanged = { [weak self] _ in
+            self?.reconcileMultitouchSource()
         }
+        reconcileMultitouchSource()
     }
 
     @discardableResult
@@ -296,6 +337,9 @@ final class MouseEventHandler {
             self?.resetForMultitouchSourceReplacement()
         }
         multitouchSource = source
+        if performanceCounters != nil {
+            source.beginPerformanceCapture()
+        }
         guard source.startLifecycle() else {
             multitouchSource = nil
             return false
@@ -307,22 +351,7 @@ final class MouseEventHandler {
         clearNativeTitleBarDrag()
         cancelActiveMouseInteraction()
         state.capturedInteractionButton = nil
-        if let source = state.moveTapRunLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
-            state.moveTapRunLoopSource = nil
-        }
-        if let tap = state.moveTap {
-            CGEvent.tapEnable(tap: tap, enable: false)
-            state.moveTap = nil
-        }
-        if let source = state.runLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
-            state.runLoopSource = nil
-        }
-        if let tap = state.eventTap {
-            CGEvent.tapEnable(tap: tap, enable: false)
-            state.eventTap = nil
-        }
+        tearDownEventTaps()
         if multitouchSource?.shutdown() != false {
             multitouchSource = nil
         }
@@ -331,6 +360,64 @@ final class MouseEventHandler {
         DiagnosticsEventRecorder.shared.recordLifecycle(name: "mouse.tap.removed")
         controller?.eventIntake.removePendingMouseEvents()
         resetForMultitouchSourceReplacement()
+    }
+
+    func reconcileMultitouchSource() {
+        guard let controller, controller.hasStartedServices else { return }
+        let shouldRun = controller.settings.scrollGestureEnabled || controller.settings.workspaceSwipeEnabled
+        if shouldRun {
+            if let multitouchSource {
+                if !multitouchSource.startLifecycle() {
+                    FallbackFiringRecorder.shared.note(.input, "multitouchSourceCleanupBlocked")
+                }
+                return
+            }
+            if !installMultitouchSource(multitouchSourceFactory()) {
+                FallbackFiringRecorder.shared.note(.input, "multitouchSourceCleanupBlocked")
+            }
+        } else if multitouchSource?.shutdown() != false {
+            multitouchSource = nil
+            resetForMultitouchSourceReplacement()
+        } else {
+            FallbackFiringRecorder.shared.note(.input, "multitouchSourceCleanupBlocked")
+        }
+    }
+
+    func beginPerformanceCapture() {
+        performanceCounters = PerformanceCounters()
+        multitouchSource?.beginPerformanceCapture()
+    }
+
+    func performanceSnapshot() -> PerformanceSnapshot? {
+        performanceCounters?.snapshot(multitouch: multitouchSource?.performanceSnapshot())
+    }
+
+    func endPerformanceCapture() -> PerformanceSnapshot? {
+        let multitouch = multitouchSource?.endPerformanceCapture()
+        let snapshot = performanceCounters?.snapshot(multitouch: multitouch)
+        performanceCounters = nil
+        return snapshot
+    }
+
+    private func tearDownEventTaps() {
+        tearDownMoveEventTap()
+        tearDownSessionEventTap()
+    }
+
+    private func tearDownMoveEventTap() {
+        var tap = state.moveTap
+        var source = state.moveTapRunLoopSource
+        EventTapTeardown.tearDown(tap: &tap, runLoopSource: &source)
+        state.moveTap = tap
+        state.moveTapRunLoopSource = source
+    }
+
+    private func tearDownSessionEventTap() {
+        var tap = state.eventTap
+        var source = state.runLoopSource
+        EventTapTeardown.tearDown(tap: &tap, runLoopSource: &source)
+        state.eventTap = tap
+        state.runLoopSource = source
     }
 
     func requestMultitouchRevalidation(_ reason: MultitouchGestureSource.RevalidationReason) {
@@ -367,6 +454,8 @@ final class MouseEventHandler {
             resetHoveredEdgesIfNeeded()
             return
         }
+        controller?.mouseWarpHandler.handleMouseWarpMoved(at: location)
+        performanceCounters?.mouseWarpSamples &+= 1
         handleMouseMovedFromTap(
             at: location,
             modifiersRawValue: modifiersRawValue,
@@ -414,6 +503,8 @@ final class MouseEventHandler {
             handleInputSuppressionBegan()
             return
         }
+        controller?.mouseWarpHandler.handleMouseWarpMoved(at: location)
+        performanceCounters?.mouseWarpSamples &+= 1
         beginNativeTitleBarDragIfNeeded(button: button)
         if !isCapturedInteraction(button), shouldBlockOwnWindowInput(at: location) {
             cancelActiveMouseInteraction()
@@ -637,18 +728,22 @@ final class MouseEventHandler {
         if suppress, MouseTrace.shared.isActive {
             MouseTrace.record("tap: scroll suppressed loc=\(TraceFormat.point(location))")
         }
-        EventIntake.post(
-            .mouseScroll(
-                MouseScrollIntake(
-                    location: location,
-                    deltaX: deltaX,
-                    deltaY: deltaY,
-                    momentumPhase: momentumPhase,
-                    phase: phase,
-                    modifiersRawValue: modifiers.rawValue
+        if momentumPhase == 0, phase == 0 {
+            EventIntake.post(
+                .mouseScroll(
+                    MouseScrollIntake(
+                        location: location,
+                        deltaX: deltaX,
+                        deltaY: deltaY,
+                        momentumPhase: momentumPhase,
+                        phase: phase,
+                        modifiersRawValue: modifiers.rawValue
+                    )
                 )
             )
-        )
+        } else {
+            performanceCounters?.droppedTrackpadScrollEvents &+= 1
+        }
         return suppress
     }
 
@@ -866,6 +961,8 @@ final class MouseEventHandler {
             handleInputSuppressionBegan()
             return
         }
+        controller?.mouseWarpHandler.handleMouseWarpMoved(at: location)
+        performanceCounters?.mouseWarpSamples &+= 1
         beginNativeTitleBarDragIfNeeded(button: button)
         if shouldBlockOwnWindowInput(at: location) {
             cancelActiveMouseInteraction()
@@ -2668,6 +2765,9 @@ final class MouseEventHandler {
 
         MainActor.assumeIsolated {
             guard let handler = MouseEventHandler._instance else { return }
+            if handler.performanceCounters != nil {
+                handler.recordCGEvent(type)
+            }
             switch type {
             case .mouseMoved:
                 handler.receiveTapMouseMoved(
@@ -2711,6 +2811,27 @@ final class MouseEventHandler {
         }
 
         return suppressEvent
+    }
+
+    private func recordCGEvent(_ type: CGEventType) {
+        guard performanceCounters != nil else { return }
+        performanceCounters?.cgEvents &+= 1
+        switch type {
+        case .mouseMoved:
+            performanceCounters?.mouseMovedEvents &+= 1
+        case .leftMouseDragged,
+             .rightMouseDragged:
+            performanceCounters?.mouseDraggedEvents &+= 1
+        case .scrollWheel:
+            performanceCounters?.scrollEvents &+= 1
+        case .leftMouseDown,
+             .leftMouseUp,
+             .rightMouseDown,
+             .rightMouseUp:
+            performanceCounters?.buttonEvents &+= 1
+        default:
+            break
+        }
     }
 
     nonisolated static func eventWindowIdUnderPointer(_ event: CGEvent) -> Int? {
