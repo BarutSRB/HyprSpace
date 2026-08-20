@@ -559,6 +559,16 @@ class NiriContainer: NiriNode {
         widthAnimation != nil
     }
 
+    func stopAnimations() {
+        moveAnimation = nil
+        moveAnimationOrientation = nil
+        if let targetWidth {
+            cachedWidth = targetWidth
+        }
+        widthAnimation = nil
+        targetWidth = nil
+    }
+
     private func resolveSpan(
         spec: ProportionalSize,
         isFull: Bool,

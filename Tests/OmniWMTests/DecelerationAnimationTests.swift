@@ -34,4 +34,23 @@ final class DecelerationAnimationTests: XCTestCase {
 
         XCTAssertEqual(animation.value(at: 1.0), before + 25, accuracy: 0.001)
     }
+
+    func testNonfiniteInputsSettleImmediatelyAtFiniteValue() {
+        let invalidOrigin = DecelerationAnimation(from: .nan, velocity: .infinity, startTime: .nan)
+        XCTAssertTrue(invalidOrigin.value(at: 0).isFinite)
+        XCTAssertTrue(invalidOrigin.restingOffset.isFinite)
+        XCTAssertTrue(invalidOrigin.isComplete(at: 0))
+
+        let invalidTime = DecelerationAnimation(from: 42, velocity: 300, startTime: 0)
+        XCTAssertEqual(invalidTime.value(at: .nan), invalidTime.restingOffset)
+        XCTAssertTrue(invalidTime.isComplete(at: .infinity))
+    }
+
+    func testNonfiniteRebaseEndsAnimation() {
+        let animation = DecelerationAnimation(from: 0, velocity: 300, startTime: 0)
+        animation.offsetBy(.nan)
+
+        XCTAssertTrue(animation.isComplete(at: 0))
+        XCTAssertTrue(animation.value(at: 0).isFinite)
+    }
 }

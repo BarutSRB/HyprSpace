@@ -20,6 +20,12 @@ private let mouseRelevantModifierFlags: CGEventFlags = [
 
 @MainActor
 final class MouseEventHandler {
+    enum ViewportGestureTerminationDisposition {
+        case settleLiveOffset
+        case settleLiveOffsetWithoutRelayout
+        case viewportAlreadySettled
+    }
+
     enum MouseButton: Hashable {
         case left
         case right
@@ -135,6 +141,7 @@ final class MouseEventHandler {
         var gestureLastAverageY: CGFloat = 0.0
         var lockedGestureContext: LockedGestureContext?
         var activeGestureMode: TrackpadGestureMode?
+        var viewportGestureSessionID: AnimationDriver.GestureSessionID?
         var workspaceSwipeFired = false
         let workspaceSwipeTracker = SwipeTracker()
         var suppressGestureStartUntilAllTouchesLift = false
@@ -468,6 +475,49 @@ final class MouseEventHandler {
 
     var isTrackpadSwipeSessionActive: Bool {
         state.gesturePhase != .idle
+    }
+
+    func handleExpiredViewportGesture(
+        in workspaceId: WorkspaceDescriptor.ID,
+        sessionID: AnimationDriver.GestureSessionID
+    ) {
+        terminateViewportGesture(
+            in: workspaceId,
+            sessionID: sessionID,
+            disposition: .viewportAlreadySettled
+        )
+    }
+
+    @discardableResult
+    func terminateViewportGesture(
+        in workspaceId: WorkspaceDescriptor.ID,
+        sessionID: AnimationDriver.GestureSessionID,
+        disposition: ViewportGestureTerminationDisposition
+    ) -> Bool {
+        guard state.gesturePhase == .committed,
+              state.lockedGestureContext?.workspaceId == workspaceId,
+              state.activeGestureMode == .columnScroll,
+              state.viewportGestureSessionID == sessionID
+        else { return false }
+        let liveSessionID = controller?.workspaceManager.animationDriver.gestureSessionID(in: workspaceId)
+        guard liveSessionID == sessionID || disposition == .viewportAlreadySettled && liveSessionID == nil else {
+            return false
+        }
+        switch disposition {
+        case .settleLiveOffset:
+            cancelCommittedGestureViewportState(for: workspaceId)
+        case .settleLiveOffsetWithoutRelayout:
+            cancelCommittedGestureViewportState(for: workspaceId, requestRelayout: false)
+        case .viewportAlreadySettled:
+            break
+        }
+        if disposition != .viewportAlreadySettled {
+            state.suppressGestureStartUntilAllTouchesLift = true
+            state.consumeTrackpadScrollUntilAllTouchesLift = true
+            state.suppressTrackpadMomentumScroll = true
+        }
+        resetGestureState(settleViewportGesture: false)
+        return true
     }
 
     func handleInputSuppressionBegan() {
@@ -2276,8 +2326,14 @@ final class MouseEventHandler {
                     vstate.jumpOffset(to: liveOffset)
                 }
             }
-            driver.beginGesture(in: wsId, isTrackpad: true)
+            driver.beginGesture(in: wsId, isTrackpad: true, timestamp: timestamp)
         }
+
+        guard let gestureSessionID = driver.gestureSessionID(in: wsId) else {
+            resetGestureState()
+            return
+        }
+        state.viewportGestureSessionID = gestureSessionID
 
         driver.updateGesture(
             in: wsId,
@@ -2439,7 +2495,10 @@ final class MouseEventHandler {
         state.suppressTrackpadMomentumScroll = true
     }
 
-    private func cancelCommittedGestureViewportState(for wsId: WorkspaceDescriptor.ID) {
+    private func cancelCommittedGestureViewportState(
+        for wsId: WorkspaceDescriptor.ID,
+        requestRelayout: Bool = true
+    ) {
         guard let controller else { return }
         let driver = controller.workspaceManager.animationDriver
         let semanticOffset = controller.workspaceManager.niriViewportState(for: wsId).viewOffset
@@ -2450,7 +2509,9 @@ final class MouseEventHandler {
             vstate.viewOffsetToRestore = nil
             vstate.activatePrevColumnOnRemoval = nil
         }
-        controller.layoutRefreshController.requestImmediateRelayout(reason: .interactiveGesture)
+        if requestRelayout {
+            controller.layoutRefreshController.requestImmediateRelayout(reason: .interactiveGesture)
+        }
     }
 
     private func abortActiveGestureIfNeeded() {
@@ -2503,8 +2564,9 @@ final class MouseEventHandler {
         }
     }
 
-    private func resetGestureState() {
-        if let lockedContext = state.lockedGestureContext,
+    private func resetGestureState(settleViewportGesture: Bool = true) {
+        if settleViewportGesture,
+           let lockedContext = state.lockedGestureContext,
            controller?.workspaceManager.animationDriver.hasGesture(in: lockedContext.workspaceId) == true
         {
             cancelCommittedGestureViewportState(for: lockedContext.workspaceId)
@@ -2516,6 +2578,7 @@ final class MouseEventHandler {
         state.gestureLastAverageY = 0.0
         state.lockedGestureContext = nil
         state.activeGestureMode = nil
+        state.viewportGestureSessionID = nil
         state.workspaceSwipeFired = false
     }
 

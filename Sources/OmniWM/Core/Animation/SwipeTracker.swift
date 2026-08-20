@@ -19,14 +19,22 @@ final class SwipeTracker {
         position = 0
     }
 
-    func push(delta: Double, timestamp: TimeInterval) {
+    @discardableResult
+    func push(delta: Double, timestamp: TimeInterval) -> Bool {
+        guard delta.isFinite, timestamp.isFinite else { return false }
         if let last = history.last, timestamp < last.timestamp {
-            return
+            return false
         }
 
-        position += delta
+        let nextPosition = position + delta
+        guard nextPosition.isFinite else {
+            reset()
+            return false
+        }
+        position = nextPosition
         history.append(SwipeEvent(delta: delta, timestamp: timestamp))
         trimHistory(currentTime: timestamp)
+        return true
     }
 
     func velocity() -> Double {
@@ -34,10 +42,11 @@ final class SwipeTracker {
 
         let totalTime = last.timestamp - first.timestamp
 
-        guard totalTime != 0 else { return 0 }
+        guard totalTime.isFinite, totalTime > 0 else { return 0 }
 
         let totalDelta = history.reduce(0.0) { $0 + $1.delta }
-        return totalDelta / totalTime
+        let velocity = totalDelta / totalTime
+        return velocity.isFinite ? velocity : 0
     }
 
     private func trimHistory(currentTime: TimeInterval) {

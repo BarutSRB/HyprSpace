@@ -15,10 +15,10 @@ struct SpringConfig: Equatable {
         epsilon: Double,
         velocityEpsilon: Double = 0.01
     ) {
-        self.dampingRatio = max(0, dampingRatio)
-        self.stiffness = max(0, stiffness)
-        self.epsilon = max(0, epsilon)
-        self.velocityEpsilon = max(0, velocityEpsilon)
+        self.dampingRatio = dampingRatio.isFinite ? max(0, dampingRatio) : dampingRatio
+        self.stiffness = stiffness.isFinite ? max(0, stiffness) : stiffness
+        self.epsilon = epsilon.isFinite ? max(0, epsilon) : epsilon
+        self.velocityEpsilon = velocityEpsilon.isFinite ? max(0, velocityEpsilon) : velocityEpsilon
     }
 
     init(duration: Double = 0.2, bounce: Double = 0.0, epsilon: Double = 0.5, velocityEpsilon: Double = 10.0) {
@@ -85,6 +85,17 @@ struct SpringConfig: Equatable {
             velocityEpsilon: velocityEpsilon
         )
     }
+
+    var isFiniteAndConvergent: Bool {
+        dampingRatio.isFinite
+            && dampingRatio > 0
+            && stiffness.isFinite
+            && stiffness > 0
+            && epsilon.isFinite
+            && epsilon > 0
+            && velocityEpsilon.isFinite
+            && velocityEpsilon > 0
+    }
 }
 
 final class SpringAnimation {
@@ -106,23 +117,37 @@ final class SpringAnimation {
         config: SpringConfig = .default,
         displayRefreshRate: Double = 60.0
     ) {
-        self.from = from
-        target = to
-        self.startTime = startTime
-        self.displayRefreshRate = displayRefreshRate
-        self.initialVelocity = initialVelocity
+        let finiteFrom = from.isFinite ? from : (to.isFinite ? to : 0)
+        let finiteTarget = to.isFinite ? to : finiteFrom
+        let inputsAreFinite = from.isFinite
+            && to.isFinite
+            && initialVelocity.isFinite
+            && startTime.isFinite
+            && displayRefreshRate.isFinite
+            && displayRefreshRate > 0
+
+        self.from = finiteFrom
+        target = finiteTarget
+        self.startTime = startTime.isFinite ? startTime : 0
+        self.displayRefreshRate = displayRefreshRate.isFinite && displayRefreshRate > 0
+            ? displayRefreshRate
+            : 60
+        self.initialVelocity = initialVelocity.isFinite ? initialVelocity : 0
 
         self.config = config
-        displacement = to - from
-        duration = Self.duration(
-            from: from,
-            target: to,
-            initialVelocity: initialVelocity,
-            config: config
-        )
+        displacement = finiteTarget - finiteFrom
+        duration = inputsAreFinite && config.isFiniteAndConvergent
+            ? Self.duration(
+                from: finiteFrom,
+                target: finiteTarget,
+                initialVelocity: initialVelocity,
+                config: config
+            )
+            : 0
     }
 
     func value(at time: TimeInterval) -> Double {
+        guard time.isFinite else { return target }
         let elapsed = max(0, time - startTime)
         if elapsed >= duration {
             return target
@@ -135,6 +160,7 @@ final class SpringAnimation {
             initialVelocity: initialVelocity,
             config: config
         )
+        guard value.isFinite else { return target }
         let range = (target - from) * 10.0
         let a = from - range
         let b = target + range
@@ -147,34 +173,46 @@ final class SpringAnimation {
     }
 
     func isComplete(at time: TimeInterval) -> Bool {
-        max(0, time - startTime) >= duration
+        guard time.isFinite else { return true }
+        return max(0, time - startTime) >= duration
     }
 
     func velocity(at time: TimeInterval) -> Double {
+        guard time.isFinite else { return 0 }
         let elapsed = max(0, time - startTime)
         if elapsed >= duration {
             return 0
         }
 
-        return Self.velocity(
+        let velocity = Self.velocity(
             elapsed,
             from: from,
             target: displacement,
             initialVelocity: initialVelocity,
             config: config
         )
+        return velocity.isFinite ? velocity : 0
     }
 
     func offsetBy(_ delta: Double) {
+        guard delta.isFinite,
+              (from + delta).isFinite,
+              (target + delta).isFinite
+        else {
+            duration = 0
+            return
+        }
         from += delta
         target += delta
         displacement = target - from
-        duration = Self.duration(
-            from: from,
-            target: target,
-            initialVelocity: initialVelocity,
-            config: config
-        )
+        duration = from.isFinite && target.isFinite && config.isFiniteAndConvergent
+            ? Self.duration(
+                from: from,
+                target: target,
+                initialVelocity: initialVelocity,
+                config: config
+            )
+            : 0
     }
 
     private static func params(_ config: SpringConfig) -> (beta: Double, omega0: Double) {
@@ -254,8 +292,8 @@ final class SpringAnimation {
         let delta: Double = 0.001
         let (beta, omega0) = params(config)
 
-        if beta.magnitude <= Double.ulpOfOne || beta < 0 {
-            return .greatestFiniteMagnitude
+        if !beta.isFinite || !omega0.isFinite || beta.magnitude <= Double.ulpOfOne || beta < 0 {
+            return 0
         }
 
         if abs(target - from) <= Double.ulpOfOne {
@@ -264,6 +302,7 @@ final class SpringAnimation {
 
         let epsilon = max(config.epsilon, Double.leastNonzeroMagnitude)
         var x0 = -log(epsilon) / beta
+        guard x0.isFinite, x0 >= 0 else { return 0 }
 
         if abs(beta - omega0) <= Double(Float.ulpOfOne) || beta < omega0 {
             return x0
@@ -279,6 +318,7 @@ final class SpringAnimation {
         }
 
         var x1 = (target - y0 + slope * x0) / slope
+        guard x1.isFinite else { return 0 }
         var y1 = oscillate(x1, from: from, target: target, initialVelocity: initialVelocity, config: config)
 
         var iterations = 0
@@ -298,10 +338,11 @@ final class SpringAnimation {
             }
 
             x1 = (target - y0 + slope * x0) / slope
+            guard x1.isFinite else { return 0 }
             y1 = oscillate(x1, from: from, target: target, initialVelocity: initialVelocity, config: config)
 
             if !y1.isFinite {
-                return x0
+                return 0
             }
 
             iterations += 1

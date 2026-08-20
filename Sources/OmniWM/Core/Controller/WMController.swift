@@ -85,9 +85,14 @@ final class WMController {
     let lockScreenObserver = LockScreenObserver()
     var isLockScreenActive: Bool = false {
         didSet {
-            guard isLockScreenActive, oldValue != isLockScreenActive else { return }
-            resetWorkspaceBarReveal()
-            mouseEventHandler.handleInputSuppressionBegan()
+            guard oldValue != isLockScreenActive else { return }
+            if isLockScreenActive {
+                layoutRefreshController.suspendForLockScreen()
+                resetWorkspaceBarReveal()
+                mouseEventHandler.handleInputSuppressionBegan()
+            } else {
+                layoutRefreshController.awaitPostUnlockTopologySample()
+            }
         }
     }
 
@@ -326,6 +331,21 @@ final class WMController {
         }
         workspaceManager.onDeferredWorkspaceMonitorMove = { [weak self] outcome in
             self?.layoutRefreshController.commitWorkspaceMonitorTransition(outcome)
+        }
+        workspaceManager.onAnimationMotionsWillBeRemoved = { [weak self] workspaceIds in
+            guard let self else { return }
+            for workspaceId in workspaceIds {
+                self.niriLayoutHandler.terminateViewportGesture(
+                    for: workspaceId,
+                    disposition: .settleLiveOffset
+                )
+                let displayIds = self.niriLayoutHandler.scrollAnimationByDisplay.compactMap { displayId, registered in
+                    registered == workspaceId ? displayId : nil
+                }
+                for displayId in displayIds {
+                    self.layoutRefreshController.stopScrollAnimation(for: displayId)
+                }
+            }
         }
         focusPolicyEngine.onLeaseChanged = { [weak self] lease in
             self?.workspaceManager.recordReconcileEvent(

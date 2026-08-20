@@ -710,6 +710,7 @@ extension NiriDirectionalOrientationTests {
         let controller = WindowAdmissionTestSupport.controller(
             prefix: "OmniWMNiriDirectionalOrientationAnimationTests"
         )
+        controller.layoutRefreshController.displayLinkActivationForTests = { _ in true }
         controller.motionPolicy.animationsEnabled = false
         controller.settings.moveCrossesMonitorAtEdge = false
 

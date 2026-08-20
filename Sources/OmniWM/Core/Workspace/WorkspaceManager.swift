@@ -7,9 +7,6 @@ import OmniWMIPC
 
 @MainActor
 final class WorkspaceManager {
-    typealias NativeFullscreenTransition = WorkspaceNativeFullscreenTransition
-    typealias NativeFullscreenRecord = WorkspaceNativeFullscreenRecord
-
     private struct MonitorResolutionContext {
         let monitors: [Monitor]
         let sortedMonitors: [Monitor]
@@ -65,6 +62,7 @@ final class WorkspaceManager {
     var onWindowPresenceObserved: ((WindowHandle) -> Void)?
     var onWindowRemoved: ((WindowState) -> Void)?
     var onDeferredWorkspaceMonitorMove: ((WorkspaceMonitorMoveOutcome) -> Void)?
+    var onAnimationMotionsWillBeRemoved: ((Set<WorkspaceDescriptor.ID>) -> Void)?
 
     init(settings: SettingsStore) {
         self.settings = settings
@@ -168,6 +166,9 @@ final class WorkspaceManager {
 
     @discardableResult
     func recordReconcileEvent(_ event: WMEvent) -> ReconcileTxn {
+        if case let .viewportForgotten(workspaceIds, _) = event {
+            removeAnimationMotions(for: workspaceIds)
+        }
         let previousFocus = world.focus
         let viewportWorkspaceId = viewportWorkspaceId(for: event)
         let previousViewport = viewportWorkspaceId.flatMap { world.viewports[$0] }
@@ -221,9 +222,6 @@ final class WorkspaceManager {
                     transition: eventState.offsetTransition
                 )
             }
-        }
-        if case let .viewportForgotten(workspaceIds, _) = event {
-            animationDriver.removeMotions(for: workspaceIds)
         }
         return txn
     }
@@ -2802,7 +2800,7 @@ final class WorkspaceManager {
             ? nil
             : OutputId(from: targetMonitor)
 
-        animationDriver.removeMotions(for: [workspaceId])
+        removeAnimationMotions(for: [workspaceId])
         world.commit(
             .userCommand(
                 workspaceId: workspaceId,
@@ -3220,7 +3218,7 @@ final class WorkspaceManager {
             return $0.token.windowId < $1.token.windowId
         }
 
-        animationDriver.removeMotions(for: moves.lazy.map(\.workspaceId))
+        removeAnimationMotions(for: moves.lazy.map(\.workspaceId))
         world.commit(
             .userCommand(
                 workspaceId: nil,
@@ -3306,7 +3304,7 @@ final class WorkspaceManager {
             }
         }
         world.removeInvalidationMarks(for: ids)
-        animationDriver.removeMotions(for: ids)
+        removeAnimationMotions(for: ids)
 
         _cachedSortedWorkspaces = nil
         workspaceIdByName = workspaceIdByName.filter { !toRemove.contains($0.value) }

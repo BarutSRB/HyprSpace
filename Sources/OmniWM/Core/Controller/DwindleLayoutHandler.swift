@@ -40,6 +40,9 @@ import QuartzCore
         if dwindleAnimationByDisplay[displayId]?.0 == workspaceId {
             return false
         }
+        if let displacedWorkspaceId = dwindleAnimationByDisplay[displayId]?.0 {
+            controller?.dwindleEngine?.cancelAnimations(in: displacedWorkspaceId)
+        }
         dwindleAnimationByDisplay[displayId] = (workspaceId, monitor)
         return true
     }
@@ -93,8 +96,12 @@ import QuartzCore
 
     func tickDwindleAnimation(targetTime: CFTimeInterval, displayId: CGDirectDisplayID) {
         guard let (wsId, animationMonitor) = dwindleAnimationByDisplay[displayId] else { return }
-        guard let controller, let engine = controller.dwindleEngine else {
-            controller?.layoutRefreshController.stopDwindleAnimation(for: displayId)
+        guard let controller else {
+            dwindleAnimationByDisplay.removeValue(forKey: displayId)
+            return
+        }
+        guard let engine = controller.dwindleEngine else {
+            controller.layoutRefreshController.stopDwindleAnimation(for: displayId)
             return
         }
 
