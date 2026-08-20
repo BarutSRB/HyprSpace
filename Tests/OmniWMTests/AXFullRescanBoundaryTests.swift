@@ -504,10 +504,7 @@ final class AXFullRescanBoundaryTests: XCTestCase {
             } == true)
             XCTAssertNil(windows[orphanWindow.windowId])
             XCTAssertNil(subscriptions[orphanWindow.windowId])
-            XCTAssertEqual(
-                Set(pending.value.map(\.notification)),
-                Set(AppAXWindowNotification.allCases)
-            )
+            XCTAssertEqual(pending.value.map(\.notification), [.miniaturized])
             XCTAssertTrue(pending.value.allSatisfy {
                 CFEqual($0.element, orphanWindow.element)
             })
@@ -931,7 +928,8 @@ final class AXFullRescanBoundaryTests: XCTestCase {
                 expectedWindow: retired,
                 windows: windows,
                 subscribedWindows: subscriptions,
-                pendingNotificationRemovals: pending
+                pendingNotificationRemovals: pending,
+                observerKey: nil
             )
 
             XCTAssertFalse(outcome.removedCachedWindow)
@@ -970,7 +968,8 @@ final class AXFullRescanBoundaryTests: XCTestCase {
                 expectedWindow: subscribed,
                 windows: windows,
                 subscribedWindows: subscriptions,
-                pendingNotificationRemovals: pending
+                pendingNotificationRemovals: pending,
+                observerKey: nil
             )
 
             XCTAssertFalse(outcome.removedCachedWindow)

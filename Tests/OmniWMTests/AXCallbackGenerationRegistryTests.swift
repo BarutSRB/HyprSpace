@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Copyright (C) 2026 BarutSRB — https://github.com/BarutSRB/OmniWM
 
+import ApplicationServices
 import Dispatch
 @testable import OmniWM
 import XCTest
@@ -108,17 +109,78 @@ final class AXCallbackGenerationRegistryTests: XCTestCase {
         let second = registerObserver(2, in: registry, serviceGeneration: serviceGeneration)
 
         XCTAssertGreaterThan(second, first)
-        XCTAssertEqual(registry.generation(observerKey: 1), first)
+        XCTAssertNil(registry.generation(observerKey: 1))
         XCTAssertEqual(registry.generation(observerKey: 2), second)
         XCTAssertFalse(registry.performIfCurrent(observerKey: 1) {})
         XCTAssertTrue(registry.performIfCurrent(observerKey: 2) {})
+    }
+
+    func testRetiredElementOverflowFailsClosedUntilObserverIsRecreated() {
+        let registry = AXCallbackGenerationRegistry()
+        let serviceGeneration = registry.currentGeneration
+        let observerKey: UInt = 3
+        let windowId = 740_001
+        let pid: pid_t = 740_000
+
+        $appThreadToken.withValue(AppThreadToken(pid: pid)) {
+            let liveElement = AXUIElementCreateApplication(pid)
+            let subscriptions = ThreadGuardedValue([
+                windowId: AppAXWindowSubscription(
+                    windowId: windowId,
+                    element: liveElement,
+                    notifications: .lifecycle
+                )
+            ])
+            defer {
+                registry.unregister(observerKey: observerKey)
+                subscriptions.destroy()
+            }
+            _ = registerObserver(
+                observerKey,
+                in: registry,
+                serviceGeneration: serviceGeneration,
+                windowSubscriptions: subscriptions
+            )
+
+            for offset in 0 ... AXCallbackGenerationRegistry.retiredWindowElementLimit {
+                registry.retireWindowElement(
+                    observerKey: observerKey,
+                    element: AXUIElementCreateApplication(pid_t(741_000 + offset))
+                )
+            }
+            XCTAssertFalse(
+                registry.performIfCurrentWindowNotification(
+                    observerKey: observerKey,
+                    windowId: windowId,
+                    element: liveElement,
+                    notification: .destroyed
+                ) {}
+            )
+
+            registry.unregister(observerKey: observerKey)
+            _ = registerObserver(
+                observerKey,
+                in: registry,
+                serviceGeneration: serviceGeneration,
+                windowSubscriptions: subscriptions
+            )
+            XCTAssertTrue(
+                registry.performIfCurrentWindowNotification(
+                    observerKey: observerKey,
+                    windowId: windowId,
+                    element: liveElement,
+                    notification: .destroyed
+                ) {}
+            )
+        }
     }
 
     @discardableResult
     private func registerObserver(
         _ observerKey: UInt,
         in registry: AXCallbackGenerationRegistry,
-        serviceGeneration: UInt64
+        serviceGeneration: UInt64,
+        windowSubscriptions: ThreadGuardedValue<[Int: AppAXWindowSubscription]>? = nil
     ) -> UInt64 {
         guard let callbackGeneration = registry.reserveCallbackGeneration(
             serviceGeneration: serviceGeneration
@@ -130,7 +192,8 @@ final class AXCallbackGenerationRegistryTests: XCTestCase {
             registry.register(
                 observerKey: observerKey,
                 serviceGeneration: serviceGeneration,
-                callbackGeneration: callbackGeneration
+                callbackGeneration: callbackGeneration,
+                windowSubscriptions: windowSubscriptions
             )
         )
         return callbackGeneration

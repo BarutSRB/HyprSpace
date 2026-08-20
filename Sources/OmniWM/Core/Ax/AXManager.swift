@@ -42,6 +42,12 @@ struct AXClosingFrameTarget: Sendable {
     }
 }
 
+struct AXManagerPIDBufferRuntimeSnapshot: Equatable, Sendable {
+    var currentSize = 0
+    var highWater = 0
+    var retainedCapacity = 0
+}
+
 func boundedFullRescanMap<Input: Sendable, Output: Sendable>(
     _ inputs: [Input],
     maxConcurrent: Int,
@@ -202,6 +208,8 @@ final class AXManager {
     private let frameLedger = AXFrameApplicationLedger()
     private var framesByPidBuffer: [pid_t: [AXFrameApplicationRequest]] = [:]
     private var frameApplicationBufferInUse = false
+    private var pidBufferMetricsActive = false
+    private var pidBufferMetrics = AXManagerPIDBufferRuntimeSnapshot()
     private var pendingFrameRetryTasksByWindowId: [Int: Task<Void, Never>] = [:]
     private var pendingFrameRetryGenerationByWindowId: [Int: UInt64] = [:]
     private var pendingFrameRetryRequestsByWindowId: [Int: AXFrameRetryRequest] = [:]
@@ -815,8 +823,39 @@ final class AXManager {
             state.task?.cancel()
         }
         managedWindowBindingRetryStateByPID.removeAll()
+        framesByPidBuffer.removeAll(keepingCapacity: false)
+        recordPIDBufferRuntimeState()
 
         AppAXContext.shutdownAll()
+    }
+
+    func beginPIDBufferRuntimeCapture() {
+        pidBufferMetrics = AXManagerPIDBufferRuntimeSnapshot(
+            currentSize: framesByPidBuffer.count,
+            highWater: framesByPidBuffer.count,
+            retainedCapacity: framesByPidBuffer.capacity
+        )
+        pidBufferMetricsActive = true
+    }
+
+    func endPIDBufferRuntimeCapture() {
+        recordPIDBufferRuntimeState()
+        pidBufferMetricsActive = false
+    }
+
+    func pidBufferRuntimeSnapshot() -> AXManagerPIDBufferRuntimeSnapshot {
+        var snapshot = pidBufferMetrics
+        snapshot.currentSize = framesByPidBuffer.count
+        snapshot.highWater = max(snapshot.highWater, snapshot.currentSize)
+        snapshot.retainedCapacity = framesByPidBuffer.capacity
+        return snapshot
+    }
+
+    private func recordPIDBufferRuntimeState() {
+        guard pidBufferMetricsActive else { return }
+        pidBufferMetrics.currentSize = framesByPidBuffer.count
+        pidBufferMetrics.highWater = max(pidBufferMetrics.highWater, framesByPidBuffer.count)
+        pidBufferMetrics.retainedCapacity = framesByPidBuffer.capacity
     }
 
     func windowsForApp(_ app: NSRunningApplication) async -> [(AXWindowRef, pid_t, Int)] {
@@ -2242,9 +2281,9 @@ final class AXManager {
 
         frameApplicationBufferInUse = true
         defer {
-            for key in Array(framesByPidBuffer.keys) {
-                framesByPidBuffer[key]?.removeAll(keepingCapacity: true)
-            }
+            recordPIDBufferRuntimeState()
+            framesByPidBuffer.removeAll(keepingCapacity: true)
+            recordPIDBufferRuntimeState()
             frameApplicationBufferInUse = false
         }
 
