@@ -6,11 +6,18 @@ import IOKit.pwr_mgt
 
 @MainActor
 final class SleepPreventionManager {
+    struct PerformanceSnapshot: Equatable, Sendable {
+        let timerFires: UInt64
+        let assertionRefreshes: UInt64
+    }
+
     static let shared = SleepPreventionManager()
 
     private var sleepAssertionID: IOPMAssertionID?
     private var assertionTimer: Timer?
     private var isUserSessionActive = true
+    private var performanceTimerFires: UInt64?
+    private var performanceAssertionRefreshes: UInt64?
 
     private init() {
         setupWorkspaceNotifications()
@@ -35,8 +42,32 @@ final class SleepPreventionManager {
         releaseSleepAssertion()
     }
 
+    func beginPerformanceCapture() {
+        performanceTimerFires = 0
+        performanceAssertionRefreshes = 0
+    }
+
+    func performanceSnapshot() -> PerformanceSnapshot? {
+        guard let timerFires = performanceTimerFires,
+              let assertionRefreshes = performanceAssertionRefreshes
+        else { return nil }
+        return PerformanceSnapshot(
+            timerFires: timerFires,
+            assertionRefreshes: assertionRefreshes
+        )
+    }
+
+    func endPerformanceCapture() -> PerformanceSnapshot? {
+        let snapshot = performanceSnapshot()
+        performanceTimerFires = nil
+        performanceAssertionRefreshes = nil
+        return snapshot
+    }
+
     private func refreshSleepAssertion() {
+        performanceTimerFires? &+= 1
         guard isUserSessionActive else { return }
+        performanceAssertionRefreshes? &+= 1
 
         if let assertionID = sleepAssertionID {
             if IOPMAssertionRelease(assertionID) != kIOReturnSuccess {

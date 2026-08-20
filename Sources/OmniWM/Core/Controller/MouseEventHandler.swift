@@ -45,6 +45,7 @@ final class MouseEventHandler {
         var buttonEvents: UInt64 = 0
         var droppedTrackpadScrollEvents: UInt64 = 0
         var mouseWarpSamples: UInt64 = 0
+        var retiredMultitouch: MultitouchFrameMailbox.PerformanceSnapshot?
 
         func snapshot(multitouch: MultitouchFrameMailbox.PerformanceSnapshot?) -> PerformanceSnapshot {
             PerformanceSnapshot(
@@ -55,7 +56,60 @@ final class MouseEventHandler {
                 buttonEvents: buttonEvents,
                 droppedTrackpadScrollEvents: droppedTrackpadScrollEvents,
                 mouseWarpSamples: mouseWarpSamples,
-                multitouch: multitouch
+                multitouch: mergedMultitouch(with: multitouch)
+            )
+        }
+
+        mutating func accumulateRetiredMultitouch(
+            _ snapshot: MultitouchFrameMailbox.PerformanceSnapshot
+        ) {
+            retiredMultitouch = if let retiredMultitouch {
+                Self.mergeMultitouch(retiredMultitouch, snapshot, pendingFrames: 0)
+            } else {
+                Self.mergeMultitouch(snapshot, nil, pendingFrames: 0)
+            }
+        }
+
+        private func mergedMultitouch(
+            with current: MultitouchFrameMailbox.PerformanceSnapshot?
+        ) -> MultitouchFrameMailbox.PerformanceSnapshot? {
+            guard let retiredMultitouch else { return current }
+            return Self.mergeMultitouch(
+                retiredMultitouch,
+                current,
+                pendingFrames: current?.pendingFrames ?? 0
+            )
+        }
+
+        private static func mergeMultitouch(
+            _ accumulated: MultitouchFrameMailbox.PerformanceSnapshot,
+            _ current: MultitouchFrameMailbox.PerformanceSnapshot?,
+            pendingFrames: Int
+        ) -> MultitouchFrameMailbox.PerformanceSnapshot {
+            guard let current else {
+                return MultitouchFrameMailbox.PerformanceSnapshot(
+                    rawCallbacks: accumulated.rawCallbacks,
+                    staleCallbacks: accumulated.staleCallbacks,
+                    drainBatches: accumulated.drainBatches,
+                    overwrittenChanges: accumulated.overwrittenChanges,
+                    transitionsQueued: accumulated.transitionsQueued,
+                    cursorSamples: accumulated.cursorSamples,
+                    pendingFrames: pendingFrames,
+                    maximumPendingFrames: accumulated.maximumPendingFrames
+                )
+            }
+            return MultitouchFrameMailbox.PerformanceSnapshot(
+                rawCallbacks: accumulated.rawCallbacks &+ current.rawCallbacks,
+                staleCallbacks: accumulated.staleCallbacks &+ current.staleCallbacks,
+                drainBatches: accumulated.drainBatches &+ current.drainBatches,
+                overwrittenChanges: accumulated.overwrittenChanges &+ current.overwrittenChanges,
+                transitionsQueued: accumulated.transitionsQueued &+ current.transitionsQueued,
+                cursorSamples: accumulated.cursorSamples &+ current.cursorSamples,
+                pendingFrames: pendingFrames,
+                maximumPendingFrames: max(
+                    accumulated.maximumPendingFrames,
+                    current.maximumPendingFrames
+                )
             )
         }
     }
@@ -327,8 +381,10 @@ final class MouseEventHandler {
 
     @discardableResult
     func installMultitouchSource(_ source: MultitouchGestureSource) -> Bool {
-        if let current = multitouchSource, current !== source {
+        let current = multitouchSource
+        if let current, current !== source {
             guard current.shutdown() else { return false }
+            accumulateRetiredMultitouchPerformance(from: current)
         }
         source.onSnapshot = { [weak self] snapshot in
             self?.receiveTapGestureEvent(snapshot)
@@ -337,10 +393,11 @@ final class MouseEventHandler {
             self?.resetForMultitouchSourceReplacement()
         }
         multitouchSource = source
-        if performanceCounters != nil {
+        if performanceCounters != nil, current !== source {
             source.beginPerformanceCapture()
         }
         guard source.startLifecycle() else {
+            accumulateRetiredMultitouchPerformance(from: source)
             multitouchSource = nil
             return false
         }
@@ -352,7 +409,11 @@ final class MouseEventHandler {
         cancelActiveMouseInteraction()
         state.capturedInteractionButton = nil
         tearDownEventTaps()
-        if multitouchSource?.shutdown() != false {
+        let retiringMultitouchSource = multitouchSource
+        if retiringMultitouchSource?.shutdown() != false {
+            if let retiringMultitouchSource {
+                accumulateRetiredMultitouchPerformance(from: retiringMultitouchSource)
+            }
             multitouchSource = nil
         }
         MouseEventHandler._instance = nil
@@ -375,11 +436,17 @@ final class MouseEventHandler {
             if !installMultitouchSource(multitouchSourceFactory()) {
                 FallbackFiringRecorder.shared.note(.input, "multitouchSourceCleanupBlocked")
             }
-        } else if multitouchSource?.shutdown() != false {
-            multitouchSource = nil
-            resetForMultitouchSourceReplacement()
         } else {
-            FallbackFiringRecorder.shared.note(.input, "multitouchSourceCleanupBlocked")
+            let retiringMultitouchSource = multitouchSource
+            if retiringMultitouchSource?.shutdown() != false {
+                if let retiringMultitouchSource {
+                    accumulateRetiredMultitouchPerformance(from: retiringMultitouchSource)
+                }
+                multitouchSource = nil
+                resetForMultitouchSourceReplacement()
+            } else {
+                FallbackFiringRecorder.shared.note(.input, "multitouchSourceCleanupBlocked")
+            }
         }
     }
 
@@ -389,14 +456,24 @@ final class MouseEventHandler {
     }
 
     func performanceSnapshot() -> PerformanceSnapshot? {
-        performanceCounters?.snapshot(multitouch: multitouchSource?.performanceSnapshot())
+        guard let performanceCounters else { return nil }
+        return performanceCounters.snapshot(multitouch: multitouchSource?.performanceSnapshot())
     }
 
     func endPerformanceCapture() -> PerformanceSnapshot? {
+        guard let performanceCounters else { return nil }
         let multitouch = multitouchSource?.endPerformanceCapture()
-        let snapshot = performanceCounters?.snapshot(multitouch: multitouch)
-        performanceCounters = nil
+        let snapshot = performanceCounters.snapshot(multitouch: multitouch)
+        self.performanceCounters = nil
         return snapshot
+    }
+
+    private func accumulateRetiredMultitouchPerformance(from source: MultitouchGestureSource) {
+        guard var performanceCounters,
+              let snapshot = source.endPerformanceCapture()
+        else { return }
+        performanceCounters.accumulateRetiredMultitouch(snapshot)
+        self.performanceCounters = performanceCounters
     }
 
     private func tearDownEventTaps() {

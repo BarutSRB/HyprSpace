@@ -26,6 +26,7 @@ final class DiagnosticsRecordingPresentationTests: XCTestCase {
 
     func testRecordingStartStoppedOutcomeRemainsUnexpected() {
         let artifact = TraceCaptureArtifact(
+            profile: .problem,
             url: URL(fileURLWithPath: "/tmp/recording.log"),
             startedAt: Date(timeIntervalSince1970: 1),
             endedAt: Date(timeIntervalSince1970: 2)

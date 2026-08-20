@@ -170,7 +170,7 @@ final class StatusBarController: NSObject {
     func updateButtonAppearance() {
         guard let button = statusItem?.button else { return }
         button.wantsLayer = true
-        if controller?.isTraceCaptureActive == true {
+        if controller?.traceCaptureStatus.profile == .problem {
             let config = NSImage.SymbolConfiguration(paletteColors: [.systemRed])
             button.image = NSImage(
                 systemSymbolName: "record.circle.fill",
@@ -180,6 +180,17 @@ final class StatusBarController: NSObject {
             button.contentTintColor = nil
             button.toolTip = "OmniWM — recording diagnostics (auto-stops in 10 min)"
             applyRecordingPulse(to: button)
+        } else if controller?.traceCaptureStatus.profile == .performance {
+            button.layer?.removeAnimation(forKey: recordingPulseKey)
+            button.layer?.opacity = 1
+            let config = NSImage.SymbolConfiguration(paletteColors: [.systemBlue])
+            button.image = NSImage(
+                systemSymbolName: "gauge.with.dots.needle.67percent",
+                accessibilityDescription: "OmniWM, measuring performance"
+            )?.withSymbolConfiguration(config)
+            button.image?.isTemplate = false
+            button.contentTintColor = nil
+            button.toolTip = "OmniWM — measuring performance (auto-stops in 10 min)"
         } else {
             button.layer?.removeAnimation(forKey: recordingPulseKey)
             button.layer?.opacity = 1

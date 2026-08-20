@@ -280,13 +280,22 @@ struct StatusMenuDiagnosticsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            MenuActionRow(
-                icon: traceIcon,
-                label: traceLabel
-            ) {
-                model.toggleTraceRecording()
+            if model.traceCapturePhase == .idle {
+                MenuActionRow(icon: "record.circle", label: "Record a Problem") {
+                    model.toggleTraceRecording(profile: .problem)
+                }
+                MenuActionRow(icon: "gauge.with.dots.needle.67percent", label: "Measure Performance") {
+                    model.toggleTraceRecording(profile: .performance)
+                }
+            } else {
+                MenuActionRow(
+                    icon: traceIcon,
+                    label: traceLabel
+                ) {
+                    model.toggleTraceRecording(profile: model.traceCaptureProfile ?? .problem)
+                }
+                .disabled(model.traceCapturePhase == .starting || model.traceCapturePhase == .finalizing)
             }
-            .disabled(model.traceCapturePhase == .finalizing)
             MenuActionRow(icon: "stethoscope", label: "Open Troubleshooting…", showChevron: true) {
                 model.openSettings(section: .diagnostics)
             }
@@ -296,6 +305,7 @@ struct StatusMenuDiagnosticsView: View {
     private var traceIcon: String {
         switch model.traceCapturePhase {
         case .idle: "record.circle"
+        case .starting: "hourglass"
         case .recording: "stop.circle"
         case .finalizing: "hourglass"
         }
@@ -304,8 +314,18 @@ struct StatusMenuDiagnosticsView: View {
     private var traceLabel: String {
         switch model.traceCapturePhase {
         case .idle: "Start Recording"
-        case .recording: "Stop & Save Recording"
-        case .finalizing: "Finalizing diagnostics…"
+        case .starting:
+            model.traceCaptureProfile == .performance
+                ? "Starting performance capture…"
+                : "Starting diagnostics…"
+        case .recording:
+            model.traceCaptureProfile == .performance
+                ? "Stop & Save Performance Capture"
+                : "Stop & Save Recording"
+        case .finalizing:
+            model.traceCaptureProfile == .performance
+                ? "Finalizing performance capture…"
+                : "Finalizing diagnostics…"
         }
     }
 }

@@ -1,4 +1,4 @@
-.PHONY: format format-check lint lint-fix build run release-check verify check check-tool-versions check-swiftformat-version check-swiftlint-version
+.PHONY: format format-check lint lint-fix build run energy-profile release-check verify check check-tool-versions check-swiftformat-version check-swiftlint-version
 
 SWIFTFORMAT_VERSION = 0.62.1
 SWIFTLINT_VERSION = 0.65.0
@@ -35,6 +35,9 @@ run:
 	./Scripts/package-app.sh debug dev
 	-pkill -x OmniWM
 	open ./dist/OmniWM.app
+
+energy-profile:
+	./Scripts/energy-profile.sh
 
 release-check: build
 

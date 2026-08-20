@@ -158,7 +158,7 @@ final class WMController {
     }()
 
     @ObservationIgnored
-    private let hiddenBarController: HiddenBarController
+    let hiddenBarController: HiddenBarController
     @ObservationIgnored
     private lazy var quakeTerminalController: QuakeTerminalController = .init(
         settings: settings,
@@ -232,7 +232,7 @@ final class WMController {
     }
 
     @ObservationIgnored
-    private lazy var clipboardHistoryService = ClipboardHistoryService(configuration: clipboardHistoryConfiguration())
+    lazy var clipboardHistoryService = ClipboardHistoryService(configuration: clipboardHistoryConfiguration())
     @ObservationIgnored
     private(set) lazy var focusNotificationDispatcher = FocusNotificationDispatcher(controller: self)
     @ObservationIgnored

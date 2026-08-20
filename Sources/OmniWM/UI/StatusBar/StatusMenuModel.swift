@@ -230,6 +230,10 @@ final class StatusMenuModel {
         controller?.traceCaptureStatus.phase ?? .idle
     }
 
+    var traceCaptureProfile: TraceCaptureProfile? {
+        controller?.traceCaptureStatus.profile
+    }
+
     var canShowHiddenIcons: Bool {
         settings.hiddenBarEnabled && controller?.isHiddenBarHidingAvailable == true
     }
@@ -377,11 +381,11 @@ final class StatusMenuModel {
         NSApplication.shared.terminate(nil)
     }
 
-    func toggleTraceRecording() {
+    func toggleTraceRecording(profile: TraceCaptureProfile = .problem) {
         guard let controller else { return }
         let wasRecording = controller.isTraceCaptureActive
         Task {
-            switch await controller.toggleTraceCaptureForUI(desiredState: .toggle) {
+            switch await controller.toggleTraceCaptureForUI(desiredState: .toggle, profile: profile) {
             case .noChange,
                  .started:
                 break

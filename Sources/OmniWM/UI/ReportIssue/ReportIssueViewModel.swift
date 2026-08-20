@@ -254,6 +254,11 @@ final class ReportIssueViewModel {
         selectEvidence(trace)
     }
 
+    func recordingFinished(artifact: TraceCaptureArtifact) {
+        guard artifact.profile == .problem else { return }
+        recordingFinished(traceURL: artifact.url)
+    }
+
     func useFreshSnapshot() {
         selectedEvidence = nil
         lastAttachmentWarning = nil

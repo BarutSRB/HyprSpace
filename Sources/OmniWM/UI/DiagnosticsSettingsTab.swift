@@ -43,6 +43,7 @@ struct DiagnosticsSettingsTab: View {
             healthSection
             privateAPICapabilitySection
             recordingSection
+            performanceRecordingSection
             savedDiagnosticsSection
         }
         .formStyle(.grouped)
@@ -54,7 +55,11 @@ struct DiagnosticsSettingsTab: View {
         .onChange(of: controller.traceCaptureStatus.lastArtifact) { _, artifact in
             guard let artifact else { return }
             NSWorkspace.shared.activateFileViewerSelecting([artifact.url])
-            traceStatus = .success("Recording saved \(artifact.url.lastPathComponent)")
+            traceStatus = .success(
+                artifact.profile == .performance
+                    ? "Performance capture saved \(artifact.url.lastPathComponent)"
+                    : "Recording saved \(artifact.url.lastPathComponent)"
+            )
             reloadToken += 1
         }
     }
@@ -160,10 +165,25 @@ struct DiagnosticsSettingsTab: View {
                 Button("Start Recording") {
                     startRecording()
                 }
+            case .starting:
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(
+                        controller.traceCaptureStatus.profile == .problem
+                            ? "Starting diagnostics…"
+                            : "A performance capture is starting."
+                    )
+                }
             case .recording:
-                recordingProgressLabel
-                Button("Stop & Save Recording") {
-                    stopRecording()
+                if controller.traceCaptureStatus.profile == .problem {
+                    recordingProgressLabel
+                    Button("Stop & Save Recording") {
+                        stopRecording()
+                    }
+                } else {
+                    Text("A performance capture is running.")
+                        .foregroundStyle(.secondary)
                 }
             case .finalizing:
                 HStack(spacing: 8) {
@@ -175,7 +195,51 @@ struct DiagnosticsSettingsTab: View {
             statusLabel(traceStatus)
             SettingsCaption(
                 "Start recording, reproduce one problem, then stop and attach the saved trace log. "
-                    + "The app and window evidence is captured automatically."
+                    + "The app and window evidence is captured automatically. This detailed recording changes runtime "
+                    + "work and must not be used for energy comparisons."
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var performanceRecordingSection: some View {
+        Section("Measure Performance") {
+            switch controller.traceCaptureStatus.phase {
+            case .idle:
+                Button("Start Performance Capture") {
+                    startPerformanceCapture()
+                }
+            case .starting:
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(
+                        controller.traceCaptureStatus.profile == .performance
+                            ? "Starting performance capture…"
+                            : "A detailed problem recording is starting."
+                    )
+                }
+            case .recording:
+                if controller.traceCaptureStatus.profile == .performance {
+                    Label("Performance capture in progress", systemImage: "gauge.with.dots.needle.67percent")
+                    Button("Stop & Save Performance Capture") {
+                        stopPerformanceCapture()
+                    }
+                } else {
+                    Text("A detailed problem recording is running.")
+                        .foregroundStyle(.secondary)
+                }
+            case .finalizing:
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Finalizing capture…")
+                }
+            }
+            SettingsCaption(
+                "Records aggregate operation counts, CPU energy, CPU time, wakeups and memory with one final write. "
+                    + "It does not enable detailed event traces. Use Instruments or powermetrics separately to measure "
+                    + "WindowServer and GPU energy."
             )
         }
     }
@@ -310,6 +374,34 @@ struct DiagnosticsSettingsTab: View {
         }
     }
 
+    private func startPerformanceCapture() {
+        Task {
+            let outcome = await controller.toggleTraceCaptureForUI(
+                desiredState: .active,
+                profile: .performance
+            )
+            traceStatus = diagnosticsRecordingStartStatus(for: outcome)
+        }
+    }
+
+    private func stopPerformanceCapture() {
+        Task {
+            switch await controller.toggleTraceCaptureForUI(
+                desiredState: .inactive,
+                profile: .performance
+            ) {
+            case .stopped:
+                break
+            case let .writeFailed(reason):
+                traceStatus = .failure("Failed to write the performance capture: \(reason)")
+            case .noChange:
+                traceStatus = .failure("No performance capture is running")
+            case .started:
+                traceStatus = .failure("Unexpected capture state")
+            }
+        }
+    }
+
     private func revealFolder() {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         NSWorkspace.shared.open(directory)
@@ -340,6 +432,9 @@ struct DiagnosticsSettingsTab: View {
         let name = file.name
         if name.hasPrefix("omniwm-trace-") {
             return name.hasSuffix(".partial.log") ? "Trace (incomplete)" : "Trace"
+        }
+        if name.hasPrefix("omniwm-performance-") {
+            return "Performance"
         }
         if name.hasPrefix("omniwm-crash-") {
             return "Crash"
