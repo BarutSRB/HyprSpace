@@ -24,12 +24,36 @@ func diagnosticsRecordingStartStatus(for outcome: TraceCaptureOutcome) -> Diagno
     }
 }
 
+func privateAPIProbePresentationStatus(for report: PrivateAPIProbeReport) -> DiagnosticsActionStatus {
+    let failures = report.selfTests.filter { $0.outcome == .failed }.count
+    let checks = "\(report.selfTests.count) checks, \(failures) failures"
+    guard let foreign = report.foreign else {
+        let prefix = failures == 0 ? "Inconclusive: " : ""
+        return .failure("\(prefix)\(checks) · no unmanaged foreign window probed")
+    }
+    let foreignResult = "foreign transaction move=\(foreign.skylightMoved ? "yes" : "no")"
+        + ", restored=\(foreign.restored ? "yes" : "no")"
+    guard failures == 0 else {
+        return .failure("\(checks) · \(foreignResult)")
+    }
+    switch foreign.outcome {
+    case .works where foreign.skylightMoved && foreign.restored:
+        return .success("\(checks) · \(foreignResult)")
+    case .inconclusive:
+        return .failure("Inconclusive: \(checks) · \(foreignResult)")
+    case .works,
+         .failed:
+        return .failure("\(checks) · \(foreignResult)")
+    }
+}
+
 struct DiagnosticsSettingsTab: View {
     @Bindable var controller: WMController
     let navigation: SettingsNavigationModel
 
     @State private var traceStatus: DiagnosticsActionStatus = .idle
     @State private var probeStatus: DiagnosticsActionStatus = .idle
+    @State private var isPrivateAPIProbeRunning = false
     @State private var recentFiles: [DiagnosticsFile] = []
     @State private var reloadToken = 0
 
@@ -147,11 +171,12 @@ struct DiagnosticsSettingsTab: View {
             Button("Run Private-API Probe") {
                 runPrivateAPIProbe()
             }
+            .disabled(isPrivateAPIProbeRunning)
             statusLabel(probeStatus)
             SettingsCaption(
                 "On-demand check of every private window-server API on this Mac, confirming each actually works. "
-                    + "It briefly nudges one of your real open windows a few pixels and moves it back, so you may see "
-                    + "a window jump for an instant; OmniWM re-tiles immediately afterward. The full result is written "
+                    + "It briefly nudges one unmanaged open window a few pixels and restores its verified starting "
+                    + "position, so you may see a window jump for an instant. The full result is written "
                     + "into the Private API Capability section of your next diagnostics report."
             )
         }
@@ -339,16 +364,12 @@ struct DiagnosticsSettingsTab: View {
     }
 
     private func runPrivateAPIProbe() {
+        guard !isPrivateAPIProbeRunning else { return }
+        isPrivateAPIProbeRunning = true
         Task {
+            defer { isPrivateAPIProbeRunning = false }
             let report = await controller.runPrivateAPIProbe()
-            let failures = report.selfTests.filter { $0.outcome == .failed }.count
-            let foreign = report.foreign
-                .map { "foreign-window move=\($0.skylightMoved ? "yes" : "no")" } ?? "no foreign window probed"
-            if failures == 0 {
-                probeStatus = .success("\(report.selfTests.count) checks, 0 failures · \(foreign)")
-            } else {
-                probeStatus = .failure("\(failures) of \(report.selfTests.count) checks failed · \(foreign)")
-            }
+            probeStatus = privateAPIProbePresentationStatus(for: report)
         }
     }
 

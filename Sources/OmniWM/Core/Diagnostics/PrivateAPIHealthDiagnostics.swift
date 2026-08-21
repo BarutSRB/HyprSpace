@@ -27,7 +27,24 @@ struct ForeignWindowProbeResult: Sendable {
     let movedDelta: CGPoint?
     let skylightMoved: Bool
     let restored: Bool
+    let outcome: PrivateAPISelfTestOutcome
     let detail: String
+}
+
+struct ForeignWindowProbeOperations {
+    let queryWindowInfo: (UInt32) -> WindowServerInfo?
+    let windowBounds: (UInt32) -> CGRect?
+    let independentOrigin: (UInt32, pid_t) -> CGPoint?
+    let batchMove: (UInt32, CGPoint) -> SkyLight.TransactionSubmissionResult
+    let directMove: (UInt32, CGPoint) -> Bool
+    let waitForOrigin: (UInt32, pid_t, CGPoint) async -> CGPoint?
+}
+
+struct ForeignWindowRestoreResult {
+    let transactionSubmission: SkyLight.TransactionSubmissionResult?
+    let directMoveResult: Bool?
+    let restoredOrigin: CGPoint?
+    let interfered: Bool
 }
 
 struct PrivateAPIProbeReport: Sendable {
@@ -80,11 +97,14 @@ struct PrivateAPIHealthSnapshot: Sendable {
         }
         if let foreign = report.foreign {
             lines.append(
-                "  foreignWindowMove: skylightMovesForeignWindows=\(foreign.skylightMoved ? "YES" : "NO")"
+                "  foreignTransactionMove: outcome=\(foreign.outcome.rawValue)"
+                    + " moved=\(foreign.skylightMoved ? "YES" : "NO")"
                     + " restored=\(foreign.restored) delta=\(TraceFormat.point(foreign.movedDelta)) \(foreign.detail)"
             )
         } else {
-            lines.append("  foreignWindowMove: no eligible foreign window to probe")
+            lines.append(
+                "  foreignTransactionMove: inconclusive — no eligible unmanaged foreign window to probe"
+            )
         }
         return lines
     }
@@ -105,27 +125,34 @@ enum PrivateAPIHealthDiagnostics {
     }
 
     @discardableResult
-    static func runProbe() async -> PrivateAPIProbeReport {
-        var tests = skylightTests()
+    static func runProbe(
+        foreignWindowEligibility: (WindowServerInfo) -> Bool
+    ) async -> PrivateAPIProbeReport {
+        var tests = await skylightTests()
         tests.append(contentsOf: axProbes())
         tests.append(contentsOf: inputProbes())
         tests.append(contentsOf: multitouchProbes())
         tests.append(await captureProbe())
         tests.append(contentsOf: monitorProbes())
         tests.append(contentsOf: systemProbes())
-        let sample = SkyLight.shared.queryAllVisibleWindows().first { isEligibleForeignWindow($0) }
+        let visibleWindows = SkyLight.shared.queryAllVisibleWindows()
+        let sample = visibleWindows.first(where: isEligibleForeignWindow)
+        let foreignSample = visibleWindows.first {
+            isEligibleForeignWindow($0) && foreignWindowEligibility($0)
+        }
         tests.append(contentsOf: sampleWindowTests(sample))
         tests.append(silgenAXWindowTest(sample))
+        let foreign = await activeForeignWindowProbe(sample: foreignSample)
         let report = PrivateAPIProbeReport(
             ranAt: Date(),
             selfTests: tests,
-            foreign: activeForeignWindowProbe(sample: sample)
+            foreign: foreign
         )
         PrivateAPIProbeStore.shared.last = report
         return report
     }
 
-    private static func skylightTests() -> [PrivateAPISelfTest] {
+    private static func skylightTests() async -> [PrivateAPISelfTest] {
         let sky = SkyLight.shared
         let cid = sky.getMainConnectionID()
         var tests = [test("SLSMainConnectionID", cid != 0 ? .works : .failed, "cid=\(cid)")]
@@ -134,6 +161,7 @@ enum PrivateAPIHealthDiagnostics {
             tests.append(test("SLSNewWindow/CGSNewRegionWithRect", .failed, "createBorderWindow returned 0"))
             return tests
         }
+        defer { sky.releaseBorderWindow(wid) }
         tests.append(test("SLSNewWindow/CGSNewRegionWithRect", .works, "wid=\(wid)"))
         let target = CGPoint(x: 137, y: 213)
         _ = sky.moveWindow(wid, to: target)
@@ -148,10 +176,65 @@ enum PrivateAPIHealthDiagnostics {
         } else {
             tests.append(test("SLSWindowQuery* iterator", .inconclusive, "queryWindowInfo nil"))
         }
+        tests.append(await skylightTransactionMoveTest(wid))
         tests.append(contentsOf: skylightMutationTests(wid))
-        sky.releaseBorderWindow(wid)
         tests.append(contentsOf: spaceTests())
         return tests
+    }
+
+    private static func skylightTransactionMoveTest(_ wid: UInt32) async -> PrivateAPISelfTest {
+        let sky = SkyLight.shared
+        guard let initialBounds = sky.getWindowBounds(wid) else {
+            return test("SLSTransactionMoveWindowWithGroup", .inconclusive, "initial bounds unavailable")
+        }
+        defer { _ = sky.moveWindow(wid, to: initialBounds.origin) }
+        let target = CGPoint(x: initialBounds.origin.x + 8, y: initialBounds.origin.y + 8)
+        let result = sky.batchMoveWindows([(windowId: wid, origin: target)])
+        guard result == .submitted else {
+            return test("SLSTransactionMoveWindowWithGroup", .failed, "submission=\(result)")
+        }
+        let movedBounds = await waitForWindowBounds(wid, matching: target)
+        let restoreIssued = sky.moveWindow(wid, to: initialBounds.origin)
+        let restoredBounds = await waitForWindowBounds(wid, matching: initialBounds.origin)
+        let restored = restoreIssued && restoredBounds != nil
+        guard let movedBounds else {
+            return test(
+                "SLSTransactionMoveWindowWithGroup",
+                .failed,
+                "submission=\(result) bounds=nil restored=\(restored)"
+            )
+        }
+        guard movedBounds.size == initialBounds.size else {
+            return test(
+                "SLSTransactionMoveWindowWithGroup",
+                .failed,
+                "submission=\(result) size=\(movedBounds.width)x\(movedBounds.height) restored=\(restored)"
+            )
+        }
+        return test(
+            "SLSTransactionMoveWindowWithGroup",
+            restored ? .works : .inconclusive,
+            "submission=\(result) bounds=\(TraceFormat.rect(movedBounds)) restored=\(restored)"
+        )
+    }
+
+    private static func waitForWindowBounds(_ wid: UInt32, matching origin: CGPoint) async -> CGRect? {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .milliseconds(250))
+        repeat {
+            if let bounds = SkyLight.shared.getWindowBounds(wid),
+               abs(bounds.origin.x - origin.x) < 2,
+               abs(bounds.origin.y - origin.y) < 2
+            {
+                return bounds
+            }
+            do {
+                try await Task.sleep(for: .milliseconds(5))
+            } catch {
+                return nil
+            }
+        } while clock.now < deadline
+        return nil
     }
 
     private static func skylightMutationTests(_ wid: UInt32) -> [PrivateAPISelfTest] {
@@ -401,39 +484,232 @@ enum PrivateAPIHealthDiagnostics {
 
 @MainActor
 extension PrivateAPIHealthDiagnostics {
-    static func activeForeignWindowProbe(sample: WindowServerInfo?) -> ForeignWindowProbeResult? {
+    static func activeForeignWindowProbe(
+        sample: WindowServerInfo?,
+        operations suppliedOperations: ForeignWindowProbeOperations? = nil
+    ) async -> ForeignWindowProbeResult? {
         let sky = SkyLight.shared
-        guard let sample = sample ?? sky.queryAllVisibleWindows().first(where: isEligibleForeignWindow) else {
-            return nil
-        }
-        let originSLS = (sky.getWindowBounds(sample.id) ?? sample.frame).origin
-        let before = independentOrigin(sample.id)
+        guard let sample else { return nil }
+        let operations = suppliedOperations ?? ForeignWindowProbeOperations(
+            queryWindowInfo: { sky.queryWindowInfo($0) },
+            windowBounds: { sky.getWindowBounds($0) },
+            independentOrigin: { independentOrigin($0, expectedPID: $1) },
+            batchMove: { wid, origin in
+                sky.batchMoveWindows([(windowId: wid, origin: origin)])
+            },
+            directMove: { sky.moveWindow($0, to: $1) },
+            waitForOrigin: { wid, pid, origin in
+                await waitForIndependentOrigin(wid, expectedPID: pid, matching: origin)
+            }
+        )
         DiagnosticsEventRecorder.shared.recordVerbose(
             name: "privateAPIProbe.foreignMove",
             pid: sample.pid,
             windowId: sample.id
         )
-        _ = sky.moveWindow(sample.id, to: CGPoint(x: originSLS.x + 6, y: originSLS.y + 6))
-        let after = independentOrigin(sample.id)
+        guard let currentInfo = operations.queryWindowInfo(sample.id),
+              currentInfo.id == sample.id,
+              currentInfo.pid == sample.pid
+        else {
+            return ForeignWindowProbeResult(
+                targetPid: sample.pid,
+                targetWid: sample.id,
+                movedDelta: nil,
+                skylightMoved: false,
+                restored: false,
+                outcome: .inconclusive,
+                detail: "submission=not-attempted reason=sls-identity-unavailable"
+                    + " pid=\(sample.pid) wid=\(sample.id)"
+            )
+        }
+        guard let slsBounds = operations.windowBounds(sample.id),
+              let before = operations.independentOrigin(sample.id, sample.pid)
+        else {
+            return ForeignWindowProbeResult(
+                targetPid: sample.pid,
+                targetWid: sample.id,
+                movedDelta: nil,
+                skylightMoved: false,
+                restored: false,
+                outcome: .inconclusive,
+                detail: "submission=not-attempted reason=baseline-unavailable"
+                    + " pid=\(sample.pid) wid=\(sample.id)"
+            )
+        }
+        let baseline = slsBounds.origin
+        guard originsMatch(baseline, before) else {
+            return ForeignWindowProbeResult(
+                targetPid: sample.pid,
+                targetWid: sample.id,
+                movedDelta: nil,
+                skylightMoved: false,
+                restored: false,
+                outcome: .inconclusive,
+                detail: "submission=not-attempted reason=baseline-mismatch"
+                    + " pid=\(sample.pid) wid=\(sample.id)"
+                    + " sls=\(TraceFormat.point(baseline)) independent=\(TraceFormat.point(before))"
+            )
+        }
+        let target = CGPoint(x: baseline.x + 6, y: baseline.y + 6)
+        let submission = operations.batchMove(sample.id, target)
+        guard submission == .submitted else {
+            let restoreSubmission = submission == .deferred
+                ? operations.batchMove(sample.id, baseline)
+                : nil
+            let current = operations.independentOrigin(sample.id, sample.pid)
+            let restored = current.map { originsMatch($0, baseline) } ?? false
+            return ForeignWindowProbeResult(
+                targetPid: sample.pid,
+                targetWid: sample.id,
+                movedDelta: current.map { CGPoint(x: $0.x - before.x, y: $0.y - before.y) },
+                skylightMoved: false,
+                restored: restored,
+                outcome: submission == .unavailable ? .failed : .inconclusive,
+                detail: "submission=\(submission) restore="
+                    + (restoreSubmission.map(String.init(describing:)) ?? "not-attempted")
+                    + " pid=\(sample.pid) wid=\(sample.id) before=\(TraceFormat.point(before))"
+            )
+        }
+        let movedOrigin = await operations.waitForOrigin(
+            sample.id,
+            sample.pid,
+            target
+        )
+        let after = movedOrigin ?? operations.independentOrigin(sample.id, sample.pid)
         let delta: CGPoint? = {
-            guard let before, let after else { return nil }
+            guard let after else { return nil }
             return CGPoint(x: after.x - before.x, y: after.y - before.y)
         }()
         let moved = delta.map { abs($0.x - 6) < 2 && abs($0.y - 6) < 2 } ?? false
-        _ = sky.moveWindow(sample.id, to: originSLS)
-        let restoredOrigin = independentOrigin(sample.id)
-        let restored: Bool = {
-            guard let before, let restoredOrigin else { return !moved }
-            return abs(restoredOrigin.x - before.x) < 2 && abs(restoredOrigin.y - before.y) < 2
-        }()
+        let restoration = await restoreForeignWindow(
+            sample: sample,
+            baseline: baseline,
+            target: target,
+            movedWasObserved: moved,
+            operations: operations
+        )
+        let restored = restoration.restoredOrigin.map { originsMatch($0, baseline) } ?? false
+        let outcome: PrivateAPISelfTestOutcome = if moved,
+                                                    restored,
+                                                    !restoration.interfered
+        {
+            .works
+        } else if restoration.interfered || after == nil {
+            .inconclusive
+        } else {
+            .failed
+        }
+        let restoreDetail = restoration.transactionSubmission.map(String.init(describing:))
+            ?? "not-attempted"
+        let directRestoreDetail = restoration.directMoveResult.map(String.init(describing:))
+            ?? "not-attempted"
         return ForeignWindowProbeResult(
             targetPid: sample.pid,
             targetWid: sample.id,
             movedDelta: delta,
             skylightMoved: moved,
             restored: restored,
-            detail: "pid=\(sample.pid) wid=\(sample.id) before=\(TraceFormat.point(before))"
+            outcome: outcome,
+            detail: "submission=\(submission) restore=\(restoreDetail) directRestore=\(directRestoreDetail)"
+                + " pid=\(sample.pid) wid=\(sample.id) before=\(TraceFormat.point(before))"
         )
+    }
+
+    static func restoreForeignWindow(
+        sample: WindowServerInfo,
+        baseline: CGPoint,
+        target: CGPoint,
+        movedWasObserved: Bool,
+        operations: ForeignWindowProbeOperations
+    ) async -> ForeignWindowRestoreResult {
+        guard let currentInfo = operations.queryWindowInfo(sample.id),
+              currentInfo.id == sample.id,
+              currentInfo.pid == sample.pid,
+              let currentOrigin = operations.independentOrigin(sample.id, sample.pid)
+        else {
+            return ForeignWindowRestoreResult(
+                transactionSubmission: nil,
+                directMoveResult: nil,
+                restoredOrigin: nil,
+                interfered: true
+            )
+        }
+        let currentlyAtTarget = originsMatch(currentOrigin, target)
+        let currentlyAtBaseline = originsMatch(currentOrigin, baseline)
+        guard currentlyAtTarget || currentlyAtBaseline else {
+            return ForeignWindowRestoreResult(
+                transactionSubmission: nil,
+                directMoveResult: nil,
+                restoredOrigin: nil,
+                interfered: true
+            )
+        }
+
+        var transactionSubmission: SkyLight.TransactionSubmissionResult?
+        if currentlyAtTarget {
+            let submission = operations.batchMove(sample.id, baseline)
+            transactionSubmission = submission
+            if submission == .submitted,
+               let restoredOrigin = await operations.waitForOrigin(sample.id, sample.pid, baseline)
+            {
+                return ForeignWindowRestoreResult(
+                    transactionSubmission: submission,
+                    directMoveResult: nil,
+                    restoredOrigin: restoredOrigin,
+                    interfered: false
+                )
+            }
+        }
+
+        guard let latestInfo = operations.queryWindowInfo(sample.id),
+              latestInfo.id == sample.id,
+              latestInfo.pid == sample.pid,
+              let latestOrigin = operations.independentOrigin(sample.id, sample.pid),
+              originsMatch(latestOrigin, target) || originsMatch(latestOrigin, baseline)
+        else {
+            return ForeignWindowRestoreResult(
+                transactionSubmission: transactionSubmission,
+                directMoveResult: nil,
+                restoredOrigin: nil,
+                interfered: true
+            )
+        }
+        let directMoveResult = operations.directMove(sample.id, baseline)
+        let restoredOrigin = directMoveResult
+            ? await operations.waitForOrigin(sample.id, sample.pid, baseline)
+            : nil
+        return ForeignWindowRestoreResult(
+            transactionSubmission: transactionSubmission,
+            directMoveResult: directMoveResult,
+            restoredOrigin: restoredOrigin,
+            interfered: movedWasObserved && currentlyAtBaseline
+        )
+    }
+
+    private static func waitForIndependentOrigin(
+        _ wid: UInt32,
+        expectedPID: pid_t,
+        matching target: CGPoint
+    ) async -> CGPoint? {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .milliseconds(250))
+        repeat {
+            if let origin = independentOrigin(wid, expectedPID: expectedPID),
+               originsMatch(origin, target)
+            {
+                return origin
+            }
+            do {
+                try await Task.sleep(for: .milliseconds(5))
+            } catch {
+                return nil
+            }
+        } while clock.now < deadline
+        return nil
+    }
+
+    static func originsMatch(_ lhs: CGPoint, _ rhs: CGPoint) -> Bool {
+        abs(lhs.x - rhs.x) < 2 && abs(lhs.y - rhs.y) < 2
     }
 
     private static func screencaptureSelectionExclusionTest(_ wid: UInt32) -> PrivateAPISelfTest {
@@ -453,9 +729,11 @@ extension PrivateAPIHealthDiagnostics {
         info.pid != getpid() && info.frame.width > 1 && info.frame.height > 1
     }
 
-    private static func independentOrigin(_ wid: UInt32) -> CGPoint? {
+    private static func independentOrigin(_ wid: UInt32, expectedPID: pid_t) -> CGPoint? {
         guard let list = CGWindowListCopyWindowInfo([.optionIncludingWindow], CGWindowID(wid)) as? [[String: Any]],
               let info = list.first,
+              let ownerPID = info[kCGWindowOwnerPID as String] as? NSNumber,
+              ownerPID.int32Value == expectedPID,
               let boundsDict = info[kCGWindowBounds as String] as? NSDictionary,
               let rect = CGRect(dictionaryRepresentation: boundsDict as CFDictionary)
         else { return nil }
@@ -482,7 +760,9 @@ private func privateAPIProbeAXObserverCallback(
 extension WMController {
     @discardableResult
     func runPrivateAPIProbe() async -> PrivateAPIProbeReport {
-        let report = await PrivateAPIHealthDiagnostics.runProbe()
+        let report = await PrivateAPIHealthDiagnostics.runProbe {
+            workspaceManager.entry(forWindowId: Int($0.id)) == nil
+        }
         if let wid = report.foreign?.targetWid,
            let entry = workspaceManager.entry(forWindowId: Int(wid))
         {

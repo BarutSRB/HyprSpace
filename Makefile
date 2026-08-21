@@ -1,4 +1,4 @@
-.PHONY: format format-check lint lint-fix build run energy-profile release-check verify check check-tool-versions check-swiftformat-version check-swiftlint-version
+.PHONY: format format-check lint lint-fix build run energy-profile test-skylight-live release-check verify check check-tool-versions check-swiftformat-version check-swiftlint-version
 
 SWIFTFORMAT_VERSION = 0.62.1
 SWIFTLINT_VERSION = 0.65.0
@@ -38,6 +38,9 @@ run:
 
 energy-profile:
 	./Scripts/energy-profile.sh
+
+test-skylight-live:
+	OMNIWM_RUN_SKYLIGHT_LIVE_TESTS=1 swift test --filter SkyLightNativeSpaceInventoryLiveTests/testLiveTransactionMoveIsObservedThroughWindowServerBounds
 
 release-check: build
 
