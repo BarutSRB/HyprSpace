@@ -9,7 +9,6 @@ struct ReconcileTraceRecord: Equatable {
     let event: WMEvent
     let normalizedEvent: WMEvent
     let plan: ActionPlan
-    let snapshot: ReconcileSnapshot
     let invariantViolations: [ReconcileInvariantViolation]
 }
 
@@ -28,7 +27,6 @@ final class ReconcileTraceRecorder {
         event: WMEvent,
         normalizedEvent: WMEvent? = nil,
         plan: ActionPlan,
-        snapshot: ReconcileSnapshot,
         invariantViolations: [ReconcileInvariantViolation] = [],
         timestamp: Date = Date()
     ) {
@@ -39,7 +37,6 @@ final class ReconcileTraceRecorder {
             event: strippedEvent,
             normalizedEvent: normalizedEvent.map { $0.strippingAXReferences() } ?? strippedEvent,
             plan: plan,
-            snapshot: snapshot,
             invariantViolations: invariantViolations
         )
         nextSequence += 1
@@ -51,7 +48,6 @@ final class ReconcileTraceRecorder {
             event: transaction.event,
             normalizedEvent: transaction.normalizedEvent,
             plan: transaction.plan,
-            snapshot: transaction.snapshot,
             invariantViolations: transaction.invariantViolations,
             timestamp: transaction.timestamp
         )

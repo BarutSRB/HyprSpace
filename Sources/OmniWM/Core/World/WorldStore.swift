@@ -121,7 +121,9 @@ final class WorldStore {
         let resolvedPlan = resolvePlan(plan, normalizedEvent.token, reducerSnapshot)
         applyWindowMutation(event, phase: .afterPlan, monitors: monitors)
 
-        let committedSnapshot = snapshot()
+        let committedSnapshot = resolvedPlan.mutatesRuntimeState || event.mutatesSnapshotAfterPlan
+            ? snapshot()
+            : reducerSnapshot
         let invariantViolations = commitDepth == 1
             ? InvariantChecks.validate(snapshot: committedSnapshot)
             : []
@@ -417,6 +419,57 @@ final class WorldStore {
             return false
         }
         return niriEngine?.workspaceIds(containing: token).isEmpty ?? true
+    }
+}
+
+private extension WMEvent {
+    var mutatesSnapshotAfterPlan: Bool {
+        switch self {
+        case .windowRemoved:
+            true
+        case .activeSpaceChanged,
+             .appVisibilityInvalidated,
+             .floatingGeometryUpdated,
+             .floatingStateChanged,
+             .focusFallbackRemembered,
+             .focusForgotten,
+             .focusLeaseChanged,
+             .focusRemembered,
+             .hiddenApplicationsChanged,
+             .hiddenStateChanged,
+             .interactionMonitorChanged,
+             .layoutOperationPerformed,
+             .managedFocusCancelled,
+             .managedFocusConfirmed,
+             .managedFocusRequested,
+             .managedReplacementMetadataChanged,
+             .manualLayoutOverrideChanged,
+             .nativeFullscreenPlaceholderSelected,
+             .nativeFullscreenTransition,
+             .niriPlacementsResolved,
+             .nonManagedFocusChanged,
+             .nonManagedFocusTargetChanged,
+             .scratchpadChanged,
+             .selectionChanged,
+             .spaceTopologyChanged,
+             .suppressedFocusChanged,
+             .systemModalFocusChanged,
+             .systemSleep,
+             .systemWake,
+             .topologyChanged,
+             .userCommand,
+             .viewportChanged,
+             .viewportCommitted,
+             .viewportForgotten,
+             .visibleWorkspacesChanged,
+             .windowAdmissionHintsChanged,
+             .windowAdmitted,
+             .windowModeChanged,
+             .windowRekeyed,
+             .workspaceAssigned,
+             .workspaceFocusCleared:
+            false
+        }
     }
 }
 

@@ -13,8 +13,6 @@ enum InvariantChecks {
                 duplicateTokens.insert(window.token)
             }
         }
-        let liveTokens = Set(windowByToken.keys)
-        let liveMonitorIds = Set(snapshot.topologyProfile.displays.map { Monitor.ID(displayId: $0.displayId) })
 
         for token in duplicateTokens {
             violations.append(
@@ -26,7 +24,7 @@ enum InvariantChecks {
         }
 
         if let focusedToken = snapshot.focusedToken,
-           !liveTokens.contains(focusedToken)
+           windowByToken[focusedToken] == nil
         {
             violations.append(
                 .init(
@@ -49,7 +47,7 @@ enum InvariantChecks {
         }
 
         if let pendingToken = snapshot.focusSession.pendingManagedFocus.token,
-           !liveTokens.contains(pendingToken)
+           windowByToken[pendingToken] == nil
         {
             violations.append(
                 .init(
@@ -140,7 +138,7 @@ enum InvariantChecks {
             }
 
             if let observedMonitorId = window.observedState.monitorId,
-               !liveMonitorIds.contains(observedMonitorId)
+               !snapshot.topologyProfile.displays.contains(where: { $0.displayId == observedMonitorId.displayId })
             {
                 violations.append(
                     .init(
@@ -151,7 +149,7 @@ enum InvariantChecks {
             }
 
             if let desiredMonitorId = window.desiredState.monitorId,
-               !liveMonitorIds.contains(desiredMonitorId)
+               !snapshot.topologyProfile.displays.contains(where: { $0.displayId == desiredMonitorId.displayId })
             {
                 violations.append(
                     .init(
