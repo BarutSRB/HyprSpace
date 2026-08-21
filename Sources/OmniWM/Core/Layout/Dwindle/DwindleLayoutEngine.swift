@@ -977,6 +977,14 @@ final class DwindleLayoutEngine {
         return frames
     }
 
+    func presentedFrame(
+        for token: WindowToken,
+        in workspaceId: WorkspaceDescriptor.ID,
+        at time: TimeInterval
+    ) -> CGRect? {
+        states[workspaceId]?.leafByToken[token]?.presentedFrame(at: time)
+    }
+
     private func collectPresentedFrames(
         node: DwindleNode,
         at time: TimeInterval,

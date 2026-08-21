@@ -195,6 +195,435 @@ final class AnimationRegistrationLivenessTests: XCTestCase {
         XCTAssertFalse(dwindleEngine.hasActiveAnimations(in: dwindleWorkspaceId, at: CACurrentMediaTime()))
     }
 
+    func testRejectedPlanDoesNotPublishDwindleAnimationTarget() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let engine = DwindleLayoutEngine()
+        controller.dwindleEngine = engine
+        let candidate = try makeCandidate(
+            controller: controller,
+            workspaceId: workspaceId,
+            engine: engine,
+            targetFrames: [:]
+        )
+        controller.workspaceManager.invalidateLayout(for: [workspaceId])
+        let plannedSeq = controller.workspaceManager.worldSeq
+        controller.workspaceManager.invalidateLayout(for: [workspaceId])
+
+        let accepted = controller.layoutRefreshController.executeLayoutPlanReturningAcceptedSeq(
+            makePlan(
+                controller: controller,
+                workspaceId: workspaceId,
+                plannedSeq: plannedSeq,
+                disposition: .replace(candidate)
+            )
+        )
+
+        XCTAssertNil(accepted)
+        XCTAssertTrue(controller.dwindleLayoutHandler.animationSessionByDisplay.isEmpty)
+    }
+
+    func testLayoutOperationInvalidatesDwindleAnimationGeneration() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let plannedSeq = controller.workspaceManager.worldSeq
+
+        controller.workspaceManager.recordLayoutOperation(.sizesBalanced, in: workspaceId)
+
+        XCTAssertFalse(
+            controller.workspaceManager.isSeqCurrent(
+                plannedSeq,
+                for: workspaceId,
+                domains: .layoutCommit
+            )
+        )
+    }
+
+    func testAcceptedPlanPublishesAndRetargetsSameWorkspaceSession() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let monitor = try XCTUnwrap(controller.workspaceManager.monitor(for: workspaceId))
+        let engine = DwindleLayoutEngine()
+        controller.dwindleEngine = engine
+        controller.layoutRefreshController.displayLinkActivationForTests = { _ in true }
+        let token = WindowToken(pid: 981_109, windowId: 981_209)
+        let firstTarget = CGRect(x: 10, y: 20, width: 300, height: 200)
+        let firstCandidate = try makeCandidate(
+            controller: controller,
+            workspaceId: workspaceId,
+            engine: engine,
+            targetFrames: [token: firstTarget]
+        )
+
+        XCTAssertNotNil(
+            controller.layoutRefreshController.executeLayoutPlanReturningAcceptedSeq(
+                makePlan(
+                    controller: controller,
+                    workspaceId: workspaceId,
+                    disposition: .replace(firstCandidate),
+                    startAnimation: true
+                )
+            )
+        )
+        XCTAssertEqual(
+            controller.dwindleLayoutHandler.dwindleAnimationByDisplay[monitor.displayId]?.0,
+            workspaceId
+        )
+
+        let secondTarget = CGRect(x: 40, y: 50, width: 500, height: 350)
+        let secondCandidate = try makeCandidate(
+            controller: controller,
+            workspaceId: workspaceId,
+            engine: engine,
+            targetFrames: [token: secondTarget]
+        )
+        XCTAssertNotNil(
+            controller.layoutRefreshController.executeLayoutPlanReturningAcceptedSeq(
+                makePlan(
+                    controller: controller,
+                    workspaceId: workspaceId,
+                    disposition: .replace(secondCandidate),
+                    startAnimation: true
+                )
+            )
+        )
+
+        XCTAssertEqual(
+            controller.dwindleLayoutHandler.animationSessionByDisplay[monitor.displayId]?
+                .targetFrames[token],
+            secondTarget
+        )
+        XCTAssertEqual(
+            controller.dwindleLayoutHandler.dwindleAnimationByDisplay[monitor.displayId]?.0,
+            workspaceId
+        )
+    }
+
+    func testAcceptedDwindleSessionUsesPostEffectLayoutSequence() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let engine = DwindleLayoutEngine()
+        controller.dwindleEngine = engine
+        let token = WindowToken(pid: 981_112, windowId: 981_212)
+        _ = WindowAdmissionTestSupport.track(token, in: workspaceId, controller: controller)
+        controller.workspaceManager.setHiddenState(
+            HiddenState(
+                proportionalPosition: .zero,
+                referenceMonitorId: nil,
+                reason: .layoutTransient(.left)
+            ),
+            for: token
+        )
+        let candidate = try makeCandidate(
+            controller: controller,
+            workspaceId: workspaceId,
+            engine: engine,
+            targetFrames: [:]
+        )
+        let plannedSeq = controller.workspaceManager.worldSeq
+        var diff = WorkspaceLayoutDiff()
+        diff.visibilityChanges.append(.show(token))
+
+        XCTAssertNotNil(
+            controller.layoutRefreshController.executeLayoutPlanReturningAcceptedSeq(
+                makePlan(
+                    controller: controller,
+                    workspaceId: workspaceId,
+                    plannedSeq: plannedSeq,
+                    disposition: .replace(candidate),
+                    diff: diff
+                )
+            )
+        )
+
+        let session = try XCTUnwrap(
+            controller.dwindleLayoutHandler.animationSessionByDisplay[candidate.geometry.displayId]
+        )
+        XCTAssertGreaterThan(session.plannedSeq, plannedSeq)
+        XCTAssertEqual(session.plannedSeq, controller.workspaceManager.worldSeq)
+        XCTAssertTrue(
+            controller.workspaceManager.isSeqCurrent(
+                session.plannedSeq,
+                for: workspaceId,
+                domains: .layoutCommit
+            )
+        )
+    }
+
+    func testInactiveDwindleRelayoutDoesNotDisplaceActiveDisplaySession() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        controller.settings.workspaceConfigurations = controller.settings.workspaceConfigurations.map {
+            $0.name == "1" || $0.name == "2" ? $0.with(layoutType: .dwindle) : $0
+        }
+        controller.workspaceManager.applySettings()
+        let activeWorkspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let inactiveWorkspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "2", createIfMissing: true)
+        )
+        let monitor = try XCTUnwrap(controller.workspaceManager.monitor(for: activeWorkspaceId))
+        XCTAssertTrue(
+            controller.workspaceManager.setActiveWorkspace(
+                activeWorkspaceId,
+                on: monitor.id,
+                updateInteractionMonitor: false
+            )
+        )
+        let engine = DwindleLayoutEngine()
+        controller.dwindleEngine = engine
+        let activeToken = WindowToken(pid: 981_113, windowId: 981_213)
+        let inactiveToken = WindowToken(pid: 981_114, windowId: 981_214)
+        _ = WindowAdmissionTestSupport.track(activeToken, in: activeWorkspaceId, controller: controller)
+        _ = WindowAdmissionTestSupport.track(inactiveToken, in: inactiveWorkspaceId, controller: controller)
+        controller.workspaceManager.withEngineMutationScope {
+            _ = engine.addWindow(token: activeToken, to: activeWorkspaceId, activeWindowFrame: nil)
+            let inactiveNode = engine.addWindow(
+                token: inactiveToken,
+                to: inactiveWorkspaceId,
+                activeWindowFrame: nil
+            )
+            inactiveNode.animateFrom(
+                oldFrame: CGRect(x: 0, y: 0, width: 400, height: 300),
+                newFrame: CGRect(x: 100, y: 100, width: 500, height: 400),
+                startTime: CACurrentMediaTime(),
+                config: engine.windowMovementAnimationConfig,
+                animated: true
+            )
+        }
+        let activeCandidate = try makeCandidate(
+            controller: controller,
+            workspaceId: activeWorkspaceId,
+            engine: engine,
+            targetFrames: [activeToken: CGRect(x: 0, y: 0, width: 800, height: 600)]
+        )
+        _ = controller.dwindleLayoutHandler.acceptAnimationTarget(
+            .replace(activeCandidate),
+            workspaceId: activeWorkspaceId,
+            displayId: monitor.displayId,
+            plannedSeq: controller.workspaceManager.worldSeq
+        )
+        XCTAssertTrue(
+            controller.dwindleLayoutHandler.registerDwindleAnimation(
+                activeWorkspaceId,
+                monitor: monitor,
+                on: monitor.displayId
+            )
+        )
+
+        let plans = controller.workspaceManager.withBatchedLayoutBuild {
+            controller.dwindleLayoutHandler.layoutWithDwindleEngine(
+                activeWorkspaces: [inactiveWorkspaceId]
+            )
+        }
+        let plan = try XCTUnwrap(plans.first)
+        XCTAssertFalse(plan.isActiveWorkspace)
+        XCTAssertTrue(plan.animationDirectives.isEmpty)
+        let disposition = try XCTUnwrap(plan.dwindleAnimationTargetDisposition)
+        guard case .clear = disposition else {
+            return XCTFail("inactive relayout must clear rather than publish an animation target")
+        }
+        XCTAssertNotNil(controller.layoutRefreshController.executeLayoutPlanReturningAcceptedSeq(plan))
+
+        XCTAssertEqual(
+            controller.dwindleLayoutHandler.animationSessionByDisplay[monitor.displayId]?.workspaceId,
+            activeWorkspaceId
+        )
+        XCTAssertEqual(
+            controller.dwindleLayoutHandler.dwindleAnimationByDisplay[monitor.displayId]?.0,
+            activeWorkspaceId
+        )
+        XCTAssertFalse(engine.hasActiveAnimations(in: inactiveWorkspaceId, at: CACurrentMediaTime()))
+    }
+
+    func testAcceptedClearRemovesDwindleSessionAndRegistration() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let monitor = try XCTUnwrap(controller.workspaceManager.monitor(for: workspaceId))
+        let engine = DwindleLayoutEngine()
+        controller.dwindleEngine = engine
+        let candidate = try makeCandidate(
+            controller: controller,
+            workspaceId: workspaceId,
+            engine: engine,
+            targetFrames: [:]
+        )
+        XCTAssertNotNil(
+            controller.layoutRefreshController.executeLayoutPlanReturningAcceptedSeq(
+                makePlan(
+                    controller: controller,
+                    workspaceId: workspaceId,
+                    disposition: .replace(candidate)
+                )
+            )
+        )
+        XCTAssertTrue(
+            controller.dwindleLayoutHandler.registerDwindleAnimation(
+                workspaceId,
+                monitor: monitor,
+                on: monitor.displayId
+            )
+        )
+
+        XCTAssertNotNil(
+            controller.layoutRefreshController.executeLayoutPlanReturningAcceptedSeq(
+                makePlan(
+                    controller: controller,
+                    workspaceId: workspaceId,
+                    disposition: .clear(
+                        engineIdentifier: ObjectIdentifier(engine),
+                        geometry: candidate.geometry
+                    )
+                )
+            )
+        )
+
+        XCTAssertTrue(controller.dwindleLayoutHandler.animationSessionByDisplay.isEmpty)
+        XCTAssertTrue(controller.dwindleLayoutHandler.dwindleAnimationByDisplay.isEmpty)
+    }
+
+    func testReplacingDwindleEngineClearsAcceptedAnimationState() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let engine = DwindleLayoutEngine()
+        controller.dwindleEngine = engine
+        let candidate = try makeCandidate(
+            controller: controller,
+            workspaceId: workspaceId,
+            engine: engine,
+            targetFrames: [:]
+        )
+        XCTAssertNotNil(
+            controller.layoutRefreshController.executeLayoutPlanReturningAcceptedSeq(
+                makePlan(
+                    controller: controller,
+                    workspaceId: workspaceId,
+                    disposition: .replace(candidate)
+                )
+            )
+        )
+
+        controller.dwindleEngine = DwindleLayoutEngine()
+
+        XCTAssertTrue(controller.dwindleLayoutHandler.animationSessionByDisplay.isEmpty)
+        XCTAssertTrue(controller.dwindleLayoutHandler.dwindleAnimationByDisplay.isEmpty)
+    }
+
+    func testStaleDwindleTickSuspendsOnceAndPreservesCurve() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let monitor = try XCTUnwrap(controller.workspaceManager.monitor(for: workspaceId))
+        _ = controller.workspaceManager.setActiveWorkspace(
+            workspaceId,
+            on: monitor.id,
+            updateInteractionMonitor: false
+        )
+        XCTAssertEqual(controller.workspaceManager.activeWorkspaceOrFirst(on: monitor.id)?.id, workspaceId)
+        let token = WindowToken(pid: 981_110, windowId: 981_210)
+        let engine = seedDwindleMotion(
+            controller: controller,
+            workspaceId: workspaceId,
+            token: token
+        )
+        let candidate = try makeCandidate(
+            controller: controller,
+            workspaceId: workspaceId,
+            engine: engine,
+            targetFrames: [token: CGRect(x: 100, y: 100, width: 500, height: 400)]
+        )
+        _ = controller.dwindleLayoutHandler.acceptAnimationTarget(
+            .replace(candidate),
+            workspaceId: workspaceId,
+            displayId: monitor.displayId,
+            plannedSeq: controller.workspaceManager.worldSeq
+        )
+        XCTAssertTrue(
+            controller.dwindleLayoutHandler.registerDwindleAnimation(
+                workspaceId,
+                monitor: monitor,
+                on: monitor.displayId
+            )
+        )
+        controller.workspaceManager.invalidateLayout(for: [workspaceId])
+
+        controller.dwindleLayoutHandler.tickDwindleAnimation(
+            targetTime: CACurrentMediaTime(),
+            displayId: monitor.displayId
+        )
+
+        XCTAssertNil(controller.dwindleLayoutHandler.animationSessionByDisplay[monitor.displayId])
+        XCTAssertNil(controller.dwindleLayoutHandler.dwindleAnimationByDisplay[monitor.displayId])
+        XCTAssertTrue(engine.hasActiveAnimations(in: workspaceId, at: CACurrentMediaTime()))
+        XCTAssertFalse(
+            controller.dwindleLayoutHandler.suspendStaleAnimation(
+                workspaceId: workspaceId,
+                displayId: monitor.displayId
+            )
+        )
+        _ = controller.dwindleLayoutHandler.removeAllAnimationState()
+        XCTAssertTrue(
+            controller.dwindleLayoutHandler.suspendStaleAnimation(
+                workspaceId: workspaceId,
+                displayId: monitor.displayId
+            )
+        )
+    }
+
+    func testDwindleLayoutDiffProjectsCurveWithoutMutatingTargetBuffer() throws {
+        let workspaceId = WorkspaceDescriptor.ID()
+        let token = WindowToken(pid: 981_111, windowId: 981_211)
+        let engine = DwindleLayoutEngine()
+        let node = engine.addWindow(token: token, to: workspaceId, activeWindowFrame: nil)
+        let oldFrame = CGRect(x: 10, y: 20, width: 300, height: 200)
+        let targetFrame = CGRect(x: 100, y: 120, width: 500, height: 400)
+        node.animateFrom(
+            oldFrame: oldFrame,
+            newFrame: targetFrame,
+            startTime: 10,
+            config: engine.windowMovementAnimationConfig,
+            animated: true
+        )
+        let targetFrames = [token: targetFrame]
+        let handler = DwindleLayoutHandler(controller: nil)
+
+        let diff = handler.layoutDiff(
+            windows: [
+                LayoutWindowSnapshot(
+                    token: token,
+                    constraints: .unconstrained,
+                    hiddenState: nil,
+                    layoutReason: .standard
+                )
+            ],
+            frames: targetFrames,
+            engine: engine,
+            workspaceId: workspaceId,
+            preferredHideSide: .right,
+            canRestoreHiddenWorkspaceWindows: true,
+            scale: 1,
+            reassertHidden: false,
+            pendingParkWindowIds: [],
+            animationTime: 10
+        )
+
+        XCTAssertEqual(try XCTUnwrap(diff.frameChanges.first).frame, oldFrame)
+        XCTAssertEqual(targetFrames[token], targetFrame)
+    }
+
     private func makeMonitor(displayId: CGDirectDisplayID) -> Monitor {
         Monitor(
             id: .init(displayId: displayId),
@@ -203,6 +632,54 @@ final class AnimationRegistrationLivenessTests: XCTestCase {
             visibleFrame: CGRect(x: 0, y: 0, width: 800, height: 600),
             hasNotch: false,
             name: "Display"
+        )
+    }
+
+    private func makeCandidate(
+        controller: WMController,
+        workspaceId: WorkspaceDescriptor.ID,
+        engine: DwindleLayoutEngine,
+        targetFrames: [WindowToken: CGRect]
+    ) throws -> DwindleAnimationTargetCandidate {
+        let monitor = try XCTUnwrap(controller.workspaceManager.monitor(for: workspaceId))
+        let monitorSnapshot = controller.layoutRefreshController.buildMonitorSnapshot(for: monitor)
+        return DwindleAnimationTargetCandidate(
+            workspaceId: workspaceId,
+            engineIdentifier: ObjectIdentifier(engine),
+            geometry: DwindleAnimationGeometryContext(
+                monitorId: monitorSnapshot.monitorId,
+                displayId: monitorSnapshot.displayId,
+                workingFrame: monitorSnapshot.workingFrame,
+                fullscreenLayoutFrame: monitorSnapshot.fullscreenLayoutFrame,
+                scale: monitorSnapshot.scale,
+                settings: controller.settings.resolvedDwindleSettings(for: monitor),
+                tabRailWidth: TabRailManager.tabIndicatorWidth
+            ),
+            targetFrames: targetFrames
+        )
+    }
+
+    private func makePlan(
+        controller: WMController,
+        workspaceId: WorkspaceDescriptor.ID,
+        plannedSeq: UInt64? = nil,
+        disposition: DwindleAnimationTargetDisposition,
+        startAnimation: Bool = false,
+        diff: WorkspaceLayoutDiff = WorkspaceLayoutDiff()
+    ) -> WorkspaceLayoutPlan {
+        let monitor = controller.workspaceManager.monitor(for: workspaceId)!
+        return WorkspaceLayoutPlan(
+            workspaceId: workspaceId,
+            monitor: controller.layoutRefreshController.buildMonitorSnapshot(for: monitor),
+            sessionPatch: WorkspaceSessionPatch(
+                workspaceId: workspaceId,
+                plannedSeq: plannedSeq ?? controller.workspaceManager.worldSeq
+            ),
+            diff: diff,
+            animationDirectives: startAnimation
+                ? [.startDwindleAnimation(workspaceId: workspaceId, monitorId: monitor.id)]
+                : [],
+            dwindleAnimationTargetDisposition: disposition
         )
     }
 

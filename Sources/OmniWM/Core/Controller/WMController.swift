@@ -119,7 +119,12 @@ final class WMController {
 
     var dwindleEngine: DwindleLayoutEngine? {
         get { workspaceManager.dwindleEngine }
-        set { workspaceManager.dwindleEngine = newValue }
+        set {
+            if let current = workspaceManager.dwindleEngine, current !== newValue {
+                layoutRefreshController.stopAllDwindleAnimations()
+            }
+            workspaceManager.dwindleEngine = newValue
+        }
     }
 
     let tabRailManager = TabRailManager()
@@ -345,6 +350,9 @@ final class WMController {
                 for displayId in displayIds {
                     self.layoutRefreshController.stopScrollAnimation(for: displayId)
                 }
+                for displayId in self.dwindleLayoutHandler.animationDisplayIds(for: workspaceId) {
+                    self.layoutRefreshController.stopDwindleAnimation(for: displayId)
+                }
             }
         }
         focusPolicyEngine.onLeaseChanged = { [weak self] lease in
@@ -558,6 +566,7 @@ final class WMController {
         }
         pruneHiddenWorkspaceBarMonitorIds()
         workspaceBarManager.setup(controller: self, settings: settings)
+        workspaceManager.invalidateAllLayouts()
         layoutRefreshController.requestRelayout(reason: .monitorSettingsChanged)
         surfaceReconciler.noteWorldChanged()
         syncWorkspaceBarRevealMonitor()
@@ -649,6 +658,7 @@ final class WMController {
             hiddenWorkspaceBarMonitorIds.insert(monitor.id)
         }
 
+        workspaceManager.invalidateAllLayouts()
         layoutRefreshController.requestRelayout(reason: .monitorSettingsChanged)
         surfaceReconciler.noteWorldChanged()
         hiddenBarController.dismissPanel()
@@ -741,6 +751,7 @@ final class WMController {
             forceReload: forceIconReload
         )
         pruneHiddenWorkspaceBarMonitorIds()
+        workspaceManager.invalidateAllLayouts()
         layoutRefreshController.requestRelayout(reason: .monitorSettingsChanged)
         surfaceReconciler.noteWorldChanged()
         syncWorkspaceBarRevealMonitor()
@@ -818,10 +829,12 @@ final class WMController {
                 engine.updateMonitorSettings(resolved, for: monitor.id)
             }
         }
+        workspaceManager.invalidateAllLayouts()
         layoutRefreshController.requestRelayout(reason: .monitorSettingsChanged)
     }
 
     func updateMonitorGapSettings() {
+        workspaceManager.invalidateAllLayouts()
         layoutRefreshController.requestRelayout(reason: .monitorSettingsChanged)
         publishDisplayChanged()
     }
@@ -1354,6 +1367,7 @@ final class WMController {
         guard observedMin.width > 1 || observedMin.height > 1 else { return }
 
         guard workspaceManager.setObservedMinSize(observedMin, for: token) else { return }
+        workspaceManager.invalidateLayout(for: [entry.workspaceId])
         layoutRefreshController.requestRelayout(
             reason: .observedConstraintsChanged,
             affectedWorkspaceIds: [entry.workspaceId]

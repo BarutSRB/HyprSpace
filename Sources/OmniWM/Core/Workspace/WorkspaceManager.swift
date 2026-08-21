@@ -395,6 +395,7 @@ final class WorkspaceManager {
              .appVisibilityInvalidated,
              .floatingStateChanged,
              .hiddenApplicationsChanged,
+             .layoutOperationPerformed,
              .manualLayoutOverrideChanged,
              .systemSleep,
              .systemWake,
@@ -407,7 +408,6 @@ final class WorkspaceManager {
              .focusRemembered,
              .hiddenStateChanged,
              .interactionMonitorChanged,
-             .layoutOperationPerformed,
              .managedFocusCancelled,
              .managedFocusConfirmed,
              .managedFocusRequested,
@@ -1959,10 +1959,12 @@ final class WorkspaceManager {
         onGapsChanged?()
     }
 
-    func invalidateLayout(for workspaceIds: Set<WorkspaceDescriptor.ID>) {
-        for workspaceId in workspaceIds {
-            noteInvalidation(workspaceId: workspaceId, domains: .layout)
-        }
+    func invalidateLayout(for ids: Set<WorkspaceDescriptor.ID>) {
+        noteInvalidation(workspaceIds: ids, domains: .layout)
+    }
+
+    func invalidateAllLayouts() {
+        noteInvalidation(workspaceId: nil, domains: .layout)
     }
 
     private func monitor(
@@ -3898,7 +3900,8 @@ extension WorkspaceManager {
             noteInvalidation(workspaceId: workspaceId, domains: [.workspace, .layout])
 
         case let .floatingStateChanged(_, workspaceId, _, _),
-             let .manualLayoutOverrideChanged(_, workspaceId, _, _):
+             let .manualLayoutOverrideChanged(_, workspaceId, _, _),
+             let .layoutOperationPerformed(workspaceId, _, _):
             noteInvalidation(workspaceId: workspaceId, domains: .layout)
 
         case .niriPlacementsResolved:
@@ -3950,7 +3953,6 @@ extension WorkspaceManager {
 
         case .focusForgotten,
              .interactionMonitorChanged,
-             .layoutOperationPerformed,
              .nativeFullscreenPlaceholderSelected,
              .nonManagedFocusTargetChanged,
              .scratchpadChanged,

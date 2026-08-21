@@ -85,6 +85,28 @@ struct DwindleWorkspaceSnapshot {
     let isActiveWorkspace: Bool
 }
 
+struct DwindleAnimationGeometryContext: Equatable {
+    let monitorId: Monitor.ID
+    let displayId: CGDirectDisplayID
+    let workingFrame: CGRect
+    let fullscreenLayoutFrame: CGRect
+    let scale: CGFloat
+    let settings: ResolvedDwindleSettings
+    let tabRailWidth: CGFloat
+}
+
+struct DwindleAnimationTargetCandidate {
+    let workspaceId: WorkspaceDescriptor.ID
+    let engineIdentifier: ObjectIdentifier
+    let geometry: DwindleAnimationGeometryContext
+    let targetFrames: [WindowToken: CGRect]
+}
+
+enum DwindleAnimationTargetDisposition {
+    case replace(DwindleAnimationTargetCandidate)
+    case clear(engineIdentifier: ObjectIdentifier, geometry: DwindleAnimationGeometryContext)
+}
+
 struct LayoutFrameChange {
     let token: WindowToken
     let frame: CGRect
@@ -169,6 +191,7 @@ struct WorkspaceLayoutPlan {
     var diff: WorkspaceLayoutDiff
     var niriRestorePlacements: [WindowToken: PersistedNiriPlacement] = [:]
     var animationDirectives: [AnimationDirective] = []
+    var dwindleAnimationTargetDisposition: DwindleAnimationTargetDisposition?
     var isAnimationTick = false
     var isActiveWorkspace = true
 }

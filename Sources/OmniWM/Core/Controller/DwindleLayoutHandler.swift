@@ -6,6 +6,14 @@ import Foundation
 import QuartzCore
 
 @MainActor final class DwindleLayoutHandler {
+    struct AnimationSession {
+        let workspaceId: WorkspaceDescriptor.ID
+        let engineIdentifier: ObjectIdentifier
+        let geometry: DwindleAnimationGeometryContext
+        let targetFrames: [WindowToken: CGRect]
+        let plannedSeq: UInt64
+    }
+
     private struct PendingGroupRevealTransaction {
         let id: UInt64
         var token: WindowToken
@@ -25,6 +33,8 @@ import QuartzCore
     weak var controller: WMController?
 
     var dwindleAnimationByDisplay: [CGDirectDisplayID: (WorkspaceDescriptor.ID, Monitor)] = [:]
+    private(set) var animationSessionByDisplay: [CGDirectDisplayID: AnimationSession] = [:]
+    private var staleRelayoutWorkspaceByDisplay: [CGDirectDisplayID: WorkspaceDescriptor.ID] = [:]
     private var nextPendingGroupRevealTransactionId: UInt64 = 1
     private var pendingGroupRevealTransactionsByWindowId: [Int: PendingGroupRevealTransaction] = [:]
 
@@ -32,11 +42,165 @@ import QuartzCore
         self.controller = controller
     }
 
+    func canAcceptAnimationTarget(
+        _ disposition: DwindleAnimationTargetDisposition,
+        workspaceId: WorkspaceDescriptor.ID,
+        monitor: LayoutMonitorSnapshot
+    ) -> Bool {
+        switch disposition {
+        case let .clear(engineIdentifier, geometry):
+            guard let controller,
+                  let engine = controller.dwindleEngine,
+                  let currentMonitor = controller.workspaceManager.monitor(byId: monitor.monitorId),
+                  let currentGeometry = geometryContext(
+                      monitor: currentMonitor,
+                      settings: controller.settings.resolvedDwindleSettings(for: currentMonitor)
+                  )
+            else {
+                return false
+            }
+            return ObjectIdentifier(engine) == engineIdentifier
+                && geometry == currentGeometry
+                && geometry == geometryContext(monitor: monitor, settings: geometry.settings)
+        case let .replace(candidate):
+            guard let controller,
+                  let engine = controller.dwindleEngine,
+                  let currentMonitor = controller.workspaceManager.monitor(byId: monitor.monitorId),
+                  let currentGeometry = geometryContext(
+                      monitor: currentMonitor,
+                      settings: controller.settings.resolvedDwindleSettings(for: currentMonitor)
+                  ),
+                  candidate.workspaceId == workspaceId,
+                  candidate.engineIdentifier == ObjectIdentifier(engine),
+                  candidate.geometry == currentGeometry,
+                  candidate.geometry == geometryContext(monitor: monitor, settings: candidate.geometry.settings)
+            else {
+                return false
+            }
+            return true
+        }
+    }
+
+    func acceptAnimationTarget(
+        _ disposition: DwindleAnimationTargetDisposition,
+        workspaceId: WorkspaceDescriptor.ID,
+        displayId: CGDirectDisplayID,
+        plannedSeq: UInt64
+    ) -> Set<CGDirectDisplayID> {
+        clearStaleRelayoutState(for: workspaceId)
+        switch disposition {
+        case .clear:
+            return removeAnimationState(for: workspaceId)
+        case let .replace(candidate):
+            guard controller?.workspaceManager.activeWorkspaceOrFirst(
+                on: candidate.geometry.monitorId
+            )?.id == workspaceId else {
+                controller?.dwindleEngine?.cancelAnimations(in: workspaceId)
+                return removeAnimationState(for: workspaceId)
+            }
+            var detachedDisplayIds: Set<CGDirectDisplayID> = []
+            let previousDisplayIds = animationSessionByDisplay.compactMap { registeredDisplayId, session in
+                session.workspaceId == workspaceId && registeredDisplayId != displayId
+                    ? registeredDisplayId
+                    : nil
+            }
+            for registeredDisplayId in previousDisplayIds {
+                animationSessionByDisplay.removeValue(forKey: registeredDisplayId)
+                if dwindleAnimationByDisplay[registeredDisplayId]?.0 == workspaceId {
+                    dwindleAnimationByDisplay.removeValue(forKey: registeredDisplayId)
+                }
+                detachedDisplayIds.insert(registeredDisplayId)
+            }
+            animationSessionByDisplay[displayId] = AnimationSession(
+                workspaceId: workspaceId,
+                engineIdentifier: candidate.engineIdentifier,
+                geometry: candidate.geometry,
+                targetFrames: candidate.targetFrames,
+                plannedSeq: plannedSeq
+            )
+            return detachedDisplayIds
+        }
+    }
+
+    func suspendStaleAnimation(
+        workspaceId: WorkspaceDescriptor.ID,
+        displayId: CGDirectDisplayID
+    ) -> Bool {
+        animationSessionByDisplay.removeValue(forKey: displayId)
+        if dwindleAnimationByDisplay[displayId]?.0 == workspaceId {
+            dwindleAnimationByDisplay.removeValue(forKey: displayId)
+        }
+        let wasAlreadyStale = staleRelayoutWorkspaceByDisplay.values.contains(workspaceId)
+        staleRelayoutWorkspaceByDisplay[displayId] = workspaceId
+        return !wasAlreadyStale
+    }
+
+    func removeAnimationState(for displayId: CGDirectDisplayID) -> Set<WorkspaceDescriptor.ID> {
+        var workspaceIds: Set<WorkspaceDescriptor.ID> = []
+        if let workspaceId = animationSessionByDisplay.removeValue(forKey: displayId)?.workspaceId {
+            workspaceIds.insert(workspaceId)
+        }
+        if let workspaceId = dwindleAnimationByDisplay.removeValue(forKey: displayId)?.0 {
+            workspaceIds.insert(workspaceId)
+        }
+        if let workspaceId = staleRelayoutWorkspaceByDisplay.removeValue(forKey: displayId) {
+            workspaceIds.insert(workspaceId)
+        }
+        return workspaceIds
+    }
+
+    func removeAllAnimationState() -> (workspaceIds: Set<WorkspaceDescriptor.ID>, displayIds: Set<CGDirectDisplayID>) {
+        let workspaceIds = Set(animationSessionByDisplay.values.map(\.workspaceId))
+            .union(dwindleAnimationByDisplay.values.map(\.0))
+            .union(staleRelayoutWorkspaceByDisplay.values)
+        let displayIds = Set(animationSessionByDisplay.keys)
+            .union(dwindleAnimationByDisplay.keys)
+            .union(staleRelayoutWorkspaceByDisplay.keys)
+        animationSessionByDisplay.removeAll(keepingCapacity: true)
+        dwindleAnimationByDisplay.removeAll(keepingCapacity: true)
+        staleRelayoutWorkspaceByDisplay.removeAll(keepingCapacity: true)
+        return (workspaceIds, displayIds)
+    }
+
+    private func removeAnimationState(
+        for workspaceId: WorkspaceDescriptor.ID
+    ) -> Set<CGDirectDisplayID> {
+        var displayIds: Set<CGDirectDisplayID> = []
+        let sessionDisplayIds = animationSessionByDisplay.compactMap { displayId, session in
+            session.workspaceId == workspaceId ? displayId : nil
+        }
+        for displayId in sessionDisplayIds {
+            animationSessionByDisplay.removeValue(forKey: displayId)
+            displayIds.insert(displayId)
+        }
+        let registrationDisplayIds = dwindleAnimationByDisplay.compactMap { displayId, registration in
+            registration.0 == workspaceId ? displayId : nil
+        }
+        for displayId in registrationDisplayIds {
+            dwindleAnimationByDisplay.removeValue(forKey: displayId)
+            displayIds.insert(displayId)
+        }
+        clearStaleRelayoutState(for: workspaceId)
+        return displayIds
+    }
+
+    private func clearStaleRelayoutState(for workspaceId: WorkspaceDescriptor.ID) {
+        let displayIds = staleRelayoutWorkspaceByDisplay.compactMap { displayId, staleWorkspaceId in
+            staleWorkspaceId == workspaceId ? displayId : nil
+        }
+        for displayId in displayIds {
+            staleRelayoutWorkspaceByDisplay.removeValue(forKey: displayId)
+        }
+    }
+
     func registerDwindleAnimation(
         _ workspaceId: WorkspaceDescriptor.ID,
         monitor: Monitor,
         on displayId: CGDirectDisplayID
     ) -> Bool {
+        guard animationSessionByDisplay[displayId]?.workspaceId == workspaceId else {
+            return false
+        }
         if dwindleAnimationByDisplay[displayId]?.0 == workspaceId {
             return false
         }
@@ -49,6 +213,41 @@ import QuartzCore
 
     func hasDwindleAnimationRunning(in workspaceId: WorkspaceDescriptor.ID) -> Bool {
         dwindleAnimationByDisplay.values.contains { $0.0 == workspaceId }
+    }
+
+    func animationDisplayIds(for workspaceId: WorkspaceDescriptor.ID) -> Set<CGDirectDisplayID> {
+        let sessionDisplayIds = animationSessionByDisplay.compactMap { displayId, session in
+            session.workspaceId == workspaceId ? displayId : nil
+        }
+        let registrationDisplayIds = dwindleAnimationByDisplay.compactMap { displayId, registration in
+            registration.0 == workspaceId ? displayId : nil
+        }
+        return Set(sessionDisplayIds).union(registrationDisplayIds)
+    }
+
+    private func isAnimationSessionCurrent(
+        _ session: AnimationSession,
+        displayId: CGDirectDisplayID,
+        engine: DwindleLayoutEngine,
+        snapshot: DwindleWorkspaceSnapshot
+    ) -> Bool {
+        guard let controller,
+              session.workspaceId == snapshot.workspaceId,
+              session.geometry.displayId == displayId,
+              session.engineIdentifier == ObjectIdentifier(engine),
+              session.geometry == geometryContext(
+                  monitor: snapshot.monitor,
+                  settings: snapshot.settings
+              )
+        else {
+            return false
+        }
+        return session.plannedSeq == 0
+            || controller.workspaceManager.isSeqCurrent(
+                session.plannedSeq,
+                for: snapshot.workspaceId,
+                domains: .layoutCommit
+            )
     }
 
     @discardableResult
@@ -97,7 +296,7 @@ import QuartzCore
     func tickDwindleAnimation(targetTime: CFTimeInterval, displayId: CGDirectDisplayID) {
         guard let (wsId, animationMonitor) = dwindleAnimationByDisplay[displayId] else { return }
         guard let controller else {
-            dwindleAnimationByDisplay.removeValue(forKey: displayId)
+            _ = removeAnimationState(for: displayId)
             return
         }
         guard let engine = controller.dwindleEngine else {
@@ -115,26 +314,45 @@ import QuartzCore
             return
         }
 
-        engine.tickAnimations(at: targetTime, in: wsId)
         guard let snapshot = makeWorkspaceSnapshot(
             workspaceId: wsId,
             monitor: monitor,
             resolveConstraints: false,
             isActiveWorkspace: true
         ) else {
+            controller.layoutRefreshController.suspendStaleDwindleAnimation(
+                workspaceId: wsId,
+                displayId: displayId
+            )
+            return
+        }
+        guard let session = animationSessionByDisplay[displayId],
+              isAnimationSessionCurrent(
+                  session,
+                  displayId: displayId,
+                  engine: engine,
+                  snapshot: snapshot
+              )
+        else {
+            controller.layoutRefreshController.suspendStaleDwindleAnimation(
+                workspaceId: wsId,
+                displayId: displayId
+            )
             return
         }
 
+        engine.tickAnimations(at: targetTime, in: wsId)
         let plan = buildAnimationPlan(
             snapshot: snapshot,
             engine: engine,
+            session: session,
             targetTime: targetTime
         )
         let didExecute = controller.layoutRefreshController.executeLayoutPlan(plan)
         guard didExecute else {
-            controller.layoutRefreshController.requestRelayout(
-                reason: .staleLayoutPlan,
-                affectedWorkspaceIds: [wsId]
+            controller.layoutRefreshController.suspendStaleDwindleAnimation(
+                workspaceId: wsId,
+                displayId: displayId
             )
             return
         }
@@ -149,6 +367,7 @@ import QuartzCore
                 var settlePlan = buildAnimationPlan(
                     snapshot: settleSnapshot,
                     engine: engine,
+                    session: session,
                     targetTime: targetTime
                 )
                 settlePlan.isAnimationTick = false
@@ -1055,6 +1274,7 @@ import QuartzCore
             if let v = singleWindowFit { engine.settings.singleWindowFit = v }
             if let v = innerGap { engine.settings.innerGap = v }
         }
+        controller.workspaceManager.invalidateAllLayouts()
         controller.layoutRefreshController.requestRelayout(reason: .layoutConfigChanged)
     }
 
@@ -1156,31 +1376,41 @@ import QuartzCore
             motion: controller?.motionPolicy.snapshot() ?? .enabled
         )
 
-        let animationsActive = engine.hasActiveAnimations(in: snapshot.workspaceId, at: now)
-        let diffFrames: [WindowToken: CGRect]
-        if animationsActive {
-            diffFrames = engine.calculateAnimatedFrames(
-                baseFrames: consume newFrames,
-                in: snapshot.workspaceId,
-                at: now
-            )
-        } else {
-            diffFrames = consume newFrames
+        let animationsActive = snapshot.isActiveWorkspace
+            && engine.hasActiveAnimations(in: snapshot.workspaceId, at: now)
+        if !snapshot.isActiveWorkspace {
+            engine.cancelAnimations(in: snapshot.workspaceId)
         }
         let diff = layoutDiff(
             windows: snapshot.windows,
-            frames: diffFrames,
+            frames: newFrames,
             engine: engine,
             workspaceId: snapshot.workspaceId,
             preferredHideSide: snapshot.preferredHideSide,
             canRestoreHiddenWorkspaceWindows: snapshot.isActiveWorkspace,
             scale: snapshot.monitor.scale,
             reassertHidden: true,
-            pendingParkWindowIds: controller?.axManager.pendingParkWindowIds ?? []
+            pendingParkWindowIds: controller?.axManager.pendingParkWindowIds ?? [],
+            animationTime: animationsActive ? now : nil
         )
         let directives: [AnimationDirective] = animationsActive
             ? [.startDwindleAnimation(workspaceId: snapshot.workspaceId, monitorId: snapshot.monitor.monitorId)]
             : []
+        let targetDisposition: DwindleAnimationTargetDisposition = if animationsActive {
+            .replace(
+                DwindleAnimationTargetCandidate(
+                    workspaceId: snapshot.workspaceId,
+                    engineIdentifier: ObjectIdentifier(engine),
+                    geometry: geometryContext(monitor: snapshot.monitor, settings: snapshot.settings),
+                    targetFrames: newFrames
+                )
+            )
+        } else {
+            .clear(
+                engineIdentifier: ObjectIdentifier(engine),
+                geometry: geometryContext(monitor: snapshot.monitor, settings: snapshot.settings)
+            )
+        }
 
         return WorkspaceLayoutPlan(
             workspaceId: snapshot.workspaceId,
@@ -1192,6 +1422,7 @@ import QuartzCore
             ),
             diff: diff,
             animationDirectives: directives,
+            dwindleAnimationTargetDisposition: targetDisposition,
             isActiveWorkspace: snapshot.isActiveWorkspace
         )
     }
@@ -1233,29 +1464,20 @@ import QuartzCore
     private func buildAnimationPlan(
         snapshot: DwindleWorkspaceSnapshot,
         engine: DwindleLayoutEngine,
+        session: AnimationSession,
         targetTime: TimeInterval
     ) -> WorkspaceLayoutPlan {
-        let baseFrames = engine.calculateLayout(
-            for: snapshot.workspaceId,
-            screen: snapshot.monitor.workingFrame,
-            fullscreenScreen: snapshot.monitor.fullscreenLayoutFrame,
-            calculationSettings: calculationSettings(snapshot.settings, from: engine)
-        )
-        let animatedFrames = engine.calculateAnimatedFrames(
-            baseFrames: consume baseFrames,
-            in: snapshot.workspaceId,
-            at: targetTime
-        )
         let diff = layoutDiff(
             windows: snapshot.windows,
-            frames: animatedFrames,
+            frames: session.targetFrames,
             engine: engine,
             workspaceId: snapshot.workspaceId,
             preferredHideSide: snapshot.preferredHideSide,
             canRestoreHiddenWorkspaceWindows: snapshot.isActiveWorkspace,
             scale: snapshot.monitor.scale,
             reassertHidden: false,
-            pendingParkWindowIds: controller?.axManager.pendingParkWindowIds ?? []
+            pendingParkWindowIds: controller?.axManager.pendingParkWindowIds ?? [],
+            animationTime: targetTime
         )
 
         return WorkspaceLayoutPlan(
@@ -1280,16 +1502,23 @@ import QuartzCore
         canRestoreHiddenWorkspaceWindows: Bool,
         scale: CGFloat,
         reassertHidden: Bool,
-        pendingParkWindowIds: Set<Int>
+        pendingParkWindowIds: Set<Int>,
+        animationTime: TimeInterval? = nil
     ) -> WorkspaceLayoutDiff {
         var diff = WorkspaceLayoutDiff()
         let effectiveScale = max(scale, 1.0)
         let excludedTokens = engine.excludedTokens(in: workspaceId)
         for window in windows {
             let token = window.token
+            let targetFrame = frames[token]
+            let frame = if let animationTime, targetFrame != nil {
+                engine.presentedFrame(for: token, in: workspaceId, at: animationTime) ?? targetFrame
+            } else {
+                targetFrame
+            }
             if window.isNativeFullscreenSuspended {
                 if let originalToken = window.nativeFullscreenOriginalToken {
-                    let roundedFrame = frames[token]?.roundedToPhysicalPixels(scale: effectiveScale)
+                    let roundedFrame = frame?.roundedToPhysicalPixels(scale: effectiveScale)
                     let validFrame = roundedFrame.map {
                         !$0.isNull && !$0.isInfinite && $0.width > 1 && $0.height > 1
                     } == true
@@ -1334,7 +1563,7 @@ import QuartzCore
                 continue
             }
 
-            if previousOffscreenSide != nil, frames[token] != nil {
+            if previousOffscreenSide != nil, frame != nil {
                 diff.visibilityChanges.append(.show(token))
             }
 
@@ -1346,7 +1575,7 @@ import QuartzCore
                     .init(token: token, hiddenState: hiddenState)
                 )
             }
-            guard let frame = frames[token]?.roundedToPhysicalPixels(scale: effectiveScale) else { continue }
+            guard let frame = frame?.roundedToPhysicalPixels(scale: effectiveScale) else { continue }
             diff.frameChanges.append(
                 LayoutFrameChange(
                     token: token,
@@ -1356,6 +1585,32 @@ import QuartzCore
             )
         }
         return diff
+    }
+
+    private func geometryContext(
+        monitor: LayoutMonitorSnapshot,
+        settings: ResolvedDwindleSettings
+    ) -> DwindleAnimationGeometryContext {
+        DwindleAnimationGeometryContext(
+            monitorId: monitor.monitorId,
+            displayId: monitor.displayId,
+            workingFrame: monitor.workingFrame,
+            fullscreenLayoutFrame: monitor.fullscreenLayoutFrame,
+            scale: monitor.scale,
+            settings: settings,
+            tabRailWidth: TabRailManager.tabIndicatorWidth
+        )
+    }
+
+    private func geometryContext(
+        monitor: Monitor,
+        settings: ResolvedDwindleSettings
+    ) -> DwindleAnimationGeometryContext? {
+        guard let controller else { return nil }
+        return geometryContext(
+            monitor: controller.layoutRefreshController.buildMonitorSnapshot(for: monitor),
+            settings: settings
+        )
     }
 
     private func applyResolvedSettings(

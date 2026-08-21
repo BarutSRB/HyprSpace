@@ -277,6 +277,15 @@ import QuartzCore
         else {
             return nil
         }
+        if let disposition = plan.dwindleAnimationTargetDisposition,
+           !dwindleHandler.canAcceptAnimationTarget(
+               disposition,
+               workspaceId: plan.workspaceId,
+               monitor: plan.monitor
+           )
+        {
+            return nil
+        }
 
         controller.withRuntimeFrameJobCancellationSuppressed {
             applySessionPatch(plan.sessionPatch)
@@ -292,6 +301,14 @@ import QuartzCore
                 scale: plan.monitor.scale
             )
         )
+        if let disposition = plan.dwindleAnimationTargetDisposition {
+            acceptDwindleAnimationTarget(
+                disposition,
+                workspaceId: plan.workspaceId,
+                displayId: plan.monitor.displayId,
+                plannedSeq: controller.workspaceManager.worldSeq
+            )
+        }
         applyAnimationDirectives(
             plan.animationDirectives,
             workspaceId: plan.workspaceId,
@@ -397,6 +414,7 @@ import QuartzCore
         )
         controller.workspaceManager.setCachedConstraints(fact.constraints, for: fact.token)
         if previous != fact.constraints {
+            controller.workspaceManager.invalidateLayout(for: [workspaceId])
             requestRelayout(reason: .observedConstraintsChanged, affectedWorkspaceIds: [workspaceId])
         }
     }

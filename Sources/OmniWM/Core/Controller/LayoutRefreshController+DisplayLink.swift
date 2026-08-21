@@ -197,17 +197,55 @@ extension LayoutRefreshController {
         }
     }
 
+    func acceptDwindleAnimationTarget(
+        _ disposition: DwindleAnimationTargetDisposition,
+        workspaceId: WorkspaceDescriptor.ID,
+        displayId: CGDirectDisplayID,
+        plannedSeq: UInt64
+    ) {
+        let detachedDisplayIds = dwindleHandler.acceptAnimationTarget(
+            disposition,
+            workspaceId: workspaceId,
+            displayId: displayId,
+            plannedSeq: plannedSeq
+        )
+        for detachedDisplayId in detachedDisplayIds {
+            stopDisplayLinkIfIdle(for: detachedDisplayId)
+        }
+    }
+
+    func suspendStaleDwindleAnimation(
+        workspaceId: WorkspaceDescriptor.ID,
+        displayId: CGDirectDisplayID
+    ) {
+        let shouldRequestRelayout = dwindleHandler.suspendStaleAnimation(
+            workspaceId: workspaceId,
+            displayId: displayId
+        )
+        stopDisplayLinkIfIdle(for: displayId)
+        guard shouldRequestRelayout else { return }
+        requestRelayout(
+            reason: .staleLayoutPlan,
+            affectedWorkspaceIds: [workspaceId]
+        )
+    }
+
     func startDwindleAnimation(for workspaceId: WorkspaceDescriptor.ID, monitor: Monitor) {
-        guard controller?.motionPolicy.animationsEnabled != false else { return }
         guard let controller else { return }
         let targetDisplayId = monitor.displayId
         guard controller.workspaceManager.activeWorkspaceOrFirst(on: monitor.id)?.id == workspaceId else {
-            let displayIds = dwindleHandler.dwindleAnimationByDisplay.compactMap { displayId, registration in
-                registration.0 == workspaceId ? displayId : nil
-            }
-            for displayId in displayIds {
+            for displayId in dwindleHandler.animationDisplayIds(for: workspaceId) {
                 stopDwindleAnimation(for: displayId)
             }
+            controller.dwindleEngine?.cancelAnimations(in: workspaceId)
+            return
+        }
+        guard controller.motionPolicy.animationsEnabled else {
+            stopDwindleAnimation(for: targetDisplayId)
+            return
+        }
+        guard dwindleHandler.animationSessionByDisplay[targetDisplayId]?.workspaceId == workspaceId else {
+            stopDwindleAnimation(for: targetDisplayId)
             controller.dwindleEngine?.cancelAnimations(in: workspaceId)
             return
         }
@@ -217,6 +255,9 @@ extension LayoutRefreshController {
             monitor: monitor,
             on: targetDisplayId
         )
+        if displayLinkActivationForTests?(targetDisplayId) == true {
+            return
+        }
         if !registrationChanged, layoutState.displayLinksByDisplay[targetDisplayId] != nil {
             return
         }
@@ -224,8 +265,7 @@ extension LayoutRefreshController {
         if let displayLink = getOrCreateDisplayLink(for: targetDisplayId) {
             displayLink.add(to: .main, forMode: .common)
         } else {
-            dwindleHandler.dwindleAnimationByDisplay.removeValue(forKey: targetDisplayId)
-            controller.dwindleEngine?.cancelAnimations(in: workspaceId)
+            stopDwindleAnimation(for: targetDisplayId)
         }
     }
 
@@ -288,19 +328,18 @@ extension LayoutRefreshController {
     }
 
     func stopDwindleAnimation(for displayId: CGDirectDisplayID) {
-        if let workspaceId = dwindleHandler.dwindleAnimationByDisplay.removeValue(forKey: displayId)?.0 {
+        for workspaceId in dwindleHandler.removeAnimationState(for: displayId) {
             controller?.dwindleEngine?.cancelAnimations(in: workspaceId)
         }
         stopDisplayLinkIfIdle(for: displayId)
     }
 
     func stopAllDwindleAnimations() {
-        let registrations = dwindleHandler.dwindleAnimationByDisplay
-        dwindleHandler.dwindleAnimationByDisplay.removeAll()
-        for workspaceId in Set(registrations.values.map(\.0)) {
+        let removed = dwindleHandler.removeAllAnimationState()
+        for workspaceId in removed.workspaceIds {
             controller?.dwindleEngine?.cancelAnimations(in: workspaceId)
         }
-        for displayId in registrations.keys {
+        for displayId in removed.displayIds {
             stopDisplayLinkIfIdle(for: displayId)
         }
     }
@@ -311,7 +350,7 @@ extension LayoutRefreshController {
 
     func resetDisplayLinkAndAnimationState() {
         let niriWorkspaceIds = Set(niriHandler.scrollAnimationByDisplay.values)
-        let dwindleWorkspaceIds = Set(dwindleHandler.dwindleAnimationByDisplay.values.map(\.0))
+        let removedDwindleState = dwindleHandler.removeAllAnimationState()
         for workspaceId in niriWorkspaceIds {
             niriHandler.cancelAnimationMotion(
                 for: workspaceId,
@@ -322,8 +361,7 @@ extension LayoutRefreshController {
             invalidateDisplayLink(for: displayId, reason: .reset)
         }
         niriHandler.scrollAnimationByDisplay.removeAll()
-        dwindleHandler.dwindleAnimationByDisplay.removeAll()
-        for workspaceId in dwindleWorkspaceIds {
+        for workspaceId in removedDwindleState.workspaceIds {
             controller?.dwindleEngine?.cancelAnimations(in: workspaceId)
         }
         layoutState.closingAnimationsByDisplay.removeAll()

@@ -580,6 +580,28 @@ final class DwindleGroupFocusIntegrationTests: XCTestCase {
             fixture.controller.workspaceManager.monitor(for: fixture.workspaceId)
         )
         XCTAssertFalse(fixture.controller.dwindleLayoutHandler.desiredTabRailInfos().isEmpty)
+        let monitorSnapshot = fixture.controller.layoutRefreshController.buildMonitorSnapshot(for: monitor)
+        _ = fixture.controller.dwindleLayoutHandler.acceptAnimationTarget(
+            .replace(
+                DwindleAnimationTargetCandidate(
+                    workspaceId: fixture.workspaceId,
+                    engineIdentifier: ObjectIdentifier(fixture.engine),
+                    geometry: DwindleAnimationGeometryContext(
+                        monitorId: monitor.id,
+                        displayId: monitor.displayId,
+                        workingFrame: monitorSnapshot.workingFrame,
+                        fullscreenLayoutFrame: monitorSnapshot.fullscreenLayoutFrame,
+                        scale: monitorSnapshot.scale,
+                        settings: fixture.controller.settings.resolvedDwindleSettings(for: monitor),
+                        tabRailWidth: TabRailManager.tabIndicatorWidth
+                    ),
+                    targetFrames: [:]
+                )
+            ),
+            workspaceId: fixture.workspaceId,
+            displayId: monitor.displayId,
+            plannedSeq: fixture.controller.workspaceManager.worldSeq
+        )
         XCTAssertTrue(
             fixture.controller.dwindleLayoutHandler.registerDwindleAnimation(
                 fixture.workspaceId,
