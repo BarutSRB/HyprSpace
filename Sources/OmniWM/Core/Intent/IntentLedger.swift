@@ -233,6 +233,7 @@ final class IntentLedger {
     private(set) var entries: [Intent] = []
     private(set) var lastConfirmedManagedFocus: (token: WindowToken, origin: ManagedFocusOrigin)?
     private var nextIntentId: IntentID = 1
+    private var intentIssuanceGeneration: UInt64 = 0
 
     var activeManagedRequest: ManagedFocusRequest? {
         entries.last { $0.phase == .pending && $0.kind.isFocusWindow }?.asManagedFocusRequest
@@ -259,6 +260,7 @@ final class IntentLedger {
         origin: ManagedFocusOrigin = .keyboardOrProgrammatic
     ) -> ManagedFocusRequest {
         if let index = openIndex(where: { $0.kind == .focusWindow(token: token, workspaceId: workspaceId) }) {
+            intentIssuanceGeneration &+= 1
             entries[index].origin = entries[index].origin.merged(with: origin)
             return entries[index].asManagedFocusRequest!
         }
@@ -400,6 +402,7 @@ final class IntentLedger {
     @discardableResult
     func registerActivateApp(pid: pid_t) -> Intent {
         if let index = openIndex(where: { $0.kind == .activateApp(pid: pid) }) {
+            intentIssuanceGeneration &+= 1
             return entries[index]
         }
         return append(kind: .activateApp(pid: pid), origin: .keyboardOrProgrammatic)
@@ -620,6 +623,10 @@ final class IntentLedger {
         entries.last { $0.kind.isFocusWindow }?.id
     }
 
+    func issuanceWatermark() -> UInt64 {
+        intentIssuanceGeneration
+    }
+
     func openIntents(pid: pid_t) -> [Intent] {
         entries.filter { $0.phase == .pending && $0.kind.targetPid == pid }
     }
@@ -708,6 +715,7 @@ final class IntentLedger {
     }
 
     func reset() {
+        intentIssuanceGeneration &+= 1
         entries.removeAll(keepingCapacity: false)
         lastConfirmedManagedFocus = nil
     }
@@ -723,6 +731,7 @@ final class IntentLedger {
             issuedAtSeq: seqProvider()
         )
         nextIntentId += 1
+        intentIssuanceGeneration &+= 1
         entries.append(intent)
         trim()
         return intent

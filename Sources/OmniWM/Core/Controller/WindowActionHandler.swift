@@ -136,6 +136,10 @@ final class WindowActionHandler {
         overviewControllerStorage?.updateSettings()
     }
 
+    func invalidateOverviewDeferredActionsForServiceStop() {
+        overviewControllerStorage?.invalidateDeferredActionsForServiceStop()
+    }
+
     func handleOverviewWindowRemoved(_ entry: WindowState) {
         overviewControllerStorage?.handleManagedWindowRemoved(entry)
     }

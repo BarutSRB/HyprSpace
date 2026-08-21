@@ -288,7 +288,7 @@ final class OverviewStructuralCommandTests: XCTestCase {
             environment: environment
         )
         overview.prepareOpenState()
-        overview.updateAnimationProgress(1, state: .open)
+        overview.onAnimationComplete(state: .open)
 
         XCTAssertTrue(
             overview.executeStructuralHotkey(
@@ -1140,7 +1140,7 @@ final class OverviewStructuralCommandTests: XCTestCase {
             environment: environment
         )
         overview.prepareOpenState()
-        overview.updateAnimationProgress(1, state: .open)
+        overview.onAnimationComplete(state: .open)
 
         var niriSnapshots: [WorkspaceDescriptor.ID: NiriOverviewWorkspaceSnapshot] = [:]
         for workspaceId in fixture.workspaceIds

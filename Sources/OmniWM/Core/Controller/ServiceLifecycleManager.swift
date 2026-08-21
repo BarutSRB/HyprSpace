@@ -851,6 +851,7 @@ final class ServiceLifecycleManager {
     func stop() {
         guard let controller else { return }
         controller.hasStartedServices = false
+        controller.invalidateOverviewDeferredActionsForServiceStop()
         cancelStableTopologyInventory()
 
         let hiddenPIDs = controller.workspaceManager.hiddenAppPIDs

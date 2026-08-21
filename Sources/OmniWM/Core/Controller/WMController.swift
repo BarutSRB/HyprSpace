@@ -569,6 +569,10 @@ final class WMController {
         workspaceBarManager.cleanup()
     }
 
+    func invalidateOverviewDeferredActionsForServiceStop() {
+        windowActionHandlerStorage?.invalidateOverviewDeferredActionsForServiceStop()
+    }
+
     func setPreventSleepEnabled(_ enabled: Bool) {
         if enabled {
             SleepPreventionManager.shared.preventSleep()
