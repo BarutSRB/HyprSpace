@@ -730,7 +730,15 @@ final class WMController {
 
     func fullscreenLayoutFrame(for monitor: Monitor) -> CGRect {
         let scale = NSScreen.screens.first(where: { $0.displayId == monitor.displayId })?.backingScaleFactor ?? 2.0
-        let struts = Struts(top: workspaceBarReservedTopInset(for: monitor))
+        // Outer gaps still hold here: an external bar at a screen edge overlaps a
+        // filled single window just as much as a tiled one.
+        let gaps = settings.resolvedGapSettings(for: monitor)
+        let struts = Struts(
+            left: gaps.outerGapLeft,
+            right: gaps.outerGapRight,
+            top: workspaceBarReservedTopInset(for: monitor),
+            bottom: gaps.outerGapBottom
+        )
         return computeWorkingArea(parentArea: monitor.visibleFrame, scale: scale, struts: struts)
     }
 
