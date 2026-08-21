@@ -198,6 +198,9 @@ enum StructuralMutationOutcome: Equatable {
         let viewportMotionRunning = viewportTick.isRunning
         let animsMs = scrollTrace ? (CACurrentMediaTime() - animsStart) * 1000 : 0
         let state = controller.workspaceManager.niriViewportState(for: wsId)
+        let animationsOngoing = viewportMotionRunning
+            || windowAnimationsRunning
+            || columnAnimationsRunning
 
         let didApplyFrames = applyFramesOnDemand(
             wsId: wsId,
@@ -205,6 +208,7 @@ enum StructuralMutationOutcome: Equatable {
             engine: engine,
             monitor: monitor,
             animationTime: targetTime,
+            settlesAnimation: !animationsOngoing,
             animsMs: animsMs
         )
         guard didApplyFrames else {
@@ -214,17 +218,8 @@ enum StructuralMutationOutcome: Equatable {
             )
             return
         }
-        let animationsOngoing = viewportMotionRunning
-            || windowAnimationsRunning
-            || columnAnimationsRunning
 
         if !animationsOngoing {
-            applyFramesOnDemand(
-                wsId: wsId,
-                state: controller.workspaceManager.niriViewportState(for: wsId),
-                engine: engine,
-                monitor: monitor
-            )
             finalizeAnimation()
             controller.layoutRefreshController.hideInactiveWorkspaces(
                 activeWorkspaceIds: activeWorkspaceIds(controller: controller)
@@ -250,6 +245,7 @@ enum StructuralMutationOutcome: Equatable {
         engine: NiriLayoutEngine,
         monitor: Monitor,
         animationTime: TimeInterval? = nil,
+        settlesAnimation: Bool = false,
         animsMs: Double = 0
     ) -> Bool {
         guard let controller,
@@ -277,7 +273,8 @@ enum StructuralMutationOutcome: Equatable {
             snapshot: snapshot,
             engine: engine,
             monitor: monitor,
-            animationTime: animationTime
+            animationTime: animationTime,
+            settlesAnimation: settlesAnimation
         )
         let buildSeconds = CACurrentMediaTime() - buildStart
         controller.layoutRefreshController.recordScrollBuild(
@@ -339,7 +336,7 @@ enum StructuralMutationOutcome: Equatable {
                 hide: hide,
                 frames: plan.diff.frameChanges.count,
                 windowCount: windowCount,
-                isAnimationTick: true
+                isAnimationTick: plan.isAnimationTick
             )
         )
     }
@@ -573,8 +570,10 @@ enum StructuralMutationOutcome: Equatable {
         snapshot: NiriWorkspaceSnapshot,
         engine: NiriLayoutEngine,
         monitor: Monitor,
-        animationTime: TimeInterval?
+        animationTime: TimeInterval?,
+        settlesAnimation: Bool
     ) -> WorkspaceLayoutPlan {
+        let sampledAnimationTime = settlesAnimation ? nil : animationTime
         let gaps = LayoutGaps(
             horizontal: snapshot.gap,
             vertical: snapshot.gap,
@@ -594,11 +593,11 @@ enum StructuralMutationOutcome: Equatable {
             gaps: gaps,
             state: snapshot.viewportState,
             workingArea: area,
-            animationTime: animationTime,
+            animationTime: sampledAnimationTime,
             viewOffsetOverride: controller?.workspaceManager.animationDriver.liveViewOffset(
                 in: snapshot.workspaceId,
                 semanticOffset: snapshot.viewportState.viewOffset,
-                at: animationTime ?? CACurrentMediaTime()
+                at: sampledAnimationTime ?? CACurrentMediaTime()
             ),
             settledVisibilityOffset: controller?.workspaceManager.animationDriver.settledVisibilityOffset(
                 in: snapshot.workspaceId,
@@ -607,17 +606,41 @@ enum StructuralMutationOutcome: Equatable {
             excludedTokens: snapshot.excludedTokens
         )
 
-        let diff = layoutDiff(
+        var diff = layoutDiff(
             windows: snapshot.windows,
             frames: frames,
             hiddenHandles: hiddenHandles,
             engine: engine,
             workspaceId: snapshot.workspaceId,
             canRestoreHiddenWorkspaceWindows: snapshot.isActiveWorkspace,
-            reassertHidden: animationTime == nil,
+            reassertHidden: animationTime == nil || settlesAnimation,
             excludedTokens: snapshot.excludedTokens,
             pendingParkWindowIds: controller?.axManager.pendingParkWindowIds ?? []
         )
+        if sampledAnimationTime != nil {
+            if let axManager = controller?.axManager {
+                for index in diff.frameChanges.indices {
+                    let change = diff.frameChanges[index]
+                    diff.frameChanges[index] = LayoutFrameChange(
+                        token: change.token,
+                        frame: change.frame,
+                        components: axManager.animationFrameComponents(
+                            for: change.token.windowId,
+                            targetFrame: change.frame
+                        ),
+                        forceApply: change.forceApply,
+                        allowsTerminalRecovery: change.allowsTerminalRecovery
+                    )
+                }
+            }
+        }
+        if animationTime != nil {
+            diff.tabRailGeometryCommands = niriTabRailGeometryCommands(
+                engine: engine,
+                workspaceId: snapshot.workspaceId,
+                monitor: snapshot.monitor
+            )
+        }
 
         return WorkspaceLayoutPlan(
             workspaceId: snapshot.workspaceId,
@@ -628,7 +651,7 @@ enum StructuralMutationOutcome: Equatable {
                 plannedSeq: snapshot.plannedSeq
             ),
             diff: diff,
-            isAnimationTick: animationTime != nil,
+            isAnimationTick: sampledAnimationTime != nil,
             isActiveWorkspace: snapshot.isActiveWorkspace
         )
     }
@@ -1412,6 +1435,40 @@ enum StructuralMutationOutcome: Equatable {
         return infos
     }
 
+    func niriTabRailGeometryCommands(
+        engine: NiriLayoutEngine,
+        workspaceId: WorkspaceDescriptor.ID,
+        monitor: LayoutMonitorSnapshot
+    ) -> [TabRailGeometryCommand] {
+        var commands: [TabRailGeometryCommand] = []
+        for column in engine.columns(in: workspaceId) where column.isTabbed {
+            let key = TabRailKey(workspaceId: workspaceId, owner: .niriColumn(column.id))
+            guard let frame = column.renderedFrame,
+                  !frame.isNull,
+                  !frame.isInfinite,
+                  frame.width > 0,
+                  frame.height > 0
+            else {
+                commands.append(
+                    TabRailGeometryCommand(
+                        key: key,
+                        tileFrame: .zero,
+                        visibleTileFrame: .null
+                    )
+                )
+                continue
+            }
+            commands.append(
+                TabRailGeometryCommand(
+                    key: key,
+                    tileFrame: frame,
+                    visibleTileFrame: frame.intersection(monitor.visibleFrame)
+                )
+            )
+        }
+        return commands
+    }
+
     private func niriTabRailInfos(
         engine: NiriLayoutEngine,
         workspaceId: WorkspaceDescriptor.ID,
@@ -1420,13 +1477,6 @@ enum StructuralMutationOutcome: Equatable {
         guard let controller else { return [] }
         var infos: [TabRailInfo] = []
         for column in engine.columns(in: workspaceId) where column.isTabbed {
-            guard let frame = column.renderedFrame ?? column.frame else { continue }
-            let visibleColumnFrame = frame.intersection(monitor.visibleFrame)
-            guard TabRailManager.shouldShowRail(
-                tileFrame: frame,
-                visibleFrame: monitor.visibleFrame
-            ) else { continue }
-
             let windows = engine.projectedWindows(in: column, workspaceId: workspaceId)
             guard windows.count > 1 else { continue }
 
@@ -1442,6 +1492,11 @@ enum StructuralMutationOutcome: Equatable {
                 activeVisualIndex: activeVisualIndex,
                 controller: controller
             )
+            let candidateFrame = column.renderedFrame ?? column.frame
+            let frame = candidateFrame.map {
+                !$0.isNull && !$0.isInfinite && $0.width > 0 && $0.height > 0 ? $0 : .zero
+            } ?? .zero
+            let visibleColumnFrame = frame == .zero ? CGRect.null : frame.intersection(monitor.visibleFrame)
 
             infos.append(
                 TabRailInfo(

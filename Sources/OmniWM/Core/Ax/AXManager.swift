@@ -18,15 +18,22 @@ struct AXFrameApplicationTarget: Sendable {
     let pid: pid_t
     let expectedWindow: AXWindowRef
     let frame: CGRect
+    let components: AXFrameComponents
 
     var windowId: Int {
         expectedWindow.windowId
     }
 
-    init(pid: pid_t, window: AXWindowRef, frame: CGRect) {
+    init(
+        pid: pid_t,
+        window: AXWindowRef,
+        frame: CGRect,
+        components: AXFrameComponents = .all
+    ) {
         self.pid = pid
         expectedWindow = window
         self.frame = frame
+        self.components = components
     }
 }
 
@@ -324,12 +331,13 @@ final class AXManager {
         nativeInactiveWindowIds: Set<Int> = []
     ) {
         inactiveWorkspaceWindowIds.removeAll(keepingCapacity: true)
+        inactiveWorkspaceWindowIds.reserveCapacity(nativeInactiveWindowIds.count + allEntries.count)
+        inactiveWorkspaceWindowIds.formUnion(nativeInactiveWindowIds)
         for (wsId, windowId) in allEntries {
             if !activeWorkspaceIds.contains(wsId) {
                 inactiveWorkspaceWindowIds.insert(windowId)
             }
         }
-        inactiveWorkspaceWindowIds.formUnion(nativeInactiveWindowIds)
     }
 
     func markWindowActive(_ windowId: Int) {
@@ -370,16 +378,26 @@ final class AXManager {
         frameLedger.lastAppliedFrame(for: windowId)
     }
 
+    func animationFrameComponents(for windowId: Int, targetFrame: CGRect) -> FrameMutationComponents {
+        guard let trustedSize = frameLedger.trustedVerifiedSize(for: windowId),
+              Self.frameSizesMatch(trustedSize, targetFrame.size)
+        else {
+            return .all
+        }
+        return .position
+    }
+
+    private static func frameSizesMatch(_ lhs: CGSize, _ rhs: CGSize) -> Bool {
+        abs(lhs.width - rhs.width) < FrameTolerance.frameWrite
+            && abs(lhs.height - rhs.height) < FrameTolerance.frameWrite
+    }
+
     func recordSkyLightMove(windowId: Int, origin: CGPoint) {
         skyLightLivePositionByWindowId[windowId] = origin
     }
 
     func skyLightLivePosition(for windowId: Int) -> CGPoint? {
         skyLightLivePositionByWindowId[windowId]
-    }
-
-    func clearSkyLightLivePositions() {
-        skyLightLivePositionByWindowId.removeAll(keepingCapacity: true)
     }
 
     func markParkPending(_ target: AXFrameApplicationTarget) {
@@ -455,6 +473,10 @@ final class AXManager {
 
     func recentFrameWriteFailure(for windowId: Int) -> AXFrameWriteFailureReason? {
         frameLedger.recentFrameWriteFailure(for: windowId)
+    }
+
+    func recentFrameWriteFailureComponents(for windowId: Int) -> AXFrameComponents? {
+        frameLedger.recentFrameWriteFailureComponents(for: windowId)
     }
 
     func hasContext(for pid: pid_t) -> Bool {
@@ -822,6 +844,8 @@ final class AXManager {
         }
 
         cancelAllPendingFrameState()
+        frameLedger.invalidateAllAppliedFrames()
+        skyLightLivePositionByWindowId.removeAll(keepingCapacity: true)
         for state in managedWindowBindingRetryStateByPID.values {
             state.task?.cancel()
         }
@@ -1983,7 +2007,24 @@ final class AXManager {
     ) {
         let writable = framesAllowedToWrite(frames)
         guard !writable.isEmpty else { return }
-        enqueueFrameApplications(writable, isRetry: false, verify: verify, terminalObserver: terminalObserver)
+        applyWritableFramesParallel(
+            writable,
+            terminalObserver: terminalObserver,
+            verify: verify
+        )
+    }
+
+    private func applyWritableFramesParallel(
+        _ writable: [AXFrameApplicationTarget],
+        terminalObserver: FrameApplicationTerminalObserver? = nil,
+        verify: Bool
+    ) {
+        enqueueFrameApplications(
+            writable,
+            isRetry: false,
+            verify: verify,
+            terminalObserver: terminalObserver
+        )
     }
 
     func applyClosingFrames(_ frames: [AXClosingFrameTarget]) {
@@ -2009,21 +2050,20 @@ final class AXManager {
     private func framesAllowedToWrite(
         _ frames: [AXFrameApplicationTarget]
     ) -> [AXFrameApplicationTarget] {
-        if let interactionPolicyForWindowId {
-            return frames.filter {
-                !macOSHiddenAppPIDs.contains($0.pid)
-                    && interactionPolicyForWindowId($0.windowId).mayWriteFrame
-                    && !excludeFrameWriteForNativeTitleBarDrag(
-                        pid: $0.pid,
-                        windowId: $0.windowId
-                    )
-            }
-        }
-        guard !macOSHiddenAppPIDs.isEmpty || nativeTitleBarDrag != nil else { return frames }
-        return frames.filter {
-            !macOSHiddenAppPIDs.contains($0.pid)
-                && !excludeFrameWriteForNativeTitleBarDrag(pid: $0.pid, windowId: $0.windowId)
-        }
+        guard interactionPolicyForWindowId != nil
+            || !macOSHiddenAppPIDs.isEmpty
+            || nativeTitleBarDrag != nil
+        else { return frames }
+        return frames.filter { isFrameAllowedToWrite($0) }
+    }
+
+    private func isFrameAllowedToWrite(_ target: AXFrameApplicationTarget) -> Bool {
+        !macOSHiddenAppPIDs.contains(target.pid)
+            && (interactionPolicyForWindowId?(target.windowId).mayWriteFrame ?? true)
+            && !excludeFrameWriteForNativeTitleBarDrag(
+                pid: target.pid,
+                windowId: target.windowId
+            )
     }
 
     func excludeFrameWriteForNativeTitleBarDrag(pid: pid_t, windowId: Int) -> Bool {
@@ -2398,6 +2438,7 @@ final class AXManager {
                 windowId: windowId,
                 expectedWindow: target.expectedWindow,
                 frame: frame,
+                components: target.components,
                 isRetry: isRetry,
                 verify: verify,
                 terminalObserver: terminalObserver,
@@ -2430,7 +2471,8 @@ final class AXManager {
                             writeResult: .skipped(
                                 targetFrame: $0.frame,
                                 currentFrameHint: $0.currentFrameHint,
-                                failureReason: .contextUnavailable
+                                failureReason: .contextUnavailable,
+                                components: $0.components
                             ),
                             traceRequestId: $0.traceRequestId
                         )
@@ -2590,18 +2632,19 @@ final class AXManager {
         return uniqueEntries
     }
 
+    @discardableResult
     func applyPositionsViaSkyLight(
         _ positions: [(pid: pid_t, windowId: Int, frame: CGRect)],
         allowInactive: Bool = false
-    ) {
+    ) -> SkyLight.TransactionSubmissionResult {
         let filtered = positions.filter {
             (allowInactive || !inactiveWorkspaceWindowIds.contains($0.windowId))
                 && !macOSHiddenAppPIDs.contains($0.pid)
                 && (interactionPolicyForWindowId?($0.windowId).mayWriteFrame ?? true)
                 && !excludeFrameWriteForNativeTitleBarDrag(pid: $0.pid, windowId: $0.windowId)
         }
-        guard !filtered.isEmpty else { return }
-        SkyLight.shared.batchMoveWindows(
+        guard !filtered.isEmpty else { return .submitted }
+        return SkyLight.shared.batchMoveWindows(
             Self.windowServerPositions(filtered.map { (windowId: $0.windowId, frame: $0.frame) })
         )
     }
@@ -2754,6 +2797,7 @@ final class AXManager {
     }
 
     func handleAcceptedFrameApplySuccess(_ result: AXFrameApplyResult) {
+        clearSkyLightLivePosition(for: result.windowId)
         if isWindowParked?(result.windowId) == true {
             markParkPending(
                 for: result.windowId,
@@ -2804,7 +2848,8 @@ final class AXManager {
                             element: expectedWindow.element,
                             windowId: currentWindowId
                         ),
-                        frame: frame
+                        frame: frame,
+                        components: retry.components
                     )
                 ],
                 isRetry: true,
@@ -2830,7 +2875,8 @@ final class AXManager {
                 targetFrame: retry.frame,
                 currentFrameHint: retry.currentFrameHint,
                 failureReason: .cancelled,
-                observedFrame: retry.currentFrameHint
+                observedFrame: retry.currentFrameHint,
+                components: retry.components
             ),
             traceRequestId: retry.traceRequestId
         )

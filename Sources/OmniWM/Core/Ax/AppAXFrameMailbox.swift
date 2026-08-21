@@ -437,7 +437,8 @@ func skippedFrameApplyResult(
         writeResult: .skipped(
             targetFrame: request.frame,
             currentFrameHint: request.currentFrameHint,
-            failureReason: reason
+            failureReason: reason,
+            components: request.components
         ),
         traceRequestId: request.traceRequestId
     )

@@ -583,6 +583,170 @@ final class AnimationRegistrationLivenessTests: XCTestCase {
         )
     }
 
+    func testOngoingDwindleTickUsesPositionOnlyForTrustedSameSizeFrame() throws {
+        let oldFrame = CGRect(x: 0, y: 0, width: 500, height: 400)
+        XCTAssertEqual(
+            try ongoingDwindleTickComponents(
+                token: WindowToken(pid: 981_118, windowId: 981_218),
+                oldFrame: oldFrame,
+                targetFrame: oldFrame.offsetBy(dx: 100, dy: 100)
+            ),
+            .position
+        )
+    }
+
+    func testOngoingDwindleTickUsesFullFrameWhenPresentedSizeChanges() throws {
+        XCTAssertEqual(
+            try ongoingDwindleTickComponents(
+                token: WindowToken(pid: 981_119, windowId: 981_219),
+                oldFrame: CGRect(x: 0, y: 0, width: 400, height: 300),
+                targetFrame: CGRect(x: 100, y: 100, width: 500, height: 400)
+            ),
+            .all
+        )
+    }
+
+    func testTerminalDwindleTickSubmitsOneFullFramePlan() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let monitor = try XCTUnwrap(controller.workspaceManager.monitor(for: workspaceId))
+        _ = controller.workspaceManager.setActiveWorkspace(
+            workspaceId,
+            on: monitor.id,
+            updateInteractionMonitor: false
+        )
+        let token = WindowToken(pid: 981_115, windowId: 981_215)
+        _ = WindowAdmissionTestSupport.track(token, in: workspaceId, controller: controller)
+        let engine = seedDwindleMotion(
+            controller: controller,
+            workspaceId: workspaceId,
+            token: token
+        )
+        let target = CGRect(x: 100, y: 100, width: 500, height: 400)
+        let candidate = try makeCandidate(
+            controller: controller,
+            workspaceId: workspaceId,
+            engine: engine,
+            targetFrames: [token: target]
+        )
+        _ = controller.dwindleLayoutHandler.acceptAnimationTarget(
+            .replace(candidate),
+            workspaceId: workspaceId,
+            displayId: monitor.displayId,
+            plannedSeq: controller.workspaceManager.worldSeq
+        )
+        XCTAssertTrue(
+            controller.dwindleLayoutHandler.registerDwindleAnimation(
+                workspaceId,
+                monitor: monitor,
+                on: monitor.displayId
+            )
+        )
+        FrameApplyTrace.shared.beginCapture()
+        defer { FrameApplyTrace.shared.endCapture() }
+
+        controller.dwindleLayoutHandler.tickDwindleAnimation(
+            targetTime: CACurrentMediaTime() + 10,
+            displayId: monitor.displayId
+        )
+
+        XCTAssertNil(controller.dwindleLayoutHandler.dwindleAnimationByDisplay[monitor.displayId])
+        let applications = FrameApplyTrace.shared.dump().split(separator: "\n").filter {
+            $0.contains("win=\(token.windowId) ")
+                && $0.contains("event=outcome=skip/contextUnavailable")
+        }
+        XCTAssertEqual(applications.count, 1)
+        XCTAssertEqual(
+            applications.filter { $0.contains("target=\(TraceFormat.rect(target))") }.count,
+            1
+        )
+        XCTAssertEqual(
+            controller.axManager.recentFrameWriteFailureComponents(for: token.windowId),
+            .all
+        )
+    }
+
+    func testTerminalDwindleTickReassertsHiddenGroupMember() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let monitor = try XCTUnwrap(controller.workspaceManager.monitor(for: workspaceId))
+        _ = controller.workspaceManager.setActiveWorkspace(
+            workspaceId,
+            on: monitor.id,
+            updateInteractionMonitor: false
+        )
+        let inactiveToken = WindowToken(pid: 981_116, windowId: 981_216)
+        let activeToken = WindowToken(pid: 981_117, windowId: 981_217)
+        _ = WindowAdmissionTestSupport.track(inactiveToken, in: workspaceId, controller: controller)
+        _ = WindowAdmissionTestSupport.track(activeToken, in: workspaceId, controller: controller)
+        let engine = DwindleLayoutEngine()
+        controller.dwindleEngine = engine
+        let targetFrames = controller.workspaceManager.withEngineMutationScope(in: workspaceId) {
+            _ = engine.addWindow(token: inactiveToken, to: workspaceId, activeWindowFrame: nil)
+            let activeNode = engine.addWindow(token: activeToken, to: workspaceId, activeWindowFrame: nil)
+            _ = engine.calculateLayout(for: workspaceId, screen: monitor.visibleFrame)
+            XCTAssertTrue(engine.groupWindow(direction: .left, in: workspaceId))
+            let frames = engine.calculateLayout(for: workspaceId, screen: monitor.visibleFrame)
+            let target = frames[activeToken] ?? monitor.visibleFrame
+            activeNode.animateFrom(
+                oldFrame: target.offsetBy(dx: -30, dy: 0),
+                newFrame: target,
+                startTime: CACurrentMediaTime(),
+                config: engine.windowMovementAnimationConfig,
+                animated: true
+            )
+            return frames
+        }
+        controller.workspaceManager.setHiddenState(
+            HiddenState(
+                proportionalPosition: .zero,
+                referenceMonitorId: nil,
+                reason: .layoutTransient(.left)
+            ),
+            for: inactiveToken
+        )
+        controller.axManager.confirmFrameWrite(
+            for: inactiveToken.windowId,
+            frame: CGRect(x: 100, y: 100, width: 500, height: 400)
+        )
+        let candidate = try makeCandidate(
+            controller: controller,
+            workspaceId: workspaceId,
+            engine: engine,
+            targetFrames: targetFrames
+        )
+        _ = controller.dwindleLayoutHandler.acceptAnimationTarget(
+            .replace(candidate),
+            workspaceId: workspaceId,
+            displayId: monitor.displayId,
+            plannedSeq: controller.workspaceManager.worldSeq
+        )
+        XCTAssertTrue(
+            controller.dwindleLayoutHandler.registerDwindleAnimation(
+                workspaceId,
+                monitor: monitor,
+                on: monitor.displayId
+            )
+        )
+        FrameApplyTrace.shared.beginCapture()
+        defer { FrameApplyTrace.shared.endCapture() }
+
+        controller.dwindleLayoutHandler.tickDwindleAnimation(
+            targetTime: CACurrentMediaTime() + 10,
+            displayId: monitor.displayId
+        )
+
+        let parkFailures = FrameApplyTrace.shared.dump().split(separator: "\n").filter {
+            $0.contains("win=\(inactiveToken.windowId) ")
+                && $0.contains("event=outcome=ax-park-failed/contextUnavailable")
+        }
+        XCTAssertFalse(parkFailures.isEmpty)
+    }
+
     func testDwindleLayoutDiffProjectsCurveWithoutMutatingTargetBuffer() throws {
         let workspaceId = WorkspaceDescriptor.ID()
         let token = WindowToken(pid: 981_111, windowId: 981_211)
@@ -680,6 +844,79 @@ final class AnimationRegistrationLivenessTests: XCTestCase {
                 ? [.startDwindleAnimation(workspaceId: workspaceId, monitorId: monitor.id)]
                 : [],
             dwindleAnimationTargetDisposition: disposition
+        )
+    }
+
+    private func ongoingDwindleTickComponents(
+        token: WindowToken,
+        oldFrame: CGRect,
+        targetFrame: CGRect
+    ) throws -> FrameMutationComponents {
+        let controller = WindowAdmissionTestSupport.controller()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let monitor = try XCTUnwrap(controller.workspaceManager.monitor(for: workspaceId))
+        _ = controller.workspaceManager.setActiveWorkspace(
+            workspaceId,
+            on: monitor.id,
+            updateInteractionMonitor: false
+        )
+        _ = WindowAdmissionTestSupport.track(token, in: workspaceId, controller: controller)
+        let engine = DwindleLayoutEngine()
+        controller.dwindleEngine = engine
+        let targetTime = CACurrentMediaTime()
+        let startTime = targetTime - engine.windowMovementAnimationConfig.duration / 2
+        controller.workspaceManager.withEngineMutationScope(in: workspaceId) {
+            let node = engine.addWindow(token: token, to: workspaceId, activeWindowFrame: nil)
+            node.animateFrom(
+                oldFrame: oldFrame,
+                newFrame: targetFrame,
+                startTime: startTime,
+                config: engine.windowMovementAnimationConfig,
+                animated: true
+            )
+        }
+        XCTAssertTrue(engine.hasActiveAnimations(in: workspaceId, at: targetTime))
+        controller.axManager.confirmFrameWrite(for: token.windowId, frame: oldFrame)
+        let candidate = try makeCandidate(
+            controller: controller,
+            workspaceId: workspaceId,
+            engine: engine,
+            targetFrames: [token: targetFrame]
+        )
+        _ = controller.dwindleLayoutHandler.acceptAnimationTarget(
+            .replace(candidate),
+            workspaceId: workspaceId,
+            displayId: monitor.displayId,
+            plannedSeq: controller.workspaceManager.worldSeq
+        )
+        XCTAssertTrue(
+            controller.dwindleLayoutHandler.registerDwindleAnimation(
+                workspaceId,
+                monitor: monitor,
+                on: monitor.displayId
+            )
+        )
+        FrameApplyTrace.shared.beginCapture()
+        defer { FrameApplyTrace.shared.endCapture() }
+
+        controller.dwindleLayoutHandler.tickDwindleAnimation(
+            targetTime: targetTime,
+            displayId: monitor.displayId
+        )
+
+        XCTAssertEqual(
+            controller.dwindleLayoutHandler.dwindleAnimationByDisplay[monitor.displayId]?.0,
+            workspaceId
+        )
+        let applications = FrameApplyTrace.shared.dump().split(separator: "\n").filter {
+            $0.contains("win=\(token.windowId) ")
+                && $0.contains("event=outcome=skip/contextUnavailable")
+        }
+        XCTAssertEqual(applications.count, 1)
+        return try XCTUnwrap(
+            controller.axManager.recentFrameWriteFailureComponents(for: token.windowId)
         )
     }
 

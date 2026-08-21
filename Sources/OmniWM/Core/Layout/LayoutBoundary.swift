@@ -107,20 +107,31 @@ enum DwindleAnimationTargetDisposition {
     case clear(engineIdentifier: ObjectIdentifier, geometry: DwindleAnimationGeometryContext)
 }
 
+struct FrameMutationComponents: OptionSet, Equatable, Hashable, Sendable {
+    let rawValue: UInt8
+
+    static let position = Self(rawValue: 1 << 0)
+    static let size = Self(rawValue: 1 << 1)
+    static let all: Self = [.position, .size]
+}
+
 struct LayoutFrameChange {
     let token: WindowToken
     let frame: CGRect
+    let components: FrameMutationComponents
     let forceApply: Bool
     let allowsTerminalRecovery: Bool
 
     init(
         token: WindowToken,
         frame: CGRect,
+        components: FrameMutationComponents = .all,
         forceApply: Bool,
         allowsTerminalRecovery: Bool = false
     ) {
         self.token = token
         self.frame = frame
+        self.components = components
         self.forceApply = forceApply
         self.allowsTerminalRecovery = allowsTerminalRecovery
     }
@@ -148,6 +159,12 @@ struct NativeFullscreenSlotProjection: Equatable {
     let visible: Bool
 }
 
+struct TabRailGeometryCommand: Equatable {
+    let key: TabRailKey
+    let tileFrame: CGRect
+    let visibleTileFrame: CGRect
+}
+
 // `frameChanges` imply active, restore-eligible windows for this pass.
 // `visibilityChanges` are reserved for explicit hide/show transitions.
 struct WorkspaceLayoutDiff {
@@ -156,6 +173,7 @@ struct WorkspaceLayoutDiff {
     var restoreChanges: [LayoutRestoreChange] = []
     var deferredHides: [LayoutDeferredHide] = []
     var nativeFullscreenSlots: [WindowToken: NativeFullscreenSlotProjection] = [:]
+    var tabRailGeometryCommands: [TabRailGeometryCommand] = []
 }
 
 struct WorkspaceSessionPatch {

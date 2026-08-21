@@ -342,11 +342,13 @@ import QuartzCore
         }
 
         engine.tickAnimations(at: targetTime, in: wsId)
+        let animationsOngoing = engine.hasActiveAnimations(in: wsId, at: targetTime)
         let plan = buildAnimationPlan(
             snapshot: snapshot,
             engine: engine,
             session: session,
-            targetTime: targetTime
+            targetTime: targetTime,
+            isAnimationTick: animationsOngoing
         )
         let didExecute = controller.layoutRefreshController.executeLayoutPlan(plan)
         guard didExecute else {
@@ -357,22 +359,7 @@ import QuartzCore
             return
         }
 
-        if !engine.hasActiveAnimations(in: wsId, at: targetTime) {
-            if let settleSnapshot = makeWorkspaceSnapshot(
-                workspaceId: wsId,
-                monitor: monitor,
-                resolveConstraints: false,
-                isActiveWorkspace: true
-            ) {
-                var settlePlan = buildAnimationPlan(
-                    snapshot: settleSnapshot,
-                    engine: engine,
-                    session: session,
-                    targetTime: targetTime
-                )
-                settlePlan.isAnimationTick = false
-                _ = controller.layoutRefreshController.executeLayoutPlan(settlePlan)
-            }
+        if !animationsOngoing {
             controller.layoutRefreshController.stopDwindleAnimation(for: displayId)
             controller.surfaceReconciler.noteRestackOccurred()
         }
@@ -707,18 +694,25 @@ import QuartzCore
         var infos: [TabRailInfo] = []
         for monitor in controller.workspaceManager.monitors {
             guard let workspace = controller.workspaceManager.activeWorkspaceOrFirst(on: monitor.id),
-                  controller.workspaceManager.activeLayoutKind(for: workspace.id) == .dwindle,
-                  !hasDwindleAnimationRunning(in: workspace.id)
+                  controller.workspaceManager.activeLayoutKind(for: workspace.id) == .dwindle
             else {
                 continue
             }
 
+            let presentationTime = controller.animationClock.now()
+            let scale = controller.layoutRefreshController.buildMonitorSnapshot(for: monitor).scale
             for snapshot in engine.groupedTileSnapshots(in: workspace.id) {
-                guard let frame = snapshot.tileFrame,
-                      TabRailManager.shouldShowRail(tileFrame: frame, visibleFrame: monitor.visibleFrame)
-                else {
-                    continue
-                }
+                let presentedFrame = presentedTileFrame(
+                    tileFrame: snapshot.tileFrame,
+                    contentFrame: snapshot.contentFrame,
+                    activeToken: snapshot.activeToken,
+                    engine: engine,
+                    workspaceId: workspace.id,
+                    at: presentationTime,
+                    scale: scale
+                )
+                let frame = presentedFrame ?? snapshot.tileFrame ?? .zero
+                let visibleFrame = presentedFrame?.intersection(monitor.visibleFrame) ?? .null
 
                 var tabs: [TabRailTabInfo] = []
                 tabs.reserveCapacity(snapshot.members.count)
@@ -748,7 +742,7 @@ import QuartzCore
                         owner: .dwindleTile(snapshot.id),
                         plannedSeq: controller.workspaceManager.worldSeq,
                         tileFrame: frame,
-                        visibleTileFrame: frame.intersection(monitor.visibleFrame),
+                        visibleTileFrame: visibleFrame,
                         tabCount: tabs.count,
                         activeVisualIndex: snapshot.activeIndex,
                         activeWindowId: controller.workspaceManager.entry(for: snapshot.activeToken)?.windowId,
@@ -758,6 +752,83 @@ import QuartzCore
             }
         }
         return infos
+    }
+
+    func dwindleTabRailGeometryCommands(
+        engine: DwindleLayoutEngine,
+        workspaceId: WorkspaceDescriptor.ID,
+        monitor: LayoutMonitorSnapshot,
+        targetTime: TimeInterval
+    ) -> [TabRailGeometryCommand] {
+        var commands: [TabRailGeometryCommand] = []
+        engine.forEachGroupedTileGeometry(in: workspaceId) { geometry in
+            let key = TabRailKey(workspaceId: workspaceId, owner: .dwindleTile(geometry.id))
+            guard let frame = presentedTileFrame(
+                tileFrame: geometry.tileFrame,
+                contentFrame: geometry.contentFrame,
+                activeToken: geometry.activeToken,
+                engine: engine,
+                workspaceId: workspaceId,
+                at: targetTime,
+                scale: monitor.scale
+            ) else {
+                commands.append(
+                    TabRailGeometryCommand(
+                        key: key,
+                        tileFrame: .zero,
+                        visibleTileFrame: .null
+                    )
+                )
+                return
+            }
+            commands.append(
+                TabRailGeometryCommand(
+                    key: key,
+                    tileFrame: frame,
+                    visibleTileFrame: frame.intersection(monitor.visibleFrame)
+                )
+            )
+        }
+        return commands
+    }
+
+    func presentedTileFrame(
+        tileFrame: CGRect?,
+        contentFrame: CGRect?,
+        activeToken: WindowToken,
+        engine: DwindleLayoutEngine,
+        workspaceId: WorkspaceDescriptor.ID,
+        at targetTime: TimeInterval,
+        scale: CGFloat
+    ) -> CGRect? {
+        guard let tileFrame,
+              let contentFrame,
+              let presentedContentFrame = engine.presentedFrame(
+                  for: activeToken,
+                  in: workspaceId,
+                  at: targetTime
+              )
+        else {
+            return nil
+        }
+        let left = max(0, contentFrame.minX - tileFrame.minX)
+        let right = max(0, tileFrame.maxX - contentFrame.maxX)
+        let bottom = max(0, contentFrame.minY - tileFrame.minY)
+        let top = max(0, tileFrame.maxY - contentFrame.maxY)
+        let frame = CGRect(
+            x: presentedContentFrame.minX - left,
+            y: presentedContentFrame.minY - bottom,
+            width: presentedContentFrame.width + left + right,
+            height: presentedContentFrame.height + bottom + top
+        ).roundedToPhysicalPixels(scale: max(scale, 1))
+        guard !frame.isNull,
+              !frame.isInfinite,
+              frame.width > 0,
+              frame.height > 0
+        else {
+            return nil
+        }
+        return frame
     }
 
     func selectGroupMember(
@@ -1465,9 +1536,10 @@ import QuartzCore
         snapshot: DwindleWorkspaceSnapshot,
         engine: DwindleLayoutEngine,
         session: AnimationSession,
-        targetTime: TimeInterval
+        targetTime: TimeInterval,
+        isAnimationTick: Bool
     ) -> WorkspaceLayoutPlan {
-        let diff = layoutDiff(
+        var diff = layoutDiff(
             windows: snapshot.windows,
             frames: session.targetFrames,
             engine: engine,
@@ -1475,9 +1547,30 @@ import QuartzCore
             preferredHideSide: snapshot.preferredHideSide,
             canRestoreHiddenWorkspaceWindows: snapshot.isActiveWorkspace,
             scale: snapshot.monitor.scale,
-            reassertHidden: false,
+            reassertHidden: !isAnimationTick,
             pendingParkWindowIds: controller?.axManager.pendingParkWindowIds ?? [],
             animationTime: targetTime
+        )
+        if isAnimationTick, let axManager = controller?.axManager {
+            for index in diff.frameChanges.indices {
+                let change = diff.frameChanges[index]
+                diff.frameChanges[index] = LayoutFrameChange(
+                    token: change.token,
+                    frame: change.frame,
+                    components: axManager.animationFrameComponents(
+                        for: change.token.windowId,
+                        targetFrame: change.frame
+                    ),
+                    forceApply: change.forceApply,
+                    allowsTerminalRecovery: change.allowsTerminalRecovery
+                )
+            }
+        }
+        diff.tabRailGeometryCommands = dwindleTabRailGeometryCommands(
+            engine: engine,
+            workspaceId: snapshot.workspaceId,
+            monitor: snapshot.monitor,
+            targetTime: targetTime
         )
 
         return WorkspaceLayoutPlan(
@@ -1488,7 +1581,7 @@ import QuartzCore
                 plannedSeq: snapshot.plannedSeq
             ),
             diff: diff,
-            isAnimationTick: true,
+            isAnimationTick: isAnimationTick,
             isActiveWorkspace: snapshot.isActiveWorkspace
         )
     }

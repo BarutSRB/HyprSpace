@@ -741,7 +741,7 @@ final class AXFullRescanBoundaryTests: XCTestCase {
             request,
             pid: pid,
             generations: generations,
-            writeFrame: { window, frame, _, _ in
+            writeFrame: { window, frame, _, components, _ in
                 writtenElements.append(window.element)
                 return AXFrameWriteResult(
                     targetFrame: frame,
@@ -749,7 +749,8 @@ final class AXFullRescanBoundaryTests: XCTestCase {
                     writeOrder: .sizeThenPosition,
                     sizeError: .success,
                     positionError: .success,
-                    failureReason: nil
+                    failureReason: nil,
+                    components: components
                 )
             },
             refreshWindow: { _, _ in
@@ -794,12 +795,13 @@ final class AXFullRescanBoundaryTests: XCTestCase {
             request,
             pid: pid,
             generations: generations,
-            writeFrame: { window, frame, hint, _ in
+            writeFrame: { window, frame, hint, components, _ in
                 writtenElements.append(window.element)
                 return .skipped(
                     targetFrame: frame,
                     currentFrameHint: hint,
-                    failureReason: .staleElement
+                    failureReason: .staleElement,
+                    components: components
                 )
             },
             refreshWindow: { _, _ in replacementWindow }
@@ -810,6 +812,49 @@ final class AXFullRescanBoundaryTests: XCTestCase {
         XCTAssertTrue(writtenElements.first.map { CFEqual($0, expectedWindow.element) } == true)
         XCTAssertFalse(writtenElements.contains { CFEqual($0, replacementWindow.element) })
         XCTAssertFalse(generations.isCurrent(generation, for: windowId))
+    }
+
+    func testFrameWriteRequestForwardsExplicitComponents() {
+        let pid: pid_t = 71_035
+        let windowId = 71_036
+        let window = AXWindowRef(
+            element: AXUIElementCreateApplication(pid),
+            windowId: windowId
+        )
+        let generations = LockedWindowGenerationMap()
+        let request = AppAXFrameWriteRequest(
+            requestId: 3,
+            pid: pid,
+            windowId: windowId,
+            expectedWindow: window,
+            frame: CGRect(x: 20, y: 30, width: 640, height: 480),
+            currentFrameHint: nil,
+            components: .position,
+            generation: generations.nextGeneration(for: windowId),
+            verify: false
+        )
+        var receivedComponents: AXFrameComponents = []
+
+        let result = applyFrameWriteRequest(
+            request,
+            pid: pid,
+            generations: generations,
+            writeFrame: { _, frame, _, components, _ in
+                receivedComponents = components
+                return AXFrameWriteResult(
+                    targetFrame: frame,
+                    observedFrame: nil,
+                    writeOrder: .sizeThenPosition,
+                    sizeError: .success,
+                    positionError: .success,
+                    failureReason: nil,
+                    components: components
+                )
+            }
+        )
+
+        XCTAssertEqual(receivedComponents, .position)
+        XCTAssertEqual(result.writeResult.components, .position)
     }
 
     func testRapidBindingSupersessionReturnsSupersededWithoutPublishing() throws {

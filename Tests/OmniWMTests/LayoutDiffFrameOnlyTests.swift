@@ -112,6 +112,68 @@ final class LayoutDiffFrameOnlyTests: XCTestCase {
     }
 
     @MainActor
+    func testAnimationFrameOnlyPlanUsesOrdinaryAXLane() throws {
+        let controller = makeController()
+        defer { controller.axManager.cleanup() }
+        let monitor = Monitor(
+            id: .init(displayId: 72_201),
+            displayId: 72_201,
+            frame: CGRect(x: 0, y: 0, width: 1600, height: 1000),
+            visibleFrame: CGRect(x: 0, y: 0, width: 1600, height: 960),
+            hasNotch: false,
+            name: "Animation AX Lane"
+        )
+        controller.workspaceManager.applyMonitorConfigurationChange([monitor])
+        controller.workspaceManager.applySettings()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let pid: pid_t = 72_202
+        let windowId = 202
+        let window = AXWindowRef(
+            element: AXUIElementCreateApplication(pid),
+            windowId: windowId
+        )
+        let token = controller.workspaceManager.addWindow(
+            window,
+            pid: pid,
+            windowId: windowId,
+            to: workspaceId
+        )
+        let target = CGRect(x: 40, y: 50, width: 600, height: 800)
+        var diff = WorkspaceLayoutDiff()
+        diff.frameChanges = [
+            LayoutFrameChange(
+                token: token,
+                frame: target,
+                components: .position,
+                forceApply: false
+            )
+        ]
+        let plan = WorkspaceLayoutPlan(
+            workspaceId: workspaceId,
+            monitor: LayoutMonitorSnapshot(
+                monitorId: monitor.id,
+                displayId: monitor.displayId,
+                frame: monitor.frame,
+                visibleFrame: monitor.visibleFrame,
+                workingFrame: monitor.visibleFrame,
+                fullscreenLayoutFrame: monitor.visibleFrame,
+                scale: 1,
+                orientation: monitor.autoOrientation
+            ),
+            sessionPatch: WorkspaceSessionPatch(workspaceId: workspaceId, viewportState: nil),
+            diff: diff,
+            isAnimationTick: true
+        )
+
+        LayoutDiffExecutor(refreshController: controller.layoutRefreshController).execute(plan)
+
+        XCTAssertEqual(controller.axManager.recentFrameWriteFailure(for: windowId), .contextUnavailable)
+        XCTAssertEqual(controller.axManager.recentFrameWriteFailureComponents(for: windowId), .position)
+    }
+
+    @MainActor
     private func makeController() -> WMController {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(
             "OmniWMLayoutDiffFrameOnlyTests-\(UUID().uuidString)",

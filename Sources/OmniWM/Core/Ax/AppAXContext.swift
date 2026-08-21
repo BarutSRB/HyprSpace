@@ -101,6 +101,31 @@ final class LockedWindowGenerationMap: @unchecked Sendable {
     }
 }
 
+final class LockedEnhancedUIStateMap: @unchecked Sendable {
+    static let shared = LockedEnhancedUIStateMap()
+
+    private let lock = NSLock()
+    private var statesByPid: [pid_t: Bool] = [:]
+
+    func state(for pid: pid_t) -> Bool? {
+        lock.lock()
+        defer { lock.unlock() }
+        return statesByPid[pid]
+    }
+
+    func store(_ enabled: Bool, for pid: pid_t) {
+        lock.lock()
+        statesByPid[pid] = enabled
+        lock.unlock()
+    }
+
+    func invalidate(_ pid: pid_t) {
+        lock.lock()
+        statesByPid.removeValue(forKey: pid)
+        lock.unlock()
+    }
+}
+
 final class LockedClosingFrameGenerationMap: @unchecked Sendable {
     private let lock = NSLock()
     private var nextGeneration: UInt64 = 1
@@ -271,6 +296,7 @@ struct AppAXFrameWriteRequest: Sendable {
     let expectedWindow: AXWindowRef
     let frame: CGRect
     let currentFrameHint: CGRect?
+    let components: AXFrameComponents
     let generation: UInt64
     let verify: Bool
     let traceRequestId: UInt64
@@ -282,6 +308,7 @@ struct AppAXFrameWriteRequest: Sendable {
         expectedWindow: AXWindowRef,
         frame: CGRect,
         currentFrameHint: CGRect?,
+        components: AXFrameComponents = .all,
         generation: UInt64,
         verify: Bool,
         traceRequestId: UInt64 = 0
@@ -292,6 +319,7 @@ struct AppAXFrameWriteRequest: Sendable {
         self.expectedWindow = expectedWindow
         self.frame = frame
         self.currentFrameHint = currentFrameHint
+        self.components = components
         self.generation = generation
         self.verify = verify
         self.traceRequestId = traceRequestId
@@ -2165,6 +2193,7 @@ final class AppAXContext {
                 expectedWindow: $0.expectedWindow,
                 frame: $0.frame,
                 currentFrameHint: $0.currentFrameHint,
+                components: $0.components,
                 generation: generations.nextGeneration(for: $0.windowId),
                 verify: forceVerification || $0.verify,
                 traceRequestId: $0.traceRequestId
@@ -2186,7 +2215,8 @@ final class AppAXContext {
                 writeResult: .skipped(
                     targetFrame: $0.frame,
                     currentFrameHint: $0.currentFrameHint,
-                    failureReason: .contextUnavailable
+                    failureReason: .contextUnavailable,
+                    components: $0.components
                 ),
                 traceRequestId: $0.traceRequestId
             )
@@ -2404,11 +2434,16 @@ final class AppAXContext {
         var wasEnabled = false
         var value: CFTypeRef?
         let enhancedUIProbeStartNs = latencyActive ? DispatchTime.now().uptimeNanoseconds : 0
-        AppAXContextRuntimeMetrics.shared.noteEnhancedUICalls(1)
-        if AXUIElementCopyAttributeValue(axApp, enhancedUIKey, &value) == .success,
-           let boolValue = value as? Bool
-        {
-            wasEnabled = boolValue
+        if let cached = LockedEnhancedUIStateMap.shared.state(for: currentPid) {
+            wasEnabled = cached
+        } else {
+            AppAXContextRuntimeMetrics.shared.noteEnhancedUICalls(1)
+            if AXUIElementCopyAttributeValue(axApp, enhancedUIKey, &value) == .success,
+               let boolValue = value as? Bool
+            {
+                wasEnabled = boolValue
+                LockedEnhancedUIStateMap.shared.store(boolValue, for: currentPid)
+            }
         }
         let enhancedUIProbeEndNs = latencyActive ? DispatchTime.now().uptimeNanoseconds : 0
 
@@ -2622,6 +2657,7 @@ final class AppAXContext {
         if AppAXContext.contexts[pid] === self {
             AppAXContext.contexts.removeValue(forKey: pid)
         }
+        LockedEnhancedUIStateMap.shared.invalidate(pid)
 
         for (_, job) in activeFrameBatchJobs {
             job.cancel()
@@ -2734,8 +2770,8 @@ func applyFrameWriteRequest(
     _ request: AppAXFrameWriteRequest,
     pid: pid_t,
     generations: LockedWindowGenerationMap,
-    writeFrame: (AXWindowRef, CGRect, CGRect?, Bool) -> AXFrameWriteResult = {
-        AXWindowService.setFrame($0, frame: $1, currentFrameHint: $2, verify: $3)
+    writeFrame: (AXWindowRef, CGRect, CGRect?, AXFrameComponents, Bool) -> AXFrameWriteResult = {
+        AXWindowService.setFrame($0, frame: $1, currentFrameHint: $2, components: $3, verify: $4)
     },
     refreshWindow: (UInt32, pid_t) -> AXWindowRef? = {
         AXWindowService.axWindowRef(for: $0, pid: $1)
@@ -2749,7 +2785,7 @@ func applyFrameWriteRequest(
 
     func performWrite(_ window: AXWindowRef, attempt: UInt8) -> AXFrameWriteResult {
         guard let traceAttempt else {
-            return writeFrame(window, targetFrame, currentFrameHint, request.verify)
+            return writeFrame(window, targetFrame, currentFrameHint, request.components, request.verify)
         }
         let startedNs = DispatchTime.now().uptimeNanoseconds
         FrameEffectObservationTracker.shared.register(
@@ -2766,6 +2802,7 @@ func applyFrameWriteRequest(
             window,
             frame: targetFrame,
             currentFrameHint: currentFrameHint,
+            components: request.components,
             verify: request.verify
         )
         traceAttempt(attempt, startedNs, traced.timing, traced.result)
@@ -2835,7 +2872,8 @@ private func cancelledFrameApplyResult(for request: AppAXFrameWriteRequest) -> A
         writeResult: .skipped(
             targetFrame: request.frame,
             currentFrameHint: request.currentFrameHint,
-            failureReason: .cancelled
+            failureReason: .cancelled,
+            components: request.components
         ),
         traceRequestId: request.traceRequestId
     )

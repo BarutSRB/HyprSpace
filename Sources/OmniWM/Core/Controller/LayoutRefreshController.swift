@@ -301,6 +301,11 @@ import QuartzCore
                 scale: plan.monitor.scale
             )
         )
+        controller.surfaceReconciler.applyAcceptedTabRailGeometry(
+            plan.diff.tabRailGeometryCommands,
+            workspaceId: plan.workspaceId,
+            displayId: plan.monitor.displayId
+        )
         if let disposition = plan.dwindleAnimationTargetDisposition {
             acceptDwindleAnimationTarget(
                 disposition,

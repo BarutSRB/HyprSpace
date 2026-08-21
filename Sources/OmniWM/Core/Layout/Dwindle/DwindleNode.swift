@@ -126,6 +126,13 @@ struct DwindleTileSnapshot: Equatable {
     }
 }
 
+struct DwindleGroupedTileGeometry {
+    let id: DwindleTileId
+    let activeToken: WindowToken
+    let tileFrame: CGRect?
+    let contentFrame: CGRect?
+}
+
 enum DwindleWindowActivationOutcome: Equatable {
     case missing
     case selected

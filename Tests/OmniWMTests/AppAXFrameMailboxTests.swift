@@ -197,6 +197,56 @@ final class AppAXFrameMailboxTests: XCTestCase {
         XCTAssertEqual(snapshot.enhancedUICalls, 0)
     }
 
+    func testFailedEnhancedUIProbeRetriesOnNextEligibleBatch() {
+        let generations = LockedWindowGenerationMap()
+        let request = request(id: 1, windowId: 410_101, generations: generations)
+        let cache = LockedEnhancedUIStateMap.shared
+        cache.invalidate(request.pid)
+        defer { cache.invalidate(request.pid) }
+        AppAXContextRuntimeMetrics.shared.beginCapture()
+
+        _ = executeFrameWriteRequest(request, generations: generations)
+        _ = executeFrameWriteRequest(request, generations: generations)
+
+        AppAXContextRuntimeMetrics.shared.endCapture()
+        XCTAssertEqual(AppAXContextRuntimeMetrics.shared.snapshot().enhancedUICalls, 2)
+        XCTAssertNil(cache.state(for: request.pid))
+    }
+
+    func testCachedDisabledEnhancedUISuppressesProbe() {
+        let generations = LockedWindowGenerationMap()
+        let request = request(id: 1, windowId: 410_102, generations: generations)
+        let cache = LockedEnhancedUIStateMap.shared
+        cache.invalidate(request.pid)
+        cache.store(false, for: request.pid)
+        defer { cache.invalidate(request.pid) }
+        AppAXContextRuntimeMetrics.shared.beginCapture()
+
+        _ = executeFrameWriteRequest(request, generations: generations)
+
+        AppAXContextRuntimeMetrics.shared.endCapture()
+        XCTAssertEqual(AppAXContextRuntimeMetrics.shared.snapshot().enhancedUICalls, 0)
+        XCTAssertEqual(cache.state(for: request.pid), false)
+    }
+
+    func testEnhancedUICacheInvalidationRestoresProbe() {
+        let generations = LockedWindowGenerationMap()
+        let request = request(id: 1, windowId: 410_103, generations: generations)
+        let cache = LockedEnhancedUIStateMap.shared
+        cache.invalidate(request.pid)
+        cache.store(false, for: request.pid)
+        defer { cache.invalidate(request.pid) }
+        AppAXContextRuntimeMetrics.shared.beginCapture()
+
+        _ = executeFrameWriteRequest(request, generations: generations)
+        cache.invalidate(request.pid)
+        _ = executeFrameWriteRequest(request, generations: generations)
+
+        AppAXContextRuntimeMetrics.shared.endCapture()
+        XCTAssertEqual(AppAXContextRuntimeMetrics.shared.snapshot().enhancedUICalls, 1)
+        XCTAssertNil(cache.state(for: request.pid))
+    }
+
     func testTenThousandHeldOrdinarySubmissionsRemainBoundedAndCompleteExactlyOnce() throws {
         try assertTenThousandHeldSubmissionsRemainBounded(lane: .ordinary)
     }
@@ -402,6 +452,21 @@ final class AppAXFrameMailboxTests: XCTestCase {
         case .closing:
             XCTFail("Unexpected closing lane")
         }
+    }
+
+    private func executeFrameWriteRequest(
+        _ request: AppAXFrameWriteRequest,
+        generations: LockedWindowGenerationMap
+    ) -> [AXFrameApplyResult] {
+        AppAXContext.executeFrameWriteRequests(
+            [request],
+            pid: request.pid,
+            axApp: AXUIElementCreateApplication(request.pid),
+            generations: generations,
+            suppression: nil,
+            hardSuppression: nil,
+            isCancelled: { false }
+        )
     }
 
     private func request(

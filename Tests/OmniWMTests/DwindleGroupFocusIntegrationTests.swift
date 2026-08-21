@@ -574,7 +574,7 @@ final class DwindleGroupFocusIntegrationTests: XCTestCase {
         XCTAssertNil(fixture.controller.layoutRefreshController.layoutState.pendingRefresh)
     }
 
-    func testDwindleTabRailIsSuppressedDuringStructuralAnimation() throws {
+    func testDwindleTabRailIdentityRemainsProjectedDuringStructuralAnimation() throws {
         let fixture = try makeFixture { _, _ in }
         let monitor = try XCTUnwrap(
             fixture.controller.workspaceManager.monitor(for: fixture.workspaceId)
@@ -610,7 +610,64 @@ final class DwindleGroupFocusIntegrationTests: XCTestCase {
             )
         )
 
-        XCTAssertTrue(fixture.controller.dwindleLayoutHandler.desiredTabRailInfos().isEmpty)
+        XCTAssertFalse(fixture.controller.dwindleLayoutHandler.desiredTabRailInfos().isEmpty)
+    }
+
+    func testDwindleTabRailAnimationGeometryUsesPresentedTileFrame() throws {
+        let fixture = try makeFixture { _, _ in }
+        let monitor = try XCTUnwrap(fixture.controller.workspaceManager.monitor(for: fixture.workspaceId))
+        let snapshot = try XCTUnwrap(
+            fixture.engine.tileSnapshot(for: fixture.activeToken, in: fixture.workspaceId)
+        )
+        let tileFrame = try XCTUnwrap(snapshot.tileFrame)
+        let contentFrame = try XCTUnwrap(snapshot.contentFrame)
+        let node = try XCTUnwrap(fixture.engine.findNode(for: fixture.activeToken, in: fixture.workspaceId))
+        let fromFrame = CGRect(
+            x: contentFrame.minX - 180,
+            y: contentFrame.minY + 40,
+            width: contentFrame.width - 120,
+            height: contentFrame.height - 60
+        )
+        node.animateFrom(
+            oldFrame: fromFrame,
+            newFrame: contentFrame,
+            startTime: 10,
+            config: CubicConfig(duration: 1),
+            animated: true
+        )
+        let targetTime = 10.5
+        let monitorSnapshot = fixture.controller.layoutRefreshController.buildMonitorSnapshot(for: monitor)
+        let presentedContent = try XCTUnwrap(
+            fixture.engine.presentedFrame(
+                for: fixture.activeToken,
+                in: fixture.workspaceId,
+                at: targetTime
+            )
+        )
+
+        let command = try XCTUnwrap(
+            fixture.controller.dwindleLayoutHandler.dwindleTabRailGeometryCommands(
+                engine: fixture.engine,
+                workspaceId: fixture.workspaceId,
+                monitor: monitorSnapshot,
+                targetTime: targetTime
+            ).first
+        )
+        let left = contentFrame.minX - tileFrame.minX
+        let right = tileFrame.maxX - contentFrame.maxX
+        let bottom = contentFrame.minY - tileFrame.minY
+        let top = tileFrame.maxY - contentFrame.maxY
+        let expectedTileFrame = CGRect(
+            x: presentedContent.minX - left,
+            y: presentedContent.minY - bottom,
+            width: presentedContent.width + left + right,
+            height: presentedContent.height + bottom + top
+        ).roundedToPhysicalPixels(scale: monitorSnapshot.scale)
+
+        XCTAssertEqual(command.key, TabRailKey(workspaceId: fixture.workspaceId, owner: .dwindleTile(snapshot.id)))
+        XCTAssertEqual(command.tileFrame, expectedTileFrame)
+        XCTAssertNotEqual(command.tileFrame, tileFrame)
+        XCTAssertEqual(command.visibleTileFrame, expectedTileFrame.intersection(monitorSnapshot.visibleFrame))
     }
 
     func testValidRailSelectionIgnoresSuspendedPeer() throws {

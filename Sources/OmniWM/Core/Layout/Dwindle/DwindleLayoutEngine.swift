@@ -209,6 +209,18 @@ final class DwindleLayoutEngine {
         return snapshots
     }
 
+    func forEachGroupedTileGeometry(
+        in workspaceId: WorkspaceDescriptor.ID,
+        _ body: (DwindleGroupedTileGeometry) -> Void
+    ) {
+        guard let state = states[workspaceId] else { return }
+        visitGroupedTileGeometry(
+            node: state.root,
+            excludedTokens: state.excludedTokens,
+            body
+        )
+    }
+
     func tileFrame(for token: WindowToken, in workspaceId: WorkspaceDescriptor.ID) -> CGRect? {
         findNode(for: token, in: workspaceId)?.cachedFrame
     }
@@ -256,6 +268,43 @@ final class DwindleLayoutEngine {
                 node: child,
                 excludedTokens: excludedTokens,
                 into: &snapshots
+            )
+        }
+    }
+
+    private func visitGroupedTileGeometry(
+        node: DwindleNode,
+        excludedTokens: Set<WindowToken>,
+        _ body: (DwindleGroupedTileGeometry) -> Void
+    ) {
+        if let tile = node.tile {
+            var visibleMemberCount = 0
+            for member in tile.members where !excludedTokens.contains(member.token) {
+                visibleMemberCount += 1
+                if visibleMemberCount > 1 {
+                    break
+                }
+            }
+            guard visibleMemberCount > 1,
+                  let activeMember = visibleMember(in: tile, excluding: excludedTokens)
+            else {
+                return
+            }
+            body(
+                DwindleGroupedTileGeometry(
+                    id: tile.id,
+                    activeToken: activeMember.token,
+                    tileFrame: node.cachedFrame,
+                    contentFrame: node.cachedContentFrame
+                )
+            )
+            return
+        }
+        for child in node.children {
+            visitGroupedTileGeometry(
+                node: child,
+                excludedTokens: excludedTokens,
+                body
             )
         }
     }

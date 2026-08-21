@@ -3003,6 +3003,177 @@ final class RuntimeArchitectureTests: XCTestCase {
     }
 
     @MainActor
+    func testAXFrameLedgerPreservesPendingAllComponentsWhenPositionSupersedes() throws {
+        let ledger = AXFrameApplicationLedger()
+        let window = AXWindowRef(element: AXUIElementCreateApplication(getpid()), windowId: 10)
+        let first = ledger.prepareFrameApplication(
+            pid: getpid(),
+            windowId: 10,
+            expectedWindow: window,
+            frame: CGRect(x: 10, y: 20, width: 300, height: 200),
+            components: .all,
+            isRetry: false,
+            terminalObserver: nil
+        )
+        XCTAssertEqual(try XCTUnwrap(first.request).components, .all)
+
+        let second = ledger.prepareFrameApplication(
+            pid: getpid(),
+            windowId: 10,
+            expectedWindow: window,
+            frame: CGRect(x: 40, y: 50, width: 300, height: 200),
+            components: .position,
+            isRetry: false,
+            terminalObserver: nil
+        )
+
+        XCTAssertEqual(try XCTUnwrap(second.request).components, .all)
+    }
+
+    @MainActor
+    func testAXFrameLedgerUnionsPendingPositionAndSizeComponents() throws {
+        let ledger = AXFrameApplicationLedger()
+        let window = AXWindowRef(element: AXUIElementCreateApplication(getpid()), windowId: 10)
+        let first = ledger.prepareFrameApplication(
+            pid: getpid(),
+            windowId: 10,
+            expectedWindow: window,
+            frame: CGRect(x: 10, y: 20, width: 300, height: 200),
+            components: .position,
+            isRetry: false,
+            terminalObserver: nil
+        )
+        XCTAssertEqual(try XCTUnwrap(first.request).components, .position)
+
+        let second = ledger.prepareFrameApplication(
+            pid: getpid(),
+            windowId: 10,
+            expectedWindow: window,
+            frame: CGRect(x: 10, y: 20, width: 360, height: 240),
+            components: .size,
+            isRetry: false,
+            terminalObserver: nil
+        )
+
+        XCTAssertEqual(try XCTUnwrap(second.request).components, .all)
+    }
+
+    @MainActor
+    func testAXFrameLedgerPreservesVerificationAndCancelsSupersededObserver() throws {
+        let ledger = AXFrameApplicationLedger()
+        let window = AXWindowRef(element: AXUIElementCreateApplication(getpid()), windowId: 10)
+        let firstFrame = CGRect(x: 10, y: 20, width: 300, height: 200)
+        let latestFrame = CGRect(x: 40, y: 50, width: 300, height: 200)
+        var terminalResults: [AXFrameApplyResult] = []
+        let first = ledger.prepareFrameApplication(
+            pid: getpid(),
+            windowId: 10,
+            expectedWindow: window,
+            frame: firstFrame,
+            components: .all,
+            isRetry: false,
+            verify: true,
+            terminalObserver: { terminalResults.append($0) }
+        )
+        XCTAssertNotNil(first.request)
+
+        let second = ledger.prepareFrameApplication(
+            pid: getpid(),
+            windowId: 10,
+            expectedWindow: window,
+            frame: latestFrame,
+            components: .position,
+            isRetry: false,
+            verify: false,
+            terminalObserver: nil
+        )
+        let latestRequest = try XCTUnwrap(second.request)
+
+        XCTAssertEqual(latestRequest.components, .all)
+        XCTAssertTrue(latestRequest.verify)
+        XCTAssertEqual(second.deliveries.count, 1)
+        for delivery in second.deliveries {
+            delivery.deliver()
+        }
+        XCTAssertEqual(terminalResults.map(\.targetFrame), [firstFrame])
+        XCTAssertEqual(terminalResults.map(\.writeResult.failureReason), [.cancelled])
+
+        let outcome = ledger.handleFrameApplyResults([Self.frameResult(for: latestRequest)])
+        for delivery in outcome.deliveries {
+            delivery.deliver()
+        }
+
+        XCTAssertEqual(terminalResults.map(\.targetFrame), [firstFrame])
+    }
+
+    @MainActor
+    func testAcceptedFrameApplyClearsOnlyItsSkyLightLiveOrigin() {
+        let manager = AXManager()
+        defer { manager.cleanup() }
+        let pid: pid_t = 71037
+        let firstWindow = AXWindowRef(element: AXUIElementCreateApplication(pid), windowId: 10)
+        let firstFrame = CGRect(x: 10, y: 20, width: 300, height: 200)
+        manager.recordSkyLightMove(windowId: 10, origin: firstFrame.origin)
+        manager.recordSkyLightMove(windowId: 20, origin: CGPoint(x: 50, y: 60))
+
+        manager.handleAcceptedFrameApplySuccess(
+            AXFrameApplyResult(
+                pid: pid,
+                windowId: 10,
+                expectedWindow: firstWindow,
+                targetFrame: firstFrame,
+                currentFrameHint: nil,
+                writeResult: AXFrameWriteResult(
+                    targetFrame: firstFrame,
+                    observedFrame: firstFrame,
+                    writeOrder: .sizeThenPosition,
+                    sizeError: .success,
+                    positionError: .success,
+                    failureReason: nil,
+                    components: .all
+                )
+            )
+        )
+
+        XCTAssertNil(manager.skyLightLivePosition(for: 10))
+        XCTAssertEqual(manager.skyLightLivePosition(for: 20), CGPoint(x: 50, y: 60))
+    }
+
+    @MainActor
+    func testAXManagerCleanupInvalidatesAnimationFrameComponentProvenance() {
+        let manager = AXManager()
+        let windowId = 10
+        let frame = CGRect(x: 40, y: 50, width: 300, height: 200)
+        let translatedFrame = frame.offsetBy(dx: 30, dy: 0)
+        let resizedFrame = CGRect(
+            x: translatedFrame.minX,
+            y: translatedFrame.minY,
+            width: translatedFrame.width + 20,
+            height: translatedFrame.height
+        )
+        manager.confirmFrameWrite(for: windowId, frame: frame)
+        manager.recordSkyLightMove(windowId: windowId, origin: translatedFrame.origin)
+
+        XCTAssertEqual(
+            manager.animationFrameComponents(for: windowId, targetFrame: translatedFrame),
+            .position
+        )
+        XCTAssertEqual(
+            manager.animationFrameComponents(for: windowId, targetFrame: resizedFrame),
+            .all
+        )
+
+        manager.cleanup()
+
+        XCTAssertNil(manager.lastAppliedFrame(for: windowId))
+        XCTAssertNil(manager.skyLightLivePosition(for: windowId))
+        XCTAssertEqual(
+            manager.animationFrameComponents(for: windowId, targetFrame: translatedFrame),
+            .all
+        )
+    }
+
+    @MainActor
     func testAXFrameLedgerRekeysPendingRequestBeforeCompletion() throws {
         let ledger = AXFrameApplicationLedger()
         let frame = CGRect(x: 10, y: 20, width: 300, height: 200)
@@ -6206,6 +6377,7 @@ final class RuntimeArchitectureTests: XCTestCase {
             expectedWindow: request.expectedWindow,
             targetFrame: request.frame,
             currentFrameHint: request.currentFrameHint,
+            components: request.components,
             failureReason: failureReason
         )
     }
@@ -6217,6 +6389,7 @@ final class RuntimeArchitectureTests: XCTestCase {
         expectedWindow: AXWindowRef,
         targetFrame: CGRect,
         currentFrameHint: CGRect?,
+        components: AXFrameComponents = .all,
         failureReason: AXFrameWriteFailureReason? = nil
     ) -> AXFrameApplyResult {
         AXFrameApplyResult(
@@ -6232,7 +6405,8 @@ final class RuntimeArchitectureTests: XCTestCase {
                 writeOrder: .sizeThenPosition,
                 sizeError: .success,
                 positionError: .success,
-                failureReason: failureReason
+                failureReason: failureReason,
+                components: components
             )
         )
     }

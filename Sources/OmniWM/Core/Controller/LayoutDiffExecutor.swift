@@ -289,7 +289,8 @@ final class LayoutDiffExecutor {
                 let frameUpdate = AXFrameApplicationTarget(
                     pid: entry.pid,
                     window: entry.axRef,
-                    frame: change.frame
+                    frame: change.frame,
+                    components: change.components
                 )
                 if change.allowsTerminalRecovery {
                     terminalRecoveryFrameUpdates.append(frameUpdate)
@@ -299,7 +300,11 @@ final class LayoutDiffExecutor {
             }
         }
 
-        applyFrameUpdates(frameUpdates, isAnimationTick: plan.isAnimationTick, controller: controller)
+        applyFrameUpdates(
+            frameUpdates,
+            isAnimationTick: plan.isAnimationTick,
+            controller: controller
+        )
         refreshController.applyWorkspaceMonitorRelocationFrameUpdates(
             terminalRecoveryFrameUpdates,
             workspaceId: plan.workspaceId,
@@ -376,7 +381,8 @@ final class LayoutDiffExecutor {
             let frameUpdate = AXFrameApplicationTarget(
                 pid: entry.pid,
                 window: entry.axRef,
-                frame: change.frame
+                frame: change.frame,
+                components: change.components
             )
             if change.allowsTerminalRecovery {
                 terminalRecoveryFrameUpdates.append(frameUpdate)
@@ -450,16 +456,12 @@ final class LayoutDiffExecutor {
     ) {
         guard !frameUpdates.isEmpty else { return }
         let axManager = controller.axManager
-        guard isAnimationTick else {
+        if !isAnimationTick {
             for update in frameUpdates where axManager.skyLightLivePosition(for: update.windowId) != nil {
                 axManager.forceApplyNextFrame(for: update.windowId)
             }
-            axManager.applyFramesParallel(frameUpdates, verify: true)
-            axManager.clearSkyLightLivePositions()
-            return
         }
-
-        axManager.applyFramesParallel(frameUpdates, verify: false)
+        axManager.applyFramesParallel(frameUpdates, verify: !isAnimationTick)
     }
 
     private func resolveMonitor(

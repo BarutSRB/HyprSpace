@@ -304,19 +304,64 @@ final class TabRailManager {
     var onSelect: SelectionHandler?
 
     private var railWindows: [TabRailKey: TabRailWindow] = [:]
+    private var railInfos: [TabRailKey: TabRailInfo] = [:]
 
     func updateRails(_ infos: [TabRailInfo], forceOrdering: Bool = false) {
         var desiredKeys = Set<TabRailKey>()
         desiredKeys.reserveCapacity(infos.count)
         for info in infos where info.tabCount > 0 {
             desiredKeys.insert(info.key)
-            updateRail(info, forceOrdering: forceOrdering)
+            railInfos[info.key] = info
+            if railWindows[info.key] != nil || Self.isRenderable(visibleTileFrame: info.visibleTileFrame) {
+                updateRail(info, forceOrdering: forceOrdering)
+            }
         }
 
-        for (key, window) in railWindows where !desiredKeys.contains(key) {
-            window.close()
-            railWindows.removeValue(forKey: key)
+        let staleWindowKeys = railWindows.keys.filter { !desiredKeys.contains($0) }
+        for key in staleWindowKeys {
+            railWindows.removeValue(forKey: key)?.close()
         }
+        let staleInfoKeys = railInfos.keys.filter { !desiredKeys.contains($0) }
+        for key in staleInfoKeys {
+            railInfos.removeValue(forKey: key)
+        }
+    }
+
+    func applyAnimationGeometry(
+        _ commands: [TabRailGeometryCommand],
+        in workspaceId: WorkspaceDescriptor.ID? = nil
+    ) {
+        for command in commands {
+            if let workspaceId, command.key.workspaceId != workspaceId {
+                continue
+            }
+            if let window = railWindows[command.key] {
+                window.updateAnimationGeometry(command)
+                continue
+            }
+            guard Self.isRenderable(visibleTileFrame: command.visibleTileFrame),
+                  let info = railInfos[command.key]
+            else {
+                continue
+            }
+            let presentedInfo = TabRailInfo(
+                workspaceId: info.workspaceId,
+                owner: info.owner,
+                plannedSeq: info.plannedSeq,
+                tileFrame: command.tileFrame,
+                visibleTileFrame: command.visibleTileFrame,
+                tabCount: info.tabCount,
+                activeVisualIndex: info.activeVisualIndex,
+                activeWindowId: info.activeWindowId,
+                tabs: info.tabs
+            )
+            railInfos[command.key] = presentedInfo
+            updateRail(presentedInfo, forceOrdering: false)
+        }
+    }
+
+    func existingWindow(for key: TabRailKey) -> NSWindow? {
+        railWindows[key]
     }
 
     private func updateRail(_ info: TabRailInfo, forceOrdering: Bool) {
@@ -337,12 +382,17 @@ final class TabRailManager {
             window.close()
         }
         railWindows.removeAll()
+        railInfos.removeAll()
     }
 
     static func shouldShowRail(tileFrame: CGRect, visibleFrame: CGRect) -> Bool {
-        let intersection = tileFrame.intersection(visibleFrame)
-        return intersection.width >= TabRailMetrics.minVisibleIntersection &&
-            intersection.height >= TabRailMetrics.minVisibleIntersection
+        isRenderable(visibleTileFrame: tileFrame.intersection(visibleFrame))
+    }
+
+    fileprivate static func isRenderable(visibleTileFrame: CGRect) -> Bool {
+        !visibleTileFrame.isNull
+            && visibleTileFrame.width >= TabRailMetrics.minVisibleIntersection
+            && visibleTileFrame.height >= TabRailMetrics.minVisibleIntersection
     }
 }
 
@@ -354,6 +404,7 @@ private final class TabRailWindow: NSPanel {
     private var lastFrame: CGRect?
     private var lastActiveWindowId: Int?
     private var currentInfo: TabRailInfo?
+    private var animationGeometryNeedsAccessibilityRefresh = false
     private var registeredSurfaceWindowNumber: Int?
     private var accessibilityDisplayObserver: NSObjectProtocol?
 
@@ -421,6 +472,8 @@ private final class TabRailWindow: NSPanel {
 
     func update(info: TabRailInfo, forceOrdering: Bool) {
         currentInfo = info
+        let clampedActiveVisualIndex = min(max(0, info.activeVisualIndex), max(0, info.tabCount - 1))
+        railView.update(tabs: info.tabs, activeVisualIndex: clampedActiveVisualIndex)
 
         let frame = Self.railFrame(for: info.visibleTileFrame, tabCount: info.tabCount)
         guard frame.width > 1, frame.height > 1 else {
@@ -431,18 +484,17 @@ private final class TabRailWindow: NSPanel {
             return
         }
 
-        let accessibilityOriginChanged = self.frame.origin != frame.origin
+        let accessibilityGeometryChanged = animationGeometryNeedsAccessibilityRefresh || self.frame != frame
         if lastFrame != frame || self.frame != frame {
             setFrame(frame, display: false)
             railView.frame = CGRect(origin: .zero, size: frame.size)
             lastFrame = frame
-            if accessibilityOriginChanged {
-                railView.refreshAccessibilityFrames()
-            }
         }
 
-        let clampedActiveVisualIndex = min(max(0, info.activeVisualIndex), max(0, info.tabCount - 1))
-        railView.update(tabs: info.tabs, activeVisualIndex: clampedActiveVisualIndex)
+        if accessibilityGeometryChanged {
+            railView.refreshAccessibilityFrames()
+        }
+        animationGeometryNeedsAccessibilityRefresh = false
 
         let wasVisible = isVisible
         if forceOrdering || !wasVisible {
@@ -459,8 +511,51 @@ private final class TabRailWindow: NSPanel {
         lastActiveWindowId = info.activeWindowId
     }
 
+    func updateAnimationGeometry(_ command: TabRailGeometryCommand) {
+        guard let currentInfo, currentInfo.key == command.key else { return }
+        let frame = Self.railFrame(for: command.visibleTileFrame, tabCount: currentInfo.tabCount)
+        guard frame.width > 1, frame.height > 1 else {
+            if isVisible {
+                orderOut(nil)
+            }
+            if registeredSurfaceWindowNumber != nil {
+                surfaceCoordinator.unregister(id: surfaceID)
+                registeredSurfaceWindowNumber = nil
+            }
+            lastFrame = nil
+            return
+        }
+        guard frame != lastFrame || frame != self.frame else { return }
+
+        animationGeometryNeedsAccessibilityRefresh = true
+        if frame.size == self.frame.size {
+            SkyLight.shared.transactionMove(
+                UInt32(windowNumber),
+                origin: ScreenCoordinateSpace.toWindowServer(rect: frame).origin
+            )
+        } else {
+            railView.performWithoutAccessibilityGeometryUpdates {
+                setFrame(frame, display: false)
+                railView.frame = CGRect(origin: .zero, size: frame.size)
+                railView.needsDisplay = true
+            }
+        }
+        lastFrame = frame
+
+        guard !isVisible else { return }
+        orderFront(nil)
+        syncSurfaceRegistration()
+        if let targetWid = currentInfo.activeWindowId {
+            SkyLight.shared.orderWindow(UInt32(windowNumber), relativeTo: UInt32(targetWid))
+        }
+    }
+
     private static func railFrame(for visibleTileFrame: CGRect, tabCount: Int) -> CGRect {
-        guard tabCount > 0, !visibleTileFrame.isNull else { return .zero }
+        guard tabCount > 0,
+              TabRailManager.isRenderable(visibleTileFrame: visibleTileFrame)
+        else {
+            return .zero
+        }
         let width = max(TabRailMetrics.hitWidth, TabRailMetrics.totalWidth)
         let height = TabRailLayout.fittedHeight(tabCount: tabCount, availableHeight: visibleTileFrame.height)
         guard height > 1 else { return .zero }
@@ -523,6 +618,7 @@ private final class TabRailView: NSView {
 
     private var tracking: NSTrackingArea?
     private var accessibilityTabElements: [TabRailAccessibilityElement] = []
+    private var suppressAccessibilityGeometryUpdates = false
 
     private var tabCount: Int {
         tabs.count
@@ -556,7 +652,15 @@ private final class TabRailView: NSView {
 
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
-        refreshAccessibilityElements()
+        if !suppressAccessibilityGeometryUpdates {
+            refreshAccessibilityElements()
+        }
+    }
+
+    func performWithoutAccessibilityGeometryUpdates(_ body: () -> Void) {
+        suppressAccessibilityGeometryUpdates = true
+        body()
+        suppressAccessibilityGeometryUpdates = false
     }
 
     func refreshAccessibilityFrames() {

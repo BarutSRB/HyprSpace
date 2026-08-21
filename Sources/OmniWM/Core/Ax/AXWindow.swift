@@ -40,6 +40,22 @@ enum AXErrorWrapper: Error {
 
 typealias AXFrameRequestId = UInt64
 
+typealias AXFrameComponents = FrameMutationComponents
+
+func axFrameMatches(
+    _ observed: CGRect,
+    target: CGRect,
+    components: AXFrameComponents,
+    tolerance: CGFloat = FrameTolerance.frameWrite
+) -> Bool {
+    (!components.contains(.position)
+        || (abs(observed.origin.x - target.origin.x) < tolerance
+            && abs(observed.origin.y - target.origin.y) < tolerance))
+        && (!components.contains(.size)
+            || (abs(observed.width - target.width) < tolerance
+                && abs(observed.height - target.height) < tolerance))
+}
+
 enum AXFrameWriteOrder {
     case sizeThenPosition
     case positionThenSize
@@ -87,6 +103,25 @@ struct AXFrameWriteResult: Equatable, Sendable {
     let sizeError: AXError
     let positionError: AXError
     let failureReason: AXFrameWriteFailureReason?
+    let components: AXFrameComponents
+
+    init(
+        targetFrame: CGRect,
+        observedFrame: CGRect?,
+        writeOrder: AXFrameWriteOrder,
+        sizeError: AXError,
+        positionError: AXError,
+        failureReason: AXFrameWriteFailureReason?,
+        components: AXFrameComponents = .all
+    ) {
+        self.targetFrame = targetFrame
+        self.observedFrame = observedFrame
+        self.writeOrder = writeOrder
+        self.sizeError = sizeError
+        self.positionError = positionError
+        self.failureReason = failureReason
+        self.components = components
+    }
 
     var isVerifiedSuccess: Bool {
         failureReason == nil
@@ -100,7 +135,8 @@ struct AXFrameWriteResult: Equatable, Sendable {
         targetFrame: CGRect,
         currentFrameHint: CGRect?,
         failureReason: AXFrameWriteFailureReason,
-        observedFrame: CGRect? = nil
+        observedFrame: CGRect? = nil,
+        components: AXFrameComponents = .all
     ) -> Self {
         Self(
             targetFrame: targetFrame,
@@ -108,7 +144,8 @@ struct AXFrameWriteResult: Equatable, Sendable {
             writeOrder: AXWindowService.frameWriteOrder(currentFrame: currentFrameHint, targetFrame: targetFrame),
             sizeError: .success,
             positionError: .success,
-            failureReason: failureReason
+            failureReason: failureReason,
+            components: components
         )
     }
 }
@@ -120,6 +157,7 @@ struct AXFrameApplicationRequest: Equatable, Sendable {
     let expectedWindow: AXWindowRef
     let frame: CGRect
     let currentFrameHint: CGRect?
+    let components: AXFrameComponents
     var verify = true
     let traceRequestId: UInt64
 
@@ -130,6 +168,7 @@ struct AXFrameApplicationRequest: Equatable, Sendable {
         expectedWindow: AXWindowRef,
         frame: CGRect,
         currentFrameHint: CGRect?,
+        components: AXFrameComponents = .all,
         verify: Bool = true,
         traceRequestId: UInt64 = 0
     ) {
@@ -139,6 +178,7 @@ struct AXFrameApplicationRequest: Equatable, Sendable {
         self.expectedWindow = expectedWindow
         self.frame = frame
         self.currentFrameHint = currentFrameHint
+        self.components = components
         self.verify = verify
         self.traceRequestId = traceRequestId
     }
@@ -150,6 +190,7 @@ struct AXFrameApplicationRequest: Equatable, Sendable {
             && sameAXWindowIdentity(lhs.expectedWindow, rhs.expectedWindow)
             && lhs.frame == rhs.frame
             && lhs.currentFrameHint == rhs.currentFrameHint
+            && lhs.components == rhs.components
             && lhs.verify == rhs.verify
     }
 }
@@ -186,7 +227,7 @@ struct AXFrameApplyResult: Equatable, Sendable {
 
     var confirmedFrame: CGRect? {
         if let observedFrame = writeResult.observedFrame,
-           observedFrame.approximatelyEqual(to: targetFrame, tolerance: FrameTolerance.frameWrite)
+           axFrameMatches(observedFrame, target: targetFrame, components: writeResult.components)
         {
             return observedFrame
         }
@@ -500,12 +541,14 @@ enum AXWindowService {
         _ window: AXWindowRef,
         frame: CGRect,
         currentFrameHint: CGRect? = nil,
+        components: AXFrameComponents = .all,
         verify: Bool = true
     ) -> AXFrameWriteResult {
         setFrame(
             window,
             frame: frame,
             currentFrameHint: currentFrameHint,
+            components: components,
             verify: verify,
             timing: nil
         )
@@ -515,6 +558,7 @@ enum AXWindowService {
         _ window: AXWindowRef,
         frame: CGRect,
         currentFrameHint: CGRect? = nil,
+        components: AXFrameComponents = .all,
         verify: Bool = true
     ) -> (result: AXFrameWriteResult, timing: AXFrameSetterTiming) {
         var timing = AXFrameSetterTiming()
@@ -523,6 +567,7 @@ enum AXWindowService {
                 window,
                 frame: frame,
                 currentFrameHint: currentFrameHint,
+                components: components,
                 verify: verify,
                 timing: pointer
             )
@@ -534,59 +579,67 @@ enum AXWindowService {
         _ window: AXWindowRef,
         frame: CGRect,
         currentFrameHint: CGRect?,
+        components: AXFrameComponents,
         verify: Bool,
         timing: UnsafeMutablePointer<AXFrameSetterTiming>?
     ) -> AXFrameWriteResult {
-        let writeOrder = frameWriteOrder(
-            currentFrame: currentFrameHint ?? (try? self.frame(window)),
-            targetFrame: frame
-        )
+        precondition(!components.isEmpty)
+        let writeOrder = components == .all
+            ? frameWriteOrder(
+                currentFrame: currentFrameHint ?? (try? self.frame(window)),
+                targetFrame: frame
+            )
+            : .sizeThenPosition
         let axFrame = convertToAX(frame)
         var position = CGPoint(x: axFrame.origin.x, y: axFrame.origin.y)
         var size = CGSize(width: axFrame.size.width, height: axFrame.size.height)
-        guard let positionValue = AXValueCreate(.cgPoint, &position),
-              let sizeValue = AXValueCreate(.cgSize, &size)
+        let positionValue = components.contains(.position) ? AXValueCreate(.cgPoint, &position) : nil
+        let sizeValue = components.contains(.size) ? AXValueCreate(.cgSize, &size) : nil
+        guard (!components.contains(.position) || positionValue != nil),
+              (!components.contains(.size) || sizeValue != nil)
         else {
             return .skipped(
                 targetFrame: frame,
                 currentFrameHint: currentFrameHint,
-                failureReason: .valueCreationFailed
+                failureReason: .valueCreationFailed,
+                components: components
             )
         }
 
-        let positionError: AXError
-        let sizeError: AXError
+        var positionError: AXError = .success
+        var sizeError: AXError = .success
+
+        func setSize() -> AXError {
+            guard let sizeValue else { return .success }
+            let start = timing == nil ? 0 : DispatchTime.now().uptimeNanoseconds
+            let error = AXUIElementSetAttributeValue(window.element, kAXSizeAttribute as CFString, sizeValue)
+            if let timing {
+                timing.pointee.sizeNs = elapsedNanoseconds(since: start)
+            }
+            return error
+        }
+
+        func setPosition() -> AXError {
+            guard let positionValue else { return .success }
+            let start = timing == nil ? 0 : DispatchTime.now().uptimeNanoseconds
+            let error = AXUIElementSetAttributeValue(
+                window.element,
+                kAXPositionAttribute as CFString,
+                positionValue
+            )
+            if let timing {
+                timing.pointee.positionNs = elapsedNanoseconds(since: start)
+            }
+            return error
+        }
+
         switch writeOrder {
         case .sizeThenPosition:
-            let sizeStart = timing == nil ? 0 : DispatchTime.now().uptimeNanoseconds
-            sizeError = AXUIElementSetAttributeValue(window.element, kAXSizeAttribute as CFString, sizeValue)
-            if let timing {
-                timing.pointee.sizeNs = elapsedNanoseconds(since: sizeStart)
-            }
-            let positionStart = timing == nil ? 0 : DispatchTime.now().uptimeNanoseconds
-            positionError = AXUIElementSetAttributeValue(
-                window.element,
-                kAXPositionAttribute as CFString,
-                positionValue
-            )
-            if let timing {
-                timing.pointee.positionNs = elapsedNanoseconds(since: positionStart)
-            }
+            sizeError = setSize()
+            positionError = setPosition()
         case .positionThenSize:
-            let positionStart = timing == nil ? 0 : DispatchTime.now().uptimeNanoseconds
-            positionError = AXUIElementSetAttributeValue(
-                window.element,
-                kAXPositionAttribute as CFString,
-                positionValue
-            )
-            if let timing {
-                timing.pointee.positionNs = elapsedNanoseconds(since: positionStart)
-            }
-            let sizeStart = timing == nil ? 0 : DispatchTime.now().uptimeNanoseconds
-            sizeError = AXUIElementSetAttributeValue(window.element, kAXSizeAttribute as CFString, sizeValue)
-            if let timing {
-                timing.pointee.sizeNs = elapsedNanoseconds(since: sizeStart)
-            }
+            positionError = setPosition()
+            sizeError = setSize()
         }
 
         let verificationStart = timing == nil ? 0 : DispatchTime.now().uptimeNanoseconds
@@ -602,8 +655,7 @@ enum AXWindowService {
         } else if !verify {
             nil
         } else if let observedFrame {
-            observedFrame
-                .approximatelyEqual(to: frame, tolerance: FrameTolerance.frameWrite) ? nil : .verificationMismatch
+            axFrameMatches(observedFrame, target: frame, components: components) ? nil : .verificationMismatch
         } else {
             .readbackFailed
         }
@@ -614,7 +666,8 @@ enum AXWindowService {
             writeOrder: writeOrder,
             sizeError: sizeError,
             positionError: positionError,
-            failureReason: failureReason
+            failureReason: failureReason,
+            components: components
         )
     }
 
