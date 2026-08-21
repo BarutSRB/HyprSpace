@@ -3,6 +3,7 @@
 
 import AppKit
 import ApplicationServices
+import Dispatch
 import Foundation
 
 final class LockedWindowIdSet: @unchecked Sendable {
@@ -272,6 +273,29 @@ struct AppAXFrameWriteRequest: Sendable {
     let currentFrameHint: CGRect?
     let generation: UInt64
     let verify: Bool
+    let traceRequestId: UInt64
+
+    init(
+        requestId: AXFrameRequestId,
+        pid: pid_t,
+        windowId: Int,
+        expectedWindow: AXWindowRef,
+        frame: CGRect,
+        currentFrameHint: CGRect?,
+        generation: UInt64,
+        verify: Bool,
+        traceRequestId: UInt64 = 0
+    ) {
+        self.requestId = requestId
+        self.pid = pid
+        self.windowId = windowId
+        self.expectedWindow = expectedWindow
+        self.frame = frame
+        self.currentFrameHint = currentFrameHint
+        self.generation = generation
+        self.verify = verify
+        self.traceRequestId = traceRequestId
+    }
 }
 
 struct AppAXClosingFrameWriteRequest: Sendable {
@@ -2089,7 +2113,11 @@ final class AppAXContext {
             generations: frameWriteGenerations,
             forceVerification: false
         )
-        let outcome = frameMailbox.enqueue(requests, completion: completion)
+        let outcome = frameMailbox.enqueue(
+            requests,
+            callbackGeneration: callbackGeneration,
+            completion: completion
+        )
         for delivery in outcome.deliveries {
             delivery.deliver()
         }
@@ -2111,7 +2139,11 @@ final class AppAXContext {
             generations: parkFrameWriteGenerations,
             forceVerification: true
         )
-        let outcome = parkFrameMailbox.enqueue(requests, completion: completion)
+        let outcome = parkFrameMailbox.enqueue(
+            requests,
+            callbackGeneration: callbackGeneration,
+            completion: completion
+        )
         for delivery in outcome.deliveries {
             delivery.deliver()
         }
@@ -2134,7 +2166,8 @@ final class AppAXContext {
                 frame: $0.frame,
                 currentFrameHint: $0.currentFrameHint,
                 generation: generations.nextGeneration(for: $0.windowId),
-                verify: forceVerification || $0.verify
+                verify: forceVerification || $0.verify,
+                traceRequestId: $0.traceRequestId
             )
         }
     }
@@ -2154,7 +2187,8 @@ final class AppAXContext {
                     targetFrame: $0.frame,
                     currentFrameHint: $0.currentFrameHint,
                     failureReason: .contextUnavailable
-                )
+                ),
+                traceRequestId: $0.traceRequestId
             )
         }
     }
@@ -2166,6 +2200,7 @@ final class AppAXContext {
         nonisolated(unsafe) let appThread = thread
         let batchId = UUID()
         let currentPid = pid
+        let traceBundleId = AXWriteLatencyTrace.shared.isActive ? nsApp.bundleIdentifier : nil
 
         let batchJob = appThread.runInLoopAsync(autoCheckCancelled: false) { [self, axApp] job in
             AppAXContextRuntimeMetrics.shared.noteOrdinaryStarted(drain.items)
@@ -2177,6 +2212,11 @@ final class AppAXContext {
                 generations: frameWriteGenerations,
                 suppression: frameWriteSuppression,
                 hardSuppression: nil,
+                traceItems: drain.items,
+                drainId: drain.id,
+                lane: .ordinary,
+                callbackGeneration: callbackGeneration,
+                bundleId: traceBundleId,
                 isCancelled: { job.isCancelled }
             )
             scheduleOnMainRunLoop { [weak self] in
@@ -2200,6 +2240,7 @@ final class AppAXContext {
     ) {
         nonisolated(unsafe) let appThread = thread
         let currentPid = pid
+        let traceBundleId = AXWriteLatencyTrace.shared.isActive ? nsApp.bundleIdentifier : nil
         let batchJob = appThread.runInLoopAsync(autoCheckCancelled: false) { [self, axApp] job in
             AppAXContextRuntimeMetrics.shared.noteParkStarted(drain.items)
             let requests = drain.items.map(\.request)
@@ -2210,6 +2251,11 @@ final class AppAXContext {
                 generations: parkFrameWriteGenerations,
                 suppression: nil,
                 hardSuppression: frameWriteSuppression,
+                traceItems: drain.items,
+                drainId: drain.id,
+                lane: .park,
+                callbackGeneration: callbackGeneration,
+                bundleId: traceBundleId,
                 isCancelled: { job.isCancelled }
             )
             scheduleOnMainRunLoop { [weak self] in
@@ -2275,6 +2321,11 @@ final class AppAXContext {
         generations: LockedWindowGenerationMap,
         suppression: LockedWindowIdSet?,
         hardSuppression: LockedWindowIdSet?,
+        traceItems: [AppAXFrameMailbox.Item]? = nil,
+        drainId: UInt64 = 0,
+        lane: AppAXFrameLane = .ordinary,
+        callbackGeneration: UInt64 = 0,
+        bundleId: String? = nil,
         isCancelled: () -> Bool
     ) -> [AXFrameApplyResult] {
         var hasEligibleRequest = false
@@ -2297,9 +2348,10 @@ final class AppAXContext {
         if AppAXContextRuntimeMetrics.shared.isActive {
             AppAXContextRuntimeMetrics.shared.noteStaleBeforeIPC(staleBeforeIPC)
         }
+        let latencyActive = lane.supportsFrameEffectTracing && AXWriteLatencyTrace.shared.isActive
         guard hasEligibleRequest else {
-            return requests.map { request in
-                skippedFrameApplyResult(
+            return requests.enumerated().map { index, request in
+                let result = skippedFrameApplyResult(
                     for: request,
                     reason: frameWriteSkipReason(
                         for: request,
@@ -2309,37 +2361,72 @@ final class AppAXContext {
                         isCancelled: isCancelled
                     ) ?? .cancelled
                 )
+                if latencyActive {
+                    let item = traceItems.flatMap { items in
+                        items.indices.contains(index) ? items[index] : nil
+                    }
+                    let nowNs = DispatchTime.now().uptimeNanoseconds
+                    AXWriteLatencyTrace.shared.record(
+                        AXWriteLatencyTrace.Record(
+                            kind: .attempt,
+                            uptimeNs: nowNs,
+                            requestTraceId: FrameEffectTraceContext.currentCaptureIdentifier(
+                                request.traceRequestId
+                            ),
+                            requestId: request.requestId,
+                            pid: currentPid,
+                            bundleId: bundleId,
+                            callbackGeneration: callbackGeneration,
+                            lane: lane,
+                            submissionId: item?.submissionId ?? 0,
+                            drainId: drainId,
+                            windowId: request.windowId,
+                            attempt: 0,
+                            count: 1,
+                            queueNs: queueDelay(startedNs: nowNs, enqueuedAt: item?.enqueuedAt),
+                            sizeNs: 0,
+                            positionNs: 0,
+                            verificationNs: 0,
+                            enhancedUIProbeNs: 0,
+                            enhancedUIDisableNs: 0,
+                            enhancedUIRestoreNs: 0,
+                            totalNs: 0,
+                            enhancedUI: false,
+                            failureReason: result.writeResult.failureReason
+                        )
+                    )
+                }
+                return result
             }
         }
-        let latencyActive = AXWriteLatencyTrace.shared.isActive
-        let batchStart = latencyActive ? CACurrentMediaTime() : 0
-        var slowestWriteMs = 0.0
+        let batchStartNs = latencyActive ? DispatchTime.now().uptimeNanoseconds : 0
         let enhancedUIKey = "AXEnhancedUserInterface" as CFString
         var wasEnabled = false
         var value: CFTypeRef?
+        let enhancedUIProbeStartNs = latencyActive ? DispatchTime.now().uptimeNanoseconds : 0
         AppAXContextRuntimeMetrics.shared.noteEnhancedUICalls(1)
         if AXUIElementCopyAttributeValue(axApp, enhancedUIKey, &value) == .success,
            let boolValue = value as? Bool
         {
             wasEnabled = boolValue
         }
+        let enhancedUIProbeEndNs = latencyActive ? DispatchTime.now().uptimeNanoseconds : 0
 
+        let enhancedUIDisableStartNs = latencyActive && wasEnabled
+            ? DispatchTime.now().uptimeNanoseconds
+            : 0
         if wasEnabled {
             AppAXContextRuntimeMetrics.shared.noteEnhancedUICalls(1)
             AXUIElementSetAttributeValue(axApp, enhancedUIKey, kCFBooleanFalse)
         }
-
-        defer {
-            if wasEnabled {
-                AppAXContextRuntimeMetrics.shared.noteEnhancedUICalls(1)
-                AXUIElementSetAttributeValue(axApp, enhancedUIKey, kCFBooleanTrue)
-            }
-        }
+        let enhancedUIDisableEndNs = latencyActive && wasEnabled
+            ? DispatchTime.now().uptimeNanoseconds
+            : 0
 
         var results: [AXFrameApplyResult] = []
         results.reserveCapacity(requests.count)
 
-        for request in requests {
+        for (index, request) in requests.enumerated() {
             if let reason = frameWriteSkipReason(
                 for: request,
                 generations: generations,
@@ -2347,35 +2434,171 @@ final class AppAXContext {
                 hardSuppression: hardSuppression,
                 isCancelled: isCancelled
             ) {
-                results.append(skippedFrameApplyResult(for: request, reason: reason))
+                let result = skippedFrameApplyResult(for: request, reason: reason)
+                results.append(result)
+                if latencyActive {
+                    let item = traceItems.flatMap { items in
+                        items.indices.contains(index) ? items[index] : nil
+                    }
+                    let nowNs = DispatchTime.now().uptimeNanoseconds
+                    AXWriteLatencyTrace.shared.record(
+                        AXWriteLatencyTrace.Record(
+                            kind: .attempt,
+                            uptimeNs: nowNs,
+                            requestTraceId: FrameEffectTraceContext.currentCaptureIdentifier(
+                                request.traceRequestId
+                            ),
+                            requestId: request.requestId,
+                            pid: currentPid,
+                            bundleId: bundleId,
+                            callbackGeneration: callbackGeneration,
+                            lane: lane,
+                            submissionId: item?.submissionId ?? 0,
+                            drainId: drainId,
+                            windowId: request.windowId,
+                            attempt: 0,
+                            count: 1,
+                            queueNs: queueDelay(startedNs: nowNs, enqueuedAt: item?.enqueuedAt),
+                            sizeNs: 0,
+                            positionNs: 0,
+                            verificationNs: 0,
+                            enhancedUIProbeNs: 0,
+                            enhancedUIDisableNs: 0,
+                            enhancedUIRestoreNs: 0,
+                            totalNs: 0,
+                            enhancedUI: wasEnabled,
+                            failureReason: result.writeResult.failureReason
+                        )
+                    )
+                }
                 continue
             }
-            let writeStart = latencyActive ? CACurrentMediaTime() : 0
-            results.append(
-                applyFrameWriteRequest(
+            if latencyActive {
+                let item = traceItems.flatMap { items in
+                    items.indices.contains(index) ? items[index] : nil
+                }
+                results.append(
+                    applyFrameWriteRequest(
+                        request,
+                        pid: currentPid,
+                        generations: generations,
+                        traceLane: lane
+                    ) { attempt, attemptStartNs, timing, result in
+                        let endNs = DispatchTime.now().uptimeNanoseconds
+                        AXWriteLatencyTrace.shared.record(
+                            AXWriteLatencyTrace.Record(
+                                kind: .attempt,
+                                uptimeNs: endNs,
+                                requestTraceId: FrameEffectTraceContext.currentCaptureIdentifier(
+                                    request.traceRequestId
+                                ),
+                                requestId: request.requestId,
+                                pid: currentPid,
+                                bundleId: bundleId,
+                                callbackGeneration: callbackGeneration,
+                                lane: lane,
+                                submissionId: item?.submissionId ?? 0,
+                                drainId: drainId,
+                                windowId: request.windowId,
+                                attempt: attempt,
+                                count: 1,
+                                queueNs: mailboxQueueDelay(
+                                    attempt: attempt,
+                                    startedNs: attemptStartNs,
+                                    enqueuedAt: item?.enqueuedAt
+                                ),
+                                sizeNs: timing.sizeNs,
+                                positionNs: timing.positionNs,
+                                verificationNs: timing.verificationNs,
+                                enhancedUIProbeNs: 0,
+                                enhancedUIDisableNs: 0,
+                                enhancedUIRestoreNs: 0,
+                                totalNs: elapsedNanoseconds(
+                                    from: attemptStartNs,
+                                    to: endNs
+                                ),
+                                enhancedUI: wasEnabled,
+                                failureReason: result.failureReason
+                            )
+                        )
+                    }
+                )
+            } else {
+                results.append(applyFrameWriteRequest(
                     request,
                     pid: currentPid,
                     generations: generations
-                )
-            )
-            if latencyActive {
-                slowestWriteMs = max(slowestWriteMs, (CACurrentMediaTime() - writeStart) * 1000)
+                ))
             }
         }
 
+        let enhancedUIRestoreStartNs = latencyActive && wasEnabled
+            ? DispatchTime.now().uptimeNanoseconds
+            : 0
+        if wasEnabled {
+            AppAXContextRuntimeMetrics.shared.noteEnhancedUICalls(1)
+            AXUIElementSetAttributeValue(axApp, enhancedUIKey, kCFBooleanTrue)
+        }
+        let enhancedUIRestoreEndNs = latencyActive && wasEnabled
+            ? DispatchTime.now().uptimeNanoseconds
+            : 0
         if latencyActive {
+            let endNs = DispatchTime.now().uptimeNanoseconds
             AXWriteLatencyTrace.shared.record(
                 AXWriteLatencyTrace.Record(
-                    mediaTime: CACurrentMediaTime(),
+                    kind: .batch,
+                    uptimeNs: endNs,
+                    requestTraceId: 0,
+                    requestId: 0,
                     pid: currentPid,
+                    bundleId: bundleId,
+                    callbackGeneration: callbackGeneration,
+                    lane: lane,
+                    submissionId: 0,
+                    drainId: drainId,
+                    windowId: 0,
+                    attempt: 0,
                     count: requests.count,
-                    totalMs: (CACurrentMediaTime() - batchStart) * 1000,
-                    slowestMs: slowestWriteMs,
-                    enhancedUI: wasEnabled
+                    queueNs: 0,
+                    sizeNs: 0,
+                    positionNs: 0,
+                    verificationNs: 0,
+                    enhancedUIProbeNs: elapsedNanoseconds(
+                        from: enhancedUIProbeStartNs,
+                        to: enhancedUIProbeEndNs
+                    ),
+                    enhancedUIDisableNs: elapsedNanoseconds(
+                        from: enhancedUIDisableStartNs,
+                        to: enhancedUIDisableEndNs
+                    ),
+                    enhancedUIRestoreNs: elapsedNanoseconds(
+                        from: enhancedUIRestoreStartNs,
+                        to: enhancedUIRestoreEndNs
+                    ),
+                    totalNs: elapsedNanoseconds(from: batchStartNs, to: endNs),
+                    enhancedUI: wasEnabled,
+                    failureReason: nil
                 )
             )
         }
         return results
+    }
+
+    private nonisolated static func queueDelay(startedNs: UInt64, enqueuedAt: UInt64?) -> UInt64 {
+        guard let enqueuedAt, startedNs >= enqueuedAt else { return 0 }
+        return startedNs - enqueuedAt
+    }
+
+    nonisolated static func mailboxQueueDelay(
+        attempt: UInt8,
+        startedNs: UInt64,
+        enqueuedAt: UInt64?
+    ) -> UInt64 {
+        attempt == 1 ? queueDelay(startedNs: startedNs, enqueuedAt: enqueuedAt) : 0
+    }
+
+    private nonisolated static func elapsedNanoseconds(from start: UInt64, to end: UInt64) -> UInt64 {
+        end >= start ? end - start : 0
     }
 
     func destroy() {
@@ -2516,22 +2739,44 @@ func applyFrameWriteRequest(
     },
     refreshWindow: (UInt32, pid_t) -> AXWindowRef? = {
         AXWindowService.axWindowRef(for: $0, pid: $1)
-    }
+    },
+    traceLane: AppAXFrameLane = .ordinary,
+    traceAttempt: ((UInt8, UInt64, AXFrameSetterTiming, AXFrameWriteResult) -> Void)? = nil
 ) -> AXFrameApplyResult {
     let targetFrame = request.frame
     let currentFrameHint = request.currentFrameHint
     let windowId = request.windowId
 
+    func performWrite(_ window: AXWindowRef, attempt: UInt8) -> AXFrameWriteResult {
+        guard let traceAttempt else {
+            return writeFrame(window, targetFrame, currentFrameHint, request.verify)
+        }
+        let startedNs = DispatchTime.now().uptimeNanoseconds
+        FrameEffectObservationTracker.shared.register(
+            traceRequestId: request.traceRequestId,
+            requestId: request.requestId,
+            pid: pid,
+            windowId: windowId,
+            lane: traceLane,
+            attempt: attempt,
+            target: targetFrame,
+            startedNs: startedNs
+        )
+        let traced = AXWindowService.setFrameTraced(
+            window,
+            frame: targetFrame,
+            currentFrameHint: currentFrameHint,
+            verify: request.verify
+        )
+        traceAttempt(attempt, startedNs, traced.timing, traced.result)
+        return traced.result
+    }
+
     let expectedWindow = request.expectedWindow
     guard generations.isCurrent(request.generation, for: windowId) else {
         return cancelledFrameApplyResult(for: request)
     }
-    let initialResult = writeFrame(
-        expectedWindow,
-        targetFrame,
-        currentFrameHint,
-        request.verify
-    )
+    let initialResult = performWrite(expectedWindow, attempt: 1)
     guard generations.isCurrent(request.generation, for: windowId) else {
         return cancelledFrameApplyResult(for: request)
     }
@@ -2551,12 +2796,7 @@ func applyFrameWriteRequest(
         guard generations.isCurrent(request.generation, for: windowId) else {
             return cancelledFrameApplyResult(for: request)
         }
-        let retryResult = writeFrame(
-            refreshedAXRef,
-            targetFrame,
-            currentFrameHint,
-            request.verify
-        )
+        let retryResult = performWrite(refreshedAXRef, attempt: 2)
         guard generations.isCurrent(request.generation, for: windowId) else {
             return cancelledFrameApplyResult(for: request)
         }
@@ -2567,7 +2807,8 @@ func applyFrameWriteRequest(
             expectedWindow: expectedWindow,
             targetFrame: targetFrame,
             currentFrameHint: currentFrameHint,
-            writeResult: retryResult
+            writeResult: retryResult,
+            traceRequestId: request.traceRequestId
         )
     }
 
@@ -2578,7 +2819,8 @@ func applyFrameWriteRequest(
         expectedWindow: expectedWindow,
         targetFrame: targetFrame,
         currentFrameHint: currentFrameHint,
-        writeResult: initialResult
+        writeResult: initialResult,
+        traceRequestId: request.traceRequestId
     )
 }
 
@@ -2594,7 +2836,8 @@ private func cancelledFrameApplyResult(for request: AppAXFrameWriteRequest) -> A
             targetFrame: request.frame,
             currentFrameHint: request.currentFrameHint,
             failureReason: .cancelled
-        )
+        ),
+        traceRequestId: request.traceRequestId
     )
 }
 

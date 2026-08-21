@@ -438,7 +438,8 @@ func skippedFrameApplyResult(
             targetFrame: request.frame,
             currentFrameHint: request.currentFrameHint,
             failureReason: reason
-        )
+        ),
+        traceRequestId: request.traceRequestId
     )
 }
 
@@ -519,13 +520,29 @@ final class AppAXFrameMailbox {
 
     func enqueue(
         _ requests: [AppAXFrameWriteRequest],
+        callbackGeneration: UInt64 = 0,
         completion: @escaping Completion
     ) -> Outcome {
         guard !requests.isEmpty else {
             return Outcome(drain: nil, deliveries: [Delivery(results: [], completion: completion)])
         }
+        let frameTraceActive = FrameApplyTrace.shared.isActive
         AppAXContextRuntimeMetrics.shared.noteSubmitted(requests.count, lane: lane)
         guard !isStopped else {
+            if frameTraceActive {
+                for request in requests {
+                    FrameApplyTrace.recordEvent(
+                        pid: request.pid,
+                        windowId: request.windowId,
+                        outcome: "mailbox/stopped/terminal",
+                        target: request.frame,
+                        requestId: request.requestId,
+                        traceRequestId: request.traceRequestId,
+                        callbackGeneration: callbackGeneration,
+                        lane: lane
+                    )
+                }
+            }
             return stoppedOutcome(requests, completion: completion)
         }
 
@@ -537,20 +554,37 @@ final class AppAXFrameMailbox {
             results: Array(repeating: nil, count: requests.count),
             completion: completion
         )
+        let capturesEnqueueTime = lane.supportsFrameEffectTracing
+            && (AppAXContextRuntimeMetrics.shared.isActive || AXWriteLatencyTrace.shared.isActive)
         var deliveries: [Delivery] = []
         for (index, request) in requests.enumerated() {
+            let enqueuedAt = capturesEnqueueTime
+                ? DispatchTime.now().uptimeNanoseconds
+                : nil
             if let superseded = pendingByWindowId.updateValue(
                 Item(
                     submissionId: submissionId,
                     index: index,
                     request: request,
-                    enqueuedAt: AppAXContextRuntimeMetrics.shared.isActive
-                        ? DispatchTime.now().uptimeNanoseconds
-                        : nil
+                    enqueuedAt: enqueuedAt
                 ),
                 forKey: request.windowId
             ) {
                 AppAXContextRuntimeMetrics.shared.noteReplaced(lane: lane)
+                if frameTraceActive {
+                    FrameApplyTrace.recordEvent(
+                        pid: superseded.request.pid,
+                        windowId: superseded.request.windowId,
+                        outcome: "mailbox/superseded/terminal",
+                        target: superseded.request.frame,
+                        requestId: superseded.request.requestId,
+                        traceRequestId: superseded.request.traceRequestId,
+                        relatedTraceId: request.traceRequestId,
+                        callbackGeneration: callbackGeneration,
+                        lane: lane,
+                        submissionId: superseded.submissionId
+                    )
+                }
                 resolve(
                     superseded,
                     result: skippedFrameApplyResult(for: superseded.request, reason: .cancelled),

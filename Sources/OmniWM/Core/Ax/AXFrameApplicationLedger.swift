@@ -25,6 +25,25 @@ struct AXFrameRetryRequest: Equatable, Sendable {
     let expectedWindow: AXWindowRef
     let frame: CGRect
     let currentFrameHint: CGRect?
+    let traceRequestId: UInt64
+
+    init(
+        requestId: AXFrameRequestId,
+        pid: pid_t,
+        windowId: Int,
+        expectedWindow: AXWindowRef,
+        frame: CGRect,
+        currentFrameHint: CGRect?,
+        traceRequestId: UInt64 = 0
+    ) {
+        self.requestId = requestId
+        self.pid = pid
+        self.windowId = windowId
+        self.expectedWindow = expectedWindow
+        self.frame = frame
+        self.currentFrameHint = currentFrameHint
+        self.traceRequestId = traceRequestId
+    }
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.requestId == rhs.requestId
@@ -42,6 +61,26 @@ struct AXFrameTerminalRefusal: Equatable {
     let targetFrame: CGRect
     let observedFrame: CGRect
     let failureReason: AXFrameWriteFailureReason
+    let requestId: AXFrameRequestId
+    let traceRequestId: UInt64
+
+    init(
+        pid: pid_t,
+        windowId: Int,
+        targetFrame: CGRect,
+        observedFrame: CGRect,
+        failureReason: AXFrameWriteFailureReason,
+        requestId: AXFrameRequestId = 0,
+        traceRequestId: UInt64 = 0
+    ) {
+        self.pid = pid
+        self.windowId = windowId
+        self.targetFrame = targetFrame
+        self.observedFrame = observedFrame
+        self.failureReason = failureReason
+        self.requestId = requestId
+        self.traceRequestId = traceRequestId
+    }
 }
 
 struct AXFrameEnqueueDecision {
@@ -85,6 +124,7 @@ final class AXFrameApplicationLedger {
         let targetFrame: CGRect
         let currentFrameHint: CGRect?
         var observers: [AXFrameApplicationTerminalObserver]
+        var traceRequestId: UInt64
     }
 
     private var appliedFrameStates: [Int: AppliedFrameState] = [:]
@@ -95,6 +135,7 @@ final class AXFrameApplicationLedger {
     private var retryBudgetByWindowId: [Int: Int] = [:]
     private var forceApplyWindowIds: Set<Int> = []
     private var pendingFrameRequestIdByWindowId: [Int: AXFrameRequestId] = [:]
+    private var pendingFrameTraceRequestIdByWindowId: [Int: UInt64] = [:]
     private var pendingFrameObserversByRequestId: [AXFrameRequestId: PendingFrameObserver] = [:]
     private var observerRequestIdByWindowId: [Int: AXFrameRequestId] = [:]
     private var rekeyedWindowIdsByPreviousId: [Int: Int] = [:]
@@ -279,6 +320,9 @@ final class AXFrameApplicationLedger {
         if let requestId = pendingFrameRequestIdByWindowId.removeValue(forKey: oldWindowId) {
             pendingFrameRequestIdByWindowId[newWindowId] = requestId
         }
+        if let traceRequestId = pendingFrameTraceRequestIdByWindowId.removeValue(forKey: oldWindowId) {
+            pendingFrameTraceRequestIdByWindowId[newWindowId] = traceRequestId
+        }
 
         if var failure = recentFrameWriteFailures.removeValue(forKey: oldWindowId) {
             failure.expectedWindow = AXWindowRef(
@@ -328,6 +372,7 @@ final class AXFrameApplicationLedger {
         pendingFrameWrites.removeValue(forKey: windowId)
         pendingFrameWindows.removeValue(forKey: windowId)
         pendingFrameRequestIdByWindowId.removeValue(forKey: windowId)
+        pendingFrameTraceRequestIdByWindowId.removeValue(forKey: windowId)
         recentFrameWriteFailures.removeValue(forKey: windowId)
         retryBudgetByWindowId.removeValue(forKey: windowId)
         forceApplyWindowIds.remove(windowId)
@@ -345,6 +390,7 @@ final class AXFrameApplicationLedger {
 
     private func cancelFrameJob(pid: pid_t?, windowId: Int) -> AXFrameJobCancellationOutcome {
         let requestId = pendingFrameRequestIdByWindowId[windowId]
+        let traceRequestId = pendingFrameTraceRequestIdByWindowId[windowId] ?? 0
         let targetFrame = pendingFrameWrites[windowId]
         let expectedWindow = pendingFrameWindows[windowId]
         let currentFrameHint = appliedFrameStates[windowId]?.frame
@@ -366,7 +412,8 @@ final class AXFrameApplicationLedger {
                     currentFrameHint: currentFrameHint,
                     failureReason: .cancelled,
                     observedFrame: currentFrameHint
-                )
+                ),
+                traceRequestId: traceRequestId
             )
         } else {
             nil
@@ -374,6 +421,7 @@ final class AXFrameApplicationLedger {
         pendingFrameWrites.removeValue(forKey: windowId)
         pendingFrameWindows.removeValue(forKey: windowId)
         pendingFrameRequestIdByWindowId.removeValue(forKey: windowId)
+        pendingFrameTraceRequestIdByWindowId.removeValue(forKey: windowId)
         recentFrameWriteFailures.removeValue(forKey: windowId)
         retryBudgetByWindowId.removeValue(forKey: windowId)
         forceApplyWindowIds.remove(windowId)
@@ -391,6 +439,7 @@ final class AXFrameApplicationLedger {
         pendingFrameWrites.removeValue(forKey: windowId)
         pendingFrameWindows.removeValue(forKey: windowId)
         pendingFrameRequestIdByWindowId.removeValue(forKey: windowId)
+        pendingFrameTraceRequestIdByWindowId.removeValue(forKey: windowId)
         recentFrameWriteFailures.removeValue(forKey: windowId)
         retryBudgetByWindowId.removeValue(forKey: windowId)
         forceApplyWindowIds.remove(windowId)
@@ -405,8 +454,13 @@ final class AXFrameApplicationLedger {
         frame: CGRect,
         isRetry: Bool,
         verify: Bool = true,
-        terminalObserver: AXFrameApplicationTerminalObserver?
+        terminalObserver: AXFrameApplicationTerminalObserver?,
+        traceOrigin: FrameEffectTraceOrigin = .none,
+        parentTraceRequestId: UInt64 = 0
     ) -> AXFrameEnqueueDecision {
+        let traceRequestId = traceOrigin.effectId != 0 || parentTraceRequestId != 0
+            ? FrameEffectTraceContext.makeRequestTraceId(parentTraceId: parentTraceRequestId)
+            : 0
         let cachedState = appliedFrameStates[windowId]
         let cachedFrame = cachedState?.frame
         let pendingFrame = pendingFrameWrites[windowId]
@@ -428,9 +482,35 @@ final class AXFrameApplicationLedger {
                        targetFrame: frame
                    )
                 {
+                    if traceRequestId != 0 {
+                        recordTraceDecision(
+                            traceRequestId: traceRequestId,
+                            effectOrigin: traceOrigin,
+                            parentTraceRequestId: parentTraceRequestId,
+                            requestId: 0,
+                            pid: pid,
+                            windowId: windowId,
+                            frame: frame,
+                            outcome: "ledger-coalesced/pending",
+                            relatedTraceRequestId: pendingFrameTraceRequestIdByWindowId[windowId] ?? 0
+                        )
+                    }
                     return AXFrameEnqueueDecision()
                 }
                 if terminalObserver == nil || isRetry {
+                    if traceRequestId != 0 {
+                        recordTraceDecision(
+                            traceRequestId: traceRequestId,
+                            effectOrigin: traceOrigin,
+                            parentTraceRequestId: parentTraceRequestId,
+                            requestId: 0,
+                            pid: pid,
+                            windowId: windowId,
+                            frame: frame,
+                            outcome: "ledger-coalesced/pending",
+                            relatedTraceRequestId: pendingFrameTraceRequestIdByWindowId[windowId] ?? 0
+                        )
+                    }
                     return AXFrameEnqueueDecision()
                 }
             } else if let cachedState,
@@ -439,21 +519,47 @@ final class AXFrameApplicationLedger {
                       !shouldReverifyAssumedFrame
             {
                 if let terminalObserver {
+                    let noOpRequestId = makeNextFrameApplicationRequestId()
+                    if traceRequestId != 0 {
+                        recordTraceDecision(
+                            traceRequestId: traceRequestId,
+                            effectOrigin: traceOrigin,
+                            parentTraceRequestId: parentTraceRequestId,
+                            requestId: noOpRequestId,
+                            pid: pid,
+                            windowId: windowId,
+                            frame: frame,
+                            outcome: "ledger-noop/applied/terminal"
+                        )
+                    }
                     return AXFrameEnqueueDecision(
                         deliveries: [
                             AXFrameTerminalDelivery(
                                 result: successfulNoOpFrameApplyResult(
-                                    requestId: makeNextFrameApplicationRequestId(),
+                                    requestId: noOpRequestId,
                                     pid: pid,
                                     windowId: windowId,
                                     expectedWindow: expectedWindow,
                                     frame: frame,
                                     currentFrameHint: cachedFrame,
-                                    observedFrame: cachedState.frame
+                                    observedFrame: cachedState.frame,
+                                    traceRequestId: traceRequestId
                                 ),
                                 observers: [terminalObserver]
                             )
                         ]
+                    )
+                }
+                if traceRequestId != 0 {
+                    recordTraceDecision(
+                        traceRequestId: traceRequestId,
+                        effectOrigin: traceOrigin,
+                        parentTraceRequestId: parentTraceRequestId,
+                        requestId: 0,
+                        pid: pid,
+                        windowId: windowId,
+                        frame: frame,
+                        outcome: "ledger-noop/applied/terminal"
                     )
                 }
                 return AXFrameEnqueueDecision()
@@ -481,6 +587,11 @@ final class AXFrameApplicationLedger {
         pendingFrameWrites[windowId] = frame
         pendingFrameWindows[windowId] = expectedWindow
         pendingFrameRequestIdByWindowId[windowId] = requestId
+        if traceRequestId != 0 {
+            pendingFrameTraceRequestIdByWindowId[windowId] = traceRequestId
+        } else if !pendingFrameTraceRequestIdByWindowId.isEmpty {
+            pendingFrameTraceRequestIdByWindowId.removeValue(forKey: windowId)
+        }
         if !isRetry {
             recentFrameWriteFailures.removeValue(forKey: windowId)
         }
@@ -491,6 +602,7 @@ final class AXFrameApplicationLedger {
         {
             pendingFrameObserversByRequestId.removeValue(forKey: existingObserverRequestId)
             pendingObserver.windowId = windowId
+            pendingObserver.traceRequestId = traceRequestId
             if let terminalObserver {
                 pendingObserver.observers.append(terminalObserver)
             }
@@ -503,12 +615,25 @@ final class AXFrameApplicationLedger {
                 expectedWindow: expectedWindow,
                 targetFrame: frame,
                 currentFrameHint: cachedFrame,
-                observers: [terminalObserver]
+                observers: [terminalObserver],
+                traceRequestId: traceRequestId
             )
             observerRequestIdByWindowId[windowId] = requestId
         }
         if !isRetry {
             retryBudgetByWindowId[windowId] = 1
+        }
+        if traceRequestId != 0 {
+            recordTraceDecision(
+                traceRequestId: traceRequestId,
+                effectOrigin: traceOrigin,
+                parentTraceRequestId: parentTraceRequestId,
+                requestId: requestId,
+                pid: pid,
+                windowId: windowId,
+                frame: frame,
+                outcome: isRetry ? "ledger-prepared/retry" : "ledger-prepared"
+            )
         }
         return AXFrameEnqueueDecision(
             request: AXFrameApplicationRequest(
@@ -518,7 +643,8 @@ final class AXFrameApplicationLedger {
                 expectedWindow: expectedWindow,
                 frame: frame,
                 currentFrameHint: cachedFrame,
-                verify: verify
+                verify: verify,
+                traceRequestId: traceRequestId
             ),
             deliveries: deliveries,
             shouldCancelPendingRetry: !isRetry
@@ -546,6 +672,7 @@ final class AXFrameApplicationLedger {
             pendingFrameWrites.removeValue(forKey: resolvedWindowId)
             pendingFrameWindows.removeValue(forKey: resolvedWindowId)
             pendingFrameRequestIdByWindowId.removeValue(forKey: resolvedWindowId)
+            pendingFrameTraceRequestIdByWindowId.removeValue(forKey: resolvedWindowId)
 
             if let confirmedFrame = resolvedResult.confirmedFrame {
                 appliedFrameStates[resolvedWindowId] = AppliedFrameState(
@@ -622,7 +749,9 @@ final class AXFrameApplicationLedger {
                             windowId: resolvedWindowId,
                             targetFrame: resolvedResult.targetFrame,
                             observedFrame: observedFrame,
-                            failureReason: failureReason
+                            failureReason: failureReason,
+                            requestId: resolvedResult.requestId,
+                            traceRequestId: resolvedResult.traceRequestId
                         )
                     )
                 }
@@ -643,7 +772,8 @@ final class AXFrameApplicationLedger {
                     windowId: resolvedWindowId,
                     expectedWindow: resolvedResult.expectedWindow,
                     frame: resolvedResult.targetFrame,
-                    currentFrameHint: resolvedResult.currentFrameHint
+                    currentFrameHint: resolvedResult.currentFrameHint,
+                    traceRequestId: resolvedResult.traceRequestId
                 )
             )
         }
@@ -672,7 +802,8 @@ final class AXFrameApplicationLedger {
                         currentFrameHint: currentFrameHint,
                         failureReason: .cancelled,
                         observedFrame: currentFrameHint
-                    )
+                    ),
+                    traceRequestId: pendingObserver.traceRequestId
                 ),
                 observers: pendingObserver.observers
             )
@@ -683,6 +814,7 @@ final class AXFrameApplicationLedger {
         pendingFrameWrites.removeAll()
         pendingFrameWindows.removeAll()
         pendingFrameRequestIdByWindowId.removeAll()
+        pendingFrameTraceRequestIdByWindowId.removeAll()
         recentFrameWriteFailures.removeAll()
         retryBudgetByWindowId.removeAll()
         forceApplyWindowIds.removeAll()
@@ -712,7 +844,8 @@ final class AXFrameApplicationLedger {
                         currentFrameHint: currentFrameHint,
                         failureReason: .cancelled,
                         observedFrame: currentFrameHint
-                    )
+                    ),
+                    traceRequestId: pendingObserver.traceRequestId
                 ),
                 observers: pendingObserver.observers
             )
@@ -787,7 +920,8 @@ final class AXFrameApplicationLedger {
         expectedWindow: AXWindowRef,
         frame: CGRect,
         currentFrameHint: CGRect?,
-        observedFrame: CGRect
+        observedFrame: CGRect,
+        traceRequestId: UInt64
     ) -> AXFrameApplyResult {
         AXFrameApplyResult(
             requestId: requestId,
@@ -806,7 +940,8 @@ final class AXFrameApplicationLedger {
                 sizeError: .success,
                 positionError: .success,
                 failureReason: nil
-            )
+            ),
+            traceRequestId: traceRequestId
         )
     }
 
@@ -828,7 +963,33 @@ final class AXFrameApplicationLedger {
                 sizeError: result.writeResult.sizeError,
                 positionError: result.writeResult.positionError,
                 failureReason: nil
-            )
+            ),
+            traceRequestId: result.traceRequestId
+        )
+    }
+
+    private func recordTraceDecision(
+        traceRequestId: UInt64,
+        effectOrigin: FrameEffectTraceOrigin,
+        parentTraceRequestId: UInt64,
+        requestId: AXFrameRequestId,
+        pid: pid_t,
+        windowId: Int,
+        frame: CGRect,
+        outcome: String,
+        relatedTraceRequestId: UInt64 = 0
+    ) {
+        guard traceRequestId != 0 else { return }
+        FrameApplyTrace.recordEvent(
+            pid: pid,
+            windowId: windowId,
+            outcome: outcome,
+            target: frame,
+            requestId: requestId,
+            traceRequestId: traceRequestId,
+            effectOrigin: effectOrigin,
+            parentTraceId: parentTraceRequestId,
+            relatedTraceId: relatedTraceRequestId
         )
     }
 

@@ -82,6 +82,10 @@ enum OverviewFrameTrace {
             recorder.endCapture()
         }
 
+        func releaseStorage() {
+            recorder.releaseStorage()
+        }
+
         func dump() -> String {
             recorder.dump()
         }

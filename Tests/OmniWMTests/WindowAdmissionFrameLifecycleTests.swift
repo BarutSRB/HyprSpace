@@ -70,7 +70,9 @@ final class WindowAdmissionFrameLifecycleTests: XCTestCase {
                     windowId: windowId,
                     targetFrame: target,
                     observedFrame: observed,
-                    failureReason: failure
+                    failureReason: failure,
+                    requestId: retryRequest.requestId,
+                    traceRequestId: retryRequest.traceRequestId
                 )
             ]
         )
@@ -546,7 +548,9 @@ final class WindowAdmissionFrameLifecycleTests: XCTestCase {
                     windowId: windowId,
                     targetFrame: target,
                     observedFrame: retryObserved,
-                    failureReason: .verificationMismatch
+                    failureReason: .verificationMismatch,
+                    requestId: retryRequest.requestId,
+                    traceRequestId: retryRequest.traceRequestId
                 )
             ]
         )

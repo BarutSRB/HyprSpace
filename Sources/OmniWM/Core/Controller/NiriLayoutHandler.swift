@@ -328,6 +328,7 @@ enum StructuralMutationOutcome: Equatable {
         ScrollTickTrace.shared.record(
             ScrollTickTrace.Record(
                 mediaTime: CACurrentMediaTime(),
+                effectId: FrameEffectTraceContext.currentOrigin.effectId,
                 displayId: monitor.displayId,
                 animsMs: spans.anims,
                 snapshotMs: spans.snapshot,

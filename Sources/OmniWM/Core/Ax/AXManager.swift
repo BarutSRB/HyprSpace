@@ -437,7 +437,10 @@ final class AXManager {
                 pid: pid,
                 windowId: windowId,
                 outcome: "outcome=ax-park-cancelled/\(cancellationReason)",
-                target: cancelledTarget
+                target: cancelledTarget,
+                requestId: pending?.request.requestId ?? 0,
+                traceRequestId: pending?.request.traceRequestId ?? 0,
+                lane: .park
             )
         }
     }
@@ -2049,9 +2052,13 @@ final class AXManager {
     ) -> [AXFrameApplicationRequest] {
         var requests: [AXFrameApplicationRequest] = []
         requests.reserveCapacity(frames.count)
+        let traceOrigin = FrameEffectTraceContext.originForSubmission()
 
         for target in frames {
             let windowId = target.windowId
+            let traceRequestId = traceOrigin.effectId == 0
+                ? 0
+                : FrameEffectTraceContext.makeRequestTraceId()
             parkPIDByWindowId[windowId] = target.pid
 
             if let state = parkFrameTargetStatesByWindowId[windowId],
@@ -2060,6 +2067,17 @@ final class AXManager {
                sameAXWindowIdentity(state.target.expectedWindow, target.expectedWindow),
                state.target.frame == target.frame
             {
+                if traceRequestId != 0 {
+                    FrameApplyTrace.recordEvent(
+                        pid: target.pid,
+                        windowId: windowId,
+                        outcome: "park-ledger-noop/verified/terminal",
+                        target: target.frame,
+                        traceRequestId: traceRequestId,
+                        effectOrigin: traceOrigin,
+                        lane: .park
+                    )
+                }
                 pendingParkWindowIds.remove(windowId)
                 continue
             }
@@ -2070,6 +2088,18 @@ final class AXManager {
                    sameAXWindowIdentity(pending.request.expectedWindow, target.expectedWindow),
                    pending.request.frame == target.frame
                 {
+                    if traceRequestId != 0 {
+                        FrameApplyTrace.recordEvent(
+                            pid: target.pid,
+                            windowId: windowId,
+                            outcome: "park-ledger-coalesced/pending",
+                            target: target.frame,
+                            traceRequestId: traceRequestId,
+                            effectOrigin: traceOrigin,
+                            relatedTraceId: pending.request.traceRequestId,
+                            lane: .park
+                        )
+                    }
                     continue
                 }
                 AppAXContext.contexts[pending.request.pid]?.cancelParkFrameJob(for: windowId)
@@ -2078,7 +2108,11 @@ final class AXManager {
                     pid: pending.request.pid,
                     windowId: windowId,
                     outcome: "outcome=ax-park-cancelled/superseded",
-                    target: pending.request.frame
+                    target: pending.request.frame,
+                    requestId: pending.request.requestId,
+                    traceRequestId: pending.request.traceRequestId,
+                    relatedTraceId: traceRequestId,
+                    lane: .park
                 )
             }
 
@@ -2093,12 +2127,25 @@ final class AXManager {
                 expectedWindow: target.expectedWindow,
                 frame: target.frame,
                 currentFrameHint: frameLedger.lastAppliedFrame(for: windowId),
-                verify: true
+                verify: true,
+                traceRequestId: traceRequestId
             )
             pendingParkFrameRequestsByWindowId[windowId] = PendingParkFrameRequest(
                 request: request,
                 retriesRemaining: 1
             )
+            if traceRequestId != 0 {
+                FrameApplyTrace.recordEvent(
+                    pid: target.pid,
+                    windowId: windowId,
+                    outcome: "park-ledger-prepared",
+                    target: target.frame,
+                    requestId: request.requestId,
+                    traceRequestId: traceRequestId,
+                    effectOrigin: traceOrigin,
+                    lane: .park
+                )
+            }
             requests.append(request)
         }
 
@@ -2137,17 +2184,17 @@ final class AXManager {
                 )
                 parkPIDByWindowId[windowId] = result.pid
                 pendingParkWindowIds.remove(windowId)
-                FrameApplyTrace.shared.record(
-                    .init(
-                        timestamp: Date(),
-                        pid: result.pid,
-                        windowId: windowId,
-                        outcome: "outcome=ax-park-confirmed",
-                        target: result.targetFrame,
-                        hint: result.currentFrameHint,
-                        observed: result.writeResult.observedFrame,
-                        confirmed: result.writeResult.observedFrame
-                    )
+                FrameApplyTrace.recordEvent(
+                    pid: result.pid,
+                    windowId: windowId,
+                    outcome: "outcome=ax-park-confirmed",
+                    target: result.targetFrame,
+                    hint: result.currentFrameHint,
+                    observed: result.writeResult.observedFrame,
+                    confirmed: result.writeResult.observedFrame,
+                    requestId: result.requestId,
+                    traceRequestId: result.traceRequestId,
+                    lane: .park
                 )
                 continue
             }
@@ -2157,22 +2204,24 @@ final class AXManager {
                     pid: result.pid,
                     windowId: windowId,
                     outcome: "outcome=ax-park-cancelled/cancelled",
-                    target: result.targetFrame
+                    target: result.targetFrame,
+                    requestId: result.requestId,
+                    traceRequestId: result.traceRequestId,
+                    lane: .park
                 )
                 continue
             }
 
-            FrameApplyTrace.shared.record(
-                .init(
-                    timestamp: Date(),
-                    pid: result.pid,
-                    windowId: windowId,
-                    outcome: "outcome=ax-park-failed/\(failureReason.traceDescription)",
-                    target: result.targetFrame,
-                    hint: result.currentFrameHint,
-                    observed: result.writeResult.observedFrame,
-                    confirmed: nil
-                )
+            FrameApplyTrace.recordEvent(
+                pid: result.pid,
+                windowId: windowId,
+                outcome: "outcome=ax-park-failed/\(failureReason.traceDescription)",
+                target: result.targetFrame,
+                hint: result.currentFrameHint,
+                observed: result.writeResult.observedFrame,
+                requestId: result.requestId,
+                traceRequestId: result.traceRequestId,
+                lane: .park
             )
             guard pending.retriesRemaining > 0,
                   pendingParkWindowIds.contains(windowId)
@@ -2187,12 +2236,29 @@ final class AXManager {
                 expectedWindow: pending.request.expectedWindow,
                 frame: pending.request.frame,
                 currentFrameHint: pending.request.currentFrameHint,
-                verify: true
+                verify: true,
+                traceRequestId: FrameEffectTraceContext.isCurrentCapture(
+                    identifier: pending.request.traceRequestId
+                ) ? FrameEffectTraceContext.makeRequestTraceId(
+                    parentTraceId: pending.request.traceRequestId
+                ) : 0
             )
             pendingParkFrameRequestsByWindowId[windowId] = PendingParkFrameRequest(
                 request: retry,
                 retriesRemaining: pending.retriesRemaining - 1
             )
+            if retry.traceRequestId != 0 {
+                FrameApplyTrace.recordEvent(
+                    pid: retry.pid,
+                    windowId: windowId,
+                    outcome: "park-ledger-prepared/retry",
+                    target: retry.frame,
+                    requestId: retry.requestId,
+                    traceRequestId: retry.traceRequestId,
+                    parentTraceId: pending.request.traceRequestId,
+                    lane: .park
+                )
+            }
             retries.append(retry)
         }
 
@@ -2200,6 +2266,9 @@ final class AXManager {
     }
 
     func handleParkFrameApplyResults(_ results: [AXFrameApplyResult]) {
+        for result in results {
+            FrameApplyTrace.recordResult(result, lane: .park)
+        }
         dispatchParkFrameApplications(processParkFrameApplyResults(results))
     }
 
@@ -2226,7 +2295,8 @@ final class AXManager {
                                 targetFrame: $0.frame,
                                 currentFrameHint: $0.currentFrameHint,
                                 failureReason: .contextUnavailable
-                            )
+                            ),
+                            traceRequestId: $0.traceRequestId
                         )
                     }
                 )
@@ -2264,7 +2334,8 @@ final class AXManager {
         _ frames: [AXFrameApplicationTarget],
         isRetry: Bool,
         verify: Bool = true,
-        terminalObserver: FrameApplicationTerminalObserver? = nil
+        terminalObserver: FrameApplicationTerminalObserver? = nil,
+        parentTraceRequestId: UInt64 = 0
     ) {
         if frameApplicationBufferInUse {
             var framesByPid: [pid_t: [AXFrameApplicationRequest]] = [:]
@@ -2274,6 +2345,7 @@ final class AXManager {
                 isRetry: isRetry,
                 verify: verify,
                 terminalObserver: terminalObserver,
+                parentTraceRequestId: parentTraceRequestId,
                 framesByPid: &framesByPid
             )
             return
@@ -2292,6 +2364,7 @@ final class AXManager {
             isRetry: isRetry,
             verify: verify,
             terminalObserver: terminalObserver,
+            parentTraceRequestId: parentTraceRequestId,
             framesByPid: &framesByPidBuffer
         )
     }
@@ -2301,10 +2374,17 @@ final class AXManager {
         isRetry: Bool,
         verify: Bool,
         terminalObserver: FrameApplicationTerminalObserver?,
+        parentTraceRequestId: UInt64,
         framesByPid: inout [pid_t: [AXFrameApplicationRequest]]
     ) {
         framesByPid.reserveCapacity(min(frames.count, 8))
         var deferredDeliveries: [AXFrameTerminalDelivery] = []
+        let activeParentTraceRequestId = FrameEffectTraceContext.isCurrentCapture(
+            identifier: parentTraceRequestId
+        ) ? parentTraceRequestId : 0
+        let traceOrigin = activeParentTraceRequestId == 0
+            ? FrameEffectTraceContext.originForSubmission()
+            : .none
 
         for target in frames {
             let pid = target.pid
@@ -2320,7 +2400,9 @@ final class AXManager {
                 frame: frame,
                 isRetry: isRetry,
                 verify: verify,
-                terminalObserver: terminalObserver
+                terminalObserver: terminalObserver,
+                traceOrigin: traceOrigin,
+                parentTraceRequestId: activeParentTraceRequestId
             )
             if decision.shouldCancelPendingRetry {
                 cancelPendingFrameRetry(for: windowId)
@@ -2349,7 +2431,8 @@ final class AXManager {
                                 targetFrame: $0.frame,
                                 currentFrameHint: $0.currentFrameHint,
                                 failureReason: .contextUnavailable
-                            )
+                            ),
+                            traceRequestId: $0.traceRequestId
                         )
                     }
                 )
@@ -2420,7 +2503,10 @@ final class AXManager {
                     pid: statePID,
                     windowId: windowId,
                     outcome: "outcome=ax-park-cancelled/\(reason)",
-                    target: target
+                    target: target,
+                    requestId: pending?.request.requestId ?? 0,
+                    traceRequestId: pending?.request.traceRequestId ?? 0,
+                    lane: .park
                 )
             }
         }
@@ -2641,7 +2727,9 @@ final class AXManager {
                 pid: retry.pid,
                 windowId: retry.windowId,
                 outcome: "outcome=retry-scheduled",
-                target: retry.frame
+                target: retry.frame,
+                requestId: retry.requestId,
+                traceRequestId: retry.traceRequestId
             )
             scheduleFrameRetry(retry)
         }
@@ -2653,7 +2741,10 @@ final class AXManager {
                 pid: refusal.pid,
                 windowId: refusal.windowId,
                 outcome: "outcome=terminal-refusal/\(refusal.failureReason.traceDescription)",
-                target: refusal.targetFrame
+                target: refusal.targetFrame,
+                observed: refusal.observedFrame,
+                requestId: refusal.requestId,
+                traceRequestId: refusal.traceRequestId
             )
             onTerminalFrameRefusal?(refusal)
         }
@@ -2680,12 +2771,14 @@ final class AXManager {
             pid: result.pid,
             windowId: result.windowId,
             outcome: "outcome=terminal-failure/\(reason)",
-            target: result.targetFrame
+            target: result.targetFrame,
+            requestId: result.requestId,
+            traceRequestId: result.traceRequestId
         )
         onFrameApplyTerminated?(result)
     }
 
-    private func scheduleFrameRetry(_ retry: AXFrameRetryRequest) {
+    func scheduleFrameRetry(_ retry: AXFrameRetryRequest) {
         let pid = retry.pid
         let windowId = retry.windowId
         let expectedWindow = retry.expectedWindow
@@ -2714,7 +2807,8 @@ final class AXManager {
                         frame: frame
                     )
                 ],
-                isRetry: true
+                isRetry: true,
+                parentTraceRequestId: retry.traceRequestId
             )
         }
     }
@@ -2722,14 +2816,10 @@ final class AXManager {
     @discardableResult
     private func cancelPendingFrameRetry(for windowId: Int) -> AXFrameApplyResult? {
         let retry = pendingFrameRetryRequestsByWindowId.removeValue(forKey: windowId)
-        guard let task = pendingFrameRetryTasksByWindowId.removeValue(forKey: windowId) else {
-            pendingFrameRetryGenerationByWindowId.removeValue(forKey: windowId)
-            return nil
-        }
-        task.cancel()
+        pendingFrameRetryTasksByWindowId.removeValue(forKey: windowId)?.cancel()
         pendingFrameRetryGenerationByWindowId.removeValue(forKey: windowId)
         guard let retry else { return nil }
-        return AXFrameApplyResult(
+        let result = AXFrameApplyResult(
             requestId: retry.requestId,
             pid: retry.pid,
             windowId: retry.windowId,
@@ -2741,8 +2831,11 @@ final class AXManager {
                 currentFrameHint: retry.currentFrameHint,
                 failureReason: .cancelled,
                 observedFrame: retry.currentFrameHint
-            )
+            ),
+            traceRequestId: retry.traceRequestId
         )
+        FrameApplyTrace.recordResult(result)
+        return result
     }
 
     private func cancelAllPendingFrameState() {
@@ -2753,8 +2846,10 @@ final class AXManager {
         parkFrameTargetStatesByWindowId.removeAll()
         parkPIDByWindowId.removeAll()
 
-        for (_, task) in pendingFrameRetryTasksByWindowId {
-            task.cancel()
+        let retryWindowIds = Set(pendingFrameRetryTasksByWindowId.keys)
+            .union(pendingFrameRetryRequestsByWindowId.keys)
+        for windowId in retryWindowIds {
+            cancelPendingFrameRetry(for: windowId)
         }
         pendingFrameRetryTasksByWindowId.removeAll()
         pendingFrameRetryGenerationByWindowId.removeAll()

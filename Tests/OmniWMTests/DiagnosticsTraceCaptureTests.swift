@@ -209,6 +209,42 @@ final class DiagnosticsTraceCaptureTests: XCTestCase {
     }
 
     @MainActor
+    func testGlobalTraceBudgetPreservesLaterSectionHeadersAndIncompleteEvidence() async throws {
+        let directory = try makeDiagnosticsDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let coordinator = RuntimeTraceCaptureCoordinator(
+            diagnosticsDirectory: directory,
+            recorders: [
+                OversizedRuntimeTraceRecorder(),
+                SentinelRuntimeTraceRecorder()
+            ]
+        )
+
+        guard case .started = await coordinator.toggle(
+            desiredState: .active,
+            reportProvider: { "report" }
+        ) else {
+            return XCTFail("expected capture to start")
+        }
+        guard case let .stopped(artifact) = await coordinator.toggle(
+            desiredState: .inactive,
+            reportProvider: { "unused" }
+        ) else {
+            return XCTFail("expected capture to stop")
+        }
+
+        let data = try Data(contentsOf: artifact.url)
+        let body = try XCTUnwrap(String(data: data, encoding: .utf8))
+        let laterHeader = try XCTUnwrap(body.range(of: "== Later Records =="))
+        let laterBody = body[laterHeader.lowerBound...]
+
+        XCTAssertLessThanOrEqual(data.count, RuntimeTraceLimits.captureBytes)
+        XCTAssertTrue(body.contains("== Oversized Records =="))
+        XCTAssertTrue(laterBody.contains("incomplete=true reason=file_byte_budget"))
+        XCTAssertEqual(body.components(separatedBy: "== Trace Data Truncated ==").count - 1, 1)
+    }
+
+    @MainActor
     func testReplacementRecordingClearsLastArtifactAfterInitialPartialSucceeds() async throws {
         let directory = try makeDiagnosticsDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -447,6 +483,133 @@ final class DiagnosticsTraceCaptureTests: XCTestCase {
         XCTAssertLessThan(evidenceHeader.lowerBound, evidenceSettings.lowerBound)
     }
 
+    @MainActor
+    func testProblemCaptureReleasesRecorderStorageOnlyAfterTheFinalWrite() async throws {
+        let directory = try makeDiagnosticsDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let recorder = SessionTraceRecorder<String>(sectionTitle: "Release Probe", capacity: 8) { $0 }
+        let diagnosticsEventRecorder = DiagnosticsEventRecorder()
+        let coordinator = RuntimeTraceCaptureCoordinator(
+            diagnosticsDirectory: directory,
+            recorders: [recorder],
+            diagnosticsEventRecorder: diagnosticsEventRecorder
+        )
+
+        XCTAssertFalse(recorder.isStoragePrepared, "idle process must not hold trace ring storage")
+        XCTAssertFalse(recorder.isSpareStoragePrepared, "idle process must not hold spare ring storage")
+
+        _ = await coordinator.toggle(desiredState: .active, reportProvider: { "report" })
+        XCTAssertTrue(recorder.isStoragePrepared)
+        XCTAssertTrue(recorder.isSpareStoragePrepared)
+        XCTAssertTrue(diagnosticsEventRecorder.isVerboseStoragePrepared)
+        XCTAssertFalse(diagnosticsEventRecorder.isVerboseSpareStoragePrepared)
+        recorder.record("release-probe-sentinel")
+        diagnosticsEventRecorder.recordVerbose(name: "release-probe-verbose")
+
+        guard case let .stopped(artifact) = await coordinator.toggle(
+            desiredState: .inactive,
+            reportProvider: { "report" }
+        ) else {
+            return XCTFail("expected capture to stop with an artifact")
+        }
+
+        let contents = try String(contentsOf: artifact.url, encoding: .utf8)
+        XCTAssertTrue(
+            contents.contains("release-probe-sentinel"),
+            "records must survive into the artifact, so cleanup cannot run before the final write"
+        )
+        XCTAssertTrue(contents.contains("release-probe-verbose"))
+        XCTAssertFalse(recorder.isStoragePrepared)
+        XCTAssertFalse(recorder.isSpareStoragePrepared)
+        XCTAssertFalse(diagnosticsEventRecorder.isVerboseStoragePrepared)
+    }
+
+    @MainActor
+    func testFailedFinalWriteReleasesRecorderStorageAndStillReportsTheFailure() async throws {
+        let directory = try makeDiagnosticsDirectory()
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let recorder = SessionTraceRecorder<String>(sectionTitle: "Release Probe", capacity: 8) { $0 }
+        let diagnosticsEventRecorder = DiagnosticsEventRecorder()
+        let coordinator = RuntimeTraceCaptureCoordinator(
+            diagnosticsDirectory: directory,
+            recorders: [recorder],
+            diagnosticsEventRecorder: diagnosticsEventRecorder
+        )
+
+        _ = await coordinator.toggle(desiredState: .active, reportProvider: { "report" })
+        recorder.record("release-probe-sentinel")
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: directory.path)
+
+        guard case .writeFailed = await coordinator.toggle(desiredState: .inactive, reportProvider: { "report" }) else {
+            return XCTFail("expected the final write to fail")
+        }
+        XCTAssertFalse(recorder.isStoragePrepared)
+        XCTAssertFalse(recorder.isSpareStoragePrepared)
+        XCTAssertFalse(diagnosticsEventRecorder.isVerboseStoragePrepared)
+        XCTAssertEqual(coordinator.status.phase, .idle)
+    }
+
+    @MainActor
+    func testFailedInitialPartialWriteReleasesRecorderStorage() async throws {
+        let directory = try makeDiagnosticsDirectory()
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let recorder = SessionTraceRecorder<String>(sectionTitle: "Release Probe", capacity: 8) { $0 }
+        let diagnosticsEventRecorder = DiagnosticsEventRecorder()
+        let coordinator = RuntimeTraceCaptureCoordinator(
+            diagnosticsDirectory: directory,
+            recorders: [recorder],
+            diagnosticsEventRecorder: diagnosticsEventRecorder
+        )
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: directory.path)
+
+        guard case .writeFailed = await coordinator.toggle(desiredState: .active, reportProvider: { "report" }) else {
+            return XCTFail("expected the initial partial write to fail")
+        }
+        XCTAssertFalse(recorder.isStoragePrepared)
+        XCTAssertFalse(recorder.isSpareStoragePrepared)
+        XCTAssertFalse(diagnosticsEventRecorder.isVerboseStoragePrepared)
+    }
+
+    @MainActor
+    func testPerformanceCaptureNeverPreparesDetailedRecorderStorage() async throws {
+        let directory = try makeDiagnosticsDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let recorder = SessionTraceRecorder<String>(sectionTitle: "Release Probe", capacity: 8) { $0 }
+        let diagnosticsEventRecorder = DiagnosticsEventRecorder()
+        let coordinator = RuntimeTraceCaptureCoordinator(
+            diagnosticsDirectory: directory,
+            recorders: [recorder],
+            diagnosticsEventRecorder: diagnosticsEventRecorder,
+            processResourceProvider: { nil }
+        )
+
+        guard case .started = await coordinator.toggle(
+            desiredState: .active,
+            profile: .performance,
+            reportProvider: { "report" }
+        ) else {
+            return XCTFail("expected performance capture to start")
+        }
+        XCTAssertFalse(recorder.isStoragePrepared, "performance capture must not arm detailed trace rings")
+        XCTAssertFalse(recorder.isSpareStoragePrepared)
+        XCTAssertFalse(diagnosticsEventRecorder.isVerboseStoragePrepared)
+
+        _ = await coordinator.toggle(
+            desiredState: .inactive,
+            profile: .performance,
+            reportProvider: { "report" }
+        )
+        XCTAssertFalse(recorder.isStoragePrepared)
+        XCTAssertFalse(recorder.isSpareStoragePrepared)
+        XCTAssertFalse(diagnosticsEventRecorder.isVerboseStoragePrepared)
+    }
+
     private func makeDiagnosticsDirectory() throws -> URL {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("OmniWMDiagnosticsCapture-\(UUID().uuidString)", isDirectory: true)
@@ -520,8 +683,21 @@ private struct OversizedRuntimeTraceRecorder: RuntimeTraceRecording {
 
     func forEachLine(_ body: (String) -> Bool) {
         let line = String(repeating: "🪟", count: 1_024)
-        for _ in 0 ..< 4_096 {
+        let recordCount = RuntimeTraceLimits.captureBytes / (line.utf8.count + 1) + 2
+        for _ in 0 ..< recordCount {
             guard body(line) else { return }
         }
+    }
+}
+
+private struct SentinelRuntimeTraceRecorder: RuntimeTraceRecording {
+    let sectionTitle = "Later Records"
+
+    func beginCapture() {}
+
+    func endCapture() {}
+
+    func dump() -> String {
+        "later-sentinel"
     }
 }

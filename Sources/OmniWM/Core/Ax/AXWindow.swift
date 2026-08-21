@@ -3,6 +3,7 @@
 
 import AppKit
 import ApplicationServices
+import Dispatch
 import Foundation
 
 struct AXWindowRef: Hashable, @unchecked Sendable {
@@ -120,6 +121,27 @@ struct AXFrameApplicationRequest: Equatable, Sendable {
     let frame: CGRect
     let currentFrameHint: CGRect?
     var verify = true
+    let traceRequestId: UInt64
+
+    init(
+        requestId: AXFrameRequestId,
+        pid: pid_t,
+        windowId: Int,
+        expectedWindow: AXWindowRef,
+        frame: CGRect,
+        currentFrameHint: CGRect?,
+        verify: Bool = true,
+        traceRequestId: UInt64 = 0
+    ) {
+        self.requestId = requestId
+        self.pid = pid
+        self.windowId = windowId
+        self.expectedWindow = expectedWindow
+        self.frame = frame
+        self.currentFrameHint = currentFrameHint
+        self.verify = verify
+        self.traceRequestId = traceRequestId
+    }
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.requestId == rhs.requestId
@@ -140,6 +162,7 @@ struct AXFrameApplyResult: Equatable, Sendable {
     let targetFrame: CGRect
     let currentFrameHint: CGRect?
     let writeResult: AXFrameWriteResult
+    let traceRequestId: UInt64
 
     init(
         requestId: AXFrameRequestId = 0,
@@ -148,7 +171,8 @@ struct AXFrameApplyResult: Equatable, Sendable {
         expectedWindow: AXWindowRef,
         targetFrame: CGRect,
         currentFrameHint: CGRect?,
-        writeResult: AXFrameWriteResult
+        writeResult: AXFrameWriteResult,
+        traceRequestId: UInt64 = 0
     ) {
         self.requestId = requestId
         self.pid = pid
@@ -157,6 +181,7 @@ struct AXFrameApplyResult: Equatable, Sendable {
         self.targetFrame = targetFrame
         self.currentFrameHint = currentFrameHint
         self.writeResult = writeResult
+        self.traceRequestId = traceRequestId
     }
 
     var confirmedFrame: CGRect? {
@@ -180,7 +205,8 @@ struct AXFrameApplyResult: Equatable, Sendable {
             ),
             targetFrame: targetFrame,
             currentFrameHint: currentFrameHint,
-            writeResult: writeResult
+            writeResult: writeResult,
+            traceRequestId: traceRequestId
         )
     }
 
@@ -476,6 +502,41 @@ enum AXWindowService {
         currentFrameHint: CGRect? = nil,
         verify: Bool = true
     ) -> AXFrameWriteResult {
+        setFrame(
+            window,
+            frame: frame,
+            currentFrameHint: currentFrameHint,
+            verify: verify,
+            timing: nil
+        )
+    }
+
+    static func setFrameTraced(
+        _ window: AXWindowRef,
+        frame: CGRect,
+        currentFrameHint: CGRect? = nil,
+        verify: Bool = true
+    ) -> (result: AXFrameWriteResult, timing: AXFrameSetterTiming) {
+        var timing = AXFrameSetterTiming()
+        let result = withUnsafeMutablePointer(to: &timing) { pointer in
+            setFrame(
+                window,
+                frame: frame,
+                currentFrameHint: currentFrameHint,
+                verify: verify,
+                timing: pointer
+            )
+        }
+        return (result, timing)
+    }
+
+    private static func setFrame(
+        _ window: AXWindowRef,
+        frame: CGRect,
+        currentFrameHint: CGRect?,
+        verify: Bool,
+        timing: UnsafeMutablePointer<AXFrameSetterTiming>?
+    ) -> AXFrameWriteResult {
         let writeOrder = frameWriteOrder(
             currentFrame: currentFrameHint ?? (try? self.frame(window)),
             targetFrame: frame
@@ -497,22 +558,42 @@ enum AXWindowService {
         let sizeError: AXError
         switch writeOrder {
         case .sizeThenPosition:
+            let sizeStart = timing == nil ? 0 : DispatchTime.now().uptimeNanoseconds
             sizeError = AXUIElementSetAttributeValue(window.element, kAXSizeAttribute as CFString, sizeValue)
+            if let timing {
+                timing.pointee.sizeNs = elapsedNanoseconds(since: sizeStart)
+            }
+            let positionStart = timing == nil ? 0 : DispatchTime.now().uptimeNanoseconds
             positionError = AXUIElementSetAttributeValue(
                 window.element,
                 kAXPositionAttribute as CFString,
                 positionValue
             )
+            if let timing {
+                timing.pointee.positionNs = elapsedNanoseconds(since: positionStart)
+            }
         case .positionThenSize:
+            let positionStart = timing == nil ? 0 : DispatchTime.now().uptimeNanoseconds
             positionError = AXUIElementSetAttributeValue(
                 window.element,
                 kAXPositionAttribute as CFString,
                 positionValue
             )
+            if let timing {
+                timing.pointee.positionNs = elapsedNanoseconds(since: positionStart)
+            }
+            let sizeStart = timing == nil ? 0 : DispatchTime.now().uptimeNanoseconds
             sizeError = AXUIElementSetAttributeValue(window.element, kAXSizeAttribute as CFString, sizeValue)
+            if let timing {
+                timing.pointee.sizeNs = elapsedNanoseconds(since: sizeStart)
+            }
         }
 
+        let verificationStart = timing == nil ? 0 : DispatchTime.now().uptimeNanoseconds
         let observedFrame = verify ? (try? self.frame(window)) : nil
+        if let timing {
+            timing.pointee.verificationNs = elapsedNanoseconds(since: verificationStart)
+        }
 
         let failureReason: AXFrameWriteFailureReason? = if sizeError != .success {
             mapFrameWriteFailure(sizeError, attribute: .size)
@@ -535,6 +616,11 @@ enum AXWindowService {
             positionError: positionError,
             failureReason: failureReason
         )
+    }
+
+    private static func elapsedNanoseconds(since start: UInt64) -> UInt64 {
+        let end = DispatchTime.now().uptimeNanoseconds
+        return end >= start ? end - start : 0
     }
 
     private static func convertFromAX(_ rect: CGRect) -> CGRect {

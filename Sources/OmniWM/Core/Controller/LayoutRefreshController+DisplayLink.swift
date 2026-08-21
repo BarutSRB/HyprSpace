@@ -102,6 +102,24 @@ extension LayoutRefreshController {
         performanceCounters?.meaningfulDisplayLinkCallbacks &+= 1
 
         let traceActive = AnimationTickTrace.shared.isActive
+        let traceOrigin = traceActive
+            ? FrameEffectTraceContext.makeDisplayTickOrigin(displayId: displayId)
+            : .none
+        let previousTraceOrigin = traceActive
+            ? FrameEffectTraceContext.install(traceOrigin)
+            : .none
+        defer {
+            if traceActive {
+                FrameEffectTraceContext.restore(previousTraceOrigin)
+            }
+        }
+        let previousTimestamp = traceActive
+            ? layoutState.replaceDisplayLinkTraceTimestamp(
+                displayLink.timestamp,
+                for: displayId,
+                captureGeneration: FrameEffectTraceContext.captureGeneration(of: traceOrigin.effectId)
+            )
+            : nil
         let startTime = traceActive ? CACurrentMediaTime() : 0
         var scrollEndTime: CFTimeInterval = 0
         var dwindleEndTime: CFTimeInterval = 0
@@ -121,8 +139,6 @@ extension LayoutRefreshController {
 
         guard traceActive else { return }
         let endTime = CACurrentMediaTime()
-        let previousTimestamp = layoutState.lastDisplayLinkTimestampByDisplay[displayId]
-        layoutState.lastDisplayLinkTimestampByDisplay[displayId] = displayLink.timestamp
 
         let expectedMs = displayLink.duration * 1000
         let intervalMs = previousTimestamp.map { (displayLink.timestamp - $0) * 1000 } ?? 0
@@ -133,6 +149,7 @@ extension LayoutRefreshController {
         AnimationTickTrace.shared.record(
             AnimationTickTrace.Record(
                 mediaTime: endTime,
+                effectId: traceOrigin.effectId,
                 displayId: displayId,
                 intervalMs: intervalMs,
                 expectedMs: expectedMs,
@@ -400,7 +417,7 @@ extension LayoutRefreshController {
     ) {
         guard let link = layoutState.displayLinksByDisplay.removeValue(forKey: displayId) else { return }
         link.invalidate()
-        layoutState.lastDisplayLinkTimestampByDisplay.removeValue(forKey: displayId)
+        layoutState.endDisplayLinkTraceSession(for: displayId)
         performanceCounters?.displayLinksInvalidated &+= 1
         performanceCounters?.activeDisplayLinks = layoutState.displayLinksByDisplay.count
         switch reason {

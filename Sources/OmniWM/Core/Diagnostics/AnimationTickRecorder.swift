@@ -7,6 +7,7 @@ import QuartzCore
 enum AnimationTickTrace {
     struct Record: Sendable {
         let mediaTime: CFTimeInterval
+        let effectId: UInt64
         let displayId: CGDirectDisplayID
         let intervalMs: Double
         let expectedMs: Double
@@ -16,11 +17,37 @@ enum AnimationTickTrace {
         let reconcileMs: Double
         let totalMs: Double
         let dropped: Bool
+
+        init(
+            mediaTime: CFTimeInterval,
+            effectId: UInt64 = 0,
+            displayId: CGDirectDisplayID,
+            intervalMs: Double,
+            expectedMs: Double,
+            scrollMs: Double,
+            dwindleMs: Double,
+            closingMs: Double,
+            reconcileMs: Double,
+            totalMs: Double,
+            dropped: Bool
+        ) {
+            self.mediaTime = mediaTime
+            self.effectId = effectId
+            self.displayId = displayId
+            self.intervalMs = intervalMs
+            self.expectedMs = expectedMs
+            self.scrollMs = scrollMs
+            self.dwindleMs = dwindleMs
+            self.closingMs = closingMs
+            self.reconcileMs = reconcileMs
+            self.totalMs = totalMs
+            self.dropped = dropped
+        }
     }
 
     static let shared = SessionTraceRecorder<Record>(
         sectionTitle: "Animation Tick Timing",
-        capacity: 2048
+        capacity: 4096
     ) { record in
         let timing = String(
             format: "interval=%.2fms expected=%.2fms scroll=%.2fms dwindle=%.2fms"
@@ -34,6 +61,7 @@ enum AnimationTickTrace {
             record.totalMs
         )
         let mediaTime = String(format: "%.3f", record.mediaTime)
-        return "t=\(mediaTime) disp=\(record.displayId) \(timing)\(record.dropped ? " DROPPED" : "")"
+        return "t=\(mediaTime) effect=\(record.effectId) disp=\(record.displayId)"
+            + " \(timing)\(record.dropped ? " DROPPED" : "")"
     }
 }

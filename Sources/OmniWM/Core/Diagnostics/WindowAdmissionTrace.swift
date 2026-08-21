@@ -279,6 +279,12 @@ final class WindowAdmissionTrace: RuntimeTraceRecording, @unchecked Sendable {
         state.withLock { _ in }
     }
 
+    func releaseStorage() {
+        state.withLock { state in
+            state = State(records: RingBuffer(capacity: state.records.capacity))
+        }
+    }
+
     func dump() -> String {
         var lines: [String] = []
         forEachLine {

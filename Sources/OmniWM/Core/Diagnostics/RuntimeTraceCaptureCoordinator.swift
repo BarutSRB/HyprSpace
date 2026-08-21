@@ -73,12 +73,20 @@ private final class BoundedTraceWriter {
 
     private let sink: TraceByteSink
     private let contentLimit: Int
+    private var requiredBytesRemaining: Int
     private(set) var truncated = false
     private var failure: Error?
 
-    init(sink: TraceByteSink, reservedTailBytes: Int) {
+    init(sink: TraceByteSink, reservedTailBytes: Int, reservedRequiredBytes: Int = 0) {
         self.sink = sink
-        contentLimit = RuntimeTraceLimits.captureBytes - reservedTailBytes - Self.truncationData.count
+        requiredBytesRemaining = max(0, reservedRequiredBytes)
+        contentLimit = max(
+            0,
+            RuntimeTraceLimits.captureBytes
+                - reservedTailBytes
+                - requiredBytesRemaining
+                - Self.truncationData.count
+        )
     }
 
     func appendLine(_ line: String) -> Bool {
@@ -91,6 +99,24 @@ private final class BoundedTraceWriter {
         }
         do {
             try sink.write(data)
+            return true
+        } catch {
+            failure = error
+            return false
+        }
+    }
+
+    func appendRequiredLine(_ line: String) -> Bool {
+        guard failure == nil else { return false }
+        var data = Data(line.utf8)
+        data.append(0x0A)
+        guard data.count <= requiredBytesRemaining else {
+            failure = CocoaError(.fileWriteOutOfSpace)
+            return false
+        }
+        do {
+            try sink.write(data)
+            requiredBytesRemaining -= data.count
             return true
         } catch {
             failure = error
@@ -113,9 +139,11 @@ private actor TraceCaptureFileWriter {
     static let retainedPerformanceCaptures = 5
 
     private let diagnosticsDirectory: URL
+    private let diagnosticsEventRecorder: DiagnosticsEventRecorder
 
-    init(diagnosticsDirectory: URL) {
+    init(diagnosticsDirectory: URL, diagnosticsEventRecorder: DiagnosticsEventRecorder) {
         self.diagnosticsDirectory = diagnosticsDirectory
+        self.diagnosticsEventRecorder = diagnosticsEventRecorder
     }
 
     func preparePerformanceCapture() throws {
@@ -238,8 +266,41 @@ private actor TraceCaptureFileWriter {
         endReport: String?
     ) throws {
         let tail = tailData(automaticEvidence: automaticEvidence, endReport: endReport)
-        let writer = BoundedTraceWriter(sink: sink, reservedTailBytes: tail.count)
+        let sectionTitles = [
+            "Lifecycle Events (recent, always-on)",
+            "Verbose Window Events (capture window)"
+        ] + recorders.map(\.sectionTitle)
+        let incompleteSectionLine = "incomplete=true reason=file_byte_budget"
+        let requiredSectionBytes = sectionTitles.reduce(into: 0) { total, title in
+            total += 1
+            total += "== \(title) ==".utf8.count + 1
+            total += incompleteSectionLine.utf8.count + 1
+        }
+        let writer = BoundedTraceWriter(
+            sink: sink,
+            reservedTailBytes: tail.count,
+            reservedRequiredBytes: requiredSectionBytes
+        )
         let append: (String) -> Bool = { writer.appendLine($0) }
+        func appendOmittedSection(_ title: String) {
+            _ = writer.appendRequiredLine("")
+            _ = writer.appendRequiredLine("== \(title) ==")
+            _ = writer.appendRequiredLine(incompleteSectionLine)
+        }
+        func appendSection(_ title: String, records: ((String) -> Bool) -> Void) {
+            guard !writer.truncated else {
+                appendOmittedSection(title)
+                return
+            }
+            guard append(""), append("== \(title) ==") else {
+                appendOmittedSection(title)
+                return
+            }
+            records(append)
+            if writer.truncated {
+                _ = writer.appendRequiredLine(incompleteSectionLine)
+            }
+        }
 
         _ = append("== OmniWM Trace Capture ==")
         _ = append("startedAt=\(session.startedAt.ISO8601Format())")
@@ -247,16 +308,16 @@ private actor TraceCaptureFileWriter {
         _ = append("")
         _ = append("== State At Start ==")
         _ = append(RuntimeTraceLimits.boundedString(session.startReport, maxBytes: RuntimeTraceLimits.stateReportBytes))
-        _ = append("")
-        _ = append("== Lifecycle Events (recent, always-on) ==")
-        DiagnosticsEventRecorder.shared.forEachLifecycleLine(append)
-        _ = append("")
-        _ = append("== Verbose Window Events (capture window) ==")
-        DiagnosticsEventRecorder.shared.forEachVerboseLine(append)
+        appendSection("Lifecycle Events (recent, always-on)") { body in
+            diagnosticsEventRecorder.forEachLifecycleLine(body)
+        }
+        appendSection("Verbose Window Events (capture window)") { body in
+            diagnosticsEventRecorder.forEachVerboseLine(body)
+        }
         for recorder in recorders {
-            guard append(""), append("== \(recorder.sectionTitle) ==") else { break }
-            recorder.forEachLine(append)
-            if writer.truncated { break }
+            appendSection(recorder.sectionTitle) { body in
+                recorder.forEachLine(body)
+            }
         }
         try writer.finish(tail: tail)
     }
@@ -343,6 +404,7 @@ final class RuntimeTraceCaptureCoordinator {
     private(set) var lastArtifact: TraceCaptureArtifact?
     var onStateChange: (() -> Void)?
     private let recorders: [any RuntimeTraceRecording]
+    private let diagnosticsEventRecorder: DiagnosticsEventRecorder
     private let writer: TraceCaptureFileWriter
     private let processResourceProvider: () -> ProcessResourceSnapshot?
     private let captureSleeper: @Sendable (Duration) async throws -> Void
@@ -361,17 +423,23 @@ final class RuntimeTraceCaptureCoordinator {
             ParkVisibilityAudit.shared,
             ScrollTickTrace.shared,
             AXWriteLatencyTrace.shared,
+            OverviewFrameTrace.shared,
             BorderOpMetricsRecorder.shared,
             MouseTrace.shared,
             InputTrace.shared
         ],
+        diagnosticsEventRecorder: DiagnosticsEventRecorder = .shared,
         processResourceProvider: @escaping () -> ProcessResourceSnapshot? = ProcessResourceSnapshot.capture,
         captureSleeper: @escaping @Sendable (Duration) async throws -> Void = { duration in
             try await Task.sleep(for: duration)
         }
     ) {
-        writer = TraceCaptureFileWriter(diagnosticsDirectory: diagnosticsDirectory)
+        writer = TraceCaptureFileWriter(
+            diagnosticsDirectory: diagnosticsDirectory,
+            diagnosticsEventRecorder: diagnosticsEventRecorder
+        )
         self.recorders = recorders
+        self.diagnosticsEventRecorder = diagnosticsEventRecorder
         self.processResourceProvider = processResourceProvider
         self.captureSleeper = captureSleeper
     }
@@ -439,8 +507,10 @@ final class RuntimeTraceCaptureCoordinator {
         var startedAt = Date()
         var processResourceStart: ProcessResourceSnapshot?
         if profile == .problem {
-            DiagnosticsEventRecorder.shared.beginVerboseCapture()
+            diagnosticsEventRecorder.beginVerboseCapture()
             recorders.forEach { $0.beginCapture() }
+            FrameEffectTraceContext.beginCapture(generation: generation)
+            FrameEffectObservationTracker.shared.beginCapture(generation: generation)
         }
         do {
             if profile == .performance {
@@ -485,8 +555,12 @@ final class RuntimeTraceCaptureCoordinator {
         } catch {
             guard captureGeneration == generation else { return .noChange }
             if profile == .problem {
-                DiagnosticsEventRecorder.shared.endVerboseCapture()
+                FrameEffectObservationTracker.shared.endCapture()
+                FrameEffectTraceContext.endCapture()
+                diagnosticsEventRecorder.endVerboseCapture()
                 recorders.forEach { $0.endCapture() }
+                diagnosticsEventRecorder.releaseVerboseStorage()
+                recorders.forEach { $0.releaseStorage() }
             }
             startingProfile = nil
             self.session = nil
@@ -554,7 +628,9 @@ final class RuntimeTraceCaptureCoordinator {
         onStateChange?()
 
         if session.profile == .problem {
-            DiagnosticsEventRecorder.shared.endVerboseCapture()
+            FrameEffectObservationTracker.shared.endCapture()
+            FrameEffectTraceContext.endCapture()
+            diagnosticsEventRecorder.endVerboseCapture()
             recorders.forEach { $0.endCapture() }
         }
         let endReport = RuntimeTraceLimits.boundedString(
@@ -564,6 +640,15 @@ final class RuntimeTraceCaptureCoordinator {
         let evidenceProvider = automaticEvidenceProvider
         reportProvider = nil
         automaticEvidenceProvider = nil
+
+        defer {
+            if captureGeneration == generation {
+                if session.profile == .problem {
+                    diagnosticsEventRecorder.releaseVerboseStorage()
+                }
+                recorders.forEach { $0.releaseStorage() }
+            }
+        }
 
         do {
             let url: URL

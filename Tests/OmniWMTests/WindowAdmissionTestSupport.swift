@@ -134,7 +134,8 @@ enum WindowAdmissionTestSupport {
                 sizeError: sizeError,
                 positionError: positionError,
                 failureReason: failure
-            )
+            ),
+            traceRequestId: request.traceRequestId
         )
     }
 

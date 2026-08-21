@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Copyright (C) 2026 BarutSRB — https://github.com/BarutSRB/OmniWM
 
+import Dispatch
 import Foundation
 import os
 
@@ -138,6 +139,14 @@ private func handleRawCGSEvent(
          .malformed:
         return
     case let .event(event):
+        if case let .frameChanged(windowId) = event,
+           FrameApplyTrace.shared.isActive
+        {
+            FrameEffectObservationTracker.noteCGSFrameChanged(
+                windowId: Int(windowId),
+                eventNs: DispatchTime.now().uptimeNanoseconds
+            )
+        }
         DiagnosticsEventRecorder.shared.recordCGS(event)
         EventIntake.post(.cgs(event))
     }

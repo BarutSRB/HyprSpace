@@ -21,6 +21,14 @@ final class DiagnosticsEventRecorder: @unchecked Sendable {
     private let verbose = LockedRingBuffer<Record>(capacity: DiagnosticsEventRecorder.verboseLimit)
     private let verboseActive = Atomic<Bool>(false)
 
+    var isVerboseStoragePrepared: Bool {
+        verbose.isStoragePrepared
+    }
+
+    var isVerboseSpareStoragePrepared: Bool {
+        verbose.isSpareStoragePrepared
+    }
+
     func recordLifecycle(name: String, pid: pid_t? = nil, windowId: UInt32? = nil) {
         lifecycle.append(
             Record(
@@ -34,13 +42,17 @@ final class DiagnosticsEventRecorder: @unchecked Sendable {
 
     func recordVerbose(name: String, pid: pid_t? = nil, windowId: UInt32? = nil) {
         guard verboseActive.load(ordering: .relaxed) else { return }
+        let record = Record(
+            timestamp: Date(),
+            name: RuntimeTraceLimits.boundedString(name),
+            pid: pid,
+            windowId: windowId
+        )
         verbose.append(
-            Record(
-                timestamp: Date(),
-                name: RuntimeTraceLimits.boundedString(name),
-                pid: pid,
-                windowId: windowId
-            )
+            record,
+            while: {
+                self.verboseActive.load(ordering: .relaxed)
+            }
         )
     }
 
@@ -64,12 +76,20 @@ final class DiagnosticsEventRecorder: @unchecked Sendable {
     }
 
     func beginVerboseCapture() {
+        verboseActive.store(false, ordering: .relaxed)
+        verbose.synchronize()
         verbose.removeAll()
+        verbose.prepareActiveStorage()
         verboseActive.store(true, ordering: .relaxed)
     }
 
     func endVerboseCapture() {
         verboseActive.store(false, ordering: .relaxed)
+        verbose.synchronize()
+    }
+
+    func releaseVerboseStorage() {
+        verbose.releaseStorage()
     }
 
     func dumpLifecycle() -> String {

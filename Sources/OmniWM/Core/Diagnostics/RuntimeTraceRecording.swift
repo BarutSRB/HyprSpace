@@ -3,10 +3,11 @@
 
 import CoreGraphics
 import Foundation
+import os
 import Synchronization
 
 enum RuntimeTraceLimits {
-    static let captureBytes = 8 * 1024 * 1024
+    static let captureBytes = 32 * 1024 * 1024
     static let stateReportBytes = 1024 * 1024
     static let automaticEvidenceBytes = 512 * 1024
     static let diagnosticStringBytes = 4 * 1024
@@ -52,9 +53,12 @@ protocol RuntimeTraceRecording: Sendable {
     func endCapture()
     func dump() -> String
     func forEachLine(_ body: (String) -> Bool)
+    func releaseStorage()
 }
 
 extension RuntimeTraceRecording {
+    func releaseStorage() {}
+
     func forEachLine(_ body: (String) -> Bool) {
         let output = dump()
         guard output != "none" else {
@@ -68,20 +72,49 @@ extension RuntimeTraceRecording {
 }
 
 final class SessionTraceRecorder<Record: Sendable>: RuntimeTraceRecording, @unchecked Sendable {
+    private struct SnapshotState {
+        var retained: RingBuffer<Record>
+        var sourceEvictionCount: UInt64 = 0
+    }
+
     let sectionTitle: String
 
     private let buffer: LockedRingBuffer<Record>
+    private let snapshotState: OSAllocatedUnfairLock<SnapshotState>
     private let active = Atomic<Bool>(false)
     private let formatter: @Sendable (Record) -> String
 
     init(sectionTitle: String, capacity: Int, formatter: @escaping @Sendable (Record) -> String) {
         self.sectionTitle = sectionTitle
         buffer = LockedRingBuffer(capacity: capacity)
+        snapshotState = OSAllocatedUnfairLock(
+            initialState: SnapshotState(retained: RingBuffer(capacity: capacity))
+        )
         self.formatter = formatter
     }
 
     var isActive: Bool {
         active.load(ordering: .relaxed)
+    }
+
+    var isStoragePrepared: Bool {
+        buffer.isStoragePrepared
+    }
+
+    var isSpareStoragePrepared: Bool {
+        buffer.isSpareStoragePrepared
+    }
+
+    var isRetainedStoragePrepared: Bool {
+        snapshotState.withLock { $0.retained.isStoragePrepared }
+    }
+
+    func releaseStorage() {
+        buffer.releaseStorage()
+        snapshotState.withLock { state in
+            state.retained.releaseStorage()
+            state.sourceEvictionCount = 0
+        }
     }
 
     func record(_ make: @autoclosure () -> Record) {
@@ -92,7 +125,13 @@ final class SessionTraceRecorder<Record: Sendable>: RuntimeTraceRecording, @unch
     }
 
     func beginCapture() {
+        active.store(false, ordering: .relaxed)
         buffer.removeAll()
+        snapshotState.withLock { state in
+            state.retained.removeAll()
+            state.sourceEvictionCount = 0
+        }
+        buffer.prepareStorage()
         active.store(true, ordering: .relaxed)
     }
 
@@ -102,19 +141,44 @@ final class SessionTraceRecorder<Record: Sendable>: RuntimeTraceRecording, @unch
     }
 
     func dump() -> String {
-        let records = buffer.snapshot()
-        guard !records.isEmpty else { return "none" }
-        return records.map { RuntimeTraceLimits.boundedString(formatter($0)) }.joined(separator: "\n")
+        let snapshot = captureSnapshot()
+        guard !snapshot.records.isEmpty else { return "none" }
+        var lines: [String] = []
+        lines.reserveCapacity(snapshot.records.count + 1)
+        if snapshot.evictionCount > 0 {
+            lines.append("incomplete=true evicted=\(snapshot.evictionCount)")
+        }
+        lines.append(contentsOf: snapshot.records.map { RuntimeTraceLimits.boundedString(formatter($0)) })
+        return lines.joined(separator: "\n")
     }
 
     func forEachLine(_ body: (String) -> Bool) {
-        let records = buffer.snapshot()
-        guard !records.isEmpty else {
+        let snapshot = captureSnapshot()
+        guard !snapshot.records.isEmpty else {
             _ = body("none")
             return
         }
-        for record in records {
+        if snapshot.evictionCount > 0,
+           !body("incomplete=true evicted=\(snapshot.evictionCount)")
+        {
+            return
+        }
+        for record in snapshot.records {
             guard body(RuntimeTraceLimits.boundedString(formatter(record))) else { return }
+        }
+    }
+
+    private func captureSnapshot() -> (records: [Record], evictionCount: UInt64) {
+        let drained = buffer.takeSnapshotWithEvictionCount()
+        return snapshotState.withLock { state in
+            state.sourceEvictionCount &+= drained.evictionCount
+            for record in drained.records {
+                state.retained.append(record)
+            }
+            return (
+                state.retained.snapshot(),
+                state.sourceEvictionCount &+ state.retained.evictionCount
+            )
         }
     }
 }
