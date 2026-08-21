@@ -114,6 +114,37 @@ final class SurfaceSceneLifecycleTests: XCTestCase {
         XCTAssertEqual(scene.runtimeSnapshot().total, 0)
     }
 
+    func testPassthroughSurfacesSkipVisibilityAndFrameWorkDuringHitTesting() {
+        let scene = SurfaceScene()
+        var visibilityCalls = 0
+        var frameCalls = 0
+        scene.registerWindowNumber(node: SurfaceScene.SurfaceNode(
+            id: "border-segment",
+            policy: SurfacePolicy(
+                kind: .border,
+                hitTestPolicy: .passthrough,
+                capturePolicy: .excluded,
+                suppressesManagedFocusRecovery: false
+            ),
+            window: nil,
+            windowObjectIdentifier: nil,
+            windowNumber: 93,
+            frameProvider: {
+                frameCalls += 1
+                return CGRect(x: 0, y: 0, width: 100, height: 100)
+            },
+            visibilityProvider: {
+                visibilityCalls += 1
+                return true
+            }
+        ))
+
+        XCTAssertFalse(scene.containsInteractive(point: CGPoint(x: 50, y: 50)))
+        XCTAssertFalse(scene.containsGeometric(point: CGPoint(x: 50, y: 50)))
+        XCTAssertEqual(visibilityCalls, 0)
+        XCTAssertEqual(frameCalls, 0)
+    }
+
     func testDeallocatedWindowBackedNodeIsInvisibleAndReapedOnNumberLookup() {
         let scene = SurfaceScene()
         weak var releasedWindow: NSPanel?

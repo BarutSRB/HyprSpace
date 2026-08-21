@@ -226,7 +226,12 @@ final class SurfaceScene {
     }
 
     func containsInteractive(point: CGPoint) -> Bool {
-        containsVisibleNode { node in
+        nodesByID.values.contains { node in
+            guard node.policy.hitTestPolicy != .passthrough,
+                  isVisible(node)
+            else {
+                return false
+            }
             switch node.policy.hitTestPolicy {
             case .interactive:
                 break
@@ -237,7 +242,7 @@ final class SurfaceScene {
                     return false
                 }
             case .passthrough:
-                return false
+                break
             }
             return resolvedFrame(for: node)?.contains(point) == true
         }
@@ -379,8 +384,13 @@ final class SurfaceScene {
     }
 
     func containsGeometric(point: CGPoint) -> Bool {
-        containsVisibleNode { node in
-            node.policy.hitTestPolicy != .passthrough && resolvedFrame(for: node)?.contains(point) == true
+        nodesByID.values.contains { node in
+            guard node.policy.hitTestPolicy != .passthrough,
+                  isVisible(node)
+            else {
+                return false
+            }
+            return resolvedFrame(for: node)?.contains(point) == true
         }
     }
 }

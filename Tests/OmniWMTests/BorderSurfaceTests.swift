@@ -12,12 +12,17 @@ final class BorderSurfaceTests: XCTestCase {
         var createdWindowCount = 0
         var screencaptureExclusionCount = 0
         var releasedCount = 0
+        var releasedWindowIds: [UInt32] = []
         var shapeCount = 0
         var flushCount = 0
         var moveCount = 0
         var moveAndOrderCount = 0
         var hideCount = 0
+        var transactionScopeCount = 0
         var nextWindowId: UInt32 = 1001
+        var createdWindowIds: [UInt32] = []
+        var backingScale: CGFloat = 2
+        var screenFrame = CGRect(x: 0, y: 0, width: 5000, height: 5000)
         var contextProvider: @MainActor () -> CGContext? = { BorderOperationsRecorder.makeContext() }
 
         var orderingCount: Int {
@@ -29,9 +34,17 @@ final class BorderSurfaceTests: XCTestCase {
                 createBorderWindow: { [weak self] _ in
                     guard let self else { return 0 }
                     createdWindowCount += 1
-                    return nextWindowId
+                    let windowId = nextWindowId
+                    if windowId != 0 {
+                        createdWindowIds.append(windowId)
+                        nextWindowId += 1
+                    }
+                    return windowId
                 },
-                releaseBorderWindow: { [weak self] _ in self?.releasedCount += 1 },
+                releaseBorderWindow: { [weak self] windowId in
+                    self?.releasedCount += 1
+                    self?.releasedWindowIds.append(windowId)
+                },
                 configureWindow: { _, _, _ in },
                 setWindowTags: { _, _ in },
                 excludeFromScreencaptureSelection: { [weak self] _ in self?.screencaptureExclusionCount += 1 },
@@ -41,7 +54,14 @@ final class BorderSurfaceTests: XCTestCase {
                 transactionMove: { [weak self] _, _ in self?.moveCount += 1 },
                 transactionMoveAndOrder: { [weak self] _, _, _, _, _ in self?.moveAndOrderCount += 1 },
                 transactionHide: { [weak self] _ in self?.hideCount += 1 },
-                backingScaleForFrame: { _ in (2.0, CGRect(x: 0, y: 0, width: 5000, height: 5000)) }
+                withTransactionScope: { [weak self] body in
+                    self?.transactionScopeCount += 1
+                    body()
+                },
+                backingScaleForFrame: { [weak self] _ in
+                    guard let self else { return (2, .null) }
+                    return (backingScale, screenFrame)
+                }
             )
         }
 
@@ -102,8 +122,10 @@ final class BorderSurfaceTests: XCTestCase {
         let applied = applier.apply(desired(configRed), forceOrdering: false)
 
         XCTAssertTrue(applied.didApply)
-        XCTAssertEqual(recorder.createdWindowCount, 1)
-        XCTAssertTrue(SurfaceCoordinator.shared.contains(windowNumber: Int(recorder.nextWindowId)))
+        XCTAssertEqual(recorder.createdWindowCount, BorderWindow.SegmentKind.allCases.count)
+        XCTAssertTrue(recorder.createdWindowIds.allSatisfy {
+            SurfaceCoordinator.shared.contains(windowNumber: Int($0))
+        })
     }
 
     @MainActor
@@ -113,11 +135,14 @@ final class BorderSurfaceTests: XCTestCase {
         defer { applier.cleanup() }
 
         _ = applier.apply(desired(configRed), forceOrdering: false)
+        let windowIds = recorder.createdWindowIds
         let hidden = applier.apply(nil, forceOrdering: false)
 
         XCTAssertTrue(hidden.didApply)
-        XCTAssertEqual(recorder.hideCount, 1)
-        XCTAssertFalse(SurfaceCoordinator.shared.contains(windowNumber: Int(recorder.nextWindowId)))
+        XCTAssertEqual(recorder.hideCount, BorderWindow.SegmentKind.allCases.count)
+        XCTAssertTrue(windowIds.allSatisfy {
+            !SurfaceCoordinator.shared.contains(windowNumber: Int($0))
+        })
     }
 
     @MainActor
@@ -127,13 +152,38 @@ final class BorderSurfaceTests: XCTestCase {
         defer { applier.cleanup() }
 
         _ = applier.apply(desired(configRed), forceOrdering: false)
-        XCTAssertEqual(recorder.screencaptureExclusionCount, 1)
+        XCTAssertEqual(recorder.screencaptureExclusionCount, BorderWindow.SegmentKind.allCases.count)
 
         _ = applier.apply(desired(configRed, frame: frame.insetBy(dx: -20, dy: -20)), forceOrdering: true)
         _ = applier.apply(desired(configBlue), forceOrdering: false)
 
-        XCTAssertEqual(recorder.createdWindowCount, 1)
-        XCTAssertEqual(recorder.screencaptureExclusionCount, 1)
+        XCTAssertEqual(recorder.createdWindowCount, BorderWindow.SegmentKind.allCases.count)
+        XCTAssertEqual(recorder.screencaptureExclusionCount, BorderWindow.SegmentKind.allCases.count)
+    }
+
+    @MainActor
+    func testCapacityGrowthReplacesOnlySegmentsAndRemovesReleasedRegistrations() {
+        let recorder = BorderOperationsRecorder()
+        recorder.screenFrame = CGRect(x: 0, y: 0, width: 300, height: 200)
+        let applier = makeApplier(recorder)
+        defer { applier.cleanup() }
+
+        _ = applier.apply(desired(configRed), forceOrdering: false)
+        _ = applier.apply(
+            desired(configRed, frame: CGRect(x: 10, y: 10, width: 900, height: 700)),
+            forceOrdering: false,
+            refreshCornerRadii: false
+        )
+
+        let liveWindowIds = recorder.createdWindowIds.filter { !recorder.releasedWindowIds.contains($0) }
+        XCTAssertFalse(recorder.releasedWindowIds.isEmpty)
+        XCTAssertTrue(recorder.releasedWindowIds.allSatisfy {
+            !SurfaceCoordinator.shared.contains(windowNumber: Int($0))
+        })
+        XCTAssertEqual(liveWindowIds.count, BorderWindow.SegmentKind.allCases.count)
+        XCTAssertTrue(liveWindowIds.allSatisfy {
+            SurfaceCoordinator.shared.contains(windowNumber: Int($0))
+        })
     }
 
     @MainActor
@@ -482,6 +532,78 @@ final class BorderSurfaceTests: XCTestCase {
     }
 
     @MainActor
+    func testSizeAnimationMovesPersistentSegmentsWithoutRasterOrFlush() {
+        let recorder = BorderOperationsRecorder()
+        let window = BorderWindow(config: configRed, operations: recorder.operations())
+
+        _ = window.update(frame: CGRect(x: 0, y: 0, width: 800, height: 600), targetWid: 55)
+        let createdAfterFirst = recorder.createdWindowCount
+        let flushesAfterFirst = recorder.flushCount
+        let shapesAfterFirst = recorder.shapeCount
+        let scopesAfterFirst = recorder.transactionScopeCount
+
+        for size in [
+            CGSize(width: 840, height: 620),
+            CGSize(width: 880, height: 640),
+            CGSize(width: 920, height: 660)
+        ] {
+            _ = window.update(frame: CGRect(origin: .zero, size: size), targetWid: 55)
+        }
+
+        XCTAssertEqual(createdAfterFirst, BorderWindow.SegmentKind.allCases.count)
+        XCTAssertEqual(recorder.createdWindowCount, createdAfterFirst)
+        XCTAssertEqual(recorder.flushCount, flushesAfterFirst)
+        XCTAssertGreaterThan(recorder.shapeCount, shapesAfterFirst)
+        XCTAssertGreaterThan(recorder.moveCount, 0)
+        XCTAssertEqual(recorder.transactionScopeCount, scopesAfterFirst + 3)
+    }
+
+    @MainActor
+    func testFractionalScaleSegmentBoundariesShareExactPixelEdges() throws {
+        let recorder = BorderOperationsRecorder()
+        recorder.backingScale = 1.5
+        recorder.screenFrame = CGRect(x: 0, y: 0, width: 1729, height: 1117)
+        let config = BorderConfig(enabled: true, width: 3.5, color: .systemRed)
+        let window = BorderWindow(config: config, operations: recorder.operations())
+        let target = CGRect(x: 17.2, y: 31.4, width: 803.3, height: 607.7)
+        let radii = WindowCornerRadii(
+            topLeft: 10.9,
+            topRight: 13.7,
+            bottomLeft: 9.1,
+            bottomRight: 15.5
+        )
+
+        XCTAssertTrue(window.update(frame: target, targetWid: 55, cornerRadii: radii))
+        let top = try XCTUnwrap(window.frameOnScreen(for: .top))
+        let bottom = try XCTUnwrap(window.frameOnScreen(for: .bottom))
+        let left = try XCTUnwrap(window.frameOnScreen(for: .left))
+        let right = try XCTUnwrap(window.frameOnScreen(for: .right))
+        let topLeft = try XCTUnwrap(window.frameOnScreen(for: .topLeft))
+        let topRight = try XCTUnwrap(window.frameOnScreen(for: .topRight))
+        let bottomLeft = try XCTUnwrap(window.frameOnScreen(for: .bottomLeft))
+        let bottomRight = try XCTUnwrap(window.frameOnScreen(for: .bottomRight))
+
+        XCTAssertEqual(topLeft.maxX, top.minX)
+        XCTAssertEqual(top.maxX, topRight.minX)
+        XCTAssertEqual(bottomLeft.maxX, bottom.minX)
+        XCTAssertEqual(bottom.maxX, bottomRight.minX)
+        XCTAssertEqual(bottomLeft.maxY, left.minY)
+        XCTAssertEqual(left.maxY, topLeft.minY)
+        XCTAssertEqual(bottomRight.maxY, right.minY)
+        XCTAssertEqual(right.maxY, topRight.minY)
+
+        let effectiveWidth = config.width.roundedToPhysicalPixel(scale: recorder.backingScale)
+        XCTAssertEqual(top.height, effectiveWidth, accuracy: 0.000_000_1)
+        XCTAssertEqual(bottom.height, effectiveWidth, accuracy: 0.000_000_1)
+        XCTAssertEqual(left.width, effectiveWidth, accuracy: 0.000_000_1)
+        XCTAssertEqual(right.width, effectiveWidth, accuracy: 0.000_000_1)
+        XCTAssertEqual(
+            topLeft.width,
+            (radii.topLeft + effectiveWidth).roundedToPhysicalPixel(scale: recorder.backingScale)
+        )
+    }
+
+    @MainActor
     func testChangingFractionalCornerRadiiRedraws() {
         let recorder = BorderOperationsRecorder()
         let window = BorderWindow(config: configRed, operations: recorder.operations())
@@ -512,7 +634,7 @@ final class BorderSurfaceTests: XCTestCase {
 
         window.destroy()
         XCTAssertNil(window.windowId)
-        XCTAssertEqual(recorder.releasedCount, 1)
+        XCTAssertEqual(recorder.releasedCount, BorderWindow.SegmentKind.allCases.count)
     }
 
     @MainActor
@@ -525,7 +647,7 @@ final class BorderSurfaceTests: XCTestCase {
 
         window = nil
 
-        XCTAssertEqual(recorder.releasedCount, 1)
+        XCTAssertEqual(recorder.releasedCount, BorderWindow.SegmentKind.allCases.count)
     }
 }
 
