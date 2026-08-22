@@ -1032,10 +1032,13 @@ final class WMController {
     private func workspaceBarReservedTopInset(for monitor: Monitor) -> CGFloat {
         guard settings.workspaceBarRevealModifier == .off else { return 0 }
         let resolved = settings.resolvedBarSettings(for: monitor)
+        // Native-fullscreen auto-hide is deliberately ignored here: the tiled windows it would
+        // relayout are on another space, so reclaiming the strut would only make them jump when
+        // the fullscreen space is dismissed.
         return WorkspaceBarGeometry.resolve(
             monitor: monitor,
             resolved: resolved,
-            isVisible: isWorkspaceBarVisible(on: monitor, resolved: resolved)
+            isVisible: isWorkspaceBarConfiguredVisible(on: monitor, resolved: resolved)
         ).reservedTopInset
     }
 
@@ -1100,8 +1103,24 @@ final class WMController {
 
     func isWorkspaceBarVisible(on monitor: Monitor, resolved: ResolvedBarSettings? = nil) -> Bool {
         let effective = resolved ?? settings.resolvedBarSettings(for: monitor)
-        guard effective.enabled, !hiddenWorkspaceBarMonitorIds.contains(monitor.id) else { return false }
+        guard isWorkspaceBarConfiguredVisible(on: monitor, resolved: effective) else { return false }
+        return !isWorkspaceBarSuppressedByNativeFullscreen(on: monitor)
+    }
+
+    /// Visibility the user configured, before the transient native-fullscreen auto-hide is applied.
+    private func isWorkspaceBarConfiguredVisible(on monitor: Monitor, resolved: ResolvedBarSettings) -> Bool {
+        guard resolved.enabled, !hiddenWorkspaceBarMonitorIds.contains(monitor.id) else { return false }
         return settings.workspaceBarRevealModifier == .off || isWorkspaceBarRevealHeld
+    }
+
+    /// True while `monitor` is showing a macOS native fullscreen space and the user asked the bar
+    /// to step aside for one. The bar is `.fullScreenAuxiliary`, so it would otherwise float over
+    /// fullscreen video.
+    private func isWorkspaceBarSuppressedByNativeFullscreen(on monitor: Monitor) -> Bool {
+        guard settings.workspaceBarHideInNativeFullscreen else { return false }
+        let topology = workspaceManager.spaceTopology
+        guard topology.isPopulated else { return false }
+        return topology.isDisplayShowingFullscreenSpace(on: monitor) == true
     }
 
     private func pruneHiddenWorkspaceBarMonitorIds() {

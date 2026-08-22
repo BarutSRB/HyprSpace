@@ -120,6 +120,14 @@ private struct GlobalBarSettingsSection: View {
                     }
                 }
 
+                Toggle("Hide in Native Fullscreen", isOn: $settings.workspaceBarHideInNativeFullscreen)
+                    .onChange(of: settings.workspaceBarHideInNativeFullscreen) { _, _ in
+                        controller.updateWorkspaceBarSettings()
+                    }
+                    .help(
+                        "Hide the bar on a monitor while it shows a native fullscreen window"
+                    )
+
                 Toggle("System Stats Button", isOn: $settings.workspaceBarSystemStatsButton)
                     .onChange(of: settings.workspaceBarSystemStatsButton) { _, _ in
                         controller.updateWorkspaceBarSettings()

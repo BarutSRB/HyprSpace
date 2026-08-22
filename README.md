@@ -719,6 +719,7 @@ A visual indicator showing your workspaces:
 - If dedupe option is on click the app icon to get a popup with list of all its windows to jump to
 - Marks macOS-hidden windows with an eye-slash badge; selecting a hidden window unhides its app and focuses that exact window
 - Configure position, height, and appearance in Settings
+- Optionally hide the bar on a monitor while that monitor shows a macOS native fullscreen window, and bring it back on exit (`Hide in Native Fullscreen`); reserved tiled layout space is left untouched so windows do not shuffle around the fullscreen session
 - Exclude individual apps or choose alternate app icons across all monitors in Settings
 
 Workspace-bar icon overrides can also be configured in `settings.toml`. Quote bundle IDs so TOML treats each dotted identifier as one key:

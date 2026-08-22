@@ -232,7 +232,7 @@ final class SpaceTracker {
                 }
             }
         }
-        controller.workspaceManager.commitSpaceTopology(topology)
+        commitTopology(topology, controller: controller)
         if reconcilesNativeFullscreen {
             controller.workspaceManager.reconcileNativeFullscreenWithTopology()
         }
@@ -246,8 +246,18 @@ final class SpaceTracker {
             topology = refreshedTopology(preserving: topology) ?? topology
         }
         topology.windowSpace[windowId] = spaceId
-        controller.workspaceManager.commitSpaceTopology(topology)
+        commitTopology(topology, controller: controller)
         controller.workspaceManager.reconcileNativeFullscreenWithTopology(for: entry.token)
+    }
+
+    /// Commits `topology` and, when a display started or stopped showing a native fullscreen space,
+    /// re-derives surfaces. The workspace bar can be configured to step aside for native fullscreen,
+    /// and an unmanaged window driving the transition produces no layout plan of its own.
+    private func commitTopology(_ topology: SpaceTopology, controller: WMController) {
+        let previous = controller.workspaceManager.spaceTopology.displaysShowingFullscreenSpace
+        controller.workspaceManager.commitSpaceTopology(topology)
+        guard controller.workspaceManager.spaceTopology.displaysShowingFullscreenSpace != previous else { return }
+        controller.surfaceReconciler.noteWorldChanged()
     }
 
     private func refreshedTopology(preserving topology: SpaceTopology) -> SpaceTopology? {

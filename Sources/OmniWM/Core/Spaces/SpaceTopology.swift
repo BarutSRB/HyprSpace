@@ -72,6 +72,28 @@ struct SpaceTopology: Equatable, Sendable {
         isDisplayShowingFullscreenSpace(monitor.displayUUID ?? String(monitor.displayId))
     }
 
+    /// Canonical identifiers of the displays whose current space is a native fullscreen space.
+    /// Ambiguous identifiers (listed more than once) are skipped, matching
+    /// `isDisplayShowingFullscreenSpace(_:)`.
+    var displaysShowingFullscreenSpace: Set<String> {
+        var seen: [String: UInt64] = [:]
+        var ambiguous: Set<String> = []
+        for display in displays {
+            let identifier = DisplayUUID.canonical(display.displayIdentifier) ?? display.displayIdentifier
+            if seen.updateValue(display.currentSpaceId, forKey: identifier) != nil {
+                ambiguous.insert(identifier)
+            }
+        }
+        return Set(
+            seen.compactMap { identifier, currentSpaceId in
+                guard !ambiguous.contains(identifier), fullscreenSpaceIds.contains(currentSpaceId) else {
+                    return nil
+                }
+                return identifier
+            }
+        )
+    }
+
     func normalizingDisplayIdentifiers(using monitors: [Monitor]) -> SpaceTopology {
         var topology = self
         let mainMonitor = monitors.first(where: \.isMain) ?? monitors.first
