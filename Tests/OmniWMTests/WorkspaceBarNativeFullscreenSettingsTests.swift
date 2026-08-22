@@ -104,6 +104,43 @@ final class WorkspaceBarNativeFullscreenSettingsTests: XCTestCase {
         XCTAssertTrue(controller.isWorkspaceBarVisible(on: builtIn))
     }
 
+    @MainActor
+    func testRawSkyLightDisplayIdentifiersStillHideTheBar() {
+        // `SpaceTracker.refreshedTopology(preserving:)` hands SkyLight's raw display identifiers
+        // straight through, so a commit can carry "Main" or a numeric display id instead of a UUID.
+        // `commitSpaceTopology` canonicalizes on the way in; this pins that, since without it the
+        // per-monitor lookup would miss and the bar would stay up over a fullscreen window.
+        for rawIdentifier in ["Main", "71005"] {
+            let settings = makeSettingsStore()
+            settings.workspaceBarEnabled = true
+            settings.workspaceBarHideInNativeFullscreen = true
+            let controller = WMController(settings: settings)
+            let builtIn = makeMonitor(displayId: 71_005, uuid: Self.builtInUUID, name: "Built-in", originX: 0)
+            controller.workspaceManager.applyMonitorConfigurationChange([builtIn])
+
+            controller.workspaceManager.commitSpaceTopology(
+                SpaceTopology(
+                    displays: [
+                        .init(displayIdentifier: rawIdentifier, spaceIds: [1], currentSpaceId: 1)
+                    ],
+                    activeSpaceId: 1,
+                    fullscreenSpaceIds: [1],
+                    windowSpace: [:]
+                )
+            )
+
+            XCTAssertEqual(
+                controller.workspaceManager.spaceTopology.displaysShowingFullscreenSpace,
+                [Self.builtInUUID],
+                "raw identifier \(rawIdentifier) should canonicalize to the monitor UUID"
+            )
+            XCTAssertFalse(
+                controller.isWorkspaceBarVisible(on: builtIn),
+                "bar should hide for raw identifier \(rawIdentifier)"
+            )
+        }
+    }
+
     func testDisplaysShowingFullscreenSpaceIgnoresAmbiguousIdentifiers() {
         let topology = SpaceTopology(
             displays: [
