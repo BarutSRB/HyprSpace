@@ -7,73 +7,53 @@ import IOKit.pwr_mgt
 @MainActor
 final class SleepPreventionManager {
     struct PerformanceSnapshot: Equatable, Sendable {
-        let timerFires: UInt64
-        let assertionRefreshes: UInt64
+        let assertionAcquisitions: UInt64
     }
 
     static let shared = SleepPreventionManager()
 
     private var sleepAssertionID: IOPMAssertionID?
-    private var assertionTimer: Timer?
+    private var wantsSleepPrevention = false
     private var isUserSessionActive = true
-    private var performanceTimerFires: UInt64?
-    private var performanceAssertionRefreshes: UInt64?
+    private var performanceAssertionAcquisitions: UInt64?
 
     private init() {
         setupWorkspaceNotifications()
     }
 
     func preventSleep() {
-        assertionTimer?.invalidate()
-        assertionTimer = Timer.scheduledTimer(
-            withTimeInterval: 10.0,
-            repeats: true
-        ) { [weak self] _ in
-            Task { @MainActor in
-                self?.refreshSleepAssertion()
-            }
-        }
-        assertionTimer?.fire()
+        wantsSleepPrevention = true
+        reconcileSleepAssertion()
     }
 
     func allowSleep() {
-        assertionTimer?.invalidate()
-        assertionTimer = nil
-        releaseSleepAssertion()
+        wantsSleepPrevention = false
+        reconcileSleepAssertion()
     }
 
     func beginPerformanceCapture() {
-        performanceTimerFires = 0
-        performanceAssertionRefreshes = 0
+        performanceAssertionAcquisitions = 0
     }
 
     func performanceSnapshot() -> PerformanceSnapshot? {
-        guard let timerFires = performanceTimerFires,
-              let assertionRefreshes = performanceAssertionRefreshes
-        else { return nil }
-        return PerformanceSnapshot(
-            timerFires: timerFires,
-            assertionRefreshes: assertionRefreshes
-        )
+        performanceAssertionAcquisitions.map {
+            PerformanceSnapshot(assertionAcquisitions: $0)
+        }
     }
 
     func endPerformanceCapture() -> PerformanceSnapshot? {
         let snapshot = performanceSnapshot()
-        performanceTimerFires = nil
-        performanceAssertionRefreshes = nil
+        performanceAssertionAcquisitions = nil
         return snapshot
     }
 
-    private func refreshSleepAssertion() {
-        performanceTimerFires? &+= 1
-        guard isUserSessionActive else { return }
-        performanceAssertionRefreshes? &+= 1
-
-        if let assertionID = sleepAssertionID {
-            if IOPMAssertionRelease(assertionID) != kIOReturnSuccess {
-                FallbackFiringRecorder.shared.note(.system, "sleepAssertionReleaseFailed")
-            }
+    private func reconcileSleepAssertion() {
+        guard wantsSleepPrevention, isUserSessionActive else {
+            releaseSleepAssertion()
+            return
         }
+        guard sleepAssertionID == nil else { return }
+        performanceAssertionAcquisitions? &+= 1
 
         var assertionID: IOPMAssertionID = 0
         let reason = "OmniWM prevents sleep" as CFString
@@ -83,7 +63,7 @@ final class SleepPreventionManager {
             nil,
             nil,
             nil,
-            8,
+            0,
             nil,
             &assertionID
         )
@@ -124,9 +104,11 @@ final class SleepPreventionManager {
 
     @objc private func sessionDidResignActive() {
         isUserSessionActive = false
+        reconcileSleepAssertion()
     }
 
     @objc private func sessionDidBecomeActive() {
         isUserSessionActive = true
+        reconcileSleepAssertion()
     }
 }

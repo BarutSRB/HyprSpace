@@ -279,7 +279,7 @@ extension WMController {
         {
             lines.append(
                 "periodic clipboard=\(clipboard.timerFires) secureInput=\(secureInput.recoveryTimerFires)"
-                    + " sleepTimer=\(sleep.timerFires) sleepAssertions=\(sleep.assertionRefreshes)"
+                    + " sleepAssertions=\(sleep.assertionAcquisitions)"
             )
         }
         let ax = snapshots.ax
