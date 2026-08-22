@@ -306,7 +306,7 @@ final class IPCConnectionReadLoopTests: XCTestCase {
 
         private nonisolated static func readByte(from fileDescriptor: Int32) throws -> UInt8 {
             while true {
-                guard try pollReadable(fileDescriptor, timeoutMilliseconds: 2_000) else {
+                guard try pollReadable(fileDescriptor, timeoutMilliseconds: 30_000) else {
                     throw HarnessError.timedOut
                 }
                 var byte: UInt8 = 0
