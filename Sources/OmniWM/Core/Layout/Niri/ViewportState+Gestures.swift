@@ -108,7 +108,6 @@ extension ViewportState {
         guard motion.animationsEnabled else {
             jumpOffset(to: CGFloat(targetOffset))
             activatePrevColumnOnRemoval = nil
-            selectionProgress = 0.0
             return
         }
 
@@ -116,7 +115,6 @@ extension ViewportState {
         springOffset(to: CGFloat(targetOffset))
 
         activatePrevColumnOnRemoval = nil
-        selectionProgress = 0.0
     }
 
     struct SnapResult {
@@ -422,7 +420,6 @@ extension ViewportState {
         ) else {
             jumpOffset(to: CGFloat(projectedOffset))
             activatePrevColumnOnRemoval = nil
-            selectionProgress = 0.0
             return
         }
 
@@ -446,7 +443,6 @@ extension ViewportState {
         guard motion.animationsEnabled else {
             jumpOffset(to: CGFloat(preserved.finalOffset))
             activatePrevColumnOnRemoval = nil
-            selectionProgress = 0.0
             return
         }
 
@@ -457,7 +453,6 @@ extension ViewportState {
             decelerateOffset(to: CGFloat(preserved.finalOffset))
         }
         activatePrevColumnOnRemoval = nil
-        selectionProgress = 0.0
     }
 
     private func normalizedPreservedGestureOffset(
@@ -553,6 +548,5 @@ extension ViewportState {
         jumpOffset(to: CGFloat(currentOffset))
         activatePrevColumnOnRemoval = nil
         viewOffsetToRestore = nil
-        selectionProgress = 0.0
     }
 }

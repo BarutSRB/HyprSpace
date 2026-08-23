@@ -92,25 +92,12 @@ final class DiagnosticsEventRecorder: @unchecked Sendable {
         verbose.releaseStorage()
     }
 
-    func dumpLifecycle() -> String {
-        format(lifecycle.snapshot())
-    }
-
-    func dumpVerbose() -> String {
-        format(verbose.snapshot())
-    }
-
     func forEachLifecycleLine(_ body: (String) -> Bool) {
         forEachLine(lifecycle.snapshot(), body)
     }
 
     func forEachVerboseLine(_ body: (String) -> Bool) {
         forEachLine(verbose.snapshot(), body)
-    }
-
-    private func format(_ records: [Record]) -> String {
-        guard !records.isEmpty else { return "none" }
-        return records.map(format).joined(separator: "\n")
     }
 
     private func forEachLine(_ records: [Record], _ body: (String) -> Bool) {

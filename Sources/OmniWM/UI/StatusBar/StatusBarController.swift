@@ -7,8 +7,6 @@ import SwiftUI
 
 @MainActor
 final class StatusBarController: NSObject {
-    nonisolated static let mainAutosaveName = StatusItemPersistence.OwnedItem.main.autosaveName
-
     private var statusItem: NSStatusItem?
     private var menuModel: StatusMenuModel?
     private var menu: NSMenu?

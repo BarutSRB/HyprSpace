@@ -247,26 +247,6 @@ extension NiriLayoutEngine {
         return hadAnimations
     }
 
-    func calculateCombinedLayout(
-        in workspaceId: WorkspaceDescriptor.ID,
-        monitor: Monitor,
-        gaps: LayoutGaps,
-        state: ViewportState,
-        workingArea: WorkingAreaContext? = nil,
-        animationTime: TimeInterval? = nil,
-        excludedTokens: Set<WindowToken>? = nil
-    ) -> [WindowToken: CGRect] {
-        calculateCombinedLayoutWithVisibility(
-            in: workspaceId,
-            monitor: monitor,
-            gaps: gaps,
-            state: state,
-            workingArea: workingArea,
-            animationTime: animationTime,
-            excludedTokens: excludedTokens
-        ).frames
-    }
-
     func calculateCombinedLayoutWithVisibility(
         in workspaceId: WorkspaceDescriptor.ID,
         monitor: Monitor,

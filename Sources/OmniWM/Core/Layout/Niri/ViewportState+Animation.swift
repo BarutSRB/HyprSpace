@@ -37,7 +37,6 @@ extension ViewportState {
     mutating func reset() {
         activeColumnIndex = 0
         jumpOffset(to: 0.0)
-        selectionProgress = 0.0
         selectedNodeId = nil
     }
 

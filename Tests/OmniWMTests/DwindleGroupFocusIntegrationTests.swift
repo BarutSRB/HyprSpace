@@ -1387,7 +1387,6 @@ final class DwindleGroupFocusIntegrationTests: XCTestCase {
             targetFrame: frame,
             currentFrameHint: nil,
             writeResult: AXFrameWriteResult(
-                targetFrame: frame,
                 observedFrame: failureReason == nil ? frame : nil,
                 writeOrder: .sizeThenPosition,
                 sizeError: .success,

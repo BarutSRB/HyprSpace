@@ -253,10 +253,6 @@ class NiriNode {
         children.first
     }
 
-    func lastChild() -> NiriNode? {
-        children.last
-    }
-
     func nextSibling() -> NiriNode? {
         guard let parent else { return nil }
         guard let index = parent.children.firstIndex(where: { $0 === self }) else { return nil }
@@ -323,33 +319,12 @@ class NiriNode {
         parent.children.swapAt(myIndex, sibIndex)
     }
 
-    func swapChildren(_ child1: NiriNode, _ child2: NiriNode) {
-        guard let idx1 = children.firstIndex(where: { $0 === child1 }),
-              let idx2 = children.firstIndex(where: { $0 === child2 })
-        else {
-            return
-        }
-        children.swapAt(idx1, idx2)
-    }
-
     func insertChild(_ child: NiriNode, at index: Int) {
         child.detach()
         child.parent = self
         let clampedIndex = max(0, min(index, children.count))
         children.insert(child, at: clampedIndex)
         findRoot()?.registerNode(child)
-    }
-
-    func findNode(by id: NodeId) -> NiriNode? {
-        if self.id == id {
-            return self
-        }
-        for child in children {
-            if let found = child.findNode(by: id) {
-                return found
-            }
-        }
-        return nil
     }
 }
 
@@ -704,23 +679,6 @@ class NiriContainer: NiriNode {
         return windows[idx]
     }
 
-    // Storage index 0 is the visual bottom of a column; overlay index 0 is the visual top.
-    func visualTileIndex(forStorageTileIndex storageIndex: Int) -> Int? {
-        let count = windowNodes.count
-        guard storageIndex >= 0, storageIndex < count else { return nil }
-        return count - 1 - storageIndex
-    }
-
-    func storageTileIndex(forVisualTileIndex visualIndex: Int) -> Int? {
-        let count = windowNodes.count
-        guard visualIndex >= 0, visualIndex < count else { return nil }
-        return count - 1 - visualIndex
-    }
-
-    var activeVisualTileIdx: Int {
-        visualTileIndex(forStorageTileIndex: activeTileIdx) ?? 0
-    }
-
     func clampActiveTileIdx() {
         let count = windowNodes.count
         if count == 0 {
@@ -973,10 +931,6 @@ class NiriRoot: NiriContainer {
         return result
     }
 
-    func containsWindowId(_ id: WindowToken) -> Bool {
-        windowIdSet.contains(id)
-    }
-
     private func buildNodeIndex() -> [NodeId: NiriNode] {
         var index: [NodeId: NiriNode] = [:]
         func addToIndex(_ node: NiriNode) {
@@ -989,7 +943,7 @@ class NiriRoot: NiriContainer {
         return index
     }
 
-    override func findNode(by id: NodeId) -> NiriNode? {
+    func findNode(by id: NodeId) -> NiriNode? {
         if nodeIndex == nil {
             nodeIndex = buildNodeIndex()
         }

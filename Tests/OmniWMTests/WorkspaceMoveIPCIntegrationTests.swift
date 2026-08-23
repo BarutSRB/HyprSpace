@@ -1209,7 +1209,6 @@ final class WorkspaceMoveIPCIntegrationTests: XCTestCase {
             targetFrame: targetFrame,
             currentFrameHint: observedFrame,
             writeResult: AXFrameWriteResult(
-                targetFrame: targetFrame,
                 observedFrame: observedFrame,
                 writeOrder: .sizeThenPosition,
                 sizeError: .success,

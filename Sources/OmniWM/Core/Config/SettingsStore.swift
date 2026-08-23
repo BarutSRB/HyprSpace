@@ -1028,28 +1028,6 @@ final class SettingsStore {
         systemHyperTrigger = SettingsStore.defaultExport.systemHyperTrigger
     }
 
-    func hotkeyBindings(applyingPreset mappings: [(id: String, trigger: HotkeyTrigger)]) -> [HotkeyBinding] {
-        var proposed = hotkeyBindings
-        for mapping in mappings {
-            for index in proposed.indices where proposed[index].id != mapping.id &&
-                proposed[index].binding.conflicts(with: mapping.trigger)
-            {
-                proposed[index] = HotkeyBinding(
-                    id: proposed[index].id,
-                    command: proposed[index].command,
-                    trigger: .unassigned
-                )
-            }
-            guard let index = proposed.firstIndex(where: { $0.id == mapping.id }) else { continue }
-            proposed[index] = HotkeyBinding(
-                id: proposed[index].id,
-                command: proposed[index].command,
-                trigger: mapping.trigger
-            )
-        }
-        return proposed
-    }
-
     func updateBinding(for commandId: String, newBinding: KeyBinding) {
         updateTrigger(for: commandId, newTrigger: newBinding.isUnassigned ? .unassigned : .chord(newBinding))
     }
@@ -1072,10 +1050,6 @@ final class SettingsStore {
               let index = hotkeyBindings.firstIndex(where: { $0.id == commandId })
         else { return }
         hotkeyBindings[index] = defaultBinding
-    }
-
-    func findConflicts(for binding: KeyBinding, excluding commandId: String) -> [HotkeyBinding] {
-        findConflicts(for: binding.isUnassigned ? .unassigned : .chord(binding), excluding: commandId)
     }
 
     func findConflicts(for trigger: HotkeyTrigger, excluding commandId: String) -> [HotkeyBinding] {
@@ -1222,10 +1196,6 @@ final class SettingsStore {
         return true
     }
 
-    func appRule(for bundleId: String) -> AppRule? {
-        appRules.first { $0.bundleId == bundleId }
-    }
-
     func orientationSettings(for monitor: Monitor) -> MonitorOrientationSettings? {
         MonitorSettingsStore.get(for: monitor, in: monitorOrientationSettings)
     }
@@ -1247,16 +1217,8 @@ final class SettingsStore {
         MonitorSettingsStore.remove(for: monitor, from: &monitorOrientationSettings)
     }
 
-    func routingSettings(for monitor: Monitor) -> MonitorRoutingSettings? {
-        MonitorSettingsStore.get(for: monitor, in: monitorRoutingSettings)
-    }
-
     func updateRoutingSettings(_ settings: MonitorRoutingSettings, for monitor: Monitor) {
         MonitorSettingsStore.update(settings, for: monitor, in: &monitorRoutingSettings)
-    }
-
-    func removeRoutingSettings(for monitor: Monitor) {
-        MonitorSettingsStore.remove(for: monitor, from: &monitorRoutingSettings)
     }
 
     func niriSettings(for monitor: Monitor) -> MonitorNiriSettings? {

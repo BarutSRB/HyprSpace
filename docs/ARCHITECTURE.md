@@ -386,8 +386,6 @@ Some apps (Ghostty, browsers) destroy and recreate windows during internal opera
 
 **Scheduling.** It owns a single-slot scheduler (`activeRefresh` + `pendingRefresh`): if a refresh is in flight, incoming requests merge into the pending slot and fire when the active one completes. Each `RefreshReason` (`Core/Controller/RefreshReason.swift`, ~27 cases) maps to a `RefreshRequestRoute` and a per-reason debounce policy.
 
-> **Two route enums.** `RefreshReason.RefreshRequestRoute` has five cases including `fullRescan`. `LayoutRefreshController.RefreshRoute` is a distinct four-case enum used internally for execution (no `fullRescan`). They are not the same type.
-
 | Route | When | What it does |
 |-------|------|--------------|
 | `fullRescan` | Startup/global fallback, app launch/rebind recovery, space/wake/display inventory | Global or scope-limited enumeration + relayout |

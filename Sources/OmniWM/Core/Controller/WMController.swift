@@ -822,13 +822,7 @@ final class WMController {
     }
 
     func updateMonitorDwindleSettings() {
-        guard let engine = dwindleEngine else { return }
-        workspaceManager.withEngineMutationScope {
-            for monitor in workspaceManager.monitors {
-                let resolved = settings.resolvedDwindleSettings(for: monitor)
-                engine.updateMonitorSettings(resolved, for: monitor.id)
-            }
-        }
+        guard dwindleEngine != nil else { return }
         workspaceManager.invalidateAllLayouts()
         layoutRefreshController.requestRelayout(reason: .monitorSettingsChanged)
     }
@@ -844,21 +838,6 @@ final class WMController {
         Task {
             await ipcApplicationBridge.publishEvent(.displayChanged)
         }
-    }
-
-    func workspaceBarItems(
-        for monitor: Monitor,
-        projection options: WorkspaceBarProjectionOptions
-    ) -> [WorkspaceBarItem] {
-        WorkspaceBarDataSource.workspaceBarItems(
-            for: monitor,
-            options: options,
-            workspaceManager: workspaceManager,
-            appInfoCache: appInfoCache,
-            iconResolver: workspaceBarIconResolver,
-            focusedToken: workspaceManager.focusedToken,
-            settings: settings
-        )
     }
 
     func workspaceBarProjection(
@@ -1429,17 +1408,6 @@ final class WMController {
         return workspaceManager.monitors.first
     }
 
-    private func clampedFloatingFrame(
-        _ frame: CGRect,
-        in visibleFrame: CGRect
-    ) -> CGRect {
-        let maxX = visibleFrame.maxX - frame.width
-        let maxY = visibleFrame.maxY - frame.height
-        let clampedX = min(max(frame.origin.x, visibleFrame.minX), max(maxX, visibleFrame.minX))
-        let clampedY = min(max(frame.origin.y, visibleFrame.minY), max(maxY, visibleFrame.minY))
-        return CGRect(origin: CGPoint(x: clampedX, y: clampedY), size: frame.size)
-    }
-
     private func initialFloatingFrame(
         for entry: WindowState,
         preferredMonitor: Monitor?,
@@ -1455,7 +1423,7 @@ final class WMController {
         ) else {
             return offsetFrame
         }
-        return clampedFloatingFrame(offsetFrame, in: monitor.visibleFrame)
+        return FloatingFrameGeometry.clamped(offsetFrame, in: monitor.visibleFrame)
     }
 
     private func shouldApplyFloatingFrameImmediately(
@@ -1706,15 +1674,6 @@ final class WMController {
         if workspaceManager.clearScratchpadIfMatches(token) {
             requestWorkspaceBarRefresh()
         }
-    }
-
-    func cleanupScratchpadWindowResourcesIfNeeded(for token: WindowToken) {
-        guard workspaceManager.isScratchpadToken(token)
-            || workspaceManager.hiddenState(for: token)?.isScratchpad == true
-        else {
-            return
-        }
-        cleanupScratchpadWindowResources(for: token)
     }
 
     func rekeyScratchpadWindowResources(from oldToken: WindowToken, to newToken: WindowToken, axRef: AXWindowRef) {
@@ -2247,18 +2206,6 @@ final class WMController {
             axEventHandler.resolveWindowInfo(windowId),
             for: token
         )
-    }
-
-    func decideWindowDisposition(
-        axRef: AXWindowRef,
-        pid: pid_t,
-        appFullscreen: Bool? = nil
-    ) -> WindowDecision {
-        evaluateWindowDisposition(
-            axRef: axRef,
-            pid: pid,
-            appFullscreen: appFullscreen
-        ).decision
     }
 
     func makeWindowDecisionDebugSnapshot(
@@ -3219,16 +3166,6 @@ final class WMController {
 extension WMController {
     func isFrontmostAppLockScreen() -> Bool {
         lockScreenObserver.isFrontmostAppLockScreen()
-    }
-
-    func isPointInQuakeTerminal(_ point: CGPoint) -> Bool {
-        guard settings.quakeTerminalEnabled,
-              quakeTerminalController.visible,
-              let window = quakeTerminalController.window
-        else {
-            return false
-        }
-        return window.frame.contains(point)
     }
 
     func isPointInOwnWindow(_ point: CGPoint) -> Bool {

@@ -284,7 +284,6 @@ final class DurableParkTests: XCTestCase {
             targetFrame: visibleFrame,
             currentFrameHint: nil,
             writeResult: AXFrameWriteResult(
-                targetFrame: visibleFrame,
                 observedFrame: visibleFrame,
                 writeOrder: .sizeThenPosition,
                 sizeError: .success,
@@ -349,7 +348,6 @@ final class DurableParkTests: XCTestCase {
             targetFrame: stragglerFrame,
             currentFrameHint: nil,
             writeResult: AXFrameWriteResult(
-                targetFrame: stragglerFrame,
                 observedFrame: stragglerFrame,
                 writeOrder: .sizeThenPosition,
                 sizeError: .success,

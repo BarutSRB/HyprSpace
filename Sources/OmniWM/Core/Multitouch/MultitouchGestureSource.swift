@@ -643,22 +643,6 @@ final class MultitouchGestureSource {
         return cleanedUp
     }
 
-    func start() {
-        startLifecycle()
-    }
-
-    func stop() {
-        shutdown()
-    }
-
-    func restart() {
-        if state == .stopped {
-            startLifecycle()
-        } else {
-            requestRevalidation(.wake)
-        }
-    }
-
     func receiveTopologySignal(_ signal: TopologySignal) {
         lastTopologySignal = signal
         requestRevalidation(signal == .arrival ? .arrival : .removal)
@@ -700,14 +684,6 @@ final class MultitouchGestureSource {
 
     nonisolated func endPerformanceCapture() -> MultitouchFrameMailbox.PerformanceSnapshot? {
         rawFrameMailbox.endPerformanceCapture()
-    }
-
-    func handleRawFrame(
-        _ frame: RawFrame,
-        generation: UInt
-    ) {
-        guard recordAndAccept(frame, generation: generation) else { return }
-        emitSnapshot(frame, location: NSEvent.mouseLocation)
     }
 
     func handleRawFrame(

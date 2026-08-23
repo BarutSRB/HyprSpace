@@ -137,11 +137,6 @@ final class ClipboardHistoryService: @unchecked Sendable {
         captureGeneration &+= 1
     }
 
-    func flushAndStop() async {
-        stop()
-        await store.flush()
-    }
-
     func beginPerformanceCapture() {
         performanceTimerFires = 0
     }

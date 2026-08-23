@@ -422,7 +422,6 @@ final class DiagnosticsTraceRecorderTests: XCTestCase {
             targetFrame: frame,
             currentFrameHint: nil,
             writeResult: AXFrameWriteResult(
-                targetFrame: frame,
                 observedFrame: frame,
                 writeOrder: .sizeThenPosition,
                 sizeError: .success,
@@ -478,7 +477,6 @@ final class DiagnosticsTraceRecorderTests: XCTestCase {
             targetFrame: frame,
             currentFrameHint: nil,
             writeResult: AXFrameWriteResult(
-                targetFrame: frame,
                 observedFrame: frame.offsetBy(dx: -1, dy: 0),
                 writeOrder: .sizeThenPosition,
                 sizeError: .success,

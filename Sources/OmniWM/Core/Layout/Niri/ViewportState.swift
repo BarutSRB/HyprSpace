@@ -22,8 +22,6 @@ struct ViewportState: Equatable {
 
     var offsetTransition = OffsetTransition()
 
-    var selectionProgress: CGFloat = 0.0
-
     var selectedNodeId: NodeId?
 
     var viewOffsetToRestore: CGFloat?

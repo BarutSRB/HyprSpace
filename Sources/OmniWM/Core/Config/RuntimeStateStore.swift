@@ -68,10 +68,6 @@ final class RuntimeStateStore {
     nonisolated static let defaultCommandPaletteLastMode = CommandPaletteMode.windows
     nonisolated static let defaultQuakeTerminalUseCustomFrame = false
     nonisolated static let defaultMonitorSetupStatus = MonitorSetupStatus.notPresented
-    nonisolated static var fileURL: URL {
-        defaultDirectoryURL.appendingPathComponent(fileName, isDirectory: false)
-    }
-
     let directoryURL: URL
     let fileURL: URL
 
@@ -88,15 +84,6 @@ final class RuntimeStateStore {
         fileURL = directory.appendingPathComponent(Self.fileName, isDirectory: false)
         self.deferSaves = deferSaves
         state = Self.readState(from: directory.appendingPathComponent(Self.fileName, isDirectory: false))
-    }
-
-    func load() -> RuntimeState {
-        state
-    }
-
-    func save(_ state: RuntimeState) {
-        self.state = state
-        write(state)
     }
 
     func scheduleSave() {

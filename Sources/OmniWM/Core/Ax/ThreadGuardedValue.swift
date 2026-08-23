@@ -74,39 +74,4 @@ final class ThreadGuardedValue<Value>: Sendable {
             _value?[key] = newValue
         }
     }
-
-    @inlinable
-    func contains<T: Hashable>(_ element: T) -> Bool where Value == Set<T> {
-        #if DEBUG
-            threadToken.checkEquals(appThreadToken)
-        #endif
-        return _value?.contains(element) ?? false
-    }
-
-    @inlinable
-    func insert<T: Hashable>(_ element: T) where Value == Set<T> {
-        #if DEBUG
-            threadToken.checkEquals(appThreadToken)
-        #endif
-        _value?.insert(element)
-    }
-
-    @inlinable
-    @discardableResult
-    func remove<T: Hashable>(_ element: T) -> T? where Value == Set<T> {
-        #if DEBUG
-            threadToken.checkEquals(appThreadToken)
-        #endif
-        return _value?.remove(element)
-    }
-}
-
-extension ThreadGuardedValue {
-    @inlinable
-    func forEachKey<K: Hashable, V>(_ body: (K) -> Void) where Value == [K: V] {
-        #if DEBUG
-            threadToken.checkEquals(appThreadToken)
-        #endif
-        _value?.keys.forEach(body)
-    }
 }

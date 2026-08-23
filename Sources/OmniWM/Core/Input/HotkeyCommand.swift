@@ -98,8 +98,6 @@ enum HotkeyCommand: Codable, Equatable, Hashable {
     case preselectClear
 
     case workspaceBackAndForth
-    case focusWorkspaceAnywhere(Int)
-    case moveWindowToWorkspaceOnMonitor(workspaceIndex: Int, monitorDirection: Direction)
 
     case openCommandPalette
 

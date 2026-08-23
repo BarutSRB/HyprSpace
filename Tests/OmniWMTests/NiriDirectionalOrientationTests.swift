@@ -108,7 +108,7 @@ final class NiriDirectionalOrientationTests: XCTestCase {
         )
 
         XCTAssertEqual(
-            fixture.controller.commandHandler.handleHotkeyCommand(.moveWindowUp),
+            fixture.controller.commandHandler.performCommand(.moveWindowUp),
             .executed
         )
         XCTAssertEqual(fixture.engine.columns(in: fixture.workspaceId).count, 1)
@@ -119,7 +119,7 @@ final class NiriDirectionalOrientationTests: XCTestCase {
         )
 
         XCTAssertEqual(
-            fixture.controller.commandHandler.handleHotkeyCommand(.moveWindowDown),
+            fixture.controller.commandHandler.performCommand(.moveWindowDown),
             .executed
         )
         XCTAssertEqual(fixture.engine.columns(in: fixture.workspaceId).count, 1)
@@ -986,7 +986,7 @@ extension NiriDirectionalOrientationTests {
     }
 
     private func execute(_ command: HotkeyCommand, on controller: WMController) {
-        XCTAssertEqual(controller.commandHandler.handleHotkeyCommand(command), .executed)
+        XCTAssertEqual(controller.commandHandler.performCommand(command), .executed)
     }
 
     private func assertOrder(

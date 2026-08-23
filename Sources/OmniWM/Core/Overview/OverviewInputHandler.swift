@@ -163,27 +163,6 @@ final class OverviewInputHandler {
         return .init(action: .consume, shouldConsume: true)
     }
 
-    func handleMouseDown(at point: CGPoint, in layout: OverviewLayout) {
-        guard let controller else { return }
-        let hit = layout.windowHit(at: point)
-
-        if let hit, hit.isCloseButton {
-            controller.closeWindow(hit.window.handle)
-            return
-        }
-
-        if let window = hit?.window {
-            controller.selectAndActivateWindow(window.handle)
-            return
-        }
-
-        controller.dismissToSelection(animated: true)
-    }
-
-    func handleScroll(delta: CGFloat) {
-        controller?.adjustScrollOffset(by: delta)
-    }
-
     func reset() {
         searchQuery = ""
     }

@@ -21,7 +21,6 @@ final class DwindleLayoutEngine {
 
     var settings: DwindleSettings = DwindleSettings()
     var tabRailWidth: CGFloat = 12
-    private var monitorSettings: [Monitor.ID: ResolvedDwindleSettings] = [:]
     var animationClock: AnimationClock?
     var isMutationSanctioned = true
 
@@ -41,30 +40,6 @@ final class DwindleLayoutEngine {
 
     func constraints(for token: WindowToken) -> WindowSizeConstraints {
         windowConstraints[token] ?? .unconstrained
-    }
-
-    func updateMonitorSettings(_ resolved: ResolvedDwindleSettings, for monitorId: Monitor.ID) {
-        assertSanctionedMutation()
-        monitorSettings[monitorId] = resolved
-    }
-
-    func cleanupRemovedMonitor(_ monitorId: Monitor.ID) {
-        assertSanctionedMutation()
-        monitorSettings.removeValue(forKey: monitorId)
-    }
-
-    func effectiveSettings(for monitorId: Monitor.ID) -> DwindleSettings {
-        guard let resolved = monitorSettings[monitorId] else { return settings }
-
-        var effective = settings
-        effective.smartSplit = resolved.smartSplit
-        effective.defaultSplitRatio = resolved.defaultSplitRatio
-        effective.splitWidthMultiplier = resolved.splitWidthMultiplier
-        effective.singleWindowFit = resolved.singleWindowFit
-        if !resolved.useGlobalGaps {
-            effective.innerGap = resolved.innerGap
-        }
-        return effective
     }
 
     var windowMovementAnimationConfig: CubicConfig = .hyprlandDwindle
@@ -148,21 +123,6 @@ final class DwindleLayoutEngine {
 
     func tileCount(in workspaceId: WorkspaceDescriptor.ID) -> Int {
         states[workspaceId]?.tileCount ?? 0
-    }
-
-    func activeWindowTokens(in workspaceId: WorkspaceDescriptor.ID) -> Set<WindowToken> {
-        guard let state = states[workspaceId] else { return [] }
-        var tokens: Set<WindowToken> = []
-        tokens.reserveCapacity(state.tileCount)
-        for leaf in state.root.collectAllLeaves() {
-            guard let tile = leaf.tile,
-                  let member = visibleMember(in: tile, excluding: state.excludedTokens)
-            else {
-                continue
-            }
-            tokens.insert(member.token)
-        }
-        return tokens
     }
 
     func inactiveGroupTokens(in workspaceId: WorkspaceDescriptor.ID) -> Set<WindowToken> {
@@ -331,10 +291,6 @@ final class DwindleLayoutEngine {
         guard state.preselection != direction else { return false }
         state.preselection = direction
         return true
-    }
-
-    func getPreselection(in workspaceId: WorkspaceDescriptor.ID) -> Direction? {
-        states[workspaceId]?.preselection
     }
 
     private func findNodeById(_ nodeId: DwindleNodeId, in root: DwindleNode) -> DwindleNode? {
@@ -1607,15 +1563,6 @@ final class DwindleLayoutEngine {
             return 2 * firstMin / axisLength > 1.9 ? 1.9 ... 1.9 : 0.1 ... 0.1
         }
         return lower ... upper
-    }
-
-    func clampedRatioRespectingMinimums(_ ratio: CGFloat, for split: DwindleNode) -> CGFloat {
-        clampedRatioRespectingMinimums(
-            ratio,
-            for: split,
-            innerGap: settings.innerGap,
-            excludedTokens: []
-        )
     }
 
     func clampedRatioRespectingMinimums(

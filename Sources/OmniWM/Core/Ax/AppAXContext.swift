@@ -2715,14 +2715,6 @@ final class AppAXContext {
         }
         thread = nil
     }
-
-    static func garbageCollect() {
-        for (_, context) in contexts {
-            if context.nsApp.isTerminated {
-                context.destroy()
-            }
-        }
-    }
 }
 
 func frameWriteSkipReason(

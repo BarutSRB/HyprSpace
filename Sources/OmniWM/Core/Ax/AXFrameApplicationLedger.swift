@@ -238,15 +238,6 @@ final class AXFrameApplicationLedger {
         appliedFrameStates[windowId]?.frame
     }
 
-    func trustedVerifiedFrame(for windowId: Int) -> CGRect? {
-        guard let state = appliedFrameStates[windowId],
-              state.verifiedComponents.contains(.all)
-        else {
-            return nil
-        }
-        return state.frame
-    }
-
     func trustedVerifiedSize(for windowId: Int) -> CGSize? {
         guard let state = appliedFrameStates[windowId],
               state.verifiedComponents.contains(.size)
@@ -1006,7 +997,6 @@ final class AXFrameApplicationLedger {
             targetFrame: frame,
             currentFrameHint: currentFrameHint,
             writeResult: AXFrameWriteResult(
-                targetFrame: frame,
                 observedFrame: observedFrame,
                 writeOrder: AXWindowService.frameWriteOrder(
                     currentFrame: currentFrameHint,
@@ -1033,7 +1023,6 @@ final class AXFrameApplicationLedger {
             targetFrame: result.targetFrame,
             currentFrameHint: result.currentFrameHint,
             writeResult: AXFrameWriteResult(
-                targetFrame: result.targetFrame,
                 observedFrame: observedFrame,
                 writeOrder: result.writeResult.writeOrder,
                 sizeError: result.writeResult.sizeError,

@@ -313,8 +313,6 @@ extension NiriLayoutEngine {
             viewFrame: viewFrame,
             orientation: orientation
         )
-
-        state.selectionProgress = 0.0
     }
 
     func resolvePrimaryContainerSpans(

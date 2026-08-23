@@ -97,7 +97,6 @@ enum AXFrameWriteFailureReason: Equatable, Sendable {
 }
 
 struct AXFrameWriteResult: Equatable, Sendable {
-    let targetFrame: CGRect
     let observedFrame: CGRect?
     let writeOrder: AXFrameWriteOrder
     let sizeError: AXError
@@ -106,7 +105,6 @@ struct AXFrameWriteResult: Equatable, Sendable {
     let components: AXFrameComponents
 
     init(
-        targetFrame: CGRect,
         observedFrame: CGRect?,
         writeOrder: AXFrameWriteOrder,
         sizeError: AXError,
@@ -114,7 +112,6 @@ struct AXFrameWriteResult: Equatable, Sendable {
         failureReason: AXFrameWriteFailureReason?,
         components: AXFrameComponents = .all
     ) {
-        self.targetFrame = targetFrame
         self.observedFrame = observedFrame
         self.writeOrder = writeOrder
         self.sizeError = sizeError
@@ -139,7 +136,6 @@ struct AXFrameWriteResult: Equatable, Sendable {
         components: AXFrameComponents = .all
     ) -> Self {
         Self(
-            targetFrame: targetFrame,
             observedFrame: observedFrame,
             writeOrder: AXWindowService.frameWriteOrder(currentFrame: currentFrameHint, targetFrame: targetFrame),
             sizeError: .success,
@@ -661,7 +657,6 @@ enum AXWindowService {
         }
 
         return AXFrameWriteResult(
-            targetFrame: frame,
             observedFrame: observedFrame,
             writeOrder: writeOrder,
             sizeError: sizeError,

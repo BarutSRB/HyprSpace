@@ -848,15 +848,6 @@ final class WorkspaceManager {
         _monitorsById[id]
     }
 
-    func monitor(named name: String) -> Monitor? {
-        guard let matches = _monitorsByName[name], matches.count == 1 else { return nil }
-        return matches[0]
-    }
-
-    func monitors(named name: String) -> [Monitor] {
-        _monitorsByName[name] ?? []
-    }
-
     var interactionMonitorId: Monitor.ID? {
         world.focus.interactionMonitorId
     }
@@ -1643,30 +1634,6 @@ final class WorkspaceManager {
         )
     }
 
-    private func floatingOrigin(
-        from normalizedOrigin: CGPoint,
-        windowSize: CGSize,
-        in visibleFrame: CGRect
-    ) -> CGPoint {
-        let availableWidth = max(0, visibleFrame.width - windowSize.width)
-        let availableHeight = max(0, visibleFrame.height - windowSize.height)
-        return CGPoint(
-            x: visibleFrame.minX + min(max(0, normalizedOrigin.x), 1) * availableWidth,
-            y: visibleFrame.minY + min(max(0, normalizedOrigin.y), 1) * availableHeight
-        )
-    }
-
-    private func clampedFloatingFrame(
-        _ frame: CGRect,
-        in visibleFrame: CGRect
-    ) -> CGRect {
-        let maxX = visibleFrame.maxX - frame.width
-        let maxY = visibleFrame.maxY - frame.height
-        let clampedX = min(max(frame.origin.x, visibleFrame.minX), maxX >= visibleFrame.minX ? maxX : visibleFrame.minX)
-        let clampedY = min(max(frame.origin.y, visibleFrame.minY), maxY >= visibleFrame.minY ? maxY : visibleFrame.minY)
-        return CGRect(origin: CGPoint(x: clampedX, y: clampedY), size: frame.size)
-    }
-
     private func rebuildMonitorIndexes() {
         _cachedSortedMonitors = nil
         _cachedTopologyProfile = nil
@@ -2106,10 +2073,6 @@ final class WorkspaceManager {
         return entries
     }
 
-    func hasTiledOccupancy(in workspace: WorkspaceDescriptor.ID) -> Bool {
-        !tiledEntries(in: workspace).isEmpty
-    }
-
     func floatingEntries(in workspace: WorkspaceDescriptor.ID) -> [WindowState] {
         world.windows(in: workspace, mode: .floating)
     }
@@ -2157,10 +2120,6 @@ final class WorkspaceManager {
 
     func allEntries() -> [WindowState] {
         world.allEntries()
-    }
-
-    func allTiledEntries() -> [WindowState] {
-        world.allEntries(mode: .tiling)
     }
 
     func allFloatingEntries() -> [WindowState] {
@@ -2383,15 +2342,15 @@ final class WorkspaceManager {
         if let targetMonitor,
            floatingState.referenceMonitorId == targetMonitor.id || floatingState.normalizedOrigin == nil
         {
-            return clampedFloatingFrame(floatingState.lastFrame, in: visibleFrame)
+            return FloatingFrameGeometry.clamped(floatingState.lastFrame, in: visibleFrame)
         }
 
-        let origin = floatingOrigin(
+        let origin = FloatingFrameGeometry.origin(
             from: floatingState.normalizedOrigin ?? .zero,
             windowSize: floatingState.lastFrame.size,
             in: visibleFrame
         )
-        return clampedFloatingFrame(
+        return FloatingFrameGeometry.clamped(
             CGRect(origin: origin, size: floatingState.lastFrame.size),
             in: visibleFrame
         )
@@ -3381,15 +3340,6 @@ final class WorkspaceManager {
         return true
     }
 
-    private func pruneRestoredDisconnectedVisibleWorkspaces() {
-        let context = monitorResolutionContext()
-        disconnectedVisibleWorkspaceCache = disconnectedVisibleWorkspaceCache.filter { _, workspaceId in
-            guard descriptor(for: workspaceId) != nil else { return false }
-            guard let homeMonitorId = homeMonitorId(for: workspaceId, context: context) else { return true }
-            return visibleWorkspaceId(on: homeMonitorId) != workspaceId
-        }
-    }
-
     func reconcileConfiguredVisibleWorkspaces(notify: Bool = true) {
         var changed = false
         let context = monitorResolutionContext()
@@ -3510,23 +3460,6 @@ final class WorkspaceManager {
         Set(monitors.compactMap { monitor in
             defaultVisibleWorkspaceId(on: monitor.id) == nil ? nil : monitor.id
         })
-    }
-
-    private func replaceVisibleWorkspaceIfNeeded(on monitorId: Monitor.ID) {
-        guard let monitor = monitor(byId: monitorId) else { return }
-        if let defaultWorkspaceId = defaultVisibleWorkspaceId(on: monitor.id) {
-            _ = setActiveWorkspaceInternal(
-                defaultWorkspaceId,
-                on: monitor.id,
-                anchorPoint: monitor.workspaceAnchorPoint
-            )
-        } else {
-            updateMonitorSession(monitor.id) { session in
-                session.visibleWorkspaceId = nil
-                session.previousVisibleWorkspaceId = nil
-            }
-            notifySessionStateChanged()
-        }
     }
 
     private func sourceReplacementWorkspaceId(

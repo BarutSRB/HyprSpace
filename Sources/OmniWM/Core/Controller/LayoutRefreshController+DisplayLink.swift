@@ -200,20 +200,6 @@ extension LayoutRefreshController {
         stopDisplayLinkIfIdle(for: displayId)
     }
 
-    func stopAllScrollAnimations() {
-        let displayIds = Array(niriHandler.scrollAnimationByDisplay.keys)
-        for workspaceId in Set(niriHandler.scrollAnimationByDisplay.values) {
-            niriHandler.terminateViewportGesture(
-                for: workspaceId,
-                disposition: .settleLiveOffset
-            )
-        }
-        niriHandler.scrollAnimationByDisplay.removeAll()
-        for displayId in displayIds {
-            stopDisplayLinkIfIdle(for: displayId)
-        }
-    }
-
     func acceptDwindleAnimationTarget(
         _ disposition: DwindleAnimationTargetDisposition,
         workspaceId: WorkspaceDescriptor.ID,

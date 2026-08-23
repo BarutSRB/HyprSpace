@@ -159,10 +159,6 @@ final class WindowActionHandler {
         overviewControllerStorage?.isOpen == true
     }
 
-    func isPointInOverview(_ point: CGPoint) -> Bool {
-        overviewController.isPointInside(point)
-    }
-
     private func activateWindowFromOverview(handle: WindowHandle, workspaceId: WorkspaceDescriptor.ID) {
         guard let controller else { return }
         guard controller.workspaceManager.entry(for: handle) != nil else { return }
@@ -792,7 +788,6 @@ final class WindowActionHandler {
                             animationConfig: nil,
                             fromContainerIndex: nil
                         )
-                        targetState.selectionProgress = 0
                     }
                 }
             }

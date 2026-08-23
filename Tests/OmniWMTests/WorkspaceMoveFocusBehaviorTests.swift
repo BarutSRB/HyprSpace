@@ -456,7 +456,7 @@ final class WorkspaceMoveFocusBehaviorTests: XCTestCase {
                 ) {
                     XCTAssertFalse(fixture.controller.settings.moveCrossesMonitorAtEdge)
                     XCTAssertEqual(
-                        fixture.controller.commandHandler.handleHotkeyCommand(.moveWindowToMonitor(.right)),
+                        fixture.controller.commandHandler.performCommand(.moveWindowToMonitor(.right)),
                         .executed
                     )
 
@@ -511,7 +511,7 @@ final class WorkspaceMoveFocusBehaviorTests: XCTestCase {
         let noFocusWorldSeq = manager.worldSeq
         XCTAssertNil(manager.focusedToken)
         XCTAssertEqual(
-            controller.commandHandler.handleHotkeyCommand(.moveWindowToMonitor(.right)),
+            controller.commandHandler.performCommand(.moveWindowToMonitor(.right)),
             .executed
         )
         XCTAssertEqual(manager.worldSeq, noFocusWorldSeq)
@@ -535,7 +535,7 @@ final class WorkspaceMoveFocusBehaviorTests: XCTestCase {
         let noAdjacentWorldSeq = manager.worldSeq
 
         XCTAssertEqual(
-            controller.commandHandler.handleHotkeyCommand(.moveWindowToMonitor(.left)),
+            controller.commandHandler.performCommand(.moveWindowToMonitor(.left)),
             .executed
         )
         XCTAssertEqual(manager.workspace(for: window.id), fixture.sourceWorkspaceId)

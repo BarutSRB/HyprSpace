@@ -21,18 +21,6 @@ struct SpringConfig: Equatable {
         self.velocityEpsilon = velocityEpsilon.isFinite ? max(0, velocityEpsilon) : velocityEpsilon
     }
 
-    init(duration: Double = 0.2, bounce: Double = 0.0, epsilon: Double = 0.5, velocityEpsilon: Double = 10.0) {
-        let duration = max(0.001, duration)
-        let dampingRatio = 1.0 - min(max(bounce, -1.0), 1.0) * 0.35
-        let beta = -log(max(epsilon, 0.0001)) / duration
-        self.init(
-            dampingRatio: dampingRatio,
-            stiffness: pow(beta / max(dampingRatio, Double.ulpOfOne), 2),
-            epsilon: epsilon,
-            velocityEpsilon: velocityEpsilon
-        )
-    }
-
     init(
         response: Double,
         dampingFraction: Double,
@@ -74,7 +62,6 @@ struct SpringConfig: Equatable {
 
     static let snappy = SpringConfig.niriHorizontalViewMovement
     static let balanced = SpringConfig.niriWindowMovement
-    static let gentle = SpringConfig.niriWindowMovement
     static let `default` = SpringConfig.snappy
 
     func with(epsilon: Double, velocityEpsilon: Double) -> SpringConfig {

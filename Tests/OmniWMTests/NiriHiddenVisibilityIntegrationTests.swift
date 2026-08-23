@@ -150,7 +150,6 @@ final class NiriHiddenVisibilityIntegrationTests: XCTestCase {
                 animationConfig: nil,
                 fromContainerIndex: nil
             )
-            expectedState.selectionProgress = 0
         }
 
         XCTAssertTrue(
@@ -186,7 +185,7 @@ final class NiriHiddenVisibilityIntegrationTests: XCTestCase {
         }
         controller.workspaceManager.setAppHidden(true, pid: token.pid, source: .ax)
 
-        XCTAssertEqual(controller.commandHandler.handleHotkeyCommand(.toggleNativeFullscreen), .executed)
+        XCTAssertEqual(controller.commandHandler.performCommand(.toggleNativeFullscreen), .executed)
         XCTAssertEqual(fullscreenWrites, 0)
         XCTAssertNil(controller.workspaceManager.nativeFullscreenRecord(for: token))
     }
@@ -242,7 +241,7 @@ final class NiriHiddenVisibilityIntegrationTests: XCTestCase {
             return true
         }
 
-        XCTAssertEqual(controller.commandHandler.handleHotkeyCommand(.toggleNativeFullscreen), .executed)
+        XCTAssertEqual(controller.commandHandler.performCommand(.toggleNativeFullscreen), .executed)
 
         XCTAssertEqual(fullscreenWrites, 0)
         XCTAssertNil(controller.workspaceManager.nativeFullscreenRecord(for: reusedToken))
@@ -279,7 +278,7 @@ final class NiriHiddenVisibilityIntegrationTests: XCTestCase {
             return true
         }
 
-        XCTAssertEqual(controller.commandHandler.handleHotkeyCommand(.toggleNativeFullscreen), .executed)
+        XCTAssertEqual(controller.commandHandler.performCommand(.toggleNativeFullscreen), .executed)
 
         XCTAssertEqual(fullscreenWrites, 1)
         XCTAssertEqual(controller.workspaceManager.nativeFullscreenRecord(for: token)?.transition, .enterRequested)
@@ -336,7 +335,7 @@ final class NiriHiddenVisibilityIntegrationTests: XCTestCase {
             return true
         }
 
-        XCTAssertEqual(controller.commandHandler.handleHotkeyCommand(.toggleNativeFullscreen), .executed)
+        XCTAssertEqual(controller.commandHandler.performCommand(.toggleNativeFullscreen), .executed)
 
         XCTAssertEqual(fullscreenWrites, 0)
         XCTAssertNil(controller.workspaceManager.nativeFullscreenRecord(for: reusedToken))
@@ -379,7 +378,7 @@ final class NiriHiddenVisibilityIntegrationTests: XCTestCase {
             return true
         }
 
-        XCTAssertEqual(controller.commandHandler.handleHotkeyCommand(.toggleNativeFullscreen), .executed)
+        XCTAssertEqual(controller.commandHandler.performCommand(.toggleNativeFullscreen), .executed)
 
         XCTAssertEqual(fullscreenWrites, 1)
         XCTAssertEqual(controller.workspaceManager.nativeFullscreenRecord(for: token)?.transition, .exitRequested)

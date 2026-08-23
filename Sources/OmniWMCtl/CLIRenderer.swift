@@ -48,26 +48,6 @@ struct CLILocalFailureEnvelope: Codable, Equatable, Sendable {
 }
 
 enum CLIRenderer {
-    static func responseOutput(_ response: IPCResponse, prefersJSON: Bool) throws -> CLIRenderedOutput {
-        try responseOutput(response, format: prefersJSON ? .json : .text)
-    }
-
-    static func eventOutput(_ event: IPCEventEnvelope, prefersJSON: Bool) throws -> CLIRenderedOutput {
-        try eventOutput(event, format: prefersJSON ? .json : .text)
-    }
-
-    static func parseErrorOutput(_ error: CLIParseError, prefersJSON: Bool) throws -> CLIRenderedOutput {
-        try parseErrorOutput(error, format: prefersJSON ? .json : .text)
-    }
-
-    static func transportErrorOutput(_ error: Error, prefersJSON: Bool) throws -> CLIRenderedOutput {
-        try transportErrorOutput(error, format: prefersJSON ? .json : .text)
-    }
-
-    static func internalErrorOutput(_ error: Error, prefersJSON: Bool) throws -> CLIRenderedOutput {
-        try internalErrorOutput(error, format: prefersJSON ? .json : .text)
-    }
-
     static func exitCode(for response: IPCResponse) -> CLIExitCode {
         guard !response.ok else { return .success }
 

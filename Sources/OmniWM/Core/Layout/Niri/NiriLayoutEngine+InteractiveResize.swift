@@ -5,41 +5,6 @@ import AppKit
 import Foundation
 
 extension NiriLayoutEngine {
-    func hitTestResize(
-        point: CGPoint,
-        in workspaceId: WorkspaceDescriptor.ID,
-        threshold: CGFloat? = nil
-    ) -> ResizeHitTestResult? {
-        guard let root = root(for: workspaceId) else { return nil }
-
-        let threshold = threshold ?? resizeConfiguration.edgeThreshold
-
-        for (colIdx, column) in root.columns.enumerated() {
-            for child in column.children {
-                guard let window = child as? NiriWindow,
-                      isProjectedFocusableWindow(window, in: workspaceId),
-                      let frame = window.renderedFrame ?? window.frame else { continue }
-
-                if window.isFullscreen {
-                    continue
-                }
-
-                let edges = detectEdges(point: point, frame: frame, threshold: threshold)
-                if !edges.isEmpty {
-                    return ResizeHitTestResult(
-                        windowToken: window.token,
-                        nodeId: window.id,
-                        edges: edges,
-                        columnIndex: colIdx,
-                        windowFrame: frame
-                    )
-                }
-            }
-        }
-
-        return nil
-    }
-
     func hitTestTiled(
         point: CGPoint,
         in workspaceId: WorkspaceDescriptor.ID
@@ -90,35 +55,6 @@ extension NiriLayoutEngine {
         }
 
         return firstVisibleMatch
-    }
-
-    private func detectEdges(point: CGPoint, frame: CGRect, threshold: CGFloat) -> ResizeEdge {
-        var edges: ResizeEdge = []
-
-        let expandedFrame = frame.insetBy(dx: -threshold, dy: -threshold)
-        guard expandedFrame.contains(point) else {
-            return []
-        }
-
-        let innerFrame = frame.insetBy(dx: threshold, dy: threshold)
-        if innerFrame.contains(point) {
-            return []
-        }
-
-        if point.x <= frame.minX + threshold, point.x >= frame.minX - threshold {
-            edges.insert(.left)
-        }
-        if point.x >= frame.maxX - threshold, point.x <= frame.maxX + threshold {
-            edges.insert(.right)
-        }
-        if point.y <= frame.minY + threshold, point.y >= frame.minY - threshold {
-            edges.insert(.bottom)
-        }
-        if point.y >= frame.maxY - threshold, point.y <= frame.maxY + threshold {
-            edges.insert(.top)
-        }
-
-        return edges
     }
 
     private func interactiveResizeStartWidth(

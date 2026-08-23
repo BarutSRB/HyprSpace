@@ -186,7 +186,6 @@ enum StructuralMutationOutcome: Equatable {
         if case let .expiredGesture(relativeOffset, sessionID) = viewportTick {
             controller.workspaceManager.withNiriViewportState(for: wsId) { state in
                 state.jumpOffset(to: state.viewOffset + CGFloat(relativeOffset))
-                state.selectionProgress = 0
                 state.viewOffsetToRestore = nil
                 state.activatePrevColumnOnRemoval = nil
             }
@@ -1169,7 +1168,6 @@ enum StructuralMutationOutcome: Equatable {
         state.activeColumnIndex = columnIndex
         state.activatePrevColumnOnRemoval = nil
         state.viewOffsetToRestore = nil
-        state.selectionProgress = 0
 
         if let viewOrigin {
             restoreViewOrigin(viewOrigin, pass: pass, state: &state)
@@ -1220,7 +1218,6 @@ enum StructuralMutationOutcome: Equatable {
         state.jumpOffset(to: 0)
         state.activatePrevColumnOnRemoval = nil
         state.viewOffsetToRestore = nil
-        state.selectionProgress = 0
     }
 
     private func computeLayoutPlan(
@@ -3046,4 +3043,4 @@ struct NodeActivationOptions {
     }
 }
 
-extension NiriLayoutHandler: LayoutFocusable, LayoutSizable {}
+extension NiriLayoutHandler: LayoutSizable {}

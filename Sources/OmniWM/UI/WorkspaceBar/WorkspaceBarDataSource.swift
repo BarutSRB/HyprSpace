@@ -18,26 +18,6 @@ enum WorkspaceBarDataSource {
         case pid(pid_t)
     }
 
-    static func workspaceBarItems(
-        for monitor: Monitor,
-        options: WorkspaceBarProjectionOptions,
-        workspaceManager: WorkspaceManager,
-        appInfoCache: AppInfoCache,
-        iconResolver: WorkspaceBarIconResolver,
-        focusedToken: WindowToken?,
-        settings: SettingsStore
-    ) -> [WorkspaceBarItem] {
-        workspaceItems(
-            for: monitor,
-            options: options,
-            workspaceManager: workspaceManager,
-            appInfoCache: appInfoCache,
-            iconResolver: iconResolver,
-            focusedToken: focusedToken,
-            settings: settings
-        )
-    }
-
     static func workspaceBarProjection(
         for monitor: Monitor,
         options: WorkspaceBarProjectionOptions,

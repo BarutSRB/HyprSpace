@@ -2477,7 +2477,6 @@ final class RuntimeArchitectureTests: XCTestCase {
             targetFrame: frame,
             currentFrameHint: nil,
             writeResult: AXFrameWriteResult(
-                targetFrame: frame,
                 observedFrame: nil,
                 writeOrder: .sizeThenPosition,
                 sizeError: .success,
@@ -2498,7 +2497,6 @@ final class RuntimeArchitectureTests: XCTestCase {
             targetFrame: frame,
             currentFrameHint: nil,
             writeResult: AXFrameWriteResult(
-                targetFrame: frame,
                 observedFrame: frame.offsetBy(dx: 20, dy: 0),
                 writeOrder: .sizeThenPosition,
                 sizeError: .success,
@@ -3124,7 +3122,6 @@ final class RuntimeArchitectureTests: XCTestCase {
                 targetFrame: firstFrame,
                 currentFrameHint: nil,
                 writeResult: AXFrameWriteResult(
-                    targetFrame: firstFrame,
                     observedFrame: firstFrame,
                     writeOrder: .sizeThenPosition,
                     sizeError: .success,
@@ -6400,7 +6397,6 @@ final class RuntimeArchitectureTests: XCTestCase {
             targetFrame: targetFrame,
             currentFrameHint: currentFrameHint,
             writeResult: AXFrameWriteResult(
-                targetFrame: targetFrame,
                 observedFrame: failureReason == nil ? targetFrame : nil,
                 writeOrder: .sizeThenPosition,
                 sizeError: .success,
@@ -6811,7 +6807,7 @@ final class RuntimeArchitectureTests: XCTestCase {
             token, in: leftWs, onMonitor: leftMonitor.id, activateWorkspaceOnMonitor: true
         )
 
-        controller.commandHandler.handleHotkeyCommand(.move(.right))
+        controller.commandHandler.performCommand(.move(.right))
 
         XCTAssertEqual(controller.workspaceManager.workspace(for: token), leftWs)
     }
@@ -6908,14 +6904,14 @@ final class RuntimeArchitectureTests: XCTestCase {
 
         controller.motionPolicy.animationsEnabled = false
         XCTAssertEqual(
-            controller.commandHandler.handleHotkeyCommand(.setContainerPrimarySpan(.setProportion(50))),
+            controller.commandHandler.performCommand(.setContainerPrimarySpan(.setProportion(50))),
             .executed
         )
         let sourceColumn = try XCTUnwrap(engine.findColumn(containing: node, in: leftWs))
         XCTAssertEqual(sourceColumn.width, .proportion(0.5))
         XCTAssertTrue(sourceColumn.hasManualSingleWindowWidthOverride)
 
-        XCTAssertEqual(controller.commandHandler.handleHotkeyCommand(.move(.right)), .executed)
+        XCTAssertEqual(controller.commandHandler.performCommand(.move(.right)), .executed)
 
         XCTAssertEqual(controller.workspaceManager.workspace(for: token), rightWs)
         let movedNode = try XCTUnwrap(engine.findNode(for: token, in: rightWs))
@@ -6966,14 +6962,14 @@ final class RuntimeArchitectureTests: XCTestCase {
 
         controller.motionPolicy.animationsEnabled = false
         XCTAssertEqual(
-            controller.commandHandler.handleHotkeyCommand(.setContainerPrimarySpan(.setProportion(50))),
+            controller.commandHandler.performCommand(.setContainerPrimarySpan(.setProportion(50))),
             .executed
         )
         let sourceColumn = try XCTUnwrap(engine.findColumn(containing: node, in: leftWs))
         XCTAssertEqual(sourceColumn.width, .proportion(0.5))
         XCTAssertTrue(sourceColumn.hasManualSingleWindowWidthOverride)
 
-        XCTAssertEqual(controller.commandHandler.handleHotkeyCommand(.move(.right)), .executed)
+        XCTAssertEqual(controller.commandHandler.performCommand(.move(.right)), .executed)
 
         XCTAssertEqual(controller.workspaceManager.workspace(for: token), rightWs)
         let movedNode = try XCTUnwrap(engine.findNode(for: token, in: rightWs))
@@ -7016,7 +7012,7 @@ final class RuntimeArchitectureTests: XCTestCase {
             sourceToken, in: leftWs, onMonitor: leftMonitor.id, activateWorkspaceOnMonitor: true
         )
         XCTAssertEqual(
-            controller.commandHandler.handleHotkeyCommand(.setContainerPrimarySpan(.setProportion(50))),
+            controller.commandHandler.performCommand(.setContainerPrimarySpan(.setProportion(50))),
             .executed
         )
         let sourceColumn = try XCTUnwrap(engine.findColumn(containing: sourceNode, in: leftWs))
@@ -7162,7 +7158,7 @@ final class RuntimeArchitectureTests: XCTestCase {
         node.renderedFrame = CGRect(x: 420, y: 20, width: 360, height: 760)
 
         controller.motionPolicy.animationsEnabled = true
-        controller.commandHandler.handleHotkeyCommand(.move(.up))
+        controller.commandHandler.performCommand(.move(.up))
 
         XCTAssertEqual(controller.workspaceManager.workspace(for: token), destWs)
         let movedNode = try XCTUnwrap(engine.findNode(for: token, in: destWs))
@@ -7240,7 +7236,7 @@ final class RuntimeArchitectureTests: XCTestCase {
         node.renderedFrame = CGRect(x: 420, y: 820, width: 360, height: 760)
 
         controller.motionPolicy.animationsEnabled = true
-        controller.commandHandler.handleHotkeyCommand(.move(.down))
+        controller.commandHandler.performCommand(.move(.down))
 
         XCTAssertEqual(controller.workspaceManager.workspace(for: token), destWs)
         let movedNode = try XCTUnwrap(engine.findNode(for: token, in: destWs))
@@ -7319,7 +7315,7 @@ final class RuntimeArchitectureTests: XCTestCase {
         node.renderedFrame = CGRect(x: 1220, y: 20, width: 360, height: 360)
 
         controller.motionPolicy.animationsEnabled = true
-        controller.commandHandler.handleHotkeyCommand(.move(.left))
+        controller.commandHandler.performCommand(.move(.left))
 
         XCTAssertEqual(controller.workspaceManager.workspace(for: token), leftWs)
         let movedNode = try XCTUnwrap(engine.findNode(for: token, in: leftWs))

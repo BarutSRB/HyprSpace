@@ -32,10 +32,6 @@ struct ParsedCLICommand: Equatable {
         }
         return request
     }
-
-    var prefersJSON: Bool {
-        outputFormat.prefersJSON
-    }
 }
 
 enum CLIParser {

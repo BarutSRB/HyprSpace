@@ -1107,10 +1107,6 @@ public enum IPCAutomationManifest {
             }
     }
 
-    public static func subscriptionDescriptor(for channel: IPCSubscriptionChannel) -> IPCSubscriptionDescriptor? {
-        subscriptionDescriptors.first { $0.channel == channel }
-    }
-
     public static func expandedChannels(for request: IPCSubscribeRequest) -> [IPCSubscriptionChannel] {
         let channels = request.allChannels ? IPCSubscriptionChannel.allCases : request.channels
         var seen: Set<IPCSubscriptionChannel> = []

@@ -1088,7 +1088,7 @@ final class TrackpadWorkspaceGestureTests: XCTestCase {
         XCTAssertTrue(manager.setActiveWorkspace(wsB1, on: secondary.monitor.id))
 
         XCTAssertEqual(
-            fixture.controller.commandHandler.handleHotkeyCommand(.switchWorkspaceNext),
+            fixture.controller.commandHandler.performCommand(.switchWorkspaceNext),
             .executed
         )
 

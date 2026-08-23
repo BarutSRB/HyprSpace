@@ -113,7 +113,6 @@ final class ClosingAnimationAXLaneTests: XCTestCase {
                     receivedHint = hint
                     receivedVerify = verify
                     return AXFrameWriteResult(
-                        targetFrame: frame,
                         observedFrame: nil,
                         writeOrder: .sizeThenPosition,
                         sizeError: .success,

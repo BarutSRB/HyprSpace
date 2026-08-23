@@ -29,11 +29,4 @@ public enum IPCSocketPath {
     public static func secretPath(forSocketPath socketPath: String) -> String {
         socketPath + secretSuffix
     }
-
-    public static func resolvedSecretPath(
-        environment: [String: String] = ProcessInfo.processInfo.environment,
-        fileManager: FileManager = .default
-    ) -> String {
-        secretPath(forSocketPath: resolvedPath(environment: environment, fileManager: fileManager))
-    }
 }

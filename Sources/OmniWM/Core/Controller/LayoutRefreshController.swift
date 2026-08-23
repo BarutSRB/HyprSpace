@@ -8,13 +8,6 @@ import QuartzCore
 @MainActor final class LayoutRefreshController: NSObject {
     typealias PostLayoutAction = @MainActor () -> Void
 
-    enum RefreshRoute: Equatable {
-        case relayout
-        case immediateRelayout
-        case visibilityRefresh
-        case windowRemoval
-    }
-
     enum ScheduledRefreshKind: Int {
         case relayout
         case immediateRelayout
@@ -196,50 +189,6 @@ import QuartzCore
     init(controller: WMController) {
         self.controller = controller
         super.init()
-    }
-
-    func applyLayoutForWorkspaces(_ workspaceIds: Set<WorkspaceDescriptor.ID>) {
-        guard let controller else { return }
-
-        for monitor in controller.workspaceManager.monitors {
-            guard let workspace = controller.workspaceManager.activeWorkspaceOrFirst(on: monitor.id) else { continue }
-            let wsId = workspace.id
-            guard workspaceIds.contains(wsId) else { continue }
-
-            let layoutType = controller.settings.layoutType(for: workspace.name)
-
-            switch layoutType {
-            case .niri,
-                 .defaultLayout:
-                guard let engine = controller.niriEngine else { continue }
-                let state = controller.workspaceManager.niriViewportState(for: wsId)
-
-                niriHandler.applyFramesOnDemand(
-                    wsId: wsId,
-                    state: state,
-                    engine: engine,
-                    monitor: monitor,
-                    animationTime: nil
-                )
-
-            case .dwindle:
-                dwindleHandler.applyFramesOnDemand(workspaceId: wsId, monitor: monitor)
-            }
-        }
-
-        let preferredSides = preferredHideSides(for: controller.workspaceManager.monitors)
-        for ws in controller.workspaceManager.workspaces where workspaceIds.contains(ws.id) {
-            guard let monitor = controller.workspaceManager.monitor(for: ws.id) else { continue }
-            let isActive = controller.workspaceManager.activeWorkspace(on: monitor.id)?.id == ws.id
-            if !isActive {
-                let preferredSide = preferredSides[monitor.id] ?? .right
-                hideWorkspace(
-                    controller.workspaceManager.entries(in: ws.id),
-                    monitor: monitor,
-                    preferredSide: preferredSide
-                )
-            }
-        }
     }
 
     private func executeLayoutPlans(
@@ -876,7 +825,6 @@ import QuartzCore
         defer { layoutState.isIncrementalRefreshInProgress = false }
         return await executeRelayout(
             refresh: refresh,
-            route: .relayout,
             useScrollAnimationPath: false,
             recoverFocus: true,
             generation: generation
@@ -885,7 +833,6 @@ import QuartzCore
 
     private func executeRelayout(
         refresh: ScheduledRefresh,
-        route: RefreshRoute,
         useScrollAnimationPath: Bool,
         recoverFocus: Bool,
         generation: UInt64
@@ -948,7 +895,6 @@ import QuartzCore
         defer { layoutState.isImmediateLayoutInProgress = false }
         return await executeRelayout(
             refresh: refresh,
-            route: .immediateRelayout,
             useScrollAnimationPath: !niriHandler.scrollAnimationByDisplay.isEmpty,
             recoverFocus: false,
             generation: generation
@@ -2594,18 +2540,6 @@ import QuartzCore
                 preferredSide: preferredSide,
                 hiddenPlacementMonitors: hiddenPlacementMonitors
             )
-        }
-    }
-
-    func unhideWorkspace(_ workspaceId: WorkspaceDescriptor.ID, monitor: Monitor) {
-        guard let controller else { return }
-        let entries = controller.workspaceManager.entries(in: workspaceId)
-        for entry in entries {
-            if isWindowOnKnownInactiveNativeSpace(entry.windowId) {
-                continue
-            }
-            controller.axManager.markWindowActive(entry.windowId)
-            unhideWindow(entry, monitor: monitor)
         }
     }
 

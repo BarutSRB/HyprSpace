@@ -744,7 +744,6 @@ final class AXFullRescanBoundaryTests: XCTestCase {
             writeFrame: { window, frame, _, components, _ in
                 writtenElements.append(window.element)
                 return AXFrameWriteResult(
-                    targetFrame: frame,
                     observedFrame: frame,
                     writeOrder: .sizeThenPosition,
                     sizeError: .success,
@@ -842,7 +841,6 @@ final class AXFullRescanBoundaryTests: XCTestCase {
             writeFrame: { _, frame, _, components, _ in
                 receivedComponents = components
                 return AXFrameWriteResult(
-                    targetFrame: frame,
                     observedFrame: nil,
                     writeOrder: .sizeThenPosition,
                     sizeError: .success,

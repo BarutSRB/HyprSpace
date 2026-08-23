@@ -213,11 +213,11 @@ final class OverviewStructuralCommandTests: XCTestCase {
         )
 
         XCTAssertEqual(
-            fixture.controller.commandHandler.handleHotkeyCommand(.moveColumnToFirst),
+            fixture.controller.commandHandler.performCommand(.moveColumnToFirst),
             .ignoredOverview
         )
         XCTAssertEqual(
-            fixture.controller.commandHandler.handleCommand(.moveColumnToFirst),
+            fixture.controller.commandHandler.performCommand(.moveColumnToFirst),
             .ignoredOverview
         )
         XCTAssertEqual(

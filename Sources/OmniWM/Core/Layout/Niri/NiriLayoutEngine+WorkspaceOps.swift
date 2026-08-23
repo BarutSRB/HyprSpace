@@ -140,23 +140,4 @@ extension NiriLayoutEngine {
         states.removeValue(forKey: workspaceId)
         excludedTokensByWorkspace.removeValue(forKey: workspaceId)
     }
-
-    func adjacentWorkspace(
-        from workspaceId: WorkspaceDescriptor.ID,
-        direction: Direction,
-        workspaceIds: [WorkspaceDescriptor.ID]
-    ) -> WorkspaceDescriptor.ID? {
-        guard direction == .up || direction == .down else { return nil }
-
-        guard let currentIdx = workspaceIds.firstIndex(of: workspaceId) else { return nil }
-
-        let targetIdx: Int = if direction == .up {
-            currentIdx - 1
-        } else {
-            currentIdx + 1
-        }
-
-        guard workspaceIds.indices.contains(targetIdx) else { return nil }
-        return workspaceIds[targetIdx]
-    }
 }

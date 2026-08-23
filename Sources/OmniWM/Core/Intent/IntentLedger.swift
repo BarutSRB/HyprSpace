@@ -627,10 +627,6 @@ final class IntentLedger {
         intentIssuanceGeneration
     }
 
-    func openIntents(pid: pid_t) -> [Intent] {
-        entries.filter { $0.phase == .pending && $0.kind.targetPid == pid }
-    }
-
     @discardableResult
     func confirm(id: IntentID, source: ActivationEventSource? = nil) -> Intent? {
         retire(id: id, phase: .confirmed, source: source)

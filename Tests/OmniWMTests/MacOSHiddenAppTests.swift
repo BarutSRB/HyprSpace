@@ -465,7 +465,6 @@ final class MacOSHiddenAppTests: XCTestCase {
                 targetFrame: targetFrame,
                 currentFrameHint: nil,
                 writeResult: AXFrameWriteResult(
-                    targetFrame: targetFrame,
                     observedFrame: nil,
                     writeOrder: .sizeThenPosition,
                     sizeError: .success,

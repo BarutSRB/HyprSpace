@@ -427,12 +427,6 @@ final class OverviewController {
                 containing: selectedHandle,
                 direction: .down
             )
-        case let .moveWindowToWorkspaceOnMonitor(workspaceIndex, monitorDirection):
-            return wmController.workspaceNavigationHandler.moveWindowToWorkspaceOnMonitor(
-                handle: selectedHandle,
-                workspaceIndex: workspaceIndex,
-                monitorDirection: monitorDirection
-            )
         default:
             return nil
         }
@@ -457,8 +451,7 @@ final class OverviewController {
              .moveWindowToWorkspaceDown,
              .moveColumnToWorkspace,
              .moveColumnToWorkspaceUp,
-             .moveColumnToWorkspaceDown,
-             .moveWindowToWorkspaceOnMonitor:
+             .moveColumnToWorkspaceDown:
             true
         default:
             false
@@ -737,11 +730,6 @@ final class OverviewController {
         } else {
             completeCloseTransition(targetWindow: resolvedTargetWindow)
         }
-    }
-
-    private func buildOverviewState() {
-        buildOverviewSnapshot()
-        rebuildProjectedLayouts()
     }
 
     private func buildOverviewSnapshot() {
@@ -1279,16 +1267,6 @@ final class OverviewController {
         windowsByDisplayId.removeAll(keepingCapacity: true)
     }
 
-    func isPointInside(_ point: CGPoint) -> Bool {
-        guard state.isOpen else { return false }
-        for window in windows {
-            if window.frame.contains(point) {
-                return true
-            }
-        }
-        return false
-    }
-
     private func updateWindowDisplays(
         palette: OverviewRenderPalette? = nil,
         thumbnails: [Int: CGImage]? = nil
@@ -1707,15 +1685,6 @@ final class OverviewController {
     func closeSelectedWindow() {
         guard case .open = state, let selectedWindowHandle else { return }
         closeWindow(selectedWindowHandle)
-    }
-
-    func adjustScrollOffset(by delta: CGFloat) {
-        guard let monitorId = activeInteractionMonitorId
-            ?? wmController?.workspaceManager.monitors.first?.id
-        else {
-            return
-        }
-        adjustScrollOffset(by: delta, on: monitorId)
     }
 
     func adjustScrollOffset(by delta: CGFloat, on monitorId: Monitor.ID) {

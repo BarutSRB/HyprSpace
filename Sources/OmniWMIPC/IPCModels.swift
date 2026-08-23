@@ -2049,20 +2049,6 @@ public struct IPCRect: Codable, Equatable, Sendable {
     }
 }
 
-public struct IPCWorkspaceSummary: Codable, Equatable, Sendable {
-    public let id: String
-    public let rawName: String
-    public let displayName: String
-    public let number: Int?
-
-    public init(id: String, rawName: String, displayName: String, number: Int?) {
-        self.id = id
-        self.rawName = rawName
-        self.displayName = displayName
-        self.number = number
-    }
-}
-
 public struct IPCWorkspaceBarWindow: Codable, Equatable, Sendable {
     public let id: String
     public let title: String

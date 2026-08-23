@@ -2679,7 +2679,6 @@ final class MouseEventHandler {
         guard let liveOffset = driver.liveViewOffset(in: wsId, semanticOffset: semanticOffset) else { return }
         controller.workspaceManager.withNiriViewportState(for: wsId) { vstate in
             vstate.jumpOffset(to: liveOffset)
-            vstate.selectionProgress = 0.0
             vstate.viewOffsetToRestore = nil
             vstate.activatePrevColumnOnRemoval = nil
         }
@@ -2956,18 +2955,6 @@ final class MouseEventHandler {
 
     nonisolated static func modifierFlagsMatch(_ modifiers: CGEventFlags, required: CGEventFlags) -> Bool {
         modifiers.intersection(mouseRelevantModifierFlags) == required
-    }
-
-    nonisolated static func resolvedMouseWheelColumnDeltaValue(
-        deltaX: CGFloat,
-        deltaY: CGFloat,
-        allowVerticalFallback: Bool
-    ) -> CGFloat? {
-        resolvedMouseWheelColumnDelta(
-            deltaX: deltaX,
-            deltaY: deltaY,
-            allowVerticalFallback: allowVerticalFallback
-        )?.value
     }
 
     private nonisolated static func resolvedMouseWheelColumnDelta(

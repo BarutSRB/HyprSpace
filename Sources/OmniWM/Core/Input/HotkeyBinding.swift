@@ -518,10 +518,6 @@ enum HotkeyBindingRegistry {
         }
     }
 
-    static func canonicalizeBinding(_ binding: KeyBinding) -> KeyBinding {
-        binding.isUnassigned ? .unassigned : binding
-    }
-
     static func canonicalizeTrigger(_ trigger: HotkeyTrigger) -> HotkeyTrigger {
         switch trigger {
         case .unassigned:
@@ -553,10 +549,4 @@ enum HotkeyCategory: String, CaseIterable {
     case monitor = "Monitor"
     case layout = "Layout"
     case column = "Container and Column"
-}
-
-private extension Array where Element: Equatable {
-    func isStrictPrefix(of other: [Element]) -> Bool {
-        count < other.count && zip(self, other).allSatisfy { $0 == $1 }
-    }
 }

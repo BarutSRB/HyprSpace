@@ -385,10 +385,6 @@ final class TabRailManager {
         railInfos.removeAll()
     }
 
-    static func shouldShowRail(tileFrame: CGRect, visibleFrame: CGRect) -> Bool {
-        isRenderable(visibleTileFrame: tileFrame.intersection(visibleFrame))
-    }
-
     fileprivate static func isRenderable(visibleTileFrame: CGRect) -> Bool {
         !visibleTileFrame.isNull
             && visibleTileFrame.width >= TabRailMetrics.minVisibleIntersection

@@ -1732,4 +1732,4 @@ import QuartzCore
     }
 }
 
-extension DwindleLayoutHandler: LayoutFocusable, LayoutSizable {}
+extension DwindleLayoutHandler: LayoutSizable {}
