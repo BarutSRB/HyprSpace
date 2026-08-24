@@ -83,6 +83,21 @@ final class SettingsTOMLCodecTests: XCTestCase {
         }
     }
 
+    func testTOMLRejectsMissingFullscreenOuterGapPolicy() throws {
+        let withoutKey = try canonicalDefaultLines { lines in
+            let index = try XCTUnwrap(lines.firstIndex(of: "fullscreenUsesOuterGaps = false"))
+            lines.remove(at: index)
+        }
+
+        XCTAssertThrowsError(try SettingsTOMLCodec.decode(withoutKey)) { error in
+            guard case let DecodingError.keyNotFound(key, context) = error else {
+                return XCTFail("expected keyNotFound, got \(error)")
+            }
+            XCTAssertEqual(key.stringValue, "fullscreenUsesOuterGaps")
+            XCTAssertEqual(context.codingPath.map(\.stringValue), ["gaps"])
+        }
+    }
+
     func testTOMLRejectsCorruptSystemHyperTrigger() throws {
         let corrupt = try canonicalDefaultLines { lines in
             let index = try XCTUnwrap(lines.firstIndex { $0.hasPrefix("systemHyperTrigger = ") })
@@ -192,23 +207,29 @@ final class SettingsTOMLCodecTests: XCTestCase {
         return Data(lines.joined(separator: "\n").utf8)
     }
 
-    func testMonitorInnerGapOverrideRoundTrips() throws {
+    func testFullscreenGapPolicyAndMonitorOverridesRoundTrip() throws {
+        XCTAssertFalse(SettingsExport.defaults().fullscreenUsesOuterGaps)
         var export = SettingsExport.defaults()
+        export.fullscreenUsesOuterGaps = true
         export.monitorGapSettings = [
             MonitorGapSettings(
                 monitorName: "Built-in",
                 monitorDisplayId: 7,
                 innerGap: 6,
-                outerGapTop: 20
+                outerGapTop: 20,
+                fullscreenUsesOuterGaps: false
             )
         ]
 
         let data = try SettingsTOMLCodec.encode(export)
         let decoded = try SettingsTOMLCodec.decode(data)
 
+        XCTAssertTrue(decoded.fullscreenUsesOuterGaps)
         XCTAssertEqual(decoded.monitorGapSettings, export.monitorGapSettings)
         let toml = String(decoding: data, as: UTF8.self)
         XCTAssertTrue(toml.contains("innerGap = 6.0"))
+        XCTAssertTrue(toml.contains("fullscreenUsesOuterGaps = true"))
+        XCTAssertTrue(toml.contains("fullscreenUsesOuterGaps = false"))
     }
 
     func testPreservingEncodeKeepsUnknownKeysInsideKnownTables() throws {

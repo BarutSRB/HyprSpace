@@ -95,6 +95,42 @@ final class CLIRendererOutputTests: XCTestCase {
         XCTAssertEqual(try IPCWire.decodeResponse(from: output.data), response)
     }
 
+    func testDisplayFullscreenGapsColumnUsesTrueFalseAndIsOmittedWhenUnrequested() throws {
+        let response = IPCResponse.success(
+            id: "1",
+            kind: .query,
+            result: IPCResult(
+                displays: IPCDisplaysQueryResult(
+                    displays: [
+                        IPCDisplayQuerySnapshot(id: "left", fullscreenUsesOuterGaps: true),
+                        IPCDisplayQuerySnapshot(id: "right", fullscreenUsesOuterGaps: false)
+                    ]
+                )
+            )
+        )
+        let output = try CLIRenderer.responseOutput(response, format: .tsv)
+        let text = try XCTUnwrap(String(data: output.data, encoding: .utf8))
+        let lines = text.split(separator: "\n")
+        let headers = try XCTUnwrap(lines.first).split(separator: "\t", omittingEmptySubsequences: false)
+        let column = try XCTUnwrap(headers.firstIndex(of: "FULLSCREEN GAPS"))
+
+        XCTAssertEqual(lines[1].split(separator: "\t", omittingEmptySubsequences: false)[column], "true")
+        XCTAssertEqual(lines[2].split(separator: "\t", omittingEmptySubsequences: false)[column], "false")
+
+        let omittedResponse = IPCResponse.success(
+            id: "2",
+            kind: .query,
+            result: IPCResult(
+                displays: IPCDisplaysQueryResult(
+                    displays: [IPCDisplayQuerySnapshot(id: "left")]
+                )
+            )
+        )
+        let omittedOutput = try CLIRenderer.responseOutput(omittedResponse, format: .tsv)
+        let omittedText = try XCTUnwrap(String(data: omittedOutput.data, encoding: .utf8))
+        XCTAssertFalse(omittedText.contains("FULLSCREEN GAPS"))
+    }
+
     func testTablePreservesAndAlignsUnicodeTitles() throws {
         let titles = [
             "abcdefgh",

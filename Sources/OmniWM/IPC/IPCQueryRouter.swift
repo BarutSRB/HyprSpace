@@ -390,6 +390,8 @@ final class IPCQueryRouter {
             outerGapRight: include("outer-gap-right", in: fields) ? Double(gaps.outerGapRight) : nil,
             outerGapTop: include("outer-gap-top", in: fields) ? Double(gaps.outerGapTop) : nil,
             outerGapBottom: include("outer-gap-bottom", in: fields) ? Double(gaps.outerGapBottom) : nil,
+            fullscreenUsesOuterGaps: include("fullscreen-uses-outer-gaps", in: fields)
+                ? gaps.fullscreenUsesOuterGaps : nil,
             activeWorkspace: include("active-workspace", in: fields) ? activeWorkspace.map(workspaceRef(from:)) : nil
         )
     }

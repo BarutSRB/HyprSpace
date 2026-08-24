@@ -2362,6 +2362,7 @@ public struct IPCDisplayQuerySnapshot: Codable, Equatable, Sendable {
     public let outerGapRight: Double?
     public let outerGapTop: Double?
     public let outerGapBottom: Double?
+    public let fullscreenUsesOuterGaps: Bool?
     public let activeWorkspace: IPCWorkspaceRef?
 
     public init(
@@ -2378,6 +2379,7 @@ public struct IPCDisplayQuerySnapshot: Codable, Equatable, Sendable {
         outerGapRight: Double? = nil,
         outerGapTop: Double? = nil,
         outerGapBottom: Double? = nil,
+        fullscreenUsesOuterGaps: Bool? = nil,
         activeWorkspace: IPCWorkspaceRef? = nil
     ) {
         self.id = id
@@ -2393,6 +2395,7 @@ public struct IPCDisplayQuerySnapshot: Codable, Equatable, Sendable {
         self.outerGapRight = outerGapRight
         self.outerGapTop = outerGapTop
         self.outerGapBottom = outerGapBottom
+        self.fullscreenUsesOuterGaps = fullscreenUsesOuterGaps
         self.activeWorkspace = activeWorkspace
     }
 }

@@ -458,7 +458,9 @@ For windows, `is-visible` is true only when the workspace is visible, the window
 
 **Workspace fields:** `id`, `raw-name`, `display-name`, `number`, `layout`, `display`, `is-focused`, `is-visible`, `is-current`, `window-counts`, `focused-window-id`
 
-**Display fields:** `id`, `name`, `is-main`, `is-current`, `frame`, `visible-frame`, `has-notch`, `orientation`, `inner-gap`, `outer-gap-left`, `outer-gap-right`, `outer-gap-top`, `outer-gap-bottom`, `active-workspace`
+**Display fields:** `id`, `name`, `is-main`, `is-current`, `frame`, `visible-frame`, `has-notch`, `orientation`, `inner-gap`, `outer-gap-left`, `outer-gap-right`, `outer-gap-top`, `outer-gap-bottom`, `fullscreen-uses-outer-gaps`, `active-workspace`
+
+`fullscreen-uses-outer-gaps` reports the resolved per-display policy used by OmniWM Full Screen, Niri maximized, and the Single Window “Full Screen” fit. It does not affect native macOS Full Screen.
 
 ### Query Reference
 

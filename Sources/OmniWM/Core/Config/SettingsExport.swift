@@ -31,6 +31,7 @@ struct SettingsExport: Equatable {
     var outerGapRight: Double
     var outerGapTop: Double
     var outerGapBottom: Double
+    var fullscreenUsesOuterGaps: Bool
 
     var niriVisibleContainerCount: Int
     var niriInfiniteLoop: Bool
@@ -160,6 +161,7 @@ extension SettingsExport {
             outerGapRight: 0,
             outerGapTop: 0,
             outerGapBottom: 0,
+            fullscreenUsesOuterGaps: false,
             niriVisibleContainerCount: 2,
             niriInfiniteLoop: false,
             niriCenterFocusedColumn: CenterFocusedColumn.never.rawValue,

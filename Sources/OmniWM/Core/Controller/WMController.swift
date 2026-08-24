@@ -1021,8 +1021,10 @@ final class WMController {
         return innerGap(for: monitor)
     }
 
-    func insetWorkingFrame(for monitor: Monitor) -> CGRect {
-        let scale = NSScreen.screens.first(where: { $0.displayId == monitor.displayId })?.backingScaleFactor ?? 2.0
+    func layoutFrames(
+        for monitor: Monitor,
+        scale: CGFloat
+    ) -> (workingFrame: CGRect, fullscreenLayoutFrame: CGRect) {
         let reservedTopInset = workspaceBarReservedTopInset(for: monitor)
         let gaps = settings.resolvedGapSettings(for: monitor)
         let menuBarInset = max(0, monitor.frame.maxY - monitor.visibleFrame.maxY)
@@ -1036,13 +1038,28 @@ final class WMController {
             ),
             bottom: gaps.outerGapBottom
         )
-        return computeWorkingArea(parentArea: monitor.visibleFrame, scale: scale, struts: struts)
+        let workingFrame = computeWorkingArea(parentArea: monitor.visibleFrame, scale: scale, struts: struts)
+        let fullscreenLayoutFrame: CGRect
+        if gaps.fullscreenUsesOuterGaps {
+            fullscreenLayoutFrame = workingFrame
+        } else {
+            fullscreenLayoutFrame = computeWorkingArea(
+                parentArea: monitor.visibleFrame,
+                scale: scale,
+                struts: Struts(top: reservedTopInset)
+            )
+        }
+        return (workingFrame, fullscreenLayoutFrame)
+    }
+
+    func insetWorkingFrame(for monitor: Monitor) -> CGRect {
+        let scale = NSScreen.screens.first(where: { $0.displayId == monitor.displayId })?.backingScaleFactor ?? 2.0
+        return layoutFrames(for: monitor, scale: scale).workingFrame
     }
 
     func fullscreenLayoutFrame(for monitor: Monitor) -> CGRect {
         let scale = NSScreen.screens.first(where: { $0.displayId == monitor.displayId })?.backingScaleFactor ?? 2.0
-        let struts = Struts(top: workspaceBarReservedTopInset(for: monitor))
-        return computeWorkingArea(parentArea: monitor.visibleFrame, scale: scale, struts: struts)
+        return layoutFrames(for: monitor, scale: scale).fullscreenLayoutFrame
     }
 
     private func workspaceBarReservedTopInset(for monitor: Monitor) -> CGFloat {

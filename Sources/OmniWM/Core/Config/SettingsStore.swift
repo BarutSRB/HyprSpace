@@ -131,6 +131,10 @@ final class SettingsStore {
         didSet { scheduleSave() }
     }
 
+    var fullscreenUsesOuterGaps = SettingsStore.defaultExport.fullscreenUsesOuterGaps {
+        didSet { scheduleSave() }
+    }
+
     var niriVisibleContainerCount = SettingsStore.defaultExport.niriVisibleContainerCount {
         didSet { scheduleSave() }
     }
@@ -735,6 +739,7 @@ final class SettingsStore {
             outerGapRight: outerGapRight,
             outerGapTop: outerGapTop,
             outerGapBottom: outerGapBottom,
+            fullscreenUsesOuterGaps: fullscreenUsesOuterGaps,
             niriVisibleContainerCount: niriVisibleContainerCount,
             niriInfiniteLoop: niriInfiniteLoop,
             niriCenterFocusedColumn: niriCenterFocusedColumn.rawValue,
@@ -861,6 +866,7 @@ final class SettingsStore {
         outerGapRight = export.outerGapRight
         outerGapTop = export.outerGapTop
         outerGapBottom = export.outerGapBottom
+        fullscreenUsesOuterGaps = export.fullscreenUsesOuterGaps
 
         niriVisibleContainerCount = export.niriVisibleContainerCount
         niriInfiniteLoop = export.niriInfiniteLoop
@@ -1304,7 +1310,8 @@ final class SettingsStore {
             outerGapLeft: CGFloat(override?.outerGapLeft ?? outerGapLeft),
             outerGapRight: CGFloat(override?.outerGapRight ?? outerGapRight),
             outerGapTop: CGFloat(override?.outerGapTop ?? outerGapTop),
-            outerGapBottom: CGFloat(override?.outerGapBottom ?? outerGapBottom)
+            outerGapBottom: CGFloat(override?.outerGapBottom ?? outerGapBottom),
+            fullscreenUsesOuterGaps: override?.fullscreenUsesOuterGaps ?? fullscreenUsesOuterGaps
         )
     }
 

@@ -347,6 +347,7 @@ public enum IPCAutomationManifest {
         "outer-gap-right",
         "outer-gap-top",
         "outer-gap-bottom",
+        "fullscreen-uses-outer-gaps",
         "active-workspace"
     ]
 

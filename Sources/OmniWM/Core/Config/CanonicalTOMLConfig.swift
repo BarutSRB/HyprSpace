@@ -62,6 +62,7 @@ struct CanonicalTOMLConfig: Codable, Equatable {
 
     struct Gaps: Codable, Equatable {
         var size: Double
+        var fullscreenUsesOuterGaps: Bool
         var outer: Outer
 
         struct Outer: Codable, Equatable {
@@ -303,6 +304,7 @@ extension CanonicalTOMLConfig {
         routing = Routing(mode: export.monitorRoutingMode)
         gaps = Gaps(
             size: export.gapSize,
+            fullscreenUsesOuterGaps: export.fullscreenUsesOuterGaps,
             outer: Gaps.Outer(
                 left: export.outerGapLeft,
                 right: export.outerGapRight,
@@ -441,6 +443,7 @@ extension CanonicalTOMLConfig {
             outerGapRight: gaps.outer.right,
             outerGapTop: gaps.outer.top,
             outerGapBottom: gaps.outer.bottom,
+            fullscreenUsesOuterGaps: gaps.fullscreenUsesOuterGaps,
             niriVisibleContainerCount: niri.visibleContainerCount,
             niriInfiniteLoop: niri.infiniteLoop,
             niriCenterFocusedColumn: niri.centerFocusedColumn,

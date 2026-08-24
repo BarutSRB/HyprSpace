@@ -332,8 +332,27 @@ enum CLIRenderer {
             headers: &headers,
             rows: &rows
         )
+        appendDisplayBooleanColumn(
+            "FULLSCREEN GAPS",
+            values: payload.displays.map(\.fullscreenUsesOuterGaps),
+            headers: &headers,
+            rows: &rows
+        )
 
         return formatRows(headers: headers, rows: rows, format: format)
+    }
+
+    private static func appendDisplayBooleanColumn(
+        _ header: String,
+        values: [Bool?],
+        headers: inout [String],
+        rows: inout [[String]]
+    ) {
+        guard values.contains(where: { $0 != nil }) else { return }
+        headers.append(header)
+        for index in rows.indices {
+            rows[index].append(values[index].map { String($0) } ?? "-")
+        }
     }
 
     private static func appendDisplayColumn(

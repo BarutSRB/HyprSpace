@@ -346,6 +346,30 @@ final class NiriSingleWindowFitEngineTests: XCTestCase {
         XCTAssertEqual(frame, fullscreenFrame)
     }
 
+    func testMaximizedSizingUsesFullscreenLayoutFrame() {
+        let fixture = makeSingleWindowFixture()
+        fixture.window.sizingMode = .maximized
+        let workingFrame = CGRect(x: 24, y: 16, width: 1200, height: 760)
+        let fullscreenFrame = CGRect(x: 0, y: 0, width: 1280, height: 800)
+        let area = WorkingAreaContext(
+            workingFrame: workingFrame,
+            fullscreenLayoutFrame: fullscreenFrame,
+            viewFrame: fullscreenFrame,
+            scale: 1
+        )
+
+        let frame = fixture.engine.calculateLayout(
+            state: ViewportState(),
+            workspaceId: fixture.workspaceId,
+            monitorFrame: workingFrame,
+            gaps: (horizontal: 12, vertical: 12),
+            workingArea: area,
+            orientation: .horizontal
+        )[fixture.token]
+
+        XCTAssertEqual(frame, fullscreenFrame)
+    }
+
     func testCustomFitStaysBoundedByWorkingFrame() {
         let fixture = makeSingleWindowFixture()
         fixture.engine.singleWindowFit = SingleWindowFit(mode: .custom, width: 800, height: 600)

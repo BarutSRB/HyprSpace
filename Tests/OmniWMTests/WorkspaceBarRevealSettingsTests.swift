@@ -94,6 +94,43 @@ final class WorkspaceBarRevealSettingsTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testRevealModeKeepsFullscreenOuterGapsButDropsReservation() {
+        let settings = makeSettingsStore()
+        settings.outerGapLeft = 12
+        settings.outerGapRight = 12
+        settings.outerGapTop = 46
+        settings.outerGapBottom = 14
+        settings.fullscreenUsesOuterGaps = true
+        settings.workspaceBarEnabled = true
+        settings.workspaceBarReserveLayoutSpace = true
+        settings.workspaceBarHeight = 24
+        settings.workspaceBarRevealModifier = .option
+        let controller = WMController(settings: settings)
+        let monitor = Monitor(
+            id: .init(displayId: 1),
+            displayId: 1,
+            frame: CGRect(x: 0, y: 0, width: 1440, height: 900),
+            visibleFrame: CGRect(x: 0, y: 0, width: 1440, height: 860),
+            hasNotch: false,
+            name: "Built-in"
+        )
+
+        let overlayFrame = CGRect(x: 12, y: 14, width: 1416, height: 840)
+        XCTAssertEqual(controller.insetWorkingFrame(for: monitor), overlayFrame)
+        XCTAssertEqual(controller.fullscreenLayoutFrame(for: monitor), overlayFrame)
+
+        controller.setWorkspaceBarRevealHeld(true)
+        XCTAssertEqual(controller.insetWorkingFrame(for: monitor), overlayFrame)
+        XCTAssertEqual(controller.fullscreenLayoutFrame(for: monitor), overlayFrame)
+
+        settings.workspaceBarRevealModifier = .off
+        controller.setWorkspaceBarRevealHeld(false)
+        let reservedFrame = CGRect(x: 12, y: 14, width: 1416, height: 816)
+        XCTAssertEqual(controller.insetWorkingFrame(for: monitor), reservedFrame)
+        XCTAssertEqual(controller.fullscreenLayoutFrame(for: monitor), reservedFrame)
+    }
+
     private func defaultsDroppingLines(containing fragments: String...) throws -> Data {
         let toml = String(decoding: try SettingsTOMLCodec.encode(.defaults()), as: UTF8.self)
         let lines = toml.split(separator: "\n", omittingEmptySubsequences: false).filter { line in

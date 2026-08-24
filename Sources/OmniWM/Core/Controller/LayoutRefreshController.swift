@@ -468,14 +468,16 @@ import QuartzCore
         for monitor: Monitor,
         orientation: Monitor.Orientation? = nil
     ) -> LayoutMonitorSnapshot {
-        LayoutMonitorSnapshot(
+        let scale = backingScale(for: monitor)
+        let layoutFrames = controller?.layoutFrames(for: monitor, scale: scale)
+        return LayoutMonitorSnapshot(
             monitorId: monitor.id,
             displayId: monitor.displayId,
             frame: monitor.frame,
             visibleFrame: monitor.visibleFrame,
-            workingFrame: controller?.insetWorkingFrame(for: monitor) ?? monitor.visibleFrame,
-            fullscreenLayoutFrame: controller?.fullscreenLayoutFrame(for: monitor) ?? monitor.visibleFrame,
-            scale: backingScale(for: monitor),
+            workingFrame: layoutFrames?.workingFrame ?? monitor.visibleFrame,
+            fullscreenLayoutFrame: layoutFrames?.fullscreenLayoutFrame ?? monitor.visibleFrame,
+            scale: scale,
             orientation: orientation ?? monitor.autoOrientation
         )
     }

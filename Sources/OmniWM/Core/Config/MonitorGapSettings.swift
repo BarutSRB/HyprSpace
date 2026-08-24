@@ -15,10 +15,11 @@ struct MonitorGapSettings: MonitorSettingsType {
     var outerGapRight: Double?
     var outerGapTop: Double?
     var outerGapBottom: Double?
+    var fullscreenUsesOuterGaps: Bool?
 
     var hasOverrides: Bool {
         innerGap != nil || outerGapLeft != nil || outerGapRight != nil ||
-            outerGapTop != nil || outerGapBottom != nil
+            outerGapTop != nil || outerGapBottom != nil || fullscreenUsesOuterGaps != nil
     }
 
     init(
@@ -30,7 +31,8 @@ struct MonitorGapSettings: MonitorSettingsType {
         outerGapLeft: Double? = nil,
         outerGapRight: Double? = nil,
         outerGapTop: Double? = nil,
-        outerGapBottom: Double? = nil
+        outerGapBottom: Double? = nil,
+        fullscreenUsesOuterGaps: Bool? = nil
     ) {
         self.id = id
         self.monitorName = monitorName
@@ -41,11 +43,12 @@ struct MonitorGapSettings: MonitorSettingsType {
         self.outerGapRight = outerGapRight
         self.outerGapTop = outerGapTop
         self.outerGapBottom = outerGapBottom
+        self.fullscreenUsesOuterGaps = fullscreenUsesOuterGaps
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, monitorName, monitorDisplayUUID, monitorDisplayId
-        case innerGap, outerGapLeft, outerGapRight, outerGapTop, outerGapBottom
+        case innerGap, outerGapLeft, outerGapRight, outerGapTop, outerGapBottom, fullscreenUsesOuterGaps
     }
 
     init(from decoder: Decoder) throws {
@@ -59,6 +62,7 @@ struct MonitorGapSettings: MonitorSettingsType {
         outerGapRight = try container.decodeIfPresent(Double.self, forKey: .outerGapRight)
         outerGapTop = try container.decodeIfPresent(Double.self, forKey: .outerGapTop)
         outerGapBottom = try container.decodeIfPresent(Double.self, forKey: .outerGapBottom)
+        fullscreenUsesOuterGaps = try container.decodeIfPresent(Bool.self, forKey: .fullscreenUsesOuterGaps)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -77,6 +81,7 @@ struct MonitorGapSettings: MonitorSettingsType {
         try container.encodeIfPresent(outerGapRight, forKey: .outerGapRight)
         try container.encodeIfPresent(outerGapTop, forKey: .outerGapTop)
         try container.encodeIfPresent(outerGapBottom, forKey: .outerGapBottom)
+        try container.encodeIfPresent(fullscreenUsesOuterGaps, forKey: .fullscreenUsesOuterGaps)
     }
 }
 
@@ -86,4 +91,5 @@ struct ResolvedGapSettings: Equatable {
     let outerGapRight: CGFloat
     let outerGapTop: CGFloat
     let outerGapBottom: CGFloat
+    let fullscreenUsesOuterGaps: Bool
 }
