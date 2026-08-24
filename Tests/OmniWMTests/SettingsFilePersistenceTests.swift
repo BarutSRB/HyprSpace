@@ -202,6 +202,27 @@ final class SettingsFilePersistenceTests: XCTestCase {
     }
 
     @MainActor
+    func testStartupMissingRaiseOnMouseFocusBacksUpAndWritesDefaults() throws {
+        let fixture = try makeFixture()
+        defer { fixture.remove() }
+
+        let invalidData = try canonicalData { lines in
+            let index = try XCTUnwrap(lines.firstIndex { $0.hasPrefix("raiseOnMouseFocus = ") })
+            lines.remove(at: index)
+        }
+        try invalidData.write(to: settingsURL(in: fixture))
+
+        let loaded = makePersistence(in: fixture).load()
+
+        XCTAssertEqual(loaded, SettingsExport.defaults())
+        XCTAssertEqual(try Data(contentsOf: corruptURL(in: fixture)), invalidData)
+        XCTAssertEqual(
+            try SettingsTOMLCodec.decode(Data(contentsOf: settingsURL(in: fixture))),
+            SettingsExport.defaults()
+        )
+    }
+
+    @MainActor
     func testStartupRecoveryReusesMatchingBackupWithoutCreatingSecondSlot() throws {
         let fixture = try makeFixture()
         defer { fixture.remove() }
@@ -223,6 +244,10 @@ final class SettingsFilePersistenceTests: XCTestCase {
         let invalidInputs = try [
             canonicalData { lines in
                 let index = try XCTUnwrap(lines.firstIndex { $0.hasPrefix("followsMouse = ") })
+                lines.remove(at: index)
+            },
+            canonicalData { lines in
+                let index = try XCTUnwrap(lines.firstIndex { $0.hasPrefix("raiseOnMouseFocus = ") })
                 lines.remove(at: index)
             },
             canonicalData { lines in

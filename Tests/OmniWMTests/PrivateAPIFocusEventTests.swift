@@ -43,4 +43,26 @@ final class PrivateAPIFocusEventTests: XCTestCase {
             XCTAssertTrue(decodedLocation.y.isFinite)
         }
     }
+
+    func testSameAppFocusHandoffRecordsEncodeActivationProtocol() {
+        let windowId: UInt32 = 0xA1B2_C3D4
+        let cases = [
+            (SameAppFocusHandoffEventRecord.deactivate(windowId: windowId), UInt8(0x02)),
+            (SameAppFocusHandoffEventRecord.activate(windowId: windowId), UInt8(0x01))
+        ]
+
+        for (bytes, expectedState) in cases {
+            XCTAssertEqual(bytes.count, 0x100)
+            XCTAssertEqual(bytes[0x04], 0xF8)
+            XCTAssertEqual(bytes[0x08], 0x0D)
+            XCTAssertEqual(bytes[0x8A], expectedState)
+
+            var decodedWindowId: UInt32 = 0
+            withUnsafeMutableBytes(of: &decodedWindowId) { destination in
+                destination.copyBytes(from: bytes[0x3C ..< 0x3C + MemoryLayout<UInt32>.size])
+            }
+            XCTAssertEqual(decodedWindowId, windowId)
+            XCTAssertTrue(bytes[0xF8...].allSatisfy { $0 == 0 })
+        }
+    }
 }

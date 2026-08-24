@@ -261,35 +261,38 @@ final class RuntimeArchitectureTests: XCTestCase {
     }
 
     @MainActor
-    func testManagedFocusRequestCarriesOriginAndResistsPointerDowngrade() {
-        let bridge = IntentLedger()
+    func testManagedFocusRequestMergesEveryOriginPairAtDeclaredPrecedence() {
         let workspaceId = WorkspaceDescriptor.ID()
         let token = WindowToken(pid: 100, windowId: 42)
+        let cases: [(ManagedFocusOrigin, ManagedFocusOrigin, ManagedFocusOrigin)] = [
+            (.focusFollowsMouse, .focusFollowsMouse, .focusFollowsMouse),
+            (.focusFollowsMouse, .pointerHover, .pointerHover),
+            (.focusFollowsMouse, .keyboardOrProgrammatic, .keyboardOrProgrammatic),
+            (.pointerHover, .focusFollowsMouse, .pointerHover),
+            (.pointerHover, .pointerHover, .pointerHover),
+            (.pointerHover, .keyboardOrProgrammatic, .keyboardOrProgrammatic),
+            (.keyboardOrProgrammatic, .focusFollowsMouse, .keyboardOrProgrammatic),
+            (.keyboardOrProgrammatic, .pointerHover, .keyboardOrProgrammatic),
+            (.keyboardOrProgrammatic, .keyboardOrProgrammatic, .keyboardOrProgrammatic)
+        ]
 
-        let pointerRequest = bridge.beginManagedRequest(
-            token: token,
-            workspaceId: workspaceId,
-            origin: .pointerHover
-        )
-        XCTAssertEqual(pointerRequest.origin, .pointerHover)
-        XCTAssertFalse(pointerRequest.origin.allowsMouseToFocusedWarp)
+        for (current, incoming, expected) in cases {
+            let ledger = IntentLedger()
+            let initial = ledger.beginManagedRequest(
+                token: token,
+                workspaceId: workspaceId,
+                origin: current
+            )
+            let merged = ledger.beginManagedRequest(
+                token: token,
+                workspaceId: workspaceId,
+                origin: incoming
+            )
 
-        let keyboardRequest = bridge.beginManagedRequest(
-            token: token,
-            workspaceId: workspaceId,
-            origin: .keyboardOrProgrammatic
-        )
-        XCTAssertEqual(keyboardRequest.requestId, pointerRequest.requestId)
-        XCTAssertEqual(keyboardRequest.origin, .keyboardOrProgrammatic)
-        XCTAssertTrue(keyboardRequest.origin.allowsMouseToFocusedWarp)
-
-        let repeatedPointerRequest = bridge.beginManagedRequest(
-            token: token,
-            workspaceId: workspaceId,
-            origin: .pointerHover
-        )
-        XCTAssertEqual(repeatedPointerRequest.requestId, pointerRequest.requestId)
-        XCTAssertEqual(repeatedPointerRequest.origin, .keyboardOrProgrammatic)
+            XCTAssertEqual(merged.requestId, initial.requestId)
+            XCTAssertEqual(merged.origin, expected, "\(current) + \(incoming)")
+            XCTAssertEqual(merged.origin.allowsMouseToFocusedWarp, expected == .keyboardOrProgrammatic)
+        }
     }
 
     @MainActor
@@ -323,6 +326,18 @@ final class RuntimeArchitectureTests: XCTestCase {
         _ = bridge.beginManagedRequest(
             token: token,
             workspaceId: workspaceId,
+            origin: .focusFollowsMouse
+        )
+        let focusFollowsMouseConfirmation = try XCTUnwrap(bridge.confirmManagedRequest(
+            token: token,
+            source: .focusedWindowChanged
+        ))
+        XCTAssertEqual(focusFollowsMouseConfirmation.origin, .focusFollowsMouse)
+        XCTAssertFalse(bridge.allowsMouseToFocusedWarp(for: token))
+
+        _ = bridge.beginManagedRequest(
+            token: token,
+            workspaceId: workspaceId,
             origin: .pointerHover
         )
         _ = try XCTUnwrap(bridge.confirmManagedRequest(
@@ -347,9 +362,9 @@ final class RuntimeArchitectureTests: XCTestCase {
     }
 
     @MainActor
-    func testPointerHoverManagedFocusDoesNotMoveMouseToFocusedWindowOnActivationConfirm() throws {
+    func testFocusFollowsMouseManagedFocusDoesNotMoveMouseToFocusedWindowOnActivationConfirm() throws {
         let fixture = try Self.managedNiriActivationFixture(
-            origin: .pointerHover,
+            origin: .focusFollowsMouse,
             pid: 765_700,
             windowId: 765_800
         )
@@ -367,11 +382,33 @@ final class RuntimeArchitectureTests: XCTestCase {
     }
 
     @MainActor
-    func testPointerHoverManagedFocusConfirmationPreservesSettledNiriViewport() throws {
-        let fixture = try Self.managedNiriActivationFixture(
-            origin: .pointerHover,
+    func testFocusFollowsMouseManagedFocusConfirmationPreservesSettledNiriViewport() throws {
+        try assertManagedFocusConfirmationPreservesSettledNiriViewport(
+            origin: .focusFollowsMouse,
             pid: 765_710,
             windowId: 765_810
+        )
+    }
+
+    @MainActor
+    func testPointerHoverManagedFocusConfirmationPreservesSettledNiriViewport() throws {
+        try assertManagedFocusConfirmationPreservesSettledNiriViewport(
+            origin: .pointerHover,
+            pid: 765_720,
+            windowId: 765_820
+        )
+    }
+
+    @MainActor
+    private func assertManagedFocusConfirmationPreservesSettledNiriViewport(
+        origin: ManagedFocusOrigin,
+        pid: pid_t,
+        windowId: Int
+    ) throws {
+        let fixture = try Self.managedNiriActivationFixture(
+            origin: origin,
+            pid: pid,
+            windowId: windowId
         )
         let controller = fixture.controller
         let workspaceId = fixture.entry.workspaceId
@@ -380,12 +417,12 @@ final class RuntimeArchitectureTests: XCTestCase {
         controller.intentLedger.clock = { now }
 
         for index in 1 ..< 3 {
-            let pid = pid_t(765_710 + index)
-            let windowId = 765_810 + index
+            let addedPID = pid_t(Int(pid) + index)
+            let addedWindowId = windowId + index
             let token = controller.workspaceManager.addWindow(
-                AXWindowRef(element: AXUIElementCreateApplication(pid), windowId: windowId),
-                pid: pid,
-                windowId: windowId,
+                AXWindowRef(element: AXUIElementCreateApplication(addedPID), windowId: addedWindowId),
+                pid: addedPID,
+                windowId: addedWindowId,
                 to: workspaceId
             )
             _ = engine.addWindow(token: token, to: workspaceId, afterSelection: nil)
@@ -673,10 +710,11 @@ final class RuntimeArchitectureTests: XCTestCase {
     }
 
     @MainActor
-    func testNiriPointerHoverActivationFocusesImmediatelyWhenLayoutRefreshBlocked() throws {
+    func testNiriFocusFollowsMouseActivationFocusesImmediatelyWhenLayoutRefreshBlocked() throws {
         let controller = Self.controller()
         let workspaceId = try XCTUnwrap(controller.workspaceManager.workspaceId(for: "1", createIfMissing: true))
         _ = controller.workspaceManager.focusWorkspace(named: "1")
+        controller.setFocusFollowsMouse(true)
         controller.niriLayoutHandler.enableNiriLayout()
         controller.layoutRefreshController.layoutState.pendingRefresh = nil
         let token = controller.workspaceManager.addWindow(
@@ -714,7 +752,7 @@ final class RuntimeArchitectureTests: XCTestCase {
         )
 
         XCTAssertNil(controller.layoutRefreshController.layoutState.pendingRefresh)
-        XCTAssertEqual(controller.intentLedger.activeManagedRequest?.origin, .pointerHover)
+        XCTAssertEqual(controller.intentLedger.activeManagedRequest?.origin, .focusFollowsMouse)
     }
 
     func testMouseMoveWindowIdPrefersRoutedFieldAndFallsBackToTopmostField() throws {
@@ -801,6 +839,8 @@ final class RuntimeArchitectureTests: XCTestCase {
     ) throws {
         var focusedTokens: [WindowToken] = []
         var focusObservedPendingRelayout: [Bool] = []
+        var focusObservedSelectedNodeIds: [NodeId?] = []
+        var focusWorkspaceId: WorkspaceDescriptor.ID?
         weak var focusController: WMController?
         let controller = Self.controller(
             windowFocusOperations: WindowFocusOperations(
@@ -809,6 +849,11 @@ final class RuntimeArchitectureTests: XCTestCase {
                     focusedTokens.append(WindowToken(pid: pid, windowId: Int(windowId)))
                     focusObservedPendingRelayout.append(
                         focusController?.layoutRefreshController.layoutState.pendingRefresh != nil
+                    )
+                    focusObservedSelectedNodeIds.append(
+                        focusWorkspaceId.flatMap {
+                            focusController?.workspaceManager.niriViewportState(for: $0).selectedNodeId
+                        }
                     )
                 },
                 raiseWindow: { _ in }
@@ -833,6 +878,7 @@ final class RuntimeArchitectureTests: XCTestCase {
         )
         controller.workspaceManager.applyMonitorConfigurationChange([monitor])
         let workspaceId = try XCTUnwrap(controller.workspaceManager.workspaceId(for: "1", createIfMissing: true))
+        focusWorkspaceId = workspaceId
         defer {
             controller.layoutRefreshController.stopScrollAnimation(for: displayId)
             controller.workspaceManager.animationDriver.removeMotions(for: [workspaceId])
@@ -960,12 +1006,13 @@ final class RuntimeArchitectureTests: XCTestCase {
 
         XCTAssertEqual(focusedTokens, [tokens[1]], file: file, line: line)
         XCTAssertEqual(focusObservedPendingRelayout, [false], file: file, line: line)
+        XCTAssertEqual(focusObservedSelectedNodeIds, [nodes[1].id], file: file, line: line)
         let stateAfterHover = controller.workspaceManager.niriViewportState(for: workspaceId)
         XCTAssertEqual(stateAfterHover.selectedNodeId, nodes[1].id, file: file, line: line)
         XCTAssertEqual(stateAfterHover.activeColumnIndex, 1, file: file, line: line)
         XCTAssertEqual(
             controller.intentLedger.activeManagedRequest?.origin,
-            .pointerHover,
+            .focusFollowsMouse,
             file: file,
             line: line
         )
@@ -1125,7 +1172,7 @@ final class RuntimeArchitectureTests: XCTestCase {
 
         XCTAssertEqual(focusedTokens, [topmostFloatingToken])
         XCTAssertEqual(controller.intentLedger.activeManagedRequest?.token, topmostFloatingToken)
-        XCTAssertEqual(controller.intentLedger.activeManagedRequest?.origin, .pointerHover)
+        XCTAssertEqual(controller.intentLedger.activeManagedRequest?.origin, .focusFollowsMouse)
         XCTAssertNil(controller.layoutRefreshController.layoutState.pendingRefresh)
 
         let ignoredFloatingToken = controller.workspaceManager.addWindow(
@@ -1467,7 +1514,7 @@ final class RuntimeArchitectureTests: XCTestCase {
 
         XCTAssertEqual(focusedTokens.last, token)
         XCTAssertNil(controller.layoutRefreshController.layoutState.pendingRefresh)
-        XCTAssertEqual(controller.intentLedger.activeManagedRequest?.origin, .pointerHover)
+        XCTAssertEqual(controller.intentLedger.activeManagedRequest?.origin, .focusFollowsMouse)
 
         let exactTiledToken = controller.workspaceManager.addWindow(
             AXWindowRef(element: AXUIElementCreateApplication(765_710), windowId: 765_810),

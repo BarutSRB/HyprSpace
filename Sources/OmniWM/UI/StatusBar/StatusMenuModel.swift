@@ -118,7 +118,7 @@ enum StatusMenuControl: String, CaseIterable, Identifiable {
         case .preventSleepEnabled:
             "Prevents idle display sleep while your user session is active. Manual sleep and closing the laptop lid still work."
         case .focusFollowsMouse:
-            "Focuses a managed window when the pointer enters it—no click needed. Hold Focus Lock to cross windows without changing focus."
+            "Focuses a managed window when the pointer enters it—no click needed. Choose whether OmniWM explicitly raises it in Settings, or hold Focus Lock to cross windows without changing focus."
         case .focusCrossesMonitorAtEdge:
             "At the last window in any direction, Focus continues left, right, up, or down onto the adjacent display in OmniWM’s Routing Arrangement."
         case .moveMouseToFocusedWindow:

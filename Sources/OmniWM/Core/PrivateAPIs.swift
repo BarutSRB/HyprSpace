@@ -67,21 +67,62 @@ enum KeyWindowEventRecord {
     }
 
     private static func encode<Value>(_ value: Value, in bytes: inout [UInt8], at offset: Int) {
-        withUnsafeBytes(of: value) { encodedValue in
-            for index in encodedValue.indices {
-                bytes[offset + index] = encodedValue[index]
-            }
+        encodeWindowFocusEventValue(value, in: &bytes, at: offset)
+    }
+}
+
+enum SameAppFocusHandoffEventRecord {
+    private static let bufferSize = 0x100
+    private static let declaredLength: UInt8 = 0xF8
+    private static let declaredLengthOffset = 0x04
+    private static let eventTypeOffset = 0x08
+    private static let eventType: UInt8 = 0x0D
+    private static let windowIdOffset = 0x3C
+    private static let activationStateOffset = 0x8A
+    private static let activated: UInt8 = 0x01
+    private static let deactivated: UInt8 = 0x02
+
+    static func activate(windowId: UInt32) -> [UInt8] {
+        make(windowId: windowId, state: activated)
+    }
+
+    static func deactivate(windowId: UInt32) -> [UInt8] {
+        make(windowId: windowId, state: deactivated)
+    }
+
+    private static func make(windowId: UInt32, state: UInt8) -> [UInt8] {
+        var bytes = [UInt8](repeating: 0, count: bufferSize)
+        bytes[declaredLengthOffset] = declaredLength
+        bytes[eventTypeOffset] = eventType
+        bytes[activationStateOffset] = state
+        encodeWindowFocusEventValue(windowId, in: &bytes, at: windowIdOffset)
+        return bytes
+    }
+}
+
+private func encodeWindowFocusEventValue<Value>(
+    _ value: Value,
+    in bytes: inout [UInt8],
+    at offset: Int
+) {
+    withUnsafeBytes(of: value) { encodedValue in
+        for index in encodedValue.indices {
+            bytes[offset + index] = encodedValue[index]
         }
     }
 }
 
-func makeKeyWindow(psn: inout ProcessSerialNumber, windowId: UInt32) {
+@discardableResult
+func makeKeyWindow(psn: inout ProcessSerialNumber, windowId: UInt32) -> Bool {
+    var succeeded = true
     for var eventBytes in KeyWindowEventRecord.pressAndRelease(windowId: windowId) {
         let status = SLPSPostEventRecordTo(&psn, &eventBytes)
         if status != noErr {
+            succeeded = false
             FallbackFiringRecorder.shared.note(.skylight, "postEventRecordFailed")
         }
     }
+    return succeeded
 }
 
 func focusWindow(pid: pid_t, windowId: UInt32, windowRef _: AXUIElement) {
@@ -95,4 +136,43 @@ func focusWindow(pid: pid_t, windowId: UInt32, windowRef _: AXUIElement) {
         FallbackFiringRecorder.shared.note(.skylight, "setFrontProcessFailed")
     }
     makeKeyWindow(psn: &psn, windowId: windowId)
+}
+
+@discardableResult
+func deactivateSameAppWindow(pid: pid_t, windowId: UInt32) -> Bool {
+    var psn = ProcessSerialNumber()
+    guard GetProcessForPID(pid, &psn) == noErr else {
+        FallbackFiringRecorder.shared.note(.skylight, "getProcessForPIDFailed")
+        return false
+    }
+    var eventBytes = SameAppFocusHandoffEventRecord.deactivate(windowId: windowId)
+    let succeeded = SLPSPostEventRecordTo(&psn, &eventBytes) == noErr
+    if !succeeded {
+        FallbackFiringRecorder.shared.note(.skylight, "postFocusHandoffDeactivateFailed")
+    }
+    return succeeded
+}
+
+@discardableResult
+func activateAndFocusSameAppWindow(
+    pid: pid_t,
+    windowId: UInt32,
+    windowRef _: AXUIElement
+) -> Bool {
+    var psn = ProcessSerialNumber()
+    guard GetProcessForPID(pid, &psn) == noErr else {
+        FallbackFiringRecorder.shared.note(.skylight, "getProcessForPIDFailed")
+        return false
+    }
+
+    var eventBytes = SameAppFocusHandoffEventRecord.activate(windowId: windowId)
+    var succeeded = SLPSPostEventRecordTo(&psn, &eventBytes) == noErr
+    if !succeeded {
+        FallbackFiringRecorder.shared.note(.skylight, "postFocusHandoffActivateFailed")
+    }
+    if _SLPSSetFrontProcessWithOptions(&psn, windowId, kCPSUserGenerated) != noErr {
+        succeeded = false
+        FallbackFiringRecorder.shared.note(.skylight, "setFrontProcessFailed")
+    }
+    return makeKeyWindow(psn: &psn, windowId: windowId) && succeeded
 }

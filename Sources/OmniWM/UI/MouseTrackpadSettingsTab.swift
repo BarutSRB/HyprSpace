@@ -172,6 +172,9 @@ struct MouseTrackpadSettingsTab: View {
                     controller.setFocusFollowsMouse(newValue)
                 }
 
+            Toggle("Raise Window When Focus Follows Mouse", isOn: $settings.raiseOnMouseFocus)
+                .disabled(!settings.focusFollowsMouse)
+
             Picker("Focus Lock Modifier", selection: $settings.focusLockModifier) {
                 ForEach(FocusLockModifier.allCases, id: \.self) { key in
                     Text(key.displayName).tag(key)

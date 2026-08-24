@@ -52,7 +52,13 @@ extension AXEventHandler {
         cancelCreatedWindowRetry(windowId: token.windowId)
         cancelPostCreateLifecycleVerification(for: token)
         cancelSameAppCloseProbe(matchingFocusedToken: token, reason: policy.traceReason)
-        clearManagedFocusState(matching: token, workspaceId: workspaceId)
+        if let request = controller.intentLedger.activeManagedRequest(for: token),
+           case .awaitingSameAppActivation = request.phase
+        {
+            controller.cancelManagedFocusRequestAndRestoreSource(request)
+        } else {
+            clearManagedFocusState(matching: token, workspaceId: workspaceId)
+        }
         controller.mouseEventHandler.discardNativeTitleBarDrag(for: token)
         _ = controller.workspaceManager.removeWindow(pid: token.pid, windowId: token.windowId)
         finishDeferredReplacementAfterTracking(windowId: token.windowId)

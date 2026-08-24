@@ -83,6 +83,37 @@ final class SettingsTOMLCodecTests: XCTestCase {
         }
     }
 
+    func testTOMLRejectsMissingRaiseOnMouseFocus() throws {
+        let withoutKey = try canonicalDefaultLines { lines in
+            let index = try XCTUnwrap(lines.firstIndex { $0.hasPrefix("raiseOnMouseFocus = ") })
+            lines.remove(at: index)
+        }
+
+        XCTAssertThrowsError(try SettingsTOMLCodec.decode(withoutKey)) { error in
+            guard case let DecodingError.keyNotFound(key, context) = error else {
+                return XCTFail("expected keyNotFound, got \(error)")
+            }
+            XCTAssertEqual(key.stringValue, "raiseOnMouseFocus")
+            XCTAssertEqual(context.codingPath.map(\.stringValue), ["focus"])
+        }
+    }
+
+    func testRaiseOnMouseFocusDefaultsAndRoundTrips() throws {
+        var export = SettingsExport.defaults()
+
+        XCTAssertFalse(export.raiseOnMouseFocus)
+        XCTAssertTrue(
+            String(decoding: try SettingsTOMLCodec.encode(export), as: UTF8.self)
+                .contains("raiseOnMouseFocus = false")
+        )
+
+        export.raiseOnMouseFocus = true
+        let data = try SettingsTOMLCodec.encode(export)
+
+        XCTAssertTrue(String(decoding: data, as: UTF8.self).contains("raiseOnMouseFocus = true"))
+        XCTAssertTrue(try SettingsTOMLCodec.decode(data).raiseOnMouseFocus)
+    }
+
     func testTOMLRejectsMissingFullscreenOuterGapPolicy() throws {
         let withoutKey = try canonicalDefaultLines { lines in
             let index = try XCTUnwrap(lines.firstIndex(of: "fullscreenUsesOuterGaps = false"))
@@ -434,6 +465,20 @@ final class SettingsTOMLCodecTests: XCTestCase {
 
         XCTAssertEqual(destination.mouseMoveModifierKey, .controlCommand)
         XCTAssertEqual(destination.toExport().mouseMoveModifierKey, MouseMoveModifierKey.controlCommand.rawValue)
+    }
+
+    @MainActor
+    func testRaiseOnMouseFocusStoreMappingSurvivesDisabledFocusFollowsMouse() {
+        let source = makeSettingsStore()
+        source.focusFollowsMouse = false
+        source.raiseOnMouseFocus = true
+        let destination = makeSettingsStore()
+
+        destination.applyExport(source.toExport())
+
+        XCTAssertFalse(destination.focusFollowsMouse)
+        XCTAssertTrue(destination.raiseOnMouseFocus)
+        XCTAssertTrue(destination.toExport().raiseOnMouseFocus)
     }
 
     func testMalformedMouseMoveModifierTypeRejectsDecode() throws {

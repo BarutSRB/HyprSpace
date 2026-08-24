@@ -43,6 +43,7 @@ struct CanonicalTOMLConfig: Codable, Equatable {
 
     struct Focus: Codable, Equatable {
         var followsMouse: Bool
+        var raiseOnMouseFocus: Bool
         var lockModifier: String
         var moveMouseToFocusedWindow: Bool
         var followsWindowToMonitor: Bool
@@ -290,6 +291,7 @@ extension CanonicalTOMLConfig {
         )
         focus = Focus(
             followsMouse: export.focusFollowsMouse,
+            raiseOnMouseFocus: export.raiseOnMouseFocus,
             lockModifier: export.focusLockModifier,
             moveMouseToFocusedWindow: export.moveMouseToFocusedWindow,
             followsWindowToMonitor: export.focusFollowsWindowToMonitor,
@@ -428,6 +430,7 @@ extension CanonicalTOMLConfig {
         return SettingsExport(
             hotkeysEnabled: general.hotkeysEnabled,
             focusFollowsMouse: focus.followsMouse,
+            raiseOnMouseFocus: focus.raiseOnMouseFocus,
             focusLockModifier: focus.lockModifier,
             moveMouseToFocusedWindow: focus.moveMouseToFocusedWindow,
             focusFollowsWindowToMonitor: focus.followsWindowToMonitor,

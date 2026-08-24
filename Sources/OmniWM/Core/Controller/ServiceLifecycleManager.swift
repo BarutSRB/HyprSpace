@@ -849,6 +849,11 @@ final class ServiceLifecycleManager {
 
     func stop() {
         guard let controller else { return }
+        if let request = controller.intentLedger.activeManagedRequest,
+           case .awaitingSameAppActivation = request.phase
+        {
+            controller.cancelManagedFocusRequestAndRestoreSource(request)
+        }
         controller.hasStartedServices = false
         controller.invalidateOverviewDeferredActionsForServiceStop()
         cancelStableTopologyInventory()

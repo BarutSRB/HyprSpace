@@ -29,6 +29,7 @@ extension KeyboardFocusTarget: Equatable {
 enum ManagedFocusOrigin: Equatable {
     case keyboardOrProgrammatic
     case pointerHover
+    case focusFollowsMouse
 
     var allowsMouseToFocusedWarp: Bool {
         self == .keyboardOrProgrammatic
@@ -38,11 +39,19 @@ enum ManagedFocusOrigin: Equatable {
         if self == .keyboardOrProgrammatic || origin == .keyboardOrProgrammatic {
             return .keyboardOrProgrammatic
         }
-        return .pointerHover
+        if self == .pointerHover || origin == .pointerHover {
+            return .pointerHover
+        }
+        return .focusFollowsMouse
     }
 }
 
 struct ManagedFocusRequest: Equatable {
+    enum Phase: Equatable, Sendable {
+        case awaitingSameAppActivation(sourceToken: WindowToken, isRetry: Bool = false)
+        case awaitingConfirmation
+    }
+
     enum Status: Equatable {
         case pending
         case confirmed
@@ -52,6 +61,7 @@ struct ManagedFocusRequest: Equatable {
     var token: WindowToken
     var workspaceId: WorkspaceDescriptor.ID
     var origin: ManagedFocusOrigin
+    var phase: Phase
     var retryCount: Int = 0
     var lastActivationSource: ActivationEventSource?
     var status: Status = .pending

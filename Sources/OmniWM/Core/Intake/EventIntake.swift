@@ -21,7 +21,7 @@ enum IntakeEvent: Sendable {
     case cgs(CGSWindowEvent)
     case display(DisplayConfigurationObserver.DisplayEvent)
     case hotkeyInvocation(HotkeyInvocation)
-    case intentExpired(intentId: IntentID)
+    case intentExpired(intentId: IntentID, deadlineGeneration: UInt64)
     case ipcCommand(IPCCommandIntake)
     case mouseDragged(button: MouseEventHandler.MouseButton, location: CGPoint)
     case mouseMoved(location: CGPoint, modifiersRawValue: UInt64, windowIdUnderPointer: Int?)

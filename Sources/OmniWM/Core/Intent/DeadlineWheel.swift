@@ -8,6 +8,7 @@ final class DeadlineWheel {
     private struct Entry {
         let intentId: IntentID
         let deadline: ContinuousClock.Instant
+        let generation: UInt64
     }
 
     var clock: () -> ContinuousClock.Instant = { ContinuousClock().now }
@@ -16,27 +17,43 @@ final class DeadlineWheel {
     }
 
     private var entries: [Entry] = []
+    private var currentGenerationByIntentId: [IntentID: UInt64] = [:]
+    private var nextGeneration: UInt64 = 0
     private var timerTask: Task<Void, Never>?
     private var armedDeadline: ContinuousClock.Instant?
 
-    func schedule(intentId: IntentID, after duration: Duration) {
+    @discardableResult
+    func schedule(intentId: IntentID, after duration: Duration) -> UInt64 {
         schedule(intentId: intentId, deadline: clock().advanced(by: duration))
     }
 
-    func schedule(intentId: IntentID, deadline: ContinuousClock.Instant) {
+    @discardableResult
+    func schedule(intentId: IntentID, deadline: ContinuousClock.Instant) -> UInt64 {
+        nextGeneration &+= 1
+        let generation = nextGeneration
         entries.removeAll { $0.intentId == intentId }
-        entries.append(Entry(intentId: intentId, deadline: deadline))
+        entries.append(Entry(intentId: intentId, deadline: deadline, generation: generation))
+        currentGenerationByIntentId[intentId] = generation
         entries.sort { $0.deadline < $1.deadline }
         rearm()
+        return generation
     }
 
     func cancel(intentId: IntentID) {
         entries.removeAll { $0.intentId == intentId }
+        currentGenerationByIntentId.removeValue(forKey: intentId)
         rearm()
+    }
+
+    func consumeExpiration(intentId: IntentID, generation: UInt64) -> Bool {
+        guard currentGenerationByIntentId[intentId] == generation else { return false }
+        currentGenerationByIntentId.removeValue(forKey: intentId)
+        return true
     }
 
     func stop() {
         entries.removeAll(keepingCapacity: false)
+        currentGenerationByIntentId.removeAll(keepingCapacity: false)
         timerTask?.cancel()
         timerTask = nil
         armedDeadline = nil
@@ -51,7 +68,12 @@ final class DeadlineWheel {
             return true
         }
         for entry in due {
-            EventIntake.post(.intentExpired(intentId: entry.intentId))
+            EventIntake.post(
+                .intentExpired(
+                    intentId: entry.intentId,
+                    deadlineGeneration: entry.generation
+                )
+            )
         }
         rearm()
     }

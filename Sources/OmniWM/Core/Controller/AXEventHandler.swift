@@ -1725,6 +1725,14 @@ final class AXEventHandler {
             activeRequest: activeRequest
         )
 
+        if let activeRequest,
+           case let .awaitingSameAppActivation(sourceToken, _) = activeRequest.phase,
+           facts.pid == activeRequest.token.pid,
+           observedToken == nil || observedToken == sourceToken
+        {
+            return
+        }
+
         guard let axRef, let focusedWindow = facts.focusedWindow else {
             controller.workspaceManager.setSystemModalFocus(nil)
             handleMissingFocusedWindow(
@@ -2219,6 +2227,13 @@ final class AXEventHandler {
         }
         let shouldConfirmRequest = confirmRequest ?? true
         let focusObservation = controller.intentLedger.classifyFocusObservation(token: entry.token)
+        let omitsExplicitOrdering = switch focusObservation {
+        case let .echoOf(intent),
+             let .lateEcho(intent):
+            intent.origin == .focusFollowsMouse && !controller.settings.raiseOnMouseFocus
+        case .external:
+            false
+        }
 
         if shouldConfirmRequest {
             if let request = activeRequest,
@@ -2288,7 +2303,8 @@ final class AXEventHandler {
             )
         }
 
-        if isRetriedAuthoritativeSystemModalFocus,
+        if !omitsExplicitOrdering,
+           isRetriedAuthoritativeSystemModalFocus,
            frontmostApplicationPIDProvider() == entry.pid,
            controller.workspaceManager.focusedToken == entry.token
         {
@@ -3816,6 +3832,11 @@ final class AXEventHandler {
         reason: ActivationRetryReason
     ) {
         guard let controller else { return }
+        guard controller.intentLedger.activeManagedRequest(
+            requestId: request.requestId
+        )?.phase == .awaitingConfirmation else {
+            return
+        }
         if let updatedRequest = controller.intentLedger.recordRetry(
             requestId: request.requestId,
             source: source,

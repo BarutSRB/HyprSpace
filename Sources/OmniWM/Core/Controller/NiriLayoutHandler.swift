@@ -471,7 +471,7 @@ enum StructuralMutationOutcome: Equatable {
             shouldRequestRelayout = state.offsetTransition.kind == .jump
         }
 
-        controller.focusWindow(window.token, origin: .pointerHover)
+        controller.focusWindow(window.token, origin: .focusFollowsMouse)
 
         if shouldStartScrollAnimation {
             startScrollAnimationIfNeeded(

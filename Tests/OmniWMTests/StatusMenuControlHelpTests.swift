@@ -141,6 +141,13 @@ final class StatusMenuControlHelpTests: XCTestCase {
         }
     }
 
+    func testFocusFollowsMouseHelpPointsToRaiseBehaviorInSettings() {
+        let explanation = StatusMenuControl.focusFollowsMouse.explanation
+
+        XCTAssertTrue(explanation.contains("raises"))
+        XCTAssertTrue(explanation.contains("Settings"))
+    }
+
     func testHoveredControlIsPresentedOnlyAfterDwellCompletes() {
         var selection = StatusMenuHelpSelection()
 
@@ -308,6 +315,18 @@ final class StatusMenuControlHelpTests: XCTestCase {
         let hiddenBarTiles = fixture.model.toggleTiles.filter { $0.control == .hiddenBarEnabled }
 
         XCTAssertEqual(hiddenBarTiles.count, fixture.controller.isHiddenBarHidingAvailable ? 1 : 0)
+    }
+
+    func testFocusFollowsMouseTileDoesNotChangeRaisePreference() throws {
+        let fixture = makeStatusMenuModelFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        fixture.model.settings.raiseOnMouseFocus = true
+        let tile = try XCTUnwrap(fixture.model.toggleTiles.first { $0.control == .focusFollowsMouse })
+
+        tile.isOn.wrappedValue = true
+        tile.isOn.wrappedValue = false
+
+        XCTAssertTrue(fixture.model.settings.raiseOnMouseFocus)
     }
 
     private struct StatusMenuModelFixture {

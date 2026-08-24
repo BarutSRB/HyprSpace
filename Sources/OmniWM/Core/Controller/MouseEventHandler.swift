@@ -203,6 +203,12 @@ final class MouseEventHandler {
             var terminalFailureRetryRequestId: AXFrameRequestId?
         }
 
+        struct FocusFollowsMouseSample {
+            let location: CGPoint
+            let modifiersRawValue: UInt64
+            let windowIdUnderPointer: Int?
+        }
+
         var eventTap: CFMachPort?
         var runLoopSource: CFRunLoopSource?
         var moveTap: CFMachPort?
@@ -219,6 +225,7 @@ final class MouseEventHandler {
         var nativeTitleBarDrag: NativeTitleBarDrag?
 
         var lastFocusFollowsMouseTime: Date = .distantPast
+        var latestFocusFollowsMouseSample: FocusFollowsMouseSample?
         let focusFollowsMouseDebounce: TimeInterval = 0.1
         var dragGhostController: DragGhostController?
 
@@ -405,6 +412,7 @@ final class MouseEventHandler {
     }
 
     func cleanup() {
+        state.latestFocusFollowsMouseSample = nil
         clearNativeTitleBarDrag()
         cancelActiveMouseInteraction()
         state.capturedInteractionButton = nil
@@ -526,6 +534,11 @@ final class MouseEventHandler {
         modifiersRawValue: UInt64 = 0,
         windowIdUnderPointer: Int? = nil
     ) {
+        state.latestFocusFollowsMouseSample = .init(
+            location: location,
+            modifiersRawValue: modifiersRawValue,
+            windowIdUnderPointer: windowIdUnderPointer
+        )
         guard !isInputSuppressed else {
             handleInputSuppressionBegan()
             resetHoveredEdgesIfNeeded()
@@ -689,6 +702,7 @@ final class MouseEventHandler {
     }
 
     func handleInputSuppressionBegan() {
+        state.latestFocusFollowsMouseSample = nil
         clearNativeTitleBarDrag()
         cancelActiveMouseInteraction()
         dropPendingTapEvents()
@@ -698,6 +712,7 @@ final class MouseEventHandler {
     }
 
     func handleAppVisibilityChanged() {
+        state.latestFocusFollowsMouseSample = nil
         clearNativeTitleBarDrag()
         cancelActiveMouseInteraction()
         dropPendingTapEvents()
@@ -2114,6 +2129,36 @@ final class MouseEventHandler {
         }
     }
 
+    var hasLatestFocusFollowsMouseSample: Bool {
+        state.latestFocusFollowsMouseSample != nil
+    }
+
+    func latestFocusFollowsMouseToken() -> WindowToken? {
+        guard let controller,
+              let sample = state.latestFocusFollowsMouseSample,
+              !isInputSuppressed,
+              controller.isEnabled,
+              controller.focusFollowsMouseEnabled,
+              !controller.isOverviewOpen(),
+              !shouldBlockOwnWindowInput(at: sample.location),
+              !controller.settings.focusLockModifier.isHeld(inRawFlags: sample.modifiersRawValue),
+              !state.isMoving,
+              !state.isResizing,
+              !isTrackpadSwipeSessionActive,
+              controller.focusPolicyEngine.evaluate(.focusFollowsMouse).allowsFocusChange,
+              !nonManagedFocusBlocksFocusFollowsMouse,
+              !hasPendingNativeFullscreenTransition(at: sample.location),
+              !isPointerDisplayShowingFullscreenSpace(at: sample.location),
+              let target = resolveFocusFollowsMouseTarget(
+                  at: sample.location,
+                  windowIdUnderPointer: sample.windowIdUnderPointer
+              )
+        else {
+            return nil
+        }
+        return focusFollowsMouseToken(for: target)
+    }
+
     private func activateFocusFollowsMouseTarget(_ target: FocusFollowsMouseTarget) {
         guard let controller else { return }
 
@@ -2127,11 +2172,11 @@ final class MouseEventHandler {
             controller.dwindleLayoutHandler.activateWindow(
                 token,
                 in: workspaceId,
-                origin: .pointerHover,
+                origin: .focusFollowsMouse,
                 layoutRefresh: false
             )
         case let .floating(token):
-            controller.focusWindow(token, origin: .pointerHover)
+            controller.focusWindow(token, origin: .focusFollowsMouse)
         }
     }
 

@@ -767,23 +767,30 @@ final class DwindleGroupFocusIntegrationTests: XCTestCase {
         )
     }
 
-    func testFocusWaitsForVerifiedGroupReveal() throws {
+    func testPointerHoverFocusWaitsForVerifiedGroupReveal() throws {
+        try assertFocusWaitsForVerifiedGroupReveal(origin: .pointerHover)
+    }
+
+    func testFocusFollowsMouseWaitsForVerifiedGroupReveal() throws {
+        try assertFocusWaitsForVerifiedGroupReveal(origin: .focusFollowsMouse)
+    }
+
+    func testDisabledFocusFollowsMouseDropsDeferredGroupRevealFocus() throws {
         var frontedTokens: [WindowToken] = []
         let fixture = try makeFixture { pid, windowId in
             frontedTokens.append(WindowToken(pid: pid, windowId: Int(windowId)))
         }
+        fixture.controller.setFocusFollowsMouse(true)
         let pending = try beginPendingReveal(fixture)
         XCTAssertTrue(
             fixture.controller.dwindleLayoutHandler.deferGroupSelectionCompletion(
                 fixture.inactiveToken,
                 workspaceId: fixture.workspaceId,
                 focusAfterReveal: true,
-                focusOrigin: .pointerHover
+                focusOrigin: .focusFollowsMouse
             )
         )
-
-        XCTAssertTrue(frontedTokens.isEmpty)
-        XCTAssertNil(fixture.controller.intentLedger.activeManagedRequest)
+        fixture.controller.setFocusFollowsMouse(false)
 
         fixture.controller.dwindleLayoutHandler.completePendingGroupRevealTransaction(
             with: frameResult(
@@ -793,9 +800,53 @@ final class DwindleGroupFocusIntegrationTests: XCTestCase {
             transactionId: pending.transactionId
         )
 
-        XCTAssertEqual(frontedTokens, [fixture.inactiveToken])
-        XCTAssertEqual(fixture.controller.intentLedger.activeManagedRequest?.origin, .pointerHover)
-        XCTAssertNil(fixture.controller.workspaceManager.hiddenState(for: fixture.inactiveToken))
+        XCTAssertTrue(frontedTokens.isEmpty)
+        XCTAssertNil(fixture.controller.intentLedger.activeManagedRequest)
+        XCTAssertNil(fixture.controller.workspaceManager.pendingFocusedToken)
+    }
+
+    private func assertFocusWaitsForVerifiedGroupReveal(
+        origin: ManagedFocusOrigin,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        var frontedTokens: [WindowToken] = []
+        let fixture = try makeFixture { pid, windowId in
+            frontedTokens.append(WindowToken(pid: pid, windowId: Int(windowId)))
+        }
+        if origin == .focusFollowsMouse {
+            fixture.controller.setFocusFollowsMouse(true)
+        }
+        let pending = try beginPendingReveal(fixture)
+        XCTAssertTrue(
+            fixture.controller.dwindleLayoutHandler.deferGroupSelectionCompletion(
+                fixture.inactiveToken,
+                workspaceId: fixture.workspaceId,
+                focusAfterReveal: true,
+                focusOrigin: origin
+            ),
+            file: file,
+            line: line
+        )
+
+        XCTAssertTrue(frontedTokens.isEmpty, file: file, line: line)
+        XCTAssertNil(fixture.controller.intentLedger.activeManagedRequest, file: file, line: line)
+
+        fixture.controller.dwindleLayoutHandler.completePendingGroupRevealTransaction(
+            with: frameResult(
+                token: fixture.inactiveToken,
+                frame: pending.frame
+            ),
+            transactionId: pending.transactionId
+        )
+
+        XCTAssertEqual(frontedTokens, [fixture.inactiveToken], file: file, line: line)
+        XCTAssertEqual(fixture.controller.intentLedger.activeManagedRequest?.origin, origin, file: file, line: line)
+        XCTAssertNil(
+            fixture.controller.workspaceManager.hiddenState(for: fixture.inactiveToken),
+            file: file,
+            line: line
+        )
     }
 
     func testFailedGroupRevealRollsBackWithoutFronting() throws {
