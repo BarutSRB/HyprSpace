@@ -118,18 +118,26 @@ final class SingleWindowFitTests: XCTestCase {
 
         let canonical = String(decoding: try SettingsTOMLCodec.encode(export), as: UTF8.self)
         let legacy = Data(
-            canonical.replacingOccurrences(
-                of: "singleWindowFit",
-                with: "singleWindowAspectRatio"
-            ).utf8
+            canonical
+                .split(separator: "\n", omittingEmptySubsequences: false)
+                .flatMap { line -> [Substring] in
+                    guard line.contains("singleWindowFit") else { return [line] }
+                    return [
+                        line,
+                        Substring(line.replacingOccurrences(
+                            of: "singleWindowFit",
+                            with: "singleWindowAspectRatio"
+                        ))
+                    ]
+                }
+                .joined(separator: "\n")
+                .utf8
         )
         let decoded = try SettingsTOMLCodec.decode(legacy)
         let unknownKeys = Set(SettingsTOMLCodec.unknownKeyPaths(in: legacy))
 
-        XCTAssertEqual(decoded.niriSingleWindowFit, SingleWindowFit.fullScreen.serialized)
-        XCTAssertEqual(decoded.dwindleSingleWindowFit, SingleWindowFit.fullScreen.serialized)
-        XCTAssertNil(decoded.monitorNiriSettings.first?.singleWindowFit)
-        XCTAssertNil(decoded.monitorDwindleSettings.first?.singleWindowFit)
+        XCTAssertEqual(decoded.niriSingleWindowFit, export.niriSingleWindowFit)
+        XCTAssertEqual(decoded.dwindleSingleWindowFit, export.dwindleSingleWindowFit)
         XCTAssertTrue(unknownKeys.contains("niri.singleWindowAspectRatio"))
         XCTAssertTrue(unknownKeys.contains("dwindle.singleWindowAspectRatio"))
         XCTAssertTrue(unknownKeys.contains("monitorNiriOverrides[0].singleWindowAspectRatio"))

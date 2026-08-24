@@ -482,6 +482,26 @@ struct PersistedHotkeyBinding: Codable, Equatable {
     }
 }
 
+enum HotkeyBindingResolutionError: LocalizedError, Equatable {
+    case unknownActionID(String)
+    case unassignableActionID(String)
+    case missingActionID(String)
+    case duplicateActionID(String)
+
+    var errorDescription: String? {
+        switch self {
+        case let .unknownActionID(id):
+            "hotkeys: \(id) is not an action in this build."
+        case let .unassignableActionID(id):
+            "hotkeys: \(id) cannot be assigned as a hotkey."
+        case let .missingActionID(id):
+            "hotkeys: \(id) is missing."
+        case let .duplicateActionID(id):
+            "hotkeys: \(id) is listed more than once."
+        }
+    }
+}
+
 enum HotkeyBindingRegistry {
     private static let defaultBindings = DefaultHotkeyBindings.all()
     private static let bindingsByID = Dictionary(
@@ -507,13 +527,24 @@ enum HotkeyBindingRegistry {
         return HotkeyBinding(id: id, command: defaultBinding.command, trigger: trigger)
     }
 
-    static func canonicalize(_ persisted: [PersistedHotkeyBinding]) -> [HotkeyBinding] {
+    static func resolve(_ persisted: [PersistedHotkeyBinding]) throws -> [HotkeyBinding] {
         var overrides: [String: HotkeyTrigger] = [:]
-        for entry in persisted where bindingsByID[entry.id] != nil {
+        for entry in persisted {
+            guard bindingsByID[entry.id] != nil else {
+                if ActionCatalog.visibility(for: entry.id) == .unassignable {
+                    throw HotkeyBindingResolutionError.unassignableActionID(entry.id)
+                }
+                throw HotkeyBindingResolutionError.unknownActionID(entry.id)
+            }
+            guard overrides[entry.id] == nil else {
+                throw HotkeyBindingResolutionError.duplicateActionID(entry.id)
+            }
             overrides[entry.id] = canonicalizeTrigger(entry.binding)
         }
-        return defaultBindings.map { binding in
-            guard let override = overrides[binding.id] else { return binding }
+        return try defaultBindings.map { binding in
+            guard let override = overrides[binding.id] else {
+                throw HotkeyBindingResolutionError.missingActionID(binding.id)
+            }
             return HotkeyBinding(id: binding.id, command: binding.command, trigger: override)
         }
     }

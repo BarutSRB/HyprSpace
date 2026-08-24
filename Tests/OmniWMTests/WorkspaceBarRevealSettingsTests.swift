@@ -35,14 +35,6 @@ final class WorkspaceBarRevealSettingsTests: XCTestCase {
         XCTAssertEqual(decoded.workspaceBarRevealHoldMilliseconds, 350)
     }
 
-    func testMissingKeysRecoverToDefaults() throws {
-        let withoutKeys = try defaultsDroppingLines(containing: "revealModifier", "revealHoldMilliseconds")
-        let decoded = try SettingsTOMLCodec.decode(withoutKeys)
-
-        XCTAssertEqual(decoded.workspaceBarRevealModifier, WorkspaceBarRevealModifier.off.rawValue)
-        XCTAssertEqual(decoded.workspaceBarRevealHoldMilliseconds, 200)
-    }
-
     @MainActor
     func testApplyExportClampsDelayAndRecoversInvalidModifier() {
         let settings = makeSettingsStore()

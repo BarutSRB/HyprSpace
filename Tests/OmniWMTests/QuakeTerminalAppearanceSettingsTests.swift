@@ -82,23 +82,6 @@ final class QuakeTerminalAppearanceSettingsTests: XCTestCase {
     }
 
     @MainActor
-    func testConfigWithoutBackgroundEffectRecoversToStandardBlur() throws {
-        let defaults = SettingsExport.defaults()
-        let toml = String(decoding: try SettingsTOMLCodec.encode(defaults), as: UTF8.self)
-        let stripped = removingValue(in: toml, table: "quakeTerminal", key: "backgroundEffect")
-
-        let decoded = try SettingsTOMLCodec.decode(Data(stripped.utf8))
-        XCTAssertEqual(
-            decoded.quakeTerminalBackgroundEffect,
-            QuakeTerminalBackgroundEffect.standardBlur.rawValue
-        )
-
-        let settings = makeSettingsStore()
-        settings.applyExport(decoded)
-        XCTAssertEqual(settings.quakeTerminalBackgroundEffect, .standardBlur)
-    }
-
-    @MainActor
     func testConfigWithoutBackgroundBlurRadiusDecodesToOff() throws {
         let defaults = SettingsExport.defaults()
         let toml = String(decoding: try SettingsTOMLCodec.encode(defaults), as: UTF8.self)

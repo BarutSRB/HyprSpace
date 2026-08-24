@@ -7,7 +7,7 @@ import XCTest
 
 @MainActor
 final class WorkspaceBarExcludedAppsSettingsTests: XCTestCase {
-    func testDefaultsAndMissingKeyRecoverToEmptyList() throws {
+    func testDefaultsEncodeAsEmptyList() throws {
         XCTAssertEqual(SettingsExport.defaults().workspaceBarExcludedBundleIDs, [])
 
         let canonical = try XCTUnwrap(
@@ -17,14 +17,6 @@ final class WorkspaceBarExcludedAppsSettingsTests: XCTestCase {
             )
         )
         XCTAssertTrue(canonical.contains("excludedBundleIDs = []"))
-
-        let withoutKey = canonical
-            .split(separator: "\n", omittingEmptySubsequences: false)
-            .filter { !$0.hasPrefix("excludedBundleIDs = ") }
-            .joined(separator: "\n")
-        let decoded = try SettingsTOMLCodec.decode(Data(withoutKey.utf8))
-
-        XCTAssertEqual(decoded.workspaceBarExcludedBundleIDs, [])
     }
 
     func testCanonicalAndPreservingRoundTripsKeepBundleIDs() throws {

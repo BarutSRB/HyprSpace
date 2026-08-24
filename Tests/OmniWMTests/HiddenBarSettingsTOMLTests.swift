@@ -27,27 +27,6 @@ final class HiddenBarSettingsTOMLTests: XCTestCase {
         XCTAssertEqual(decoded.hiddenBarHiddenBundleIDs, [])
     }
 
-    func testMissingHiddenBarTableRecoversDefaults() throws {
-        let base = String(decoding: try SettingsTOMLCodec.encode(SettingsExport.defaults()), as: UTF8.self)
-        let stripped = base
-            .split(separator: "\n", omittingEmptySubsequences: false)
-            .reduce(into: (lines: [String](), inHiddenBar: false)) { state, line in
-                if line.hasPrefix("[") {
-                    state.inHiddenBar = line == "[hiddenBar]"
-                }
-                if !state.inHiddenBar {
-                    state.lines.append(String(line))
-                }
-            }
-            .lines
-            .joined(separator: "\n")
-
-        let decoded = try SettingsTOMLCodec.decode(Data(stripped.utf8))
-        let defaults = SettingsExport.defaults()
-        XCTAssertEqual(decoded.hiddenBarEnabled, defaults.hiddenBarEnabled)
-        XCTAssertEqual(decoded.hiddenBarRehideIntervalSeconds, defaults.hiddenBarRehideIntervalSeconds)
-    }
-
     func testPopulatedBundleListSurvivesPreservingEncode() throws {
         var export = SettingsExport.defaults()
         export.hiddenBarHiddenBundleIDs = ["com.keep.me"]

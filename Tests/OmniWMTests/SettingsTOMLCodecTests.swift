@@ -18,29 +18,178 @@ final class SettingsTOMLCodecTests: XCTestCase {
         }
     }
 
-    func testTOMLDropsAssignedUnassignableHotkeyAction() throws {
-        let source = Data(
-            """
+    func testTOMLRejectsUnassignableHotkeyActions() throws {
+        for id in ["consumeOrExpelWindowLeft", "consumeOrExpelWindowRight"] {
+            let source = Data(
+                (String(decoding: try SettingsTOMLCodec.encode(.defaults()), as: UTF8.self) + """
+
+                [[hotkeys]]
+                binding = "Option+H"
+                id = "\(id)"
+                """).utf8
+            )
+
+            XCTAssertThrowsError(try SettingsTOMLCodec.decode(source)) { error in
+                XCTAssertEqual(
+                    error as? HotkeyBindingResolutionError,
+                    .unassignableActionID(id)
+                )
+                XCTAssertEqual(
+                    error.localizedDescription,
+                    "hotkeys: \(id) cannot be assigned as a hotkey."
+                )
+            }
+        }
+    }
+
+    func testTOMLRejectsFileMissingAKnownHotkeyAction() throws {
+        let firstID = try XCTUnwrap(HotkeyBindingRegistry.defaults().first?.id)
+        let withoutEntry = try canonicalDefaultLines { lines in
+            let idIndex = try XCTUnwrap(lines.firstIndex(of: #"id = "\#(firstID)""#))
+            XCTAssertEqual(lines[idIndex - 2], "[[hotkeys]]")
+            lines.removeSubrange((idIndex - 2) ... idIndex)
+        }
+
+        XCTAssertThrowsError(try SettingsTOMLCodec.decode(withoutEntry)) { error in
+            XCTAssertEqual(error as? HotkeyBindingResolutionError, .missingActionID(firstID))
+        }
+    }
+
+    func testTOMLRejectsDuplicateHotkeyAction() throws {
+        let firstID = try XCTUnwrap(HotkeyBindingRegistry.defaults().first?.id)
+        let duplicated = try canonicalDefaultLines { lines in
+            let idIndex = try XCTUnwrap(lines.firstIndex(of: #"id = "\#(firstID)""#))
+            XCTAssertEqual(lines[idIndex - 2], "[[hotkeys]]")
+            lines.insert(contentsOf: lines[(idIndex - 2) ... idIndex], at: idIndex + 1)
+        }
+
+        XCTAssertThrowsError(try SettingsTOMLCodec.decode(duplicated)) { error in
+            XCTAssertEqual(error as? HotkeyBindingResolutionError, .duplicateActionID(firstID))
+        }
+    }
+
+    func testTOMLRejectsMissingRequiredKey() throws {
+        let withoutKey = try canonicalDefaultLines { lines in
+            let index = try XCTUnwrap(lines.firstIndex { $0.hasPrefix("followsMouse = ") })
+            lines.remove(at: index)
+        }
+
+        XCTAssertThrowsError(try SettingsTOMLCodec.decode(withoutKey)) { error in
+            guard case let DecodingError.keyNotFound(key, context) = error else {
+                return XCTFail("expected keyNotFound, got \(error)")
+            }
+            XCTAssertEqual(key.stringValue, "followsMouse")
+            XCTAssertEqual(context.codingPath.map(\.stringValue), ["focus"])
+        }
+    }
+
+    func testTOMLRejectsCorruptSystemHyperTrigger() throws {
+        let corrupt = try canonicalDefaultLines { lines in
+            let index = try XCTUnwrap(lines.firstIndex { $0.hasPrefix("systemHyperTrigger = ") })
+            lines[index] = #"systemHyperTrigger = "NotAKey""#
+        }
+
+        XCTAssertThrowsError(try SettingsTOMLCodec.decode(corrupt)) { error in
+            guard case let DecodingError.dataCorrupted(context) = error else {
+                return XCTFail("expected dataCorrupted, got \(error)")
+            }
+            XCTAssertEqual(context.codingPath.map(\.stringValue), ["general", "systemHyperTrigger"])
+        }
+    }
+
+    func testTOMLRejectsCorruptHyperKeyModifiers() throws {
+        let corrupt = try canonicalDefaultLines { lines in
+            let index = try XCTUnwrap(lines.firstIndex { $0.hasPrefix("hyperKeyModifiers = ") })
+            lines[index] = #"hyperKeyModifiers = "Control""#
+        }
+
+        XCTAssertThrowsError(try SettingsTOMLCodec.decode(corrupt)) { error in
+            guard case let DecodingError.dataCorrupted(context) = error else {
+                return XCTFail("expected dataCorrupted, got \(error)")
+            }
+            XCTAssertEqual(context.codingPath.map(\.stringValue), ["general", "hyperKeyModifiers"])
+        }
+    }
+
+    func testHotkeyResolverRejectsUnknownMissingAndDuplicateActionIDs() throws {
+        let defaults = HotkeyBindingRegistry.defaults()
+        let complete = defaults.map { PersistedHotkeyBinding(id: $0.id, trigger: $0.binding) }
+        XCTAssertEqual(try HotkeyBindingRegistry.resolve(complete).count, defaults.count)
+
+        let withUnknown = complete + [PersistedHotkeyBinding(id: "retired.action", trigger: .unassigned)]
+        XCTAssertThrowsError(try HotkeyBindingRegistry.resolve(withUnknown)) { error in
+            XCTAssertEqual(error as? HotkeyBindingResolutionError, .unknownActionID("retired.action"))
+            XCTAssertEqual(
+                error.localizedDescription,
+                "hotkeys: retired.action is not an action in this build."
+            )
+        }
+
+        for id in ["consumeOrExpelWindowLeft", "consumeOrExpelWindowRight"] {
+            let withUnassignable = complete + [PersistedHotkeyBinding(id: id, trigger: .unassigned)]
+            XCTAssertThrowsError(try HotkeyBindingRegistry.resolve(withUnassignable)) { error in
+                XCTAssertEqual(error as? HotkeyBindingResolutionError, .unassignableActionID(id))
+                XCTAssertEqual(
+                    error.localizedDescription,
+                    "hotkeys: \(id) cannot be assigned as a hotkey."
+                )
+            }
+        }
+
+        let firstID = try XCTUnwrap(defaults.first?.id)
+        XCTAssertThrowsError(try HotkeyBindingRegistry.resolve(Array(complete.dropFirst()))) { error in
+            XCTAssertEqual(error as? HotkeyBindingResolutionError, .missingActionID(firstID))
+        }
+
+        let withDuplicate = try complete + [XCTUnwrap(complete.first)]
+        XCTAssertThrowsError(try HotkeyBindingRegistry.resolve(withDuplicate)) { error in
+            XCTAssertEqual(error as? HotkeyBindingResolutionError, .duplicateActionID(firstID))
+        }
+    }
+
+    @MainActor
+    func testLoadFailureReportsRejectedHotkeyActionsPrecisely() throws {
+        let cases = [
+            ("retired.action", "hotkeys: retired.action is not an action in this build."),
+            (
+                "consumeOrExpelWindowLeft",
+                "hotkeys: consumeOrExpelWindowLeft cannot be assigned as a hotkey."
+            )
+        ]
+
+        for (id, expectedMessage) in cases {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("OmniWMHotkeyReport-\(UUID().uuidString)", isDirectory: true)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: directory) }
+
+            let source = String(decoding: try SettingsTOMLCodec.encode(.defaults()), as: UTF8.self) + """
+
             [[hotkeys]]
             binding = "Option+H"
-            id = "consumeOrExpelWindowLeft"
-            """.utf8
-        )
+            id = "\(id)"
+            """
+            try Data(source.utf8).write(to: directory.appendingPathComponent("settings.toml"))
 
-        let decoded = try SettingsTOMLCodec.decode(source)
+            LogErrorTap.shared.reset()
+            let persistence = SettingsFilePersistence(
+                directory: directory,
+                startWatching: false,
+                deferSaves: false
+            )
+            _ = persistence.load()
 
-        XCTAssertFalse(
-            decoded.hotkeyBindings.contains { $0.id == "consumeOrExpelWindowLeft" }
-        )
+            XCTAssertTrue(LogErrorTap.shared.dump().contains(expectedMessage))
+        }
+    }
 
-        let rewritten = String(
-            decoding: try SettingsTOMLCodec.encode(
-                decoded,
-                preservingUnknownKeysFrom: source
-            ),
-            as: UTF8.self
-        )
-        XCTAssertFalse(rewritten.contains(#"id = "consumeOrExpelWindowLeft""#))
+    private func canonicalDefaultLines(_ mutate: (inout [String]) throws -> Void) throws -> Data {
+        let canonical = String(decoding: try SettingsTOMLCodec.encode(.defaults()), as: UTF8.self)
+        var lines = canonical.components(separatedBy: "\n")
+        let original = lines
+        try mutate(&lines)
+        XCTAssertNotEqual(lines, original)
+        return Data(lines.joined(separator: "\n").utf8)
     }
 
     func testMonitorInnerGapOverrideRoundTrips() throws {
@@ -62,71 +211,6 @@ final class SettingsTOMLCodecTests: XCTestCase {
         XCTAssertTrue(toml.contains("innerGap = 6.0"))
     }
 
-    func testLoadingReinjectsNewlyAddedDefaultActionsMissingFromFile() throws {
-        var export = SettingsExport.defaults()
-        let customTrigger = HotkeyTrigger.chord(
-            KeyBinding(keyCode: UInt32(kVK_ANSI_J), modifiers: UInt32(optionKey))
-        )
-        export.hotkeyBindings = export.hotkeyBindings
-            .filter { !$0.id.hasPrefix("resizeFocusedWindow") }
-            .map { binding in
-                binding.id == "swapSplit"
-                    ? HotkeyBinding(id: binding.id, command: binding.command, trigger: customTrigger)
-                    : binding
-            }
-        XCTAssertFalse(export.hotkeyBindings.contains { $0.id.hasPrefix("resizeFocusedWindow") })
-
-        let decoded = try SettingsTOMLCodec.decode(SettingsTOMLCodec.encode(export))
-
-        XCTAssertTrue(
-            decoded.hotkeyBindings.contains { $0.id == "resizeFocusedWindow.grow" && $0.binding == .unassigned }
-        )
-        XCTAssertTrue(
-            decoded.hotkeyBindings.contains { $0.id == "resizeFocusedWindow.shrink" && $0.binding == .unassigned }
-        )
-        XCTAssertEqual(decoded.hotkeyBindings.first { $0.id == "swapSplit" }?.binding, customTrigger)
-    }
-
-    func testLoadingDropsDirectionalResizeActionsAndInjectsAxisActions() throws {
-        let oldIds = [
-            "resizeGrow.left",
-            "resizeGrow.right",
-            "resizeGrow.up",
-            "resizeGrow.down",
-            "resizeShrink.left",
-            "resizeShrink.right",
-            "resizeShrink.up",
-            "resizeShrink.down"
-        ]
-        let newIds = [
-            "resizeGrow.horizontal",
-            "resizeGrow.vertical",
-            "resizeShrink.horizontal",
-            "resizeShrink.vertical"
-        ]
-        let customTrigger = HotkeyTrigger.chord(
-            KeyBinding(keyCode: UInt32(kVK_ANSI_J), modifiers: UInt32(optionKey))
-        )
-        var export = SettingsExport.defaults()
-        export.hotkeyBindings.removeAll { newIds.contains($0.id) }
-        export.hotkeyBindings.append(contentsOf: oldIds.map { id in
-            HotkeyBinding(
-                id: id,
-                command: .resizeAlongAxis(.horizontal, true),
-                trigger: customTrigger
-            )
-        })
-
-        let decoded = try SettingsTOMLCodec.decode(SettingsTOMLCodec.encode(export))
-        let decodedIds = Set(decoded.hotkeyBindings.map(\.id))
-
-        XCTAssertTrue(decodedIds.isDisjoint(with: oldIds))
-        XCTAssertTrue(Set(newIds).isSubset(of: decodedIds))
-        for id in newIds {
-            XCTAssertEqual(decoded.hotkeyBindings.first { $0.id == id }?.binding, .unassigned)
-        }
-    }
-
     func testPreservingEncodeKeepsUnknownKeysInsideKnownTables() throws {
         let previous = try defaultsWithReplacements(
             ("[general]\n", "[general]\nfutureSetting = \"keep-me\"\n"),
@@ -144,6 +228,33 @@ final class SettingsTOMLCodecTests: XCTestCase {
         XCTAssertTrue(rewritten.contains("futureSetting = \"keep-me\""))
         XCTAssertTrue(rewritten.contains("futureNiriSetting = true"))
         XCTAssertTrue(rewritten.contains("size = 24.0"))
+    }
+
+    func testPreservingEncodeUsesCanonicalDataOnlyWhenPreviousDataIsAbsent() throws {
+        let export = SettingsExport.defaults()
+
+        let rewritten = try SettingsTOMLCodec.encode(export, preservingUnknownKeysFrom: nil)
+
+        XCTAssertEqual(rewritten, try SettingsTOMLCodec.encode(export))
+    }
+
+    func testPreservingEncodeRejectsEmptyPreviousData() {
+        XCTAssertThrowsError(
+            try SettingsTOMLCodec.encode(.defaults(), preservingUnknownKeysFrom: Data())
+        ) { error in
+            XCTAssertEqual(error as? SettingsTOMLCodecError, .cannotSafelyPreservePreviousData)
+        }
+    }
+
+    func testPreservingEncodeRejectsMalformedPreviousData() {
+        XCTAssertThrowsError(
+            try SettingsTOMLCodec.encode(
+                .defaults(),
+                preservingUnknownKeysFrom: Data("[general\ninvalid".utf8)
+            )
+        ) { error in
+            XCTAssertEqual(error as? SettingsTOMLCodecError, .cannotSafelyPreservePreviousData)
+        }
     }
 
     func testPreservingEncodeKeepsUnknownExtensionTables() throws {
@@ -263,13 +374,6 @@ final class SettingsTOMLCodecTests: XCTestCase {
         XCTAssertEqual(try SettingsTOMLCodec.decode(data).trackpadScrollStyle, TrackpadScrollStyle.momentum.rawValue)
     }
 
-    func testTrackpadScrollStyleRecoversToSnapWhenMissing() throws {
-        let withoutKey = try defaultsWithReplacements(
-            ("trackpadScrollStyle = \"snap\"\n", "")
-        )
-        XCTAssertEqual(try SettingsTOMLCodec.decode(withoutKey).trackpadScrollStyle, TrackpadScrollStyle.snap.rawValue)
-    }
-
     func testMouseMoveModifierRoundTrips() throws {
         XCTAssertEqual(SettingsExport.defaults().mouseMoveModifierKey, MouseMoveModifierKey.option.rawValue)
         XCTAssertTrue(
@@ -284,17 +388,6 @@ final class SettingsTOMLCodecTests: XCTestCase {
 
             XCTAssertEqual(try SettingsTOMLCodec.decode(data).mouseMoveModifierKey, modifier.rawValue)
         }
-    }
-
-    func testMouseMoveModifierRecoversToOptionWhenMissing() throws {
-        let withoutKey = try defaultsWithReplacements(
-            ("mouseMoveModifierKey = \"option\"\n", "")
-        )
-
-        XCTAssertEqual(
-            try SettingsTOMLCodec.decode(withoutKey).mouseMoveModifierKey,
-            MouseMoveModifierKey.option.rawValue
-        )
     }
 
     @MainActor
@@ -383,18 +476,6 @@ final class SettingsTOMLCodecTests: XCTestCase {
         settings.scrollSensitivity = 101
         XCTAssertEqual(settings.scrollSensitivity, 100)
         XCTAssertEqual(settings.toExport().scrollSensitivity, 100)
-    }
-
-    func testWorkspaceSwipeSettingsRecoverToDefaultsWhenMissing() throws {
-        let withoutKeys = try defaultsWithReplacements(
-            ("workspaceSwipeEnabled = false\n", ""),
-            ("workspaceSwipeFingerCount = 3\n", ""),
-            ("workspaceSwipeAxis = \"vertical\"\n", "")
-        )
-        let decoded = try SettingsTOMLCodec.decode(withoutKeys)
-        XCTAssertFalse(decoded.workspaceSwipeEnabled)
-        XCTAssertEqual(decoded.workspaceSwipeFingerCount, GestureFingerCount.three.rawValue)
-        XCTAssertEqual(decoded.workspaceSwipeAxis, WorkspaceSwipeAxis.vertical.rawValue)
     }
 
     @MainActor
@@ -504,21 +585,6 @@ final class SettingsTOMLCodecTests: XCTestCase {
         XCTAssertEqual(settings.workspaceSwipeAxis, .vertical)
     }
 
-    func testUnsupportedSystemHyperTriggerRecoversToNone() throws {
-        let unsupportedKey = try defaultsWithReplacements(
-            ("systemHyperTrigger = \"None\"\n", "systemHyperTrigger = \"A\"\n")
-        )
-        XCTAssertTrue(String(decoding: unsupportedKey, as: UTF8.self).contains("systemHyperTrigger = \"A\""))
-        XCTAssertEqual(try SettingsTOMLCodec.decode(unsupportedKey).systemHyperTrigger, .none)
-
-        let unsupportedMouse = try defaultsWithReplacements(
-            ("systemHyperTrigger = \"None\"\n", "systemHyperTrigger = \"MouseButton2\"\n")
-        )
-        XCTAssertTrue(String(decoding: unsupportedMouse, as: UTF8.self)
-            .contains("systemHyperTrigger = \"MouseButton2\""))
-        XCTAssertEqual(try SettingsTOMLCodec.decode(unsupportedMouse).systemHyperTrigger, .none)
-    }
-
     func testFocusLockModifierRoundTrips() throws {
         XCTAssertEqual(SettingsExport.defaults().focusLockModifier, FocusLockModifier.off.rawValue)
         XCTAssertTrue(
@@ -534,13 +600,6 @@ final class SettingsTOMLCodecTests: XCTestCase {
         XCTAssertEqual(try SettingsTOMLCodec.decode(data).focusLockModifier, FocusLockModifier.leftOption.rawValue)
     }
 
-    func testFocusLockModifierRecoversToOffWhenMissing() throws {
-        let withoutKey = try defaultsWithReplacements(
-            ("lockModifier = \"off\"\n", "")
-        )
-        XCTAssertEqual(try SettingsTOMLCodec.decode(withoutKey).focusLockModifier, FocusLockModifier.off.rawValue)
-    }
-
     func testFocusCrossesMonitorAtEdgeRoundTrips() throws {
         XCTAssertFalse(SettingsExport.defaults().focusCrossesMonitorAtEdge)
 
@@ -550,13 +609,6 @@ final class SettingsTOMLCodecTests: XCTestCase {
 
         XCTAssertTrue(String(decoding: data, as: UTF8.self).contains("crossesMonitorAtEdge = true"))
         XCTAssertTrue(try SettingsTOMLCodec.decode(data).focusCrossesMonitorAtEdge)
-    }
-
-    func testFocusCrossesMonitorAtEdgeRecoversToFalseWhenMissing() throws {
-        let withoutKey = try defaultsWithReplacements(
-            ("crossesMonitorAtEdge = false\n", "")
-        )
-        XCTAssertFalse(try SettingsTOMLCodec.decode(withoutKey).focusCrossesMonitorAtEdge)
     }
 
     func testMoveCrossesMonitorAtEdgeRoundTrips() throws {
@@ -570,13 +622,6 @@ final class SettingsTOMLCodecTests: XCTestCase {
         XCTAssertTrue(try SettingsTOMLCodec.decode(data).moveCrossesMonitorAtEdge)
     }
 
-    func testMoveCrossesMonitorAtEdgeRecoversToFalseWhenMissing() throws {
-        let withoutKey = try defaultsWithReplacements(
-            ("moveCrossesMonitorAtEdge = false\n", "")
-        )
-        XCTAssertFalse(try SettingsTOMLCodec.decode(withoutKey).moveCrossesMonitorAtEdge)
-    }
-
     func testCursorContainmentRoundTrips() throws {
         XCTAssertFalse(SettingsExport.defaults().cursorContainmentEnabled)
 
@@ -586,13 +631,6 @@ final class SettingsTOMLCodecTests: XCTestCase {
 
         XCTAssertTrue(String(decoding: data, as: UTF8.self).contains("constrainToArrangement = true"))
         XCTAssertTrue(try SettingsTOMLCodec.decode(data).cursorContainmentEnabled)
-    }
-
-    func testCursorContainmentRecoversToFalseWhenMissing() throws {
-        let withoutKey = try defaultsWithReplacements(
-            ("constrainToArrangement = false\n", "")
-        )
-        XCTAssertFalse(try SettingsTOMLCodec.decode(withoutKey).cursorContainmentEnabled)
     }
 
     private func defaultsWithReplacements(_ replacements: (String, String)...) throws -> Data {

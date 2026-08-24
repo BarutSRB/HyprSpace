@@ -7,23 +7,6 @@ import XCTest
 
 @MainActor
 final class WorkspaceBarIconOverridesSettingsTests: XCTestCase {
-    func testDefaultsAndMissingKeyRecoverToEmptyOverrides() throws {
-        XCTAssertEqual(SettingsExport.defaults().workspaceBarIconOverrides, [:])
-
-        var export = SettingsExport.defaults()
-        export.workspaceBarIconOverrides = ["com.example.App": "icons/custom.icns"]
-        let encoded = try SettingsTOMLCodec.encode(export)
-        let encodedText = try XCTUnwrap(String(bytes: encoded, encoding: .utf8))
-        let withoutOverrides = removingTOMLTable(
-            named: "workspaceBar.iconOverrides",
-            from: encodedText
-        )
-
-        let decoded = try SettingsTOMLCodec.decode(Data(withoutOverrides.utf8))
-
-        XCTAssertEqual(decoded.workspaceBarIconOverrides, [:])
-    }
-
     func testDottedBundleIDRoundTripsAndUnknownKeysArePreserved() throws {
         var export = SettingsExport.defaults()
         export.workspaceBarIconOverrides = [

@@ -50,7 +50,7 @@ final class SystemStatsCommandTests: XCTestCase {
         XCTAssertEqual(router.handle(.toggleSystemStats), .executed)
     }
 
-    func testSystemStatsButtonSettingRoundTripsAndRecovers() throws {
+    func testSystemStatsButtonSettingRoundTrips() throws {
         XCTAssertFalse(SettingsExport.defaults().workspaceBarSystemStatsButton)
 
         var export = SettingsExport.defaults()
@@ -58,10 +58,6 @@ final class SystemStatsCommandTests: XCTestCase {
         let data = try SettingsTOMLCodec.encode(export)
         XCTAssertTrue(String(decoding: data, as: UTF8.self).contains("systemStatsButton = true"))
         XCTAssertTrue(try SettingsTOMLCodec.decode(data).workspaceBarSystemStatsButton)
-
-        var toml = String(decoding: try SettingsTOMLCodec.encode(.defaults()), as: UTF8.self)
-        toml = toml.replacingOccurrences(of: "systemStatsButton = false\n", with: "")
-        XCTAssertFalse(try SettingsTOMLCodec.decode(Data(toml.utf8)).workspaceBarSystemStatsButton)
     }
 
     @MainActor
