@@ -9,21 +9,36 @@ import XCTest
 final class BorderSurfaceTests: XCTestCase {
     @MainActor
     private final class BorderOperationsRecorder {
+        enum PresentationOperation: Equatable {
+            case shape(windowId: UInt32, frame: CGRect)
+            case flush(windowId: UInt32)
+        }
+
+        struct RGBA8: Equatable {
+            let red: UInt8
+            let green: UInt8
+            let blue: UInt8
+            let alpha: UInt8
+        }
+
         var createdWindowCount = 0
         var screencaptureExclusionCount = 0
         var releasedCount = 0
-        var releasedWindowIds: [UInt32] = []
         var shapeCount = 0
         var flushCount = 0
         var moveCount = 0
         var moveAndOrderCount = 0
         var hideCount = 0
-        var transactionScopeCount = 0
         var nextWindowId: UInt32 = 1001
         var createdWindowIds: [UInt32] = []
+        var createdFramesByWindowId: [UInt32: CGRect] = [:]
         var backingScale: CGFloat = 2
         var screenFrame = CGRect(x: 0, y: 0, width: 5000, height: 5000)
-        var contextProvider: @MainActor () -> CGContext? = { BorderOperationsRecorder.makeContext() }
+        var presentationOperations: [PresentationOperation] = []
+        var contextsByWindowId: [UInt32: CGContext] = [:]
+        var contextProvider: @MainActor (UInt32, CGRect) -> CGContext? = { _, frame in
+            BorderOperationsRecorder.makeContext(size: frame.size)
+        }
 
         var orderingCount: Int {
             moveCount + moveAndOrderCount
@@ -31,33 +46,44 @@ final class BorderSurfaceTests: XCTestCase {
 
         func operations() -> BorderWindow.Operations {
             BorderWindow.Operations(
-                createBorderWindow: { [weak self] _ in
+                createBorderWindow: { [weak self] frame in
                     guard let self else { return 0 }
                     createdWindowCount += 1
                     let windowId = nextWindowId
                     if windowId != 0 {
                         createdWindowIds.append(windowId)
+                        createdFramesByWindowId[windowId] = frame
                         nextWindowId += 1
                     }
                     return windowId
                 },
                 releaseBorderWindow: { [weak self] windowId in
                     self?.releasedCount += 1
-                    self?.releasedWindowIds.append(windowId)
+                    self?.createdFramesByWindowId.removeValue(forKey: windowId)
+                    self?.contextsByWindowId.removeValue(forKey: windowId)
                 },
                 configureWindow: { _, _, _ in },
                 setWindowTags: { _, _ in },
                 excludeFromScreencaptureSelection: { [weak self] _ in self?.screencaptureExclusionCount += 1 },
-                createWindowContext: { [weak self] _ in self?.contextProvider() },
-                setWindowShape: { [weak self] _, _ in self?.shapeCount += 1 },
-                flushWindow: { [weak self] _ in self?.flushCount += 1 },
+                createWindowContext: { [weak self] windowId in
+                    guard let self,
+                          let frame = createdFramesByWindowId[windowId],
+                          let context = contextProvider(windowId, frame)
+                    else { return nil }
+                    contextsByWindowId[windowId] = context
+                    return context
+                },
+                setWindowShape: { [weak self] windowId, frame in
+                    self?.shapeCount += 1
+                    self?.presentationOperations.append(.shape(windowId: windowId, frame: frame))
+                },
+                flushWindow: { [weak self] windowId in
+                    self?.flushCount += 1
+                    self?.presentationOperations.append(.flush(windowId: windowId))
+                },
                 transactionMove: { [weak self] _, _ in self?.moveCount += 1 },
                 transactionMoveAndOrder: { [weak self] _, _, _, _, _ in self?.moveAndOrderCount += 1 },
                 transactionHide: { [weak self] _ in self?.hideCount += 1 },
-                withTransactionScope: { [weak self] body in
-                    self?.transactionScopeCount += 1
-                    body()
-                },
                 backingScaleForFrame: { [weak self] _ in
                     guard let self else { return (2, .null) }
                     return (backingScale, screenFrame)
@@ -65,15 +91,36 @@ final class BorderSurfaceTests: XCTestCase {
             )
         }
 
-        static func makeContext() -> CGContext? {
-            CGContext(
+        static func makeContext(size: CGSize) -> CGContext? {
+            let width = max(1, Int(ceil(size.width)))
+            let height = max(1, Int(ceil(size.height)))
+            return CGContext(
                 data: nil,
-                width: 8,
-                height: 8,
+                width: width,
+                height: height,
                 bitsPerComponent: 8,
-                bytesPerRow: 32,
+                bytesPerRow: width * 4,
                 space: CGColorSpaceCreateDeviceRGB(),
-                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+                bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue
+                    | CGImageAlphaInfo.premultipliedLast.rawValue
+            )
+        }
+
+        func pixel(windowId: UInt32, x: Int, y: Int) -> RGBA8? {
+            guard let context = contextsByWindowId[windowId],
+                  let data = context.data,
+                  x >= 0,
+                  x < context.width,
+                  y >= 0,
+                  y < context.height
+            else { return nil }
+            let bytes = data.assumingMemoryBound(to: UInt8.self)
+            let offset = y * context.bytesPerRow + x * 4
+            return RGBA8(
+                red: bytes[offset],
+                green: bytes[offset + 1],
+                blue: bytes[offset + 2],
+                alpha: bytes[offset + 3]
             )
         }
     }
@@ -122,10 +169,8 @@ final class BorderSurfaceTests: XCTestCase {
         let applied = applier.apply(desired(configRed), forceOrdering: false)
 
         XCTAssertTrue(applied.didApply)
-        XCTAssertEqual(recorder.createdWindowCount, BorderWindow.SegmentKind.allCases.count)
-        XCTAssertTrue(recorder.createdWindowIds.allSatisfy {
-            SurfaceCoordinator.shared.contains(windowNumber: Int($0))
-        })
+        XCTAssertEqual(recorder.createdWindowCount, 1)
+        XCTAssertTrue(SurfaceCoordinator.shared.contains(windowNumber: Int(recorder.createdWindowIds[0])))
     }
 
     @MainActor
@@ -135,14 +180,12 @@ final class BorderSurfaceTests: XCTestCase {
         defer { applier.cleanup() }
 
         _ = applier.apply(desired(configRed), forceOrdering: false)
-        let windowIds = recorder.createdWindowIds
+        let windowId = recorder.createdWindowIds[0]
         let hidden = applier.apply(nil, forceOrdering: false)
 
         XCTAssertTrue(hidden.didApply)
-        XCTAssertEqual(recorder.hideCount, BorderWindow.SegmentKind.allCases.count)
-        XCTAssertTrue(windowIds.allSatisfy {
-            !SurfaceCoordinator.shared.contains(windowNumber: Int($0))
-        })
+        XCTAssertEqual(recorder.hideCount, 1)
+        XCTAssertFalse(SurfaceCoordinator.shared.contains(windowNumber: Int(windowId)))
     }
 
     @MainActor
@@ -152,38 +195,32 @@ final class BorderSurfaceTests: XCTestCase {
         defer { applier.cleanup() }
 
         _ = applier.apply(desired(configRed), forceOrdering: false)
-        XCTAssertEqual(recorder.screencaptureExclusionCount, BorderWindow.SegmentKind.allCases.count)
+        XCTAssertEqual(recorder.screencaptureExclusionCount, 1)
 
         _ = applier.apply(desired(configRed, frame: frame.insetBy(dx: -20, dy: -20)), forceOrdering: true)
         _ = applier.apply(desired(configBlue), forceOrdering: false)
 
-        XCTAssertEqual(recorder.createdWindowCount, BorderWindow.SegmentKind.allCases.count)
-        XCTAssertEqual(recorder.screencaptureExclusionCount, BorderWindow.SegmentKind.allCases.count)
+        XCTAssertEqual(recorder.createdWindowCount, 1)
+        XCTAssertEqual(recorder.screencaptureExclusionCount, 1)
     }
 
     @MainActor
-    func testCapacityGrowthReplacesOnlySegmentsAndRemovesReleasedRegistrations() {
+    func testResizeKeepsSingleWindowAndRegistration() {
         let recorder = BorderOperationsRecorder()
-        recorder.screenFrame = CGRect(x: 0, y: 0, width: 300, height: 200)
         let applier = makeApplier(recorder)
         defer { applier.cleanup() }
 
         _ = applier.apply(desired(configRed), forceOrdering: false)
+        let windowId = recorder.createdWindowIds[0]
         _ = applier.apply(
             desired(configRed, frame: CGRect(x: 10, y: 10, width: 900, height: 700)),
             forceOrdering: false,
             refreshCornerRadii: false
         )
 
-        let liveWindowIds = recorder.createdWindowIds.filter { !recorder.releasedWindowIds.contains($0) }
-        XCTAssertFalse(recorder.releasedWindowIds.isEmpty)
-        XCTAssertTrue(recorder.releasedWindowIds.allSatisfy {
-            !SurfaceCoordinator.shared.contains(windowNumber: Int($0))
-        })
-        XCTAssertEqual(liveWindowIds.count, BorderWindow.SegmentKind.allCases.count)
-        XCTAssertTrue(liveWindowIds.allSatisfy {
-            SurfaceCoordinator.shared.contains(windowNumber: Int($0))
-        })
+        XCTAssertEqual(recorder.createdWindowCount, 1)
+        XCTAssertEqual(recorder.releasedCount, 0)
+        XCTAssertTrue(SurfaceCoordinator.shared.contains(windowNumber: Int(windowId)))
     }
 
     @MainActor
@@ -493,7 +530,7 @@ final class BorderSurfaceTests: XCTestCase {
     @MainActor
     func testNilContextFailsCreation() {
         let recorder = BorderOperationsRecorder()
-        recorder.contextProvider = { nil }
+        recorder.contextProvider = { _, _ in nil }
         let window = BorderWindow(config: configRed, operations: recorder.operations())
 
         let applied = window.update(frame: CGRect(x: 0, y: 0, width: 100, height: 80), targetWid: 55)
@@ -504,103 +541,94 @@ final class BorderSurfaceTests: XCTestCase {
     }
 
     @MainActor
-    func testUpdateConfigDoesNotRedrawUntilNextUpdate() {
+    func testColorChangeRepaintsPixelsOnNextUpdate() throws {
         let recorder = BorderOperationsRecorder()
-        let window = BorderWindow(config: configRed, operations: recorder.operations())
+        recorder.backingScale = 1
+        let red = BorderConfig(
+            enabled: true,
+            width: 4,
+            color: NSColor(deviceRed: 1, green: 0, blue: 0, alpha: 1)
+        )
+        let blue = BorderConfig(
+            enabled: true,
+            width: 4,
+            color: NSColor(deviceRed: 0, green: 0, blue: 1, alpha: 1)
+        )
+        let window = BorderWindow(config: red, operations: recorder.operations())
         let target = CGRect(x: 0, y: 0, width: 100, height: 80)
 
-        _ = window.update(frame: target, targetWid: 55)
+        XCTAssertTrue(window.update(frame: target, targetWid: 55))
+        let windowId = try XCTUnwrap(window.windowId)
+        let redPixel = BorderOperationsRecorder.RGBA8(red: 255, green: 0, blue: 0, alpha: 255)
+        let bluePixel = BorderOperationsRecorder.RGBA8(red: 0, green: 0, blue: 255, alpha: 255)
+
+        XCTAssertEqual(recorder.pixel(windowId: windowId, x: 50, y: 2), redPixel)
+        XCTAssertEqual(recorder.pixel(windowId: windowId, x: 5, y: 5), redPixel)
+
         let flushesAfterFirst = recorder.flushCount
+        let createdAfterFirst = recorder.createdWindowCount
+        recorder.presentationOperations.removeAll()
 
-        window.updateConfig(configBlue)
+        window.updateConfig(blue)
         XCTAssertEqual(recorder.flushCount, flushesAfterFirst)
+        XCTAssertTrue(recorder.presentationOperations.isEmpty)
+        XCTAssertEqual(recorder.pixel(windowId: windowId, x: 50, y: 2), redPixel)
+        XCTAssertEqual(recorder.pixel(windowId: windowId, x: 5, y: 5), redPixel)
 
-        _ = window.update(frame: target, targetWid: 55)
-        XCTAssertGreaterThan(recorder.flushCount, flushesAfterFirst)
+        XCTAssertTrue(window.update(frame: target, targetWid: 55))
+
+        XCTAssertEqual(recorder.flushCount, flushesAfterFirst + 1)
+        XCTAssertEqual(recorder.createdWindowCount, createdAfterFirst)
+        XCTAssertEqual(recorder.pixel(windowId: windowId, x: 50, y: 2), bluePixel)
+        XCTAssertEqual(recorder.pixel(windowId: windowId, x: 5, y: 5), bluePixel)
+        XCTAssertEqual(recorder.presentationOperations, [.flush(windowId: windowId)])
     }
 
     @MainActor
-    func testReshapeOnSizeChange() {
+    func testSizeChangeShapesBeforeFullRedraw() throws {
+        let recorder = BorderOperationsRecorder()
+        let window = BorderWindow(config: configRed, operations: recorder.operations())
+
+        XCTAssertTrue(window.update(frame: CGRect(x: 0, y: 0, width: 100, height: 80), targetWid: 55))
+        let windowId = try XCTUnwrap(window.windowId)
+        let shapesAfterFirst = recorder.shapeCount
+        let flushesAfterFirst = recorder.flushCount
+        let createdAfterFirst = recorder.createdWindowCount
+        recorder.presentationOperations.removeAll()
+
+        XCTAssertTrue(window.update(frame: CGRect(x: 0, y: 0, width: 140, height: 80), targetWid: 55))
+
+        XCTAssertEqual(recorder.shapeCount, shapesAfterFirst + 1)
+        XCTAssertEqual(recorder.flushCount, flushesAfterFirst + 1)
+        XCTAssertEqual(recorder.createdWindowCount, createdAfterFirst)
+        XCTAssertEqual(window.windowId, windowId)
+        XCTAssertEqual(
+            recorder.presentationOperations,
+            [
+                .shape(windowId: windowId, frame: CGRect(x: 0, y: 0, width: 140, height: 80)),
+                .flush(windowId: windowId)
+            ]
+        )
+    }
+
+    @MainActor
+    func testTranslationMovesWithoutReshapeOrRedraw() {
         let recorder = BorderOperationsRecorder()
         let window = BorderWindow(config: configRed, operations: recorder.operations())
 
         _ = window.update(frame: CGRect(x: 0, y: 0, width: 100, height: 80), targetWid: 55)
-        let shapesAfterFirst = recorder.shapeCount
-
-        _ = window.update(frame: CGRect(x: 0, y: 0, width: 140, height: 80), targetWid: 55)
-        XCTAssertGreaterThan(recorder.shapeCount, shapesAfterFirst)
-    }
-
-    @MainActor
-    func testSizeAnimationMovesPersistentSegmentsWithoutRasterOrFlush() {
-        let recorder = BorderOperationsRecorder()
-        let window = BorderWindow(config: configRed, operations: recorder.operations())
-
-        _ = window.update(frame: CGRect(x: 0, y: 0, width: 800, height: 600), targetWid: 55)
         let createdAfterFirst = recorder.createdWindowCount
         let flushesAfterFirst = recorder.flushCount
         let shapesAfterFirst = recorder.shapeCount
-        let scopesAfterFirst = recorder.transactionScopeCount
+        let movesAfterFirst = recorder.moveCount
 
-        for size in [
-            CGSize(width: 840, height: 620),
-            CGSize(width: 880, height: 640),
-            CGSize(width: 920, height: 660)
-        ] {
-            _ = window.update(frame: CGRect(origin: .zero, size: size), targetWid: 55)
-        }
+        _ = window.update(frame: CGRect(x: 40, y: 30, width: 100, height: 80), targetWid: 55)
 
-        XCTAssertEqual(createdAfterFirst, BorderWindow.SegmentKind.allCases.count)
         XCTAssertEqual(recorder.createdWindowCount, createdAfterFirst)
         XCTAssertEqual(recorder.flushCount, flushesAfterFirst)
-        XCTAssertGreaterThan(recorder.shapeCount, shapesAfterFirst)
-        XCTAssertGreaterThan(recorder.moveCount, 0)
-        XCTAssertEqual(recorder.transactionScopeCount, scopesAfterFirst + 3)
-    }
-
-    @MainActor
-    func testFractionalScaleSegmentBoundariesShareExactPixelEdges() throws {
-        let recorder = BorderOperationsRecorder()
-        recorder.backingScale = 1.5
-        recorder.screenFrame = CGRect(x: 0, y: 0, width: 1729, height: 1117)
-        let config = BorderConfig(enabled: true, width: 3.5, color: .systemRed)
-        let window = BorderWindow(config: config, operations: recorder.operations())
-        let target = CGRect(x: 17.2, y: 31.4, width: 803.3, height: 607.7)
-        let radii = WindowCornerRadii(
-            topLeft: 10.9,
-            topRight: 13.7,
-            bottomLeft: 9.1,
-            bottomRight: 15.5
-        )
-
-        XCTAssertTrue(window.update(frame: target, targetWid: 55, cornerRadii: radii))
-        let top = try XCTUnwrap(window.frameOnScreen(for: .top))
-        let bottom = try XCTUnwrap(window.frameOnScreen(for: .bottom))
-        let left = try XCTUnwrap(window.frameOnScreen(for: .left))
-        let right = try XCTUnwrap(window.frameOnScreen(for: .right))
-        let topLeft = try XCTUnwrap(window.frameOnScreen(for: .topLeft))
-        let topRight = try XCTUnwrap(window.frameOnScreen(for: .topRight))
-        let bottomLeft = try XCTUnwrap(window.frameOnScreen(for: .bottomLeft))
-        let bottomRight = try XCTUnwrap(window.frameOnScreen(for: .bottomRight))
-
-        XCTAssertEqual(topLeft.maxX, top.minX)
-        XCTAssertEqual(top.maxX, topRight.minX)
-        XCTAssertEqual(bottomLeft.maxX, bottom.minX)
-        XCTAssertEqual(bottom.maxX, bottomRight.minX)
-        XCTAssertEqual(bottomLeft.maxY, left.minY)
-        XCTAssertEqual(left.maxY, topLeft.minY)
-        XCTAssertEqual(bottomRight.maxY, right.minY)
-        XCTAssertEqual(right.maxY, topRight.minY)
-
-        let effectiveWidth = config.width.roundedToPhysicalPixel(scale: recorder.backingScale)
-        XCTAssertEqual(top.height, effectiveWidth, accuracy: 0.000_000_1)
-        XCTAssertEqual(bottom.height, effectiveWidth, accuracy: 0.000_000_1)
-        XCTAssertEqual(left.width, effectiveWidth, accuracy: 0.000_000_1)
-        XCTAssertEqual(right.width, effectiveWidth, accuracy: 0.000_000_1)
-        XCTAssertEqual(
-            topLeft.width,
-            (radii.topLeft + effectiveWidth).roundedToPhysicalPixel(scale: recorder.backingScale)
-        )
+        XCTAssertEqual(recorder.shapeCount, shapesAfterFirst)
+        XCTAssertEqual(recorder.moveCount, movesAfterFirst + 1)
+        XCTAssertEqual(window.frameOnScreen, CGRect(x: 40, y: 30, width: 100, height: 80))
     }
 
     @MainActor
@@ -634,7 +662,7 @@ final class BorderSurfaceTests: XCTestCase {
 
         window.destroy()
         XCTAssertNil(window.windowId)
-        XCTAssertEqual(recorder.releasedCount, BorderWindow.SegmentKind.allCases.count)
+        XCTAssertEqual(recorder.releasedCount, 1)
     }
 
     @MainActor
@@ -647,7 +675,7 @@ final class BorderSurfaceTests: XCTestCase {
 
         window = nil
 
-        XCTAssertEqual(recorder.releasedCount, BorderWindow.SegmentKind.allCases.count)
+        XCTAssertEqual(recorder.releasedCount, 1)
     }
 }
 

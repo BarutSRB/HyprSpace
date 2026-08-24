@@ -41,9 +41,9 @@ final class BorderSurfaceApplier {
     private let borderWindowOperations: BorderWindow.Operations
     private let cornerSampleProvider: @MainActor (Int) -> WindowCornerSample?
     private let surfaceCoordinator = SurfaceCoordinator.shared
-    private var registeredSurfaceWindowNumbers: [BorderWindow.SegmentKind: Int] = [:]
+    private var registeredSurfaceWindowNumber: Int?
     private let defaultCornerRadii = WindowCornerRadii(uniform: 9.0)
-    private let surfaceIDPrefix = "border-surface"
+    private let surfaceID = "border-surface"
     private var screenParametersObserver: NSObjectProtocol?
 
     init(
@@ -122,7 +122,7 @@ final class BorderSurfaceApplier {
             applied = nil
             appliedCornerRadii = nil
             clearCornerState()
-            unregisterSurfaces()
+            unregisterSurface()
             return BorderSurfaceApplyResult(didApply: false, needsCornerRadiiRetry: false)
         }
         applied = desired
@@ -145,9 +145,9 @@ final class BorderSurfaceApplier {
     }
 
     private func hide() {
-        if applied != nil || !registeredSurfaceWindowNumbers.isEmpty {
+        if applied != nil || registeredSurfaceWindowNumber != nil {
             borderWindow?.hide()
-            unregisterSurfaces()
+            unregisterSurface()
         }
         applied = nil
         appliedCornerRadii = nil
@@ -264,47 +264,33 @@ final class BorderSurfaceApplier {
     }
 
     private func syncSurfaceRegistration() {
-        guard let borderWindow else {
-            unregisterSurfaces()
+        guard let borderWindow, let windowNumber = borderWindow.windowId.map(Int.init) else {
+            unregisterSurface()
             return
         }
+        guard registeredSurfaceWindowNumber != windowNumber else { return }
 
-        for kind in BorderWindow.SegmentKind.allCases {
-            guard let windowNumber = borderWindow.windowId(for: kind).map(Int.init) else {
-                if registeredSurfaceWindowNumbers.removeValue(forKey: kind) != nil {
-                    surfaceCoordinator.unregister(id: surfaceID(for: kind))
-                }
-                continue
-            }
-            guard registeredSurfaceWindowNumbers[kind] != windowNumber else { continue }
-            surfaceCoordinator.registerWindowNumber(
-                id: surfaceID(for: kind),
-                windowNumber: windowNumber,
-                frameProvider: { [weak self] in
-                    self?.borderWindow?.frameOnScreen(for: kind)
-                },
-                visibilityProvider: { [weak self] in
-                    self?.borderWindow?.frameOnScreen(for: kind) != nil
-                },
-                policy: SurfacePolicy(
-                    kind: .border,
-                    hitTestPolicy: .passthrough,
-                    capturePolicy: .excluded,
-                    suppressesManagedFocusRecovery: false
-                )
+        surfaceCoordinator.registerWindowNumber(
+            id: surfaceID,
+            windowNumber: windowNumber,
+            frameProvider: { [weak self] in
+                self?.borderWindow?.frameOnScreen ?? self?.applied?.frame
+            },
+            visibilityProvider: { [weak self] in
+                self?.applied != nil
+            },
+            policy: SurfacePolicy(
+                kind: .border,
+                hitTestPolicy: .passthrough,
+                capturePolicy: .excluded,
+                suppressesManagedFocusRecovery: false
             )
-            registeredSurfaceWindowNumbers[kind] = windowNumber
-        }
+        )
+        registeredSurfaceWindowNumber = windowNumber
     }
 
-    private func unregisterSurfaces() {
-        for kind in registeredSurfaceWindowNumbers.keys {
-            surfaceCoordinator.unregister(id: surfaceID(for: kind))
-        }
-        registeredSurfaceWindowNumbers.removeAll(keepingCapacity: true)
-    }
-
-    private func surfaceID(for kind: BorderWindow.SegmentKind) -> String {
-        "\(surfaceIDPrefix)-\(kind.rawValue)"
+    private func unregisterSurface() {
+        surfaceCoordinator.unregister(id: surfaceID)
+        registeredSurfaceWindowNumber = nil
     }
 }
