@@ -353,6 +353,7 @@ final class AXEventHandler {
     var nextAdmissionRetryExecutionOwner: UInt64 = 1
     private var nextActivationObservationGeneration: UInt64 = 1
     private var latestActivationObservationGeneration: UInt64 = 0
+    var latestNativeActivationPID: pid_t?
     var terminalFrameFailureStateByWindowId: [Int: TerminalFrameFailureState] = [:]
     var admissionQuarantineByWindowId: [Int: AdmissionQuarantine] = [:]
     var identityAliasesByWindowId: [Int: WindowIdentityAliasHistory] = [:]
@@ -1550,7 +1551,7 @@ final class AXEventHandler {
             recentMouseFocusIntent = nil
             return false
         }
-        return intent.token.pid == pid
+        return managedWindowTokenUsingCachedIdentity(intent.token, matchesObservedPid: pid)
     }
 
     private func isWorkspaceActive(_ workspaceId: WorkspaceDescriptor.ID) -> Bool {
@@ -1574,6 +1575,11 @@ final class AXEventHandler {
         guard let controller else { return false }
         guard controller.hasStartedServices else { return false }
         guard !controller.workspaceManager.isAppHidden(pid: pid) else { return false }
+        guard acceptsActivationObservation(
+            pid: pid,
+            source: source,
+            origin: origin
+        ) else { return false }
         if handleAppTerminationFocusActivation(
             pid: pid,
             source: source,
@@ -1643,6 +1649,7 @@ final class AXEventHandler {
         } ?? true
         let focusedToken = controller.workspaceManager.focusedToken
         if origin == .external,
+           source != .focusedWindowChanged,
            conflictsWithActiveRequest,
            activeRequest != nil || focusedToken.map({ !managedWindowToken($0, matchesObservedPid: pid) }) ?? true
         {
@@ -1718,6 +1725,7 @@ final class AXEventHandler {
         let origin = facts.origin
         let axRef = facts.focusedWindow?.axRef
         let observedToken = axRef.map { canonicalObservedWindowToken(pid: pid, axRef: $0) }
+        guard acceptsActivationFacts(facts, observedToken: observedToken) else { return }
         let activeRequest = controller.intentLedger.activeManagedRequest
         let requestDisposition = activationRequestDisposition(
             for: pid,
