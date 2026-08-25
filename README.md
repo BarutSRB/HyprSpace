@@ -33,6 +33,23 @@
       <sub>@siketyan</sub>
     </td>
     <td align="center" valign="top">
+      <a href="https://github.com/bluelabs-eu">
+        <img src="https://avatars.githubusercontent.com/u/47787801?v=4" width="72" alt="BlueLabs">
+      </a>
+      <br>
+      <a href="https://github.com/bluelabs-eu"><strong>BlueLabs</strong></a>
+      <br>
+      <sub>━━━━━━━━</sub>
+      <br>
+      <a href="https://github.com/crbelaus" title="Cristian Álvarez Belaustegui">
+        <img src="https://github.com/crbelaus.png?size=96" width="72" alt="Cristian Álvarez Belaustegui">
+      </a>
+      <br>
+      <a href="https://github.com/crbelaus"><strong>Cristian Álvarez Belaustegui</strong></a>
+      <br>
+      <sub>@crbelaus</sub>
+    </td>
+    <td align="center" valign="top">
       <a href="https://github.com/epam">
         <img src="https://avatars.githubusercontent.com/u/1589802?v=4" width="72" alt="EPAM Systems">
       </a>
@@ -296,6 +313,9 @@
       </a>
       <a href="https://github.com/chen259456754" title="chen259456754">
         <img src="https://github.com/chen259456754.png?size=96" width="72" alt="chen259456754">
+      </a>
+      <a href="https://github.com/crbelaus" title="Cristian Álvarez Belaustegui">
+        <img src="https://github.com/crbelaus.png?size=96" width="72" alt="Cristian Álvarez Belaustegui">
       </a>
       <a href="https://github.com/nekonora" title="Filippo Zaffoni">
         <img src="https://github.com/nekonora.png?size=96" width="72" alt="Filippo Zaffoni">
