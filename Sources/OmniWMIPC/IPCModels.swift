@@ -4,7 +4,7 @@
 import Foundation
 
 public enum OmniWMIPCProtocol {
-    public static let version = 11
+    public static let version = 12
 }
 
 public struct IPCRequestEnvelope: Decodable, Sendable {
@@ -22,6 +22,7 @@ public enum IPCRequestKind: String, Codable, Equatable, Sendable {
     case ping
     case version
     case command
+    case capture
     case query
     case rule
     case workspace
@@ -33,6 +34,7 @@ public enum IPCResponseKind: String, Codable, Equatable, Sendable {
     case ping
     case version
     case command
+    case capture
     case query
     case rule
     case workspace
@@ -48,6 +50,8 @@ public enum IPCResponseKind: String, Codable, Equatable, Sendable {
             self = .version
         case .command:
             self = .command
+        case .capture:
+            self = .capture
         case .query:
             self = .query
         case .rule:
@@ -82,6 +86,7 @@ public enum IPCErrorCode: String, Codable, Equatable, Sendable, Error {
     case notFound = "not_found"
     case workspaceAssignmentConflict = "workspace_assignment_conflict"
     case workspaceStateConflict = "workspace_state_conflict"
+    case captureStateConflict = "capture_state_conflict"
     case internalError = "internal_error"
 }
 
@@ -1834,6 +1839,71 @@ public struct IPCWindowRequest: Codable, Equatable, Sendable {
     }
 }
 
+public enum IPCCaptureProfile: String, Codable, CaseIterable, Equatable, Sendable {
+    case trace
+    case performance
+}
+
+public enum IPCCapturePhase: String, Codable, CaseIterable, Equatable, Sendable {
+    case idle
+    case starting
+    case recording
+    case finalizing
+}
+
+public enum IPCCaptureActionName: String, Codable, CaseIterable, Equatable, Sendable {
+    case start
+    case stop
+    case status
+}
+
+public enum IPCCaptureRequest: Equatable, Sendable {
+    case start(IPCCaptureProfile)
+    case stop
+    case status
+
+    public var name: IPCCaptureActionName {
+        switch self {
+        case .start:
+            .start
+        case .stop:
+            .stop
+        case .status:
+            .status
+        }
+    }
+}
+
+extension IPCCaptureRequest: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case name
+        case profile
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let name = try container.decode(IPCCaptureActionName.self, forKey: .name)
+
+        switch name {
+        case .start:
+            self = .start(try container.decode(IPCCaptureProfile.self, forKey: .profile))
+        case .stop:
+            self = .stop
+        case .status:
+            self = .status
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(name, forKey: .name)
+
+        if case let .start(profile) = self {
+            try container.encode(profile, forKey: .profile)
+        }
+    }
+}
+
 public struct IPCSubscribeRequest: Codable, Equatable, Sendable {
     public let channels: [IPCSubscriptionChannel]
     public let allChannels: Bool
@@ -1854,6 +1924,7 @@ public struct IPCRequest: Codable, Equatable, Sendable {
     public enum Payload: Equatable, Sendable {
         case none(IPCNoPayload)
         case command(IPCCommandRequest)
+        case capture(IPCCaptureRequest)
         case query(IPCQueryRequest)
         case rule(IPCRuleRequest)
         case workspace(IPCWorkspaceRequest)
@@ -1883,6 +1954,10 @@ public struct IPCRequest: Codable, Equatable, Sendable {
 
     public init(id: String, command: IPCCommandRequest, authorizationToken: String? = nil) {
         self.init(id: id, kind: .command, authorizationToken: authorizationToken, payload: .command(command))
+    }
+
+    public init(id: String, capture: IPCCaptureRequest, authorizationToken: String? = nil) {
+        self.init(id: id, kind: .capture, authorizationToken: authorizationToken, payload: .capture(capture))
     }
 
     public init(id: String, query: IPCQueryRequest, authorizationToken: String? = nil) {
@@ -1940,6 +2015,8 @@ public struct IPCRequest: Codable, Equatable, Sendable {
             payload = .none(try container.decodeIfPresent(IPCNoPayload.self, forKey: .payload) ?? .init())
         case .command:
             payload = .command(try container.decode(IPCCommandRequest.self, forKey: .payload))
+        case .capture:
+            payload = .capture(try container.decode(IPCCaptureRequest.self, forKey: .payload))
         case .query:
             payload = .query(try container.decode(IPCQueryRequest.self, forKey: .payload))
         case .rule:
@@ -1965,6 +2042,8 @@ public struct IPCRequest: Codable, Equatable, Sendable {
             try container.encode(payload, forKey: .payload)
         case let .command(payload):
             try container.encode(payload, forKey: .payload)
+        case let .capture(payload):
+            try container.encode(payload, forKey: .payload)
         case let .query(payload):
             try container.encode(payload, forKey: .payload)
         case let .rule(payload):
@@ -1982,6 +2061,7 @@ public struct IPCRequest: Codable, Equatable, Sendable {
 public enum IPCResultKind: String, Codable, Equatable, Sendable {
     case pong
     case version
+    case capture
     case workspaceBar = "workspace-bar"
     case activeWorkspace = "active-workspace"
     case focusedMonitor = "focused-monitor"
@@ -2014,6 +2094,42 @@ public struct IPCVersionResult: Codable, Equatable, Sendable {
     public init(protocolVersion: Int = OmniWMIPCProtocol.version, appVersion: String?) {
         self.protocolVersion = protocolVersion
         self.appVersion = appVersion
+    }
+}
+
+public struct IPCCaptureArtifact: Codable, Equatable, Sendable {
+    public let profile: IPCCaptureProfile
+    public let path: String
+    public let startedAt: String
+    public let endedAt: String
+
+    public init(profile: IPCCaptureProfile, path: String, startedAt: String, endedAt: String) {
+        self.profile = profile
+        self.path = path
+        self.startedAt = startedAt
+        self.endedAt = endedAt
+    }
+}
+
+public struct IPCCaptureResult: Codable, Equatable, Sendable {
+    public let phase: IPCCapturePhase
+    public let profile: IPCCaptureProfile?
+    public let startedAt: String?
+    public let lastArtifact: IPCCaptureArtifact?
+    public let failureReason: String?
+
+    public init(
+        phase: IPCCapturePhase,
+        profile: IPCCaptureProfile? = nil,
+        startedAt: String? = nil,
+        lastArtifact: IPCCaptureArtifact? = nil,
+        failureReason: String? = nil
+    ) {
+        self.phase = phase
+        self.profile = profile
+        self.startedAt = startedAt
+        self.lastArtifact = lastArtifact
+        self.failureReason = failureReason
     }
 }
 
@@ -2548,6 +2664,7 @@ public struct IPCCapabilitiesQueryResult: Codable, Equatable, Sendable {
     public let windowIdScope: String
     public let queries: [IPCQueryDescriptor]
     public let commands: [IPCCommandDescriptor]
+    public let captureActions: [IPCCaptureActionDescriptor]
     public let ruleActions: [IPCRuleActionDescriptor]
     public let workspaceActions: [IPCWorkspaceActionDescriptor]
     public let windowActions: [IPCWindowActionDescriptor]
@@ -2560,6 +2677,7 @@ public struct IPCCapabilitiesQueryResult: Codable, Equatable, Sendable {
         windowIdScope: String,
         queries: [IPCQueryDescriptor],
         commands: [IPCCommandDescriptor],
+        captureActions: [IPCCaptureActionDescriptor],
         ruleActions: [IPCRuleActionDescriptor],
         workspaceActions: [IPCWorkspaceActionDescriptor],
         windowActions: [IPCWindowActionDescriptor],
@@ -2571,6 +2689,7 @@ public struct IPCCapabilitiesQueryResult: Codable, Equatable, Sendable {
         self.windowIdScope = windowIdScope
         self.queries = queries
         self.commands = commands
+        self.captureActions = captureActions
         self.ruleActions = ruleActions
         self.workspaceActions = workspaceActions
         self.windowActions = windowActions
@@ -2582,6 +2701,7 @@ public struct IPCResult: Codable, Equatable, Sendable {
     public enum Payload: Equatable, Sendable {
         case pong(IPCPingResult)
         case version(IPCVersionResult)
+        case capture(IPCCaptureResult)
         case workspaceBar(IPCWorkspaceBarQueryResult)
         case activeWorkspace(IPCActiveWorkspaceQueryResult)
         case focusedMonitor(IPCFocusedMonitorQueryResult)
@@ -2613,6 +2733,10 @@ public struct IPCResult: Codable, Equatable, Sendable {
 
     public init(version: IPCVersionResult) {
         self.init(kind: .version, payload: .version(version))
+    }
+
+    public init(capture: IPCCaptureResult) {
+        self.init(kind: .capture, payload: .capture(capture))
     }
 
     public init(workspaceBar: IPCWorkspaceBarQueryResult) {
@@ -2689,6 +2813,8 @@ public struct IPCResult: Codable, Equatable, Sendable {
             payload = .pong(try container.decode(IPCPingResult.self, forKey: .payload))
         case .version:
             payload = .version(try container.decode(IPCVersionResult.self, forKey: .payload))
+        case .capture:
+            payload = .capture(try container.decode(IPCCaptureResult.self, forKey: .payload))
         case .workspaceBar:
             payload = .workspaceBar(try container.decode(IPCWorkspaceBarQueryResult.self, forKey: .payload))
         case .activeWorkspace:
@@ -2730,6 +2856,8 @@ public struct IPCResult: Codable, Equatable, Sendable {
         case let .pong(payload):
             try container.encode(payload, forKey: .payload)
         case let .version(payload):
+            try container.encode(payload, forKey: .payload)
+        case let .capture(payload):
             try container.encode(payload, forKey: .payload)
         case let .workspaceBar(payload):
             try container.encode(payload, forKey: .payload)

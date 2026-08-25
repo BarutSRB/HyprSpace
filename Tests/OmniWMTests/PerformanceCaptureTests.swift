@@ -403,13 +403,13 @@ final class PerformanceCaptureTests: XCTestCase {
         settings.hiddenBarHiddenBundleIDs = [privateIdentifier]
         let controller = WMController(settings: settings, diagnosticsDirectory: directory)
 
-        guard case .started = await controller.toggleTraceCaptureForUI(
+        guard case .started = await controller.toggleTraceCapture(
             desiredState: .active,
             profile: .performance
         ) else {
             return XCTFail("expected controller performance capture to start")
         }
-        guard case let .stopped(artifact) = await controller.toggleTraceCaptureForUI(
+        guard case let .stopped(artifact) = await controller.toggleTraceCapture(
             desiredState: .inactive,
             profile: .performance
         ) else {

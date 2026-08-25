@@ -731,18 +731,20 @@ IPCClient ──── Unix socket ────► IPCConnection (actor, per cli
   (NDJSON)                            │
                                  IPCApplicationBridge (actor)
                                       │ auth token + protocol version
-                          ┌───────────┼───────────────┐
-                          │           │               │
-               commands/window/   queries          rule ops
-               workspace          (read projection) (add/replace/…)
-                          │           │               │
-        EventIntake.post(.ipcCommand) │   @MainActor routers built fresh per request
-                          v           v               v
-                  single-writer    IPCQueryRouter   IPCRuleRouter
-                  pipeline         (live WM state)  (settings + reevaluate)
+                    ┌─────────────┬───┴────────┬───────────────┐
+                    │             │            │               │
+         commands/window/      capture      queries          rule ops
+         workspace             control      (read projection) (add/replace/…)
+                    │             │            │               │
+  EventIntake.post(.ipcCommand)   │  @MainActor routers built fresh per request
+                    v             v            v               v
+            single-writer   WMController   IPCQueryRouter   IPCRuleRouter
+            pipeline        trace capture  (live WM state)  (settings + reevaluate)
 ```
 
 **Mutating commands enter the single-writer pipeline.** `IPCApplicationBridge` posts an `IPCCommandIntake` into `EventIntake` (`.ipcCommand`); the interpreter runs `intake.perform(controller)` on the main actor and completes the request. IPC commands do not mutate state directly — they flow through the same intake → world path as hotkeys.
+
+**Capture control is a direct asynchronous bridge route.** It does not mutate window-manager world state, so start, stop, and status bypass `EventIntake` and call the same `WMController` trace-capture orchestration used by the UI. The shared coordinator remains the sole capture-state owner. Capture requests therefore remain available while window management is disabled, Overview is open, or the active layout differs, while retaining the standard IPC authorization and protocol checks.
 
 **Actors and routers.** `IPCApplicationBridge`, `IPCConnection`, `IPCEventBroker`, and `IPCConnectionRegistry` are actors; the routers (`IPCCommandRouter`/`IPCQueryRouter`/`IPCRuleRouter`) and `IPCRuleProjection` are `@MainActor` and constructed fresh per request. `IPCEventBroker` holds per-channel `AsyncStream` continuations; `IPCEventDemandTracker` is an `NSLock`-guarded refcount so `hasSubscribers` can be checked nonisolated to skip producing events nobody wants. `IPCAutomationManifest` (in `OmniWMIPC`) is the shared declarative source of truth for commands/queries/channels.
 

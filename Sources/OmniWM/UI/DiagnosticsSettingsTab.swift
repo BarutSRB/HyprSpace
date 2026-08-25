@@ -375,14 +375,14 @@ struct DiagnosticsSettingsTab: View {
 
     private func startRecording() {
         Task {
-            let outcome = await controller.toggleTraceCaptureForUI(desiredState: .active)
+            let outcome = await controller.toggleTraceCapture(desiredState: .active)
             traceStatus = diagnosticsRecordingStartStatus(for: outcome)
         }
     }
 
     private func stopRecording() {
         Task {
-            switch await controller.toggleTraceCaptureForUI(desiredState: .inactive) {
+            switch await controller.toggleTraceCapture(desiredState: .inactive) {
             case .stopped:
                 break
             case let .writeFailed(reason):
@@ -397,7 +397,7 @@ struct DiagnosticsSettingsTab: View {
 
     private func startPerformanceCapture() {
         Task {
-            let outcome = await controller.toggleTraceCaptureForUI(
+            let outcome = await controller.toggleTraceCapture(
                 desiredState: .active,
                 profile: .performance
             )
@@ -407,7 +407,7 @@ struct DiagnosticsSettingsTab: View {
 
     private func stopPerformanceCapture() {
         Task {
-            switch await controller.toggleTraceCaptureForUI(
+            switch await controller.toggleTraceCapture(
                 desiredState: .inactive,
                 profile: .performance
             ) {

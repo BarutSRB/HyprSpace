@@ -63,6 +63,7 @@ enum CLIRenderer {
              .notFound,
              .workspaceAssignmentConflict,
              .workspaceStateConflict,
+             .captureStateConflict,
              .invalidArguments,
              .invalidRequest,
              .none:
@@ -144,7 +145,13 @@ enum CLIRenderer {
     }
 
     private static func formattedResponseText(_ response: IPCResponse, format: CLIOutputFormat) -> String {
-        guard response.ok else { return humanReadableStatus(for: response) }
+        guard response.ok else {
+            let status = humanReadableStatus(for: response)
+            guard let result = response.result,
+                  case let .capture(capture) = result.payload
+            else { return status }
+            return "\(status)\n\(formattedCapture(capture, format: format))"
+        }
         guard let result = response.result else { return humanReadableStatus(for: response) }
 
         switch result.payload {
@@ -180,6 +187,8 @@ enum CLIRenderer {
             return formattedSubscriptions(payload, format: format)
         case let .capabilities(payload):
             return formattedCapabilities(payload, format: format)
+        case let .capture(payload):
+            return formattedCapture(payload, format: format)
         case let .subscribed(payload):
             return "subscribed: \(payload.channels.map(\.rawValue).joined(separator: ", "))"
         }
@@ -511,12 +520,31 @@ enum CLIRenderer {
             ["queries", String(payload.queries.count)],
             ["commands", String(payload.commands.count)],
             ["rule-actions", String(payload.ruleActions.count)],
+            ["capture-actions", String(payload.captureActions.count)],
             ["workspace-actions", String(payload.workspaceActions.count)],
             ["window-actions", String(payload.windowActions.count)],
             ["subscriptions", String(payload.subscriptions.count)]
         ]
 
         return formatRows(headers: ["CAPABILITY", "VALUE"], rows: rows, format: format)
+    }
+
+    private static func formattedCapture(_ payload: IPCCaptureResult, format: CLIOutputFormat) -> String {
+        let artifact = payload.lastArtifact
+        return formatRows(
+            headers: ["FIELD", "VALUE"],
+            rows: [
+                ["phase", payload.phase.rawValue],
+                ["profile", payload.profile?.rawValue ?? "-"],
+                ["started-at", payload.startedAt ?? "-"],
+                ["last-artifact-profile", artifact?.profile.rawValue ?? "-"],
+                ["last-artifact-path", artifact?.path ?? "-"],
+                ["last-artifact-started-at", artifact?.startedAt ?? "-"],
+                ["last-artifact-ended-at", artifact?.endedAt ?? "-"],
+                ["failure-reason", payload.failureReason ?? "-"]
+            ],
+            format: format
+        )
     }
 
     private static func formatAppSummary(_ apps: [IPCManagedAppSummary], format: CLIOutputFormat) -> String {

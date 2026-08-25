@@ -385,7 +385,7 @@ final class StatusMenuModel {
         guard let controller else { return }
         let wasRecording = controller.isTraceCaptureActive
         Task {
-            switch await controller.toggleTraceCaptureForUI(desiredState: .toggle, profile: profile) {
+            switch await controller.toggleTraceCapture(desiredState: .toggle, profile: profile) {
             case .noChange,
                  .started:
                 break

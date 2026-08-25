@@ -30,6 +30,7 @@ This document covers the OmniWM automation surface. For the docs hub, see [Docum
   - [Layout & Sizing](#layout--sizing)
   - [Window Management](#window-management)
   - [UI Toggles](#ui-toggles)
+- [Capture](#capture)
 - [Queries](#queries)
   - [Query Selectors](#query-selectors)
   - [Query Fields](#query-fields)
@@ -170,7 +171,9 @@ Turning **Enable IPC** on starts the server immediately and creates the Unix soc
 
 ## IPC Protocol
 
-**Protocol version:** 11
+**Protocol version:** 12
+
+The client and server versions must match exactly. A mismatched client can still call `version`, but every other remote request returns `protocol_mismatch`; there is no cross-version compatibility path.
 
 ### Socket & Authorization
 
@@ -224,6 +227,7 @@ omniwmctl <command> [arguments...] [--format json|table|tsv|text] [--json]
 | `ping` | remote | Verify IPC reachability and return `pong` |
 | `version` | remote | Return the OmniWM app version and IPC protocol version |
 | `command` | remote | Execute window manager commands through the IPC command surface |
+| `capture` | remote | Start, stop, or inspect a diagnostics trace or performance capture |
 | `query` | remote | Query OmniWM state, registries, and protocol capabilities |
 | `rule` | remote | Manage persisted window rules and reapply them to windows |
 | `workspace` | remote | Perform workspace actions such as focusing by workspace name |
@@ -417,6 +421,46 @@ Overview is modal with respect to external commands. `omniwmctl command toggle-o
 - `dwindle` — only works when the active workspace uses the Dwindle layout
 
 Commands sent to an incompatible layout return `layout_mismatch`.
+
+---
+
+## Capture
+
+Capture control is independent of the window-manager enabled state, active layout, and Overview. IPC must still be enabled and the request must be authenticated.
+
+```bash
+omniwmctl capture start trace
+omniwmctl capture start performance
+omniwmctl capture stop
+omniwmctl capture status
+```
+
+Only one capture can be active. `capture stop` stops whichever profile is recording and waits for finalization before returning. Starting while a capture is active, or stopping while the coordinator is idle, starting, or finalizing, returns `capture_state_conflict` with the current capture snapshot.
+
+A trace capture writes an atomic partial immediately, refreshes it periodically, and replaces it with the final trace on stop or automatic finalization. A performance capture writes only its final artifact. Both profiles automatically finalize after 10 minutes and keep their existing size and retention limits.
+
+`capture status` returns `phase`, the active `profile` and `startedAt` when present, and the coordinator's nullable `lastArtifact`. Timestamps are RFC 3339 strings. Artifact paths are absolute. A write failure returns `internal_error` with a UTF-8-safe, 4 KiB-bounded `failureReason`.
+
+```json
+{
+  "phase": "idle",
+  "profile": null,
+  "startedAt": null,
+  "lastArtifact": {
+    "profile": "trace",
+    "path": "/Users/example/.local/state/omniwm/diagnostics/omniwm-trace-....log",
+    "startedAt": "2026-08-25T21:00:00Z",
+    "endedAt": "2026-08-25T21:01:00Z"
+  },
+  "failureReason": null
+}
+```
+
+`lastArtifact` is one process-local, best-effort slot rather than per-profile history. Its profile can differ from the active profile. A successful new trace start clears a prior trace artifact after the replacement partial is safely written; a performance start does not clear the slot. Successful finalization replaces it, while finalization failure leaves the prior value unchanged. During `finalizing`, it can still refer to the preceding capture.
+
+If a successful stop response is lost, status can discover the result before another successful finalization or successful new trace start clears or replaces it. Wait for `phase` to become `idle` and compare the artifact metadata before starting another capture. Status does not recover failed responses, persist across app restarts, or provide capture history.
+
+Disconnecting the client or disabling and restarting IPC while OmniWM remains alive does not stop an armed capture or roll back an accepted finalization, although the response can be lost. App termination does not finalize an active capture: a trace retains its latest completed partial, while an unfinished performance capture produces no artifact.
 
 ---
 
@@ -792,7 +836,7 @@ eval "$(omniwmctl completion bash)"
 omniwmctl completion fish | source
 ```
 
-Completions are context-aware: query names, selectors, field names, command paths, channel names, rule actions, and argument values are all completed dynamically based on the automation manifest.
+Completions are context-aware: query names, selectors, field names, command paths, capture actions and profiles, channel names, rule actions, and argument values are all completed dynamically based on the automation manifest.
 
 ---
 
@@ -802,9 +846,9 @@ Completions are context-aware: query names, selectors, field names, command path
 
 ```json
 {
-  "version": 11,
+  "version": 12,
   "id": "<uuid>",
-  "kind": "<ping|version|command|query|rule|workspace|window|subscribe>",
+  "kind": "<ping|version|command|capture|query|rule|workspace|window|subscribe>",
   "authorizationToken": "<token>",
   "payload": { ... }
 }
@@ -842,6 +886,21 @@ Completions are context-aware: query names, selectors, field names, command path
     "visible": true
   },
   "fields": ["id", "title", "app"]
+}
+```
+
+**Capture start:**
+```json
+{
+  "name": "start",
+  "profile": "trace"
+}
+```
+
+**Capture stop or status:**
+```json
+{
+  "name": "status"
 }
 ```
 
@@ -905,14 +964,14 @@ Workspace requests use this flat wire shape. For `move-to-monitor`, `force` is o
 
 ```json
 {
-  "version": 11,
+  "version": 12,
   "id": "<request-id>",
   "ok": true,
-  "kind": "<ping|version|command|query|rule|workspace|window|subscribe>",
+  "kind": "<ping|version|command|capture|query|rule|workspace|window|subscribe>",
   "status": "<success|executed|ignored|error|subscribed>",
   "code": null,
   "result": {
-    "kind": "<pong|version|workspace-bar|active-workspace|focused-monitor|apps|focused-window|windows|workspaces|displays|rules|rule-actions|queries|commands|subscriptions|capabilities|subscribed>",
+    "kind": "<pong|version|capture|workspace-bar|active-workspace|focused-monitor|apps|focused-window|windows|workspaces|displays|rules|rule-actions|queries|commands|subscriptions|capabilities|subscribed>",
     "payload": { ... }
   }
 }
@@ -922,7 +981,7 @@ Authorization, protocol, validation, and routing failures keep the originating r
 
 ```json
 {
-  "version": 11,
+  "version": 12,
   "id": "<request-id>",
   "ok": false,
   "kind": "query",
@@ -939,7 +998,7 @@ Events are sent on subscription connections after the initial response.
 
 ```json
 {
-  "version": 11,
+  "version": 12,
   "id": "<event-id>",
   "kind": "event",
   "channel": "focus",
@@ -988,6 +1047,7 @@ This envelope is produced locally by the CLI, so it does not include IPC fields 
 | `not_found` | Target window, workspace, or rule not found |
 | `workspace_assignment_conflict` | Configured monitor assignment prevents the requested workspace move |
 | `workspace_state_conflict` | Current fullscreen, scratchpad, or pending focus state prevents the requested workspace move |
+| `capture_state_conflict` | Capture state does not permit the requested start or stop transition |
 | `internal_error` | Unexpected server-side error |
 
 ---

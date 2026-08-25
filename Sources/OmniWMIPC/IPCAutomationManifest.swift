@@ -198,6 +198,25 @@ public struct IPCWindowActionDescriptor: Codable, Equatable, Sendable {
     }
 }
 
+public struct IPCCaptureActionDescriptor: Codable, Equatable, Sendable {
+    public let path: String
+    public let name: IPCCaptureActionName
+    public let summary: String
+    public let arguments: [String]
+
+    public init(
+        path: String,
+        name: IPCCaptureActionName,
+        summary: String,
+        arguments: [String] = []
+    ) {
+        self.path = path
+        self.name = name
+        self.summary = summary
+        self.arguments = arguments
+    }
+}
+
 public struct IPCRuleActionDescriptor: Codable, Equatable, Sendable {
     public let path: String
     public let name: IPCRuleActionName
@@ -926,6 +945,25 @@ public enum IPCAutomationManifest {
             name: .summonRight,
             summary: "Summon a managed window to the right of the focused window.",
             arguments: ["opaque-id"]
+        )
+    ]
+
+    public static let captureActionDescriptors: [IPCCaptureActionDescriptor] = [
+        .init(
+            path: "capture start <trace|performance>",
+            name: .start,
+            summary: "Start a trace or performance capture.",
+            arguments: ["trace|performance"]
+        ),
+        .init(
+            path: "capture stop",
+            name: .stop,
+            summary: "Finalize the active capture."
+        ),
+        .init(
+            path: "capture status",
+            name: .status,
+            summary: "Return the current capture state and remembered artifact."
         )
     ]
 

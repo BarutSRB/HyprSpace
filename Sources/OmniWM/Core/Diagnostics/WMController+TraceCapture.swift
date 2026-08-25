@@ -36,7 +36,7 @@ extension WMController {
     }
 
     @discardableResult
-    func toggleTraceCaptureForUI(
+    func toggleTraceCapture(
         desiredState: TraceCaptureDesiredState = .toggle,
         profile: TraceCaptureProfile = .problem
     ) async -> TraceCaptureOutcome {

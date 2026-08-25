@@ -509,6 +509,8 @@ OmniWM ships with a bundled CLI, `omniwmctl`, for automation and scripting.
 
 IPC is disabled by default. Enable `Enable IPC` from the menu bar before using the CLI or any automation.
 
+Diagnostics can be scripted with `omniwmctl capture start trace`, `omniwmctl capture start performance`, `omniwmctl capture stop`, and `omniwmctl capture status`.
+
 For setup, installation options, commands, queries, rules, subscriptions, and security details, see [docs/IPC-CLI.md](docs/IPC-CLI.md).
 
 ## Quick Start

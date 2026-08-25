@@ -14,17 +14,17 @@ final class DiagnosticsTraceCaptureTests: XCTestCase {
 
         XCTAssertFalse(controller.isTraceCaptureActive)
 
-        guard case .started = await controller.toggleTraceCaptureForUI(desiredState: .active) else {
+        guard case .started = await controller.toggleTraceCapture(desiredState: .active) else {
             return XCTFail("expected capture to start")
         }
         XCTAssertTrue(controller.isTraceCaptureActive)
         XCTAssertNotNil(controller.traceCaptureStatus.startedAt)
 
-        guard case .noChange = await controller.toggleTraceCaptureForUI(desiredState: .active) else {
+        guard case .noChange = await controller.toggleTraceCapture(desiredState: .active) else {
             return XCTFail("expected no change when already active")
         }
 
-        guard case .stopped = await controller.toggleTraceCaptureForUI(desiredState: .inactive) else {
+        guard case .stopped = await controller.toggleTraceCapture(desiredState: .inactive) else {
             return XCTFail("expected capture to stop and produce an artifact")
         }
         XCTAssertFalse(controller.isTraceCaptureActive)
@@ -37,8 +37,8 @@ final class DiagnosticsTraceCaptureTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
         let controller = WMController(settings: makeSettingsStore(), diagnosticsDirectory: directory)
 
-        _ = await controller.toggleTraceCaptureForUI(desiredState: .active)
-        _ = await controller.toggleTraceCaptureForUI(desiredState: .inactive)
+        _ = await controller.toggleTraceCapture(desiredState: .active)
+        _ = await controller.toggleTraceCapture(desiredState: .inactive)
 
         let partials = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil))?
             .filter { $0.lastPathComponent.hasSuffix(".partial.log") } ?? []
@@ -80,12 +80,12 @@ final class DiagnosticsTraceCaptureTests: XCTestCase {
 
         let controller = WMController(settings: makeSettingsStore(), diagnosticsDirectory: directory)
 
-        _ = await controller.toggleTraceCaptureForUI(desiredState: .active)
+        _ = await controller.toggleTraceCapture(desiredState: .active)
         XCTAssertFalse(FileManager.default.fileExists(atPath: staleTrace.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: unrelated.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: crashLog.path))
 
-        guard case let .stopped(artifact) = await controller.toggleTraceCaptureForUI(desiredState: .inactive) else {
+        guard case let .stopped(artifact) = await controller.toggleTraceCapture(desiredState: .inactive) else {
             return XCTFail("expected capture to stop")
         }
 
@@ -107,7 +107,7 @@ final class DiagnosticsTraceCaptureTests: XCTestCase {
 
         let controller = WMController(settings: makeSettingsStore(), diagnosticsDirectory: unusable)
 
-        guard case .writeFailed = await controller.toggleTraceCaptureForUI(desiredState: .active) else {
+        guard case .writeFailed = await controller.toggleTraceCapture(desiredState: .active) else {
             return XCTFail("expected .writeFailed when the diagnostics directory cannot be created")
         }
         XCTAssertFalse(controller.isTraceCaptureActive)
@@ -206,6 +206,94 @@ final class DiagnosticsTraceCaptureTests: XCTestCase {
             try FileManager.default.contentsOfDirectory(atPath: directory.path)
                 .contains { $0.hasPrefix(".omniwm-trace-") && $0.hasSuffix(".tmp") }
         )
+    }
+
+    @MainActor
+    func testCallerCancellationDoesNotAbortAcceptedFinalization() async throws {
+        let directory = try makeDiagnosticsDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let gate = TraceFinalizationGate()
+        defer { gate.release() }
+        let evidenceStarted = expectation(description: "automatic evidence started")
+        let coordinator = RuntimeTraceCaptureCoordinator(diagnosticsDirectory: directory, recorders: [])
+
+        guard case .started = await coordinator.toggle(
+            desiredState: .active,
+            reportProvider: { "report" },
+            automaticEvidenceProvider: {
+                evidenceStarted.fulfill()
+                await gate.wait()
+                return "evidence"
+            }
+        ) else {
+            return XCTFail("expected capture to start")
+        }
+
+        let finalization = Task { @MainActor in
+            await coordinator.toggle(desiredState: .inactive, reportProvider: { "unused" })
+        }
+        await fulfillment(of: [evidenceStarted], timeout: 2)
+        XCTAssertEqual(coordinator.status.phase, .finalizing)
+
+        finalization.cancel()
+        XCTAssertTrue(finalization.isCancelled)
+        gate.release()
+
+        guard case let .stopped(artifact) = await finalization.value else {
+            return XCTFail("expected canceled caller to receive completed finalization")
+        }
+        XCTAssertEqual(coordinator.status.phase, .idle)
+        XCTAssertEqual(coordinator.status.lastArtifact, artifact)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: artifact.url.path))
+    }
+
+    @MainActor
+    func testStopLosingToAutomaticFinalizationCanDiscoverArtifactAfterIdle() async throws {
+        let directory = try makeDiagnosticsDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let gate = TraceFinalizationGate()
+        defer { gate.release() }
+        let evidenceStarted = expectation(description: "automatic evidence started")
+        let finalized = expectation(description: "automatic finalization completed")
+        let coordinator = RuntimeTraceCaptureCoordinator(
+            diagnosticsDirectory: directory,
+            recorders: [],
+            captureSleeper: { _ in }
+        )
+
+        guard case .started = await coordinator.toggle(
+            desiredState: .active,
+            reportProvider: { "report" },
+            automaticEvidenceProvider: {
+                evidenceStarted.fulfill()
+                await gate.wait()
+                return "evidence"
+            }
+        ) else {
+            return XCTFail("expected capture to start")
+        }
+        await fulfillment(of: [evidenceStarted], timeout: 5)
+        XCTAssertEqual(coordinator.status.phase, .finalizing)
+
+        guard case .noChange = await coordinator.toggle(
+            desiredState: .inactive,
+            reportProvider: { "unused" }
+        ) else {
+            return XCTFail("expected automatic finalization to own the stop transition")
+        }
+
+        coordinator.onStateChange = {
+            if coordinator.status.phase == .idle {
+                finalized.fulfill()
+            }
+        }
+        gate.release()
+        await fulfillment(of: [finalized], timeout: 2)
+
+        XCTAssertEqual(coordinator.status.phase, .idle)
+        let artifact = try XCTUnwrap(coordinator.status.lastArtifact)
+        XCTAssertEqual(artifact.profile, .problem)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: artifact.url.path))
     }
 
     @MainActor

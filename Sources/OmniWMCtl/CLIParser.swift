@@ -105,6 +105,16 @@ enum CLIParser {
                 expectsEventStream: false,
                 watchConfiguration: nil
             )
+        case "capture":
+            return ParsedCLICommand(
+                invocation: .remote(try parseCaptureRequest(
+                    id: requestId,
+                    arguments: Array(filteredArguments.dropFirst())
+                )),
+                outputFormat: outputFormat,
+                expectsEventStream: false,
+                watchConfiguration: nil
+            )
         case "workspace":
             return ParsedCLICommand(
                 invocation: .remote(try parseWorkspaceRequest(
@@ -506,6 +516,37 @@ enum CLIParser {
         throw CLIParseError.usage(usageText)
     }
 
+    private static func parseCaptureRequest(id: String, arguments: [String]) throws -> IPCRequest {
+        guard let actionToken = arguments.first,
+              let action = IPCCaptureActionName(rawValue: actionToken)
+        else {
+            throw CLIParseError.usage(usageText)
+        }
+
+        let capture: IPCCaptureRequest
+        switch action {
+        case .start:
+            guard arguments.count == 2,
+                  let profile = IPCCaptureProfile(rawValue: arguments[1])
+            else {
+                throw CLIParseError.usage(usageText)
+            }
+            capture = .start(profile)
+        case .stop:
+            guard arguments.count == 1 else {
+                throw CLIParseError.usage(usageText)
+            }
+            capture = .stop
+        case .status:
+            guard arguments.count == 1 else {
+                throw CLIParseError.usage(usageText)
+            }
+            capture = .status
+        }
+
+        return IPCRequest(id: id, capture: capture)
+    }
+
     private static func parseWindowRequest(id: String, arguments: [String]) throws -> IPCRequest {
         guard arguments.count == 2,
               let action = IPCWindowActionName(rawValue: arguments[0])
@@ -755,6 +796,7 @@ enum CLIParser {
         }
         let workspaceLines = IPCAutomationManifest.workspaceActionDescriptors.map(\.path)
         let windowLines = IPCAutomationManifest.windowActionDescriptors.map(\.path)
+        let captureLines = IPCAutomationManifest.captureActionDescriptors.map(\.path)
 
         var lines = [
             "Usage:",
@@ -765,6 +807,7 @@ enum CLIParser {
         ]
         lines += commandLines.map { "  omniwmctl \($0)" }
         lines += ruleLines.map { "  omniwmctl \($0)" }
+        lines += captureLines.map { "  omniwmctl \($0)" }
         lines += [
             "  omniwmctl query <\(queryNames)> [selectors...] [--fields <csv>] [--format <json|table|tsv|text>]"
         ]

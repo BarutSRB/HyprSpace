@@ -82,6 +82,7 @@ actor IPCApplicationBridge {
                 case .version:
                     return .success(id: request.id, kind: .version, result: versionResult)
                 case .command,
+                     .capture,
                      .query,
                      .rule,
                      .workspace,
@@ -97,6 +98,8 @@ actor IPCApplicationBridge {
         case let .command(command):
             let result = await commandResult { $0.handle(command) }
             return Self.response(for: result, id: request.id, kind: .command)
+        case let .capture(capture):
+            return await Self.captureResponse(for: capture, id: request.id, controller: controller)
         case let .query(query):
             return await MainActor.run {
                 let queryRouter = IPCQueryRouter(

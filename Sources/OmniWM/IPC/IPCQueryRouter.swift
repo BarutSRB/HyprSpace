@@ -245,6 +245,7 @@ final class IPCQueryRouter {
             windowIdScope: "session",
             queries: IPCAutomationManifest.queryDescriptors,
             commands: IPCAutomationManifest.commandDescriptors,
+            captureActions: IPCAutomationManifest.captureActionDescriptors,
             ruleActions: IPCAutomationManifest.ruleActionDescriptors,
             workspaceActions: IPCAutomationManifest.workspaceActionDescriptors,
             windowActions: IPCAutomationManifest.windowActionDescriptors,

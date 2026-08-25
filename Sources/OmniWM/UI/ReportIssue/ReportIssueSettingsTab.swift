@@ -458,7 +458,7 @@ extension ReportIssueSettingsTab {
 
     private func startRecording() {
         Task {
-            let outcome = await controller.toggleTraceCaptureForUI(desiredState: .active)
+            let outcome = await controller.toggleTraceCapture(desiredState: .active)
             switch outcome {
             case .started:
                 model.recordingStarted()
@@ -480,7 +480,7 @@ extension ReportIssueSettingsTab {
             return
         }
         Task {
-            switch await controller.toggleTraceCaptureForUI(desiredState: .inactive) {
+            switch await controller.toggleTraceCapture(desiredState: .inactive) {
             case let .stopped(artifact):
                 guard artifact.profile == .problem else {
                     traceStatus = .failure("The active capture was not a diagnostic recording")
