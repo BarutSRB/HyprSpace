@@ -84,40 +84,12 @@ extension NiriLayoutEngine {
         monitorForWorkspace(workspaceId)?.refreshRate ?? 60.0
     }
 
-    func effectiveVisibleContainerCount(for monitorId: Monitor.ID) -> Int {
-        effectiveSettings(for: monitorId).visibleContainerCount
-    }
-
     func effectiveVisibleContainerCount(in workspaceId: WorkspaceDescriptor.ID) -> Int {
         effectiveSettings(in: workspaceId).visibleContainerCount
     }
 
-    func effectiveCenterFocusedColumn(for monitorId: Monitor.ID) -> CenterFocusedColumn {
-        effectiveSettings(for: monitorId).centerFocusedColumn
-    }
-
-    func effectiveCenterFocusedColumn(in workspaceId: WorkspaceDescriptor.ID) -> CenterFocusedColumn {
-        effectiveSettings(in: workspaceId).centerFocusedColumn
-    }
-
-    func effectiveAlwaysCenterSingleColumn(for monitorId: Monitor.ID) -> Bool {
-        effectiveSettings(for: monitorId).alwaysCenterSingleColumn
-    }
-
-    func effectiveAlwaysCenterSingleColumn(in workspaceId: WorkspaceDescriptor.ID) -> Bool {
-        effectiveSettings(in: workspaceId).alwaysCenterSingleColumn
-    }
-
-    func effectiveSingleWindowFit(for monitorId: Monitor.ID) -> SingleWindowFit {
-        effectiveSettings(for: monitorId).singleWindowFit
-    }
-
     func effectiveSingleWindowFit(in workspaceId: WorkspaceDescriptor.ID) -> SingleWindowFit {
         effectiveSettings(in: workspaceId).singleWindowFit
-    }
-
-    func effectiveInfiniteLoop(for monitorId: Monitor.ID) -> Bool {
-        effectiveSettings(for: monitorId).infiniteLoop
     }
 
     func effectiveInfiniteLoop(in workspaceId: WorkspaceDescriptor.ID) -> Bool {

@@ -48,26 +48,6 @@ struct CLILocalFailureEnvelope: Codable, Equatable, Sendable {
 }
 
 enum CLIRenderer {
-    static func responseOutput(_ response: IPCResponse, prefersJSON: Bool) throws -> CLIRenderedOutput {
-        try responseOutput(response, format: prefersJSON ? .json : .text)
-    }
-
-    static func eventOutput(_ event: IPCEventEnvelope, prefersJSON: Bool) throws -> CLIRenderedOutput {
-        try eventOutput(event, format: prefersJSON ? .json : .text)
-    }
-
-    static func parseErrorOutput(_ error: CLIParseError, prefersJSON: Bool) throws -> CLIRenderedOutput {
-        try parseErrorOutput(error, format: prefersJSON ? .json : .text)
-    }
-
-    static func transportErrorOutput(_ error: Error, prefersJSON: Bool) throws -> CLIRenderedOutput {
-        try transportErrorOutput(error, format: prefersJSON ? .json : .text)
-    }
-
-    static func internalErrorOutput(_ error: Error, prefersJSON: Bool) throws -> CLIRenderedOutput {
-        try internalErrorOutput(error, format: prefersJSON ? .json : .text)
-    }
-
     static func exitCode(for response: IPCResponse) -> CLIExitCode {
         guard !response.ok else { return .success }
 
@@ -352,8 +332,27 @@ enum CLIRenderer {
             headers: &headers,
             rows: &rows
         )
+        appendDisplayBooleanColumn(
+            "FULLSCREEN GAPS",
+            values: payload.displays.map(\.fullscreenUsesOuterGaps),
+            headers: &headers,
+            rows: &rows
+        )
 
         return formatRows(headers: headers, rows: rows, format: format)
+    }
+
+    private static func appendDisplayBooleanColumn(
+        _ header: String,
+        values: [Bool?],
+        headers: inout [String],
+        rows: inout [[String]]
+    ) {
+        guard values.contains(where: { $0 != nil }) else { return }
+        headers.append(header)
+        for index in rows.indices {
+            rows[index].append(values[index].map { String($0) } ?? "-")
+        }
     }
 
     private static func appendDisplayColumn(

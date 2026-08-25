@@ -73,6 +73,10 @@ final class ClipboardPasteboardReader: @unchecked Sendable {
 
 @MainActor
 final class ClipboardHistoryService: @unchecked Sendable {
+    struct PerformanceSnapshot: Equatable, Sendable {
+        let timerFires: UInt64
+    }
+
     private(set) var paletteItems: [ClipboardPaletteItem] = []
     var onPaletteItemsChanged: (([ClipboardPaletteItem]) -> Void)?
 
@@ -83,6 +87,7 @@ final class ClipboardHistoryService: @unchecked Sendable {
     private var timer: ClipboardHistoryTimer?
     private var lastChangeCount: Int
     private var captureGeneration = 0
+    private var performanceTimerFires: UInt64?
 
     init(
         configuration: ClipboardHistoryConfiguration,
@@ -132,9 +137,18 @@ final class ClipboardHistoryService: @unchecked Sendable {
         captureGeneration &+= 1
     }
 
-    func flushAndStop() async {
-        stop()
-        await store.flush()
+    func beginPerformanceCapture() {
+        performanceTimerFires = 0
+    }
+
+    func performanceSnapshot() -> PerformanceSnapshot? {
+        performanceTimerFires.map { PerformanceSnapshot(timerFires: $0) }
+    }
+
+    func endPerformanceCapture() -> PerformanceSnapshot? {
+        let snapshot = performanceSnapshot()
+        performanceTimerFires = nil
+        return snapshot
     }
 
     func copyItemToPasteboard(id: UUID) async -> Bool {
@@ -162,6 +176,7 @@ final class ClipboardHistoryService: @unchecked Sendable {
     }
 
     private func pollPasteboard() {
+        performanceTimerFires? &+= 1
         guard configuration.isEnabled else { return }
         let changeCount = environment.pasteboardChangeCount()
         guard changeCount != lastChangeCount else { return }

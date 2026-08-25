@@ -26,6 +26,41 @@ final class IPCProtocolEnvelopeTests: XCTestCase {
         XCTAssertEqual(OmniWMIPCProtocol.version, 11)
     }
 
+    func testV11FullscreenOuterGapDisplayFieldIsAdditiveOnWire() throws {
+        let legacyShapedResponse = IPCResponse.success(
+            id: "legacy",
+            kind: .query,
+            result: IPCResult(
+                displays: IPCDisplaysQueryResult(
+                    displays: [IPCDisplayQuerySnapshot(id: "display")]
+                )
+            )
+        )
+        let legacyData = try IPCWire.encodeResponseLine(legacyShapedResponse)
+        XCTAssertFalse(String(decoding: legacyData, as: UTF8.self).contains("fullscreenUsesOuterGaps"))
+        let decodedLegacy = try IPCWire.decodeResponse(from: legacyData)
+        guard case let .displays(legacyDisplays) = decodedLegacy.result?.payload else {
+            return XCTFail("expected displays result")
+        }
+        XCTAssertNil(try XCTUnwrap(legacyDisplays.displays.first).fullscreenUsesOuterGaps)
+
+        let explicitFalseResponse = IPCResponse.success(
+            id: "current",
+            kind: .query,
+            result: IPCResult(
+                displays: IPCDisplaysQueryResult(
+                    displays: [IPCDisplayQuerySnapshot(id: "display", fullscreenUsesOuterGaps: false)]
+                )
+            )
+        )
+        let explicitFalseData = try IPCWire.encodeResponseLine(explicitFalseResponse)
+        let decodedExplicitFalse = try IPCWire.decodeResponse(from: explicitFalseData)
+        guard case let .displays(currentDisplays) = decodedExplicitFalse.result?.payload else {
+            return XCTFail("expected displays result")
+        }
+        XCTAssertEqual(try XCTUnwrap(currentDisplays.displays.first).fullscreenUsesOuterGaps, false)
+    }
+
     func testEnvelopeDecodesVersionWhenCommandNameIsUnknown() throws {
         let data = requestLine(version: 6, kind: "command", payload: #"{"name":"toggle-hidden-bar"}"#)
         XCTAssertThrowsError(try IPCWire.decodeRequest(from: data))

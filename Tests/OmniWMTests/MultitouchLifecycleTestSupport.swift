@@ -101,6 +101,13 @@ final class FakeMultitouchBackend {
 
     private var enumerationIndex = 0
     private var registryIdByPointer: [UInt: UInt64] = [:]
+    private var callbackByRegistryId: [
+        UInt64: (
+            device: MultitouchBinding.DeviceRef,
+            callback: MultitouchBinding.ContactCallback,
+            refcon: UnsafeMutableRawPointer
+        )
+    ] = [:]
 
     static func device(pointer: UInt, registryId: UInt64) -> MultitouchBinding.Device {
         MultitouchBinding.Device(ref: OpaquePointer(bitPattern: pointer)!, registryId: registryId)
@@ -123,7 +130,7 @@ final class FakeMultitouchBackend {
     func operations(sleeper: ManualMultitouchSleeper) -> MultitouchGestureSource.LifecycleOperations {
         MultitouchGestureSource.LifecycleOperations(
             enumerate: { self.enumerate() },
-            register: { self.register($0, refcon: $2) },
+            register: { self.register($0, callback: $1, refcon: $2) },
             start: { self.start($0) },
             isRunning: { self.isRunning($0) },
             stop: { self.stop($0) },
@@ -134,6 +141,18 @@ final class FakeMultitouchBackend {
 
     func callCount(_ expected: Call) -> Int {
         calls.count(where: { $0 == expected })
+    }
+
+    func emitEmptyFrame(registryId: UInt64, timestamp: Double) {
+        guard let registration = callbackByRegistryId[registryId] else { return }
+        _ = registration.callback(
+            registration.device,
+            nil,
+            0,
+            timestamp,
+            0,
+            registration.refcon
+        )
     }
 
     private func enumerate() -> MultitouchBinding.Enumeration {
@@ -152,12 +171,17 @@ final class FakeMultitouchBackend {
 
     private func register(
         _ ref: MultitouchBinding.DeviceRef,
+        callback: MultitouchBinding.ContactCallback,
         refcon: UnsafeMutableRawPointer
     ) -> Bool {
         let registryId = registryId(for: ref)
         calls.append(.register(registryId))
         registeredGenerations.append(UInt(bitPattern: refcon))
-        return nextResult(from: &registerResults, for: registryId) ?? true
+        let registered = nextResult(from: &registerResults, for: registryId) ?? true
+        if registered {
+            callbackByRegistryId[registryId] = (ref, callback, refcon)
+        }
+        return registered
     }
 
     private func start(_ ref: MultitouchBinding.DeviceRef) -> Int32 {
@@ -181,6 +205,7 @@ final class FakeMultitouchBackend {
     private func unregister(_ ref: MultitouchBinding.DeviceRef) -> Bool {
         let registryId = registryId(for: ref)
         calls.append(.unregister(registryId))
+        callbackByRegistryId.removeValue(forKey: registryId)
         return nextResult(from: &unregisterResults, for: registryId) ?? true
     }
 

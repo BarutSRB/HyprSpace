@@ -25,17 +25,6 @@ final class WorkspaceBarNotchModeSettingsTests: XCTestCase {
         XCTAssertEqual(decoded.workspaceBarNotchActiveZoneWidth, 220)
     }
 
-    func testNotchModeRecoversToDefaultWhenMissing() throws {
-        let withoutKeys = try defaultsWithReplacements(
-            ("notchMode = \"moveBelowMenuBar\"\n", ""),
-            ("notchActiveZoneWidth = 180.0\n", "")
-        )
-
-        let decoded = try SettingsTOMLCodec.decode(withoutKeys)
-        XCTAssertEqual(decoded.workspaceBarNotchMode, WorkspaceBarNotchMode.moveBelowMenuBar.rawValue)
-        XCTAssertEqual(decoded.workspaceBarNotchActiveZoneWidth, 180)
-    }
-
     func testMonitorOverrideNotchModeRoundTrips() throws {
         var export = SettingsExport.defaults()
         export.monitorBarSettings = [

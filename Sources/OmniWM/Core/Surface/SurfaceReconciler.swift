@@ -404,6 +404,23 @@ final class SurfaceReconciler {
         }
     }
 
+    func applyAcceptedTabRailGeometry(
+        _ commands: [TabRailGeometryCommand],
+        workspaceId: WorkspaceDescriptor.ID,
+        displayId: CGDirectDisplayID
+    ) {
+        guard !commands.isEmpty,
+              let controller,
+              controller.hasStartedServices,
+              let monitor = controller.workspaceManager.monitor(for: workspaceId),
+              monitor.displayId == displayId,
+              controller.workspaceManager.activeWorkspaceOrFirst(on: monitor.id)?.id == workspaceId
+        else {
+            return
+        }
+        controller.tabRailManager.applyAnimationGeometry(commands, in: workspaceId)
+    }
+
     func handleVerifiedFrameApplySuccess(_ result: AXFrameApplyResult) {
         guard let controller else { return }
         let token = WindowToken(pid: result.pid, windowId: result.windowId)

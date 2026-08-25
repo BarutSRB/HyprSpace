@@ -128,13 +128,13 @@ enum WindowAdmissionTestSupport {
             targetFrame: request.frame,
             currentFrameHint: request.currentFrameHint,
             writeResult: AXFrameWriteResult(
-                targetFrame: request.frame,
                 observedFrame: observed,
                 writeOrder: .sizeThenPosition,
                 sizeError: sizeError,
                 positionError: positionError,
                 failureReason: failure
-            )
+            ),
+            traceRequestId: request.traceRequestId
         )
     }
 
@@ -150,7 +150,6 @@ enum WindowAdmissionTestSupport {
             targetFrame: request.frame,
             currentFrameHint: request.currentFrameHint,
             writeResult: AXFrameWriteResult(
-                targetFrame: request.frame,
                 observedFrame: observed,
                 writeOrder: .sizeThenPosition,
                 sizeError: .success,
@@ -169,7 +168,6 @@ enum WindowAdmissionTestSupport {
             targetFrame: request.frame,
             currentFrameHint: request.currentFrameHint,
             writeResult: AXFrameWriteResult(
-                targetFrame: request.frame,
                 observedFrame: request.frame,
                 writeOrder: .sizeThenPosition,
                 sizeError: .success,

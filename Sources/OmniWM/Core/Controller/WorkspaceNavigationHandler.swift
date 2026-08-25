@@ -637,11 +637,6 @@ final class WorkspaceNavigationHandler {
         }
     }
 
-    func focusWorkspaceAnywhere(index: Int) {
-        guard let rawWorkspaceID = WorkspaceIDPolicy.rawID(from: max(0, index) + 1) else { return }
-        focusWorkspaceAnywhere(rawWorkspaceID: rawWorkspaceID)
-    }
-
     func focusWorkspaceAnywhere(rawWorkspaceID: String) {
         guard let controller else { return }
         let currentWorkspace = controller.activeWorkspace()
@@ -1250,11 +1245,6 @@ final class WorkspaceNavigationHandler {
             return .unchanged
         }
         return moveWindow(handle: handle, toWorkspaceId: targetWorkspaceId)
-    }
-
-    func moveWindowToWorkspaceOnMonitor(workspaceIndex: Int, monitorDirection: Direction) {
-        guard let rawWorkspaceID = WorkspaceIDPolicy.rawID(from: max(0, workspaceIndex) + 1) else { return }
-        moveWindowToWorkspaceOnMonitor(rawWorkspaceID: rawWorkspaceID, monitorDirection: monitorDirection)
     }
 
     func moveWindowToWorkspaceOnMonitor(rawWorkspaceID: String, monitorDirection: Direction) {

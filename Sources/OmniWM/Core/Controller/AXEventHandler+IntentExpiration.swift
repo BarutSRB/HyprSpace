@@ -5,8 +5,19 @@ import Foundation
 
 @MainActor
 extension AXEventHandler {
-    func handleIntentExpired(_ intentId: IntentID) {
+    func handleIntentExpired(
+        _ intentId: IntentID,
+        deadlineGeneration: UInt64? = nil
+    ) {
         guard let controller else { return }
+        if let deadlineGeneration,
+           !controller.deadlineWheel.consumeExpiration(
+               intentId: intentId,
+               generation: deadlineGeneration
+           )
+        {
+            return
+        }
         guard let intent = controller.intentLedger.openIntent(id: intentId) else { return }
 
         switch intent.kind {
@@ -37,12 +48,22 @@ extension AXEventHandler {
                 _ = controller.intentLedger.markExpired(id: intentId)
                 return
             }
-            controller.retryManagedFocusFronting(liveRequest)
-            handleAppActivation(
-                pid: liveRequest.token.pid,
-                source: liveRequest.lastActivationSource ?? .focusedWindowChanged,
-                origin: .retry
-            )
+            switch liveRequest.phase {
+            case .awaitingSameAppActivation:
+                controller.completeSameAppFocusHandoff(liveRequest)
+            case .awaitingConfirmation:
+                controller.retryManagedFocusFronting(liveRequest)
+                guard controller.intentLedger.activeManagedRequest(
+                    requestId: liveRequest.requestId
+                )?.phase == .awaitingConfirmation else {
+                    return
+                }
+                handleAppActivation(
+                    pid: liveRequest.token.pid,
+                    source: liveRequest.lastActivationSource ?? .focusedWindowChanged,
+                    origin: .retry
+                )
+            }
         }
     }
 }

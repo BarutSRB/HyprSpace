@@ -84,22 +84,6 @@ enum ActionCatalog {
         }
     }
 
-    static func matchesSearch(_ query: String, binding: HotkeyBinding) -> Bool {
-        let normalizedQuery = normalizedSearchTerm(query)
-        guard !normalizedQuery.isEmpty else { return true }
-
-        guard let spec = spec(for: binding.id) else {
-            return binding.command.displayName.localizedCaseInsensitiveContains(query)
-                || binding.command.layoutCompatibility.rawValue.localizedCaseInsensitiveContains(query)
-                || binding.binding.displayString.localizedCaseInsensitiveContains(query)
-                || binding.binding.humanReadableString.localizedCaseInsensitiveContains(query)
-        }
-
-        return spec.searchTerms.contains { normalizedSearchTerm($0).contains(normalizedQuery) }
-            || normalizedSearchTerm(binding.binding.displayString).contains(normalizedQuery)
-            || normalizedSearchTerm(binding.binding.humanReadableString).contains(normalizedQuery)
-    }
-
     static func uniqueTerms(_ values: [String]) -> [String] {
         var seen: Set<String> = []
         return values.compactMap { raw in
@@ -1028,8 +1012,6 @@ enum ActionCatalog {
              .moveWorkspaceToMonitor,
              .swapWorkspaceWithMonitor,
              .workspaceBackAndForth,
-             .focusWorkspaceAnywhere,
-             .moveWindowToWorkspaceOnMonitor,
              .openCommandPalette,
              .raiseAllFloatingWindows,
              .rescueOffscreenWindows,
@@ -1118,8 +1100,6 @@ enum ActionCatalog {
         case let .preselect(dir): "Preselect \(dir.displayName)"
         case .preselectClear: "Clear Preselection"
         case .workspaceBackAndForth: "Switch to Last Active Workspace"
-        case let .focusWorkspaceAnywhere(idx): "Focus Workspace \(idx + 1) Anywhere"
-        case let .moveWindowToWorkspaceOnMonitor(wsIdx, monDir): "Move Window to Workspace \(wsIdx + 1) on \(monDir.displayName) Monitor"
         case .openCommandPalette: "Toggle Command Palette"
         case .raiseAllFloatingWindows: "Raise All Floating Windows"
         case .rescueOffscreenWindows: "Rescue Off-Screen Floating Windows"
@@ -1196,16 +1176,12 @@ enum ActionCatalog {
             .switchWorkspacePrevious
         case .workspaceBackAndForth:
             .switchWorkspaceBackAndForth
-        case .focusWorkspaceAnywhere:
-            .switchWorkspaceAnywhere
         case .moveToWorkspace:
             .moveToWorkspace
         case .moveWindowToWorkspaceUp:
             .moveToWorkspaceUp
         case .moveWindowToWorkspaceDown:
             .moveToWorkspaceDown
-        case .moveWindowToWorkspaceOnMonitor:
-            .moveToWorkspaceOnMonitor
         case .focusMonitorPrevious:
             .focusMonitorPrevious
         case .focusMonitorNext:

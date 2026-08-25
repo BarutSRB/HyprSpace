@@ -147,7 +147,7 @@ final class OverviewDwindleProjectionTests: XCTestCase {
         XCTAssertEqual(titleReads, 1)
         XCTAssertEqual(frameReads, 0)
 
-        overview.updateAnimationProgress(1, state: .open)
+        overview.onAnimationComplete(state: .open)
         let removedEntry = try XCTUnwrap(controller.workspaceManager.entry(for: second))
         _ = controller.workspaceManager.removeWindow(pid: second.pid, windowId: second.windowId)
         overview.handleManagedWindowRemoved(removedEntry)

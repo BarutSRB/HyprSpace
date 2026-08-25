@@ -4,6 +4,17 @@
 import Foundation
 import TOML
 
+enum SettingsTOMLCodecError: Error, Equatable, LocalizedError {
+    case cannotSafelyPreservePreviousData
+
+    var errorDescription: String? {
+        switch self {
+        case .cannotSafelyPreservePreviousData:
+            "The existing settings data could not be parsed and preserved safely."
+        }
+    }
+}
+
 // Only file in OmniWM that imports TOML — keep this boundary so swift-toml stays swappable.
 enum SettingsTOMLCodec {
     static func encode(_ export: SettingsExport) throws -> Data {
@@ -12,29 +23,33 @@ enum SettingsTOMLCodec {
 
     static func encode(_ export: SettingsExport, preservingUnknownKeysFrom previous: Data?) throws -> Data {
         let canonicalData = try encodeCanonical(export)
-        guard let previous, !previous.isEmpty else { return canonicalData }
+        guard let previous else { return canonicalData }
 
+        let decoder = TOMLDecoder()
+        let newCanonicalTree = try decoder.decode([String: TOMLNode].self, from: canonicalData)
+        let oldRawTree: [String: TOMLNode]
+        let oldExport: SettingsExport
         do {
-            let decoder = TOMLDecoder()
-            let newCanonicalTree = try decoder.decode([String: TOMLNode].self, from: canonicalData)
-            let oldRawTree = try decoder.decode([String: TOMLNode].self, from: previous)
-            let oldSchemaKnownTree = try decoder.decode(
-                [String: TOMLNode].self,
-                from: encodeCanonical(decode(previous))
-            )
-            let merged = TOMLNode.mergeUnknownKeys(
-                base: newCanonicalTree,
-                oldRaw: oldRawTree,
-                oldSchemaKnown: oldSchemaKnownTree
-            )
-            guard merged != newCanonicalTree else { return canonicalData }
-
-            let encoder = TOMLEncoder()
-            encoder.outputFormatting = [.sortedKeys, .prettyPrinted]
-            return try encoder.encode(merged)
+            oldRawTree = try decoder.decode([String: TOMLNode].self, from: previous)
+            oldExport = try decode(previous)
         } catch {
-            return canonicalData
+            throw SettingsTOMLCodecError.cannotSafelyPreservePreviousData
         }
+        let oldSchemaKnownTree = try decoder.decode(
+            [String: TOMLNode].self,
+            from: encodeCanonical(oldExport)
+        )
+
+        let merged = TOMLNode.mergeUnknownKeys(
+            base: newCanonicalTree,
+            oldRaw: oldRawTree,
+            oldSchemaKnown: oldSchemaKnownTree
+        )
+        guard merged != newCanonicalTree else { return canonicalData }
+
+        let encoder = TOMLEncoder()
+        encoder.outputFormatting = [.sortedKeys, .prettyPrinted]
+        return try encoder.encode(merged)
     }
 
     private static func encodeCanonical(_ export: SettingsExport) throws -> Data {
@@ -47,15 +62,8 @@ enum SettingsTOMLCodec {
     static func decode(_ data: Data) throws -> SettingsExport {
         let activeHyperKeyModifiers = HyperKeyModifiers(carbonMask: KeySymbolMapper.hyperModifiers) ?? .default
         defer { KeySymbolMapper.setHyperKeyModifiers(activeHyperKeyModifiers) }
-        do {
-            let canonical = try TOMLDecoder().decode(CanonicalTOMLConfig.self, from: data)
-            return canonical.toSettingsExport()
-        } catch DecodingError.keyNotFound(_, _) {
-            let decoder = TOMLDecoder()
-            decoder.userInfo[.settingsTOMLRecoverMissingKeys] = true
-            let canonical = try decoder.decode(CanonicalTOMLConfig.self, from: data)
-            return canonical.toSettingsExport()
-        }
+        let canonical = try TOMLDecoder().decode(CanonicalTOMLConfig.self, from: data)
+        return canonical.toSettingsExport()
     }
 
     static func unknownKeyPaths(in data: Data) -> [String] {

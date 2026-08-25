@@ -136,6 +136,10 @@ final class WindowActionHandler {
         overviewControllerStorage?.updateSettings()
     }
 
+    func invalidateOverviewDeferredActionsForServiceStop() {
+        overviewControllerStorage?.invalidateDeferredActionsForServiceStop()
+    }
+
     func handleOverviewWindowRemoved(_ entry: WindowState) {
         overviewControllerStorage?.handleManagedWindowRemoved(entry)
     }
@@ -153,10 +157,6 @@ final class WindowActionHandler {
 
     func isOverviewOpen() -> Bool {
         overviewControllerStorage?.isOpen == true
-    }
-
-    func isPointInOverview(_ point: CGPoint) -> Bool {
-        overviewController.isPointInside(point)
     }
 
     private func activateWindowFromOverview(handle: WindowHandle, workspaceId: WorkspaceDescriptor.ID) {
@@ -788,7 +788,6 @@ final class WindowActionHandler {
                             animationConfig: nil,
                             fromContainerIndex: nil
                         )
-                        targetState.selectionProgress = 0
                     }
                 }
             }

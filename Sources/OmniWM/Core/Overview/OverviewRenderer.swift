@@ -141,7 +141,6 @@ enum OverviewRenderer {
         static let workspaceLabelActive = CGColor(red: 0.3, green: 0.7, blue: 1.0, alpha: 1.0)
         static let workspaceLabelInactive = CGColor(gray: 0.6, alpha: 1.0)
         static let dropTarget = CGColor(red: 0.2, green: 0.8, blue: 1.0, alpha: 1.0)
-        static let dropTargetBackground = CGColor(red: 0.1, green: 0.6, blue: 1.0, alpha: 0.2)
         static let columnBackground = CGColor(red: 0.12, green: 0.12, blue: 0.16, alpha: 0.6)
         static let columnBorder = CGColor(red: 0.25, green: 0.25, blue: 0.3, alpha: 1.0)
         static let columnDivider = CGColor(red: 0.2, green: 0.2, blue: 0.25, alpha: 0.8)

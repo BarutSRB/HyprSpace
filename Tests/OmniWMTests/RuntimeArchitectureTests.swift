@@ -261,35 +261,38 @@ final class RuntimeArchitectureTests: XCTestCase {
     }
 
     @MainActor
-    func testManagedFocusRequestCarriesOriginAndResistsPointerDowngrade() {
-        let bridge = IntentLedger()
+    func testManagedFocusRequestMergesEveryOriginPairAtDeclaredPrecedence() {
         let workspaceId = WorkspaceDescriptor.ID()
         let token = WindowToken(pid: 100, windowId: 42)
+        let cases: [(ManagedFocusOrigin, ManagedFocusOrigin, ManagedFocusOrigin)] = [
+            (.focusFollowsMouse, .focusFollowsMouse, .focusFollowsMouse),
+            (.focusFollowsMouse, .pointerHover, .pointerHover),
+            (.focusFollowsMouse, .keyboardOrProgrammatic, .keyboardOrProgrammatic),
+            (.pointerHover, .focusFollowsMouse, .pointerHover),
+            (.pointerHover, .pointerHover, .pointerHover),
+            (.pointerHover, .keyboardOrProgrammatic, .keyboardOrProgrammatic),
+            (.keyboardOrProgrammatic, .focusFollowsMouse, .keyboardOrProgrammatic),
+            (.keyboardOrProgrammatic, .pointerHover, .keyboardOrProgrammatic),
+            (.keyboardOrProgrammatic, .keyboardOrProgrammatic, .keyboardOrProgrammatic)
+        ]
 
-        let pointerRequest = bridge.beginManagedRequest(
-            token: token,
-            workspaceId: workspaceId,
-            origin: .pointerHover
-        )
-        XCTAssertEqual(pointerRequest.origin, .pointerHover)
-        XCTAssertFalse(pointerRequest.origin.allowsMouseToFocusedWarp)
+        for (current, incoming, expected) in cases {
+            let ledger = IntentLedger()
+            let initial = ledger.beginManagedRequest(
+                token: token,
+                workspaceId: workspaceId,
+                origin: current
+            )
+            let merged = ledger.beginManagedRequest(
+                token: token,
+                workspaceId: workspaceId,
+                origin: incoming
+            )
 
-        let keyboardRequest = bridge.beginManagedRequest(
-            token: token,
-            workspaceId: workspaceId,
-            origin: .keyboardOrProgrammatic
-        )
-        XCTAssertEqual(keyboardRequest.requestId, pointerRequest.requestId)
-        XCTAssertEqual(keyboardRequest.origin, .keyboardOrProgrammatic)
-        XCTAssertTrue(keyboardRequest.origin.allowsMouseToFocusedWarp)
-
-        let repeatedPointerRequest = bridge.beginManagedRequest(
-            token: token,
-            workspaceId: workspaceId,
-            origin: .pointerHover
-        )
-        XCTAssertEqual(repeatedPointerRequest.requestId, pointerRequest.requestId)
-        XCTAssertEqual(repeatedPointerRequest.origin, .keyboardOrProgrammatic)
+            XCTAssertEqual(merged.requestId, initial.requestId)
+            XCTAssertEqual(merged.origin, expected, "\(current) + \(incoming)")
+            XCTAssertEqual(merged.origin.allowsMouseToFocusedWarp, expected == .keyboardOrProgrammatic)
+        }
     }
 
     @MainActor
@@ -323,6 +326,18 @@ final class RuntimeArchitectureTests: XCTestCase {
         _ = bridge.beginManagedRequest(
             token: token,
             workspaceId: workspaceId,
+            origin: .focusFollowsMouse
+        )
+        let focusFollowsMouseConfirmation = try XCTUnwrap(bridge.confirmManagedRequest(
+            token: token,
+            source: .focusedWindowChanged
+        ))
+        XCTAssertEqual(focusFollowsMouseConfirmation.origin, .focusFollowsMouse)
+        XCTAssertFalse(bridge.allowsMouseToFocusedWarp(for: token))
+
+        _ = bridge.beginManagedRequest(
+            token: token,
+            workspaceId: workspaceId,
             origin: .pointerHover
         )
         _ = try XCTUnwrap(bridge.confirmManagedRequest(
@@ -347,9 +362,9 @@ final class RuntimeArchitectureTests: XCTestCase {
     }
 
     @MainActor
-    func testPointerHoverManagedFocusDoesNotMoveMouseToFocusedWindowOnActivationConfirm() throws {
+    func testFocusFollowsMouseManagedFocusDoesNotMoveMouseToFocusedWindowOnActivationConfirm() throws {
         let fixture = try Self.managedNiriActivationFixture(
-            origin: .pointerHover,
+            origin: .focusFollowsMouse,
             pid: 765_700,
             windowId: 765_800
         )
@@ -367,11 +382,33 @@ final class RuntimeArchitectureTests: XCTestCase {
     }
 
     @MainActor
-    func testPointerHoverManagedFocusConfirmationPreservesSettledNiriViewport() throws {
-        let fixture = try Self.managedNiriActivationFixture(
-            origin: .pointerHover,
+    func testFocusFollowsMouseManagedFocusConfirmationPreservesSettledNiriViewport() throws {
+        try assertManagedFocusConfirmationPreservesSettledNiriViewport(
+            origin: .focusFollowsMouse,
             pid: 765_710,
             windowId: 765_810
+        )
+    }
+
+    @MainActor
+    func testPointerHoverManagedFocusConfirmationPreservesSettledNiriViewport() throws {
+        try assertManagedFocusConfirmationPreservesSettledNiriViewport(
+            origin: .pointerHover,
+            pid: 765_720,
+            windowId: 765_820
+        )
+    }
+
+    @MainActor
+    private func assertManagedFocusConfirmationPreservesSettledNiriViewport(
+        origin: ManagedFocusOrigin,
+        pid: pid_t,
+        windowId: Int
+    ) throws {
+        let fixture = try Self.managedNiriActivationFixture(
+            origin: origin,
+            pid: pid,
+            windowId: windowId
         )
         let controller = fixture.controller
         let workspaceId = fixture.entry.workspaceId
@@ -380,12 +417,12 @@ final class RuntimeArchitectureTests: XCTestCase {
         controller.intentLedger.clock = { now }
 
         for index in 1 ..< 3 {
-            let pid = pid_t(765_710 + index)
-            let windowId = 765_810 + index
+            let addedPID = pid_t(Int(pid) + index)
+            let addedWindowId = windowId + index
             let token = controller.workspaceManager.addWindow(
-                AXWindowRef(element: AXUIElementCreateApplication(pid), windowId: windowId),
-                pid: pid,
-                windowId: windowId,
+                AXWindowRef(element: AXUIElementCreateApplication(addedPID), windowId: addedWindowId),
+                pid: addedPID,
+                windowId: addedWindowId,
                 to: workspaceId
             )
             _ = engine.addWindow(token: token, to: workspaceId, afterSelection: nil)
@@ -673,10 +710,11 @@ final class RuntimeArchitectureTests: XCTestCase {
     }
 
     @MainActor
-    func testNiriPointerHoverActivationFocusesImmediatelyWhenLayoutRefreshBlocked() throws {
+    func testNiriFocusFollowsMouseActivationFocusesImmediatelyWhenLayoutRefreshBlocked() throws {
         let controller = Self.controller()
         let workspaceId = try XCTUnwrap(controller.workspaceManager.workspaceId(for: "1", createIfMissing: true))
         _ = controller.workspaceManager.focusWorkspace(named: "1")
+        controller.setFocusFollowsMouse(true)
         controller.niriLayoutHandler.enableNiriLayout()
         controller.layoutRefreshController.layoutState.pendingRefresh = nil
         let token = controller.workspaceManager.addWindow(
@@ -714,7 +752,7 @@ final class RuntimeArchitectureTests: XCTestCase {
         )
 
         XCTAssertNil(controller.layoutRefreshController.layoutState.pendingRefresh)
-        XCTAssertEqual(controller.intentLedger.activeManagedRequest?.origin, .pointerHover)
+        XCTAssertEqual(controller.intentLedger.activeManagedRequest?.origin, .focusFollowsMouse)
     }
 
     func testMouseMoveWindowIdPrefersRoutedFieldAndFallsBackToTopmostField() throws {
@@ -801,6 +839,8 @@ final class RuntimeArchitectureTests: XCTestCase {
     ) throws {
         var focusedTokens: [WindowToken] = []
         var focusObservedPendingRelayout: [Bool] = []
+        var focusObservedSelectedNodeIds: [NodeId?] = []
+        var focusWorkspaceId: WorkspaceDescriptor.ID?
         weak var focusController: WMController?
         let controller = Self.controller(
             windowFocusOperations: WindowFocusOperations(
@@ -809,6 +849,11 @@ final class RuntimeArchitectureTests: XCTestCase {
                     focusedTokens.append(WindowToken(pid: pid, windowId: Int(windowId)))
                     focusObservedPendingRelayout.append(
                         focusController?.layoutRefreshController.layoutState.pendingRefresh != nil
+                    )
+                    focusObservedSelectedNodeIds.append(
+                        focusWorkspaceId.flatMap {
+                            focusController?.workspaceManager.niriViewportState(for: $0).selectedNodeId
+                        }
                     )
                 },
                 raiseWindow: { _ in }
@@ -833,6 +878,7 @@ final class RuntimeArchitectureTests: XCTestCase {
         )
         controller.workspaceManager.applyMonitorConfigurationChange([monitor])
         let workspaceId = try XCTUnwrap(controller.workspaceManager.workspaceId(for: "1", createIfMissing: true))
+        focusWorkspaceId = workspaceId
         defer {
             controller.layoutRefreshController.stopScrollAnimation(for: displayId)
             controller.workspaceManager.animationDriver.removeMotions(for: [workspaceId])
@@ -960,12 +1006,13 @@ final class RuntimeArchitectureTests: XCTestCase {
 
         XCTAssertEqual(focusedTokens, [tokens[1]], file: file, line: line)
         XCTAssertEqual(focusObservedPendingRelayout, [false], file: file, line: line)
+        XCTAssertEqual(focusObservedSelectedNodeIds, [nodes[1].id], file: file, line: line)
         let stateAfterHover = controller.workspaceManager.niriViewportState(for: workspaceId)
         XCTAssertEqual(stateAfterHover.selectedNodeId, nodes[1].id, file: file, line: line)
         XCTAssertEqual(stateAfterHover.activeColumnIndex, 1, file: file, line: line)
         XCTAssertEqual(
             controller.intentLedger.activeManagedRequest?.origin,
-            .pointerHover,
+            .focusFollowsMouse,
             file: file,
             line: line
         )
@@ -1125,7 +1172,7 @@ final class RuntimeArchitectureTests: XCTestCase {
 
         XCTAssertEqual(focusedTokens, [topmostFloatingToken])
         XCTAssertEqual(controller.intentLedger.activeManagedRequest?.token, topmostFloatingToken)
-        XCTAssertEqual(controller.intentLedger.activeManagedRequest?.origin, .pointerHover)
+        XCTAssertEqual(controller.intentLedger.activeManagedRequest?.origin, .focusFollowsMouse)
         XCTAssertNil(controller.layoutRefreshController.layoutState.pendingRefresh)
 
         let ignoredFloatingToken = controller.workspaceManager.addWindow(
@@ -1467,7 +1514,7 @@ final class RuntimeArchitectureTests: XCTestCase {
 
         XCTAssertEqual(focusedTokens.last, token)
         XCTAssertNil(controller.layoutRefreshController.layoutState.pendingRefresh)
-        XCTAssertEqual(controller.intentLedger.activeManagedRequest?.origin, .pointerHover)
+        XCTAssertEqual(controller.intentLedger.activeManagedRequest?.origin, .focusFollowsMouse)
 
         let exactTiledToken = controller.workspaceManager.addWindow(
             AXWindowRef(element: AXUIElementCreateApplication(765_710), windowId: 765_810),
@@ -2477,7 +2524,6 @@ final class RuntimeArchitectureTests: XCTestCase {
             targetFrame: frame,
             currentFrameHint: nil,
             writeResult: AXFrameWriteResult(
-                targetFrame: frame,
                 observedFrame: nil,
                 writeOrder: .sizeThenPosition,
                 sizeError: .success,
@@ -2498,7 +2544,6 @@ final class RuntimeArchitectureTests: XCTestCase {
             targetFrame: frame,
             currentFrameHint: nil,
             writeResult: AXFrameWriteResult(
-                targetFrame: frame,
                 observedFrame: frame.offsetBy(dx: 20, dy: 0),
                 writeOrder: .sizeThenPosition,
                 sizeError: .success,
@@ -3000,6 +3045,176 @@ final class RuntimeArchitectureTests: XCTestCase {
         XCTAssertEqual(secondResults.map(\.requestId), [secondRequest.requestId])
         XCTAssertEqual(ledger.lastAppliedFrame(for: 10), secondFrame)
         XCTAssertFalse(ledger.hasPendingFrameWrite(for: 10))
+    }
+
+    @MainActor
+    func testAXFrameLedgerPreservesPendingAllComponentsWhenPositionSupersedes() throws {
+        let ledger = AXFrameApplicationLedger()
+        let window = AXWindowRef(element: AXUIElementCreateApplication(getpid()), windowId: 10)
+        let first = ledger.prepareFrameApplication(
+            pid: getpid(),
+            windowId: 10,
+            expectedWindow: window,
+            frame: CGRect(x: 10, y: 20, width: 300, height: 200),
+            components: .all,
+            isRetry: false,
+            terminalObserver: nil
+        )
+        XCTAssertEqual(try XCTUnwrap(first.request).components, .all)
+
+        let second = ledger.prepareFrameApplication(
+            pid: getpid(),
+            windowId: 10,
+            expectedWindow: window,
+            frame: CGRect(x: 40, y: 50, width: 300, height: 200),
+            components: .position,
+            isRetry: false,
+            terminalObserver: nil
+        )
+
+        XCTAssertEqual(try XCTUnwrap(second.request).components, .all)
+    }
+
+    @MainActor
+    func testAXFrameLedgerUnionsPendingPositionAndSizeComponents() throws {
+        let ledger = AXFrameApplicationLedger()
+        let window = AXWindowRef(element: AXUIElementCreateApplication(getpid()), windowId: 10)
+        let first = ledger.prepareFrameApplication(
+            pid: getpid(),
+            windowId: 10,
+            expectedWindow: window,
+            frame: CGRect(x: 10, y: 20, width: 300, height: 200),
+            components: .position,
+            isRetry: false,
+            terminalObserver: nil
+        )
+        XCTAssertEqual(try XCTUnwrap(first.request).components, .position)
+
+        let second = ledger.prepareFrameApplication(
+            pid: getpid(),
+            windowId: 10,
+            expectedWindow: window,
+            frame: CGRect(x: 10, y: 20, width: 360, height: 240),
+            components: .size,
+            isRetry: false,
+            terminalObserver: nil
+        )
+
+        XCTAssertEqual(try XCTUnwrap(second.request).components, .all)
+    }
+
+    @MainActor
+    func testAXFrameLedgerPreservesVerificationAndCancelsSupersededObserver() throws {
+        let ledger = AXFrameApplicationLedger()
+        let window = AXWindowRef(element: AXUIElementCreateApplication(getpid()), windowId: 10)
+        let firstFrame = CGRect(x: 10, y: 20, width: 300, height: 200)
+        let latestFrame = CGRect(x: 40, y: 50, width: 300, height: 200)
+        var terminalResults: [AXFrameApplyResult] = []
+        let first = ledger.prepareFrameApplication(
+            pid: getpid(),
+            windowId: 10,
+            expectedWindow: window,
+            frame: firstFrame,
+            components: .all,
+            isRetry: false,
+            verify: true,
+            terminalObserver: { terminalResults.append($0) }
+        )
+        XCTAssertNotNil(first.request)
+
+        let second = ledger.prepareFrameApplication(
+            pid: getpid(),
+            windowId: 10,
+            expectedWindow: window,
+            frame: latestFrame,
+            components: .position,
+            isRetry: false,
+            verify: false,
+            terminalObserver: nil
+        )
+        let latestRequest = try XCTUnwrap(second.request)
+
+        XCTAssertEqual(latestRequest.components, .all)
+        XCTAssertTrue(latestRequest.verify)
+        XCTAssertEqual(second.deliveries.count, 1)
+        for delivery in second.deliveries {
+            delivery.deliver()
+        }
+        XCTAssertEqual(terminalResults.map(\.targetFrame), [firstFrame])
+        XCTAssertEqual(terminalResults.map(\.writeResult.failureReason), [.cancelled])
+
+        let outcome = ledger.handleFrameApplyResults([Self.frameResult(for: latestRequest)])
+        for delivery in outcome.deliveries {
+            delivery.deliver()
+        }
+
+        XCTAssertEqual(terminalResults.map(\.targetFrame), [firstFrame])
+    }
+
+    @MainActor
+    func testAcceptedFrameApplyClearsOnlyItsSkyLightLiveOrigin() {
+        let manager = AXManager()
+        defer { manager.cleanup() }
+        let pid: pid_t = 71037
+        let firstWindow = AXWindowRef(element: AXUIElementCreateApplication(pid), windowId: 10)
+        let firstFrame = CGRect(x: 10, y: 20, width: 300, height: 200)
+        manager.recordSkyLightMove(windowId: 10, origin: firstFrame.origin)
+        manager.recordSkyLightMove(windowId: 20, origin: CGPoint(x: 50, y: 60))
+
+        manager.handleAcceptedFrameApplySuccess(
+            AXFrameApplyResult(
+                pid: pid,
+                windowId: 10,
+                expectedWindow: firstWindow,
+                targetFrame: firstFrame,
+                currentFrameHint: nil,
+                writeResult: AXFrameWriteResult(
+                    observedFrame: firstFrame,
+                    writeOrder: .sizeThenPosition,
+                    sizeError: .success,
+                    positionError: .success,
+                    failureReason: nil,
+                    components: .all
+                )
+            )
+        )
+
+        XCTAssertNil(manager.skyLightLivePosition(for: 10))
+        XCTAssertEqual(manager.skyLightLivePosition(for: 20), CGPoint(x: 50, y: 60))
+    }
+
+    @MainActor
+    func testAXManagerCleanupInvalidatesAnimationFrameComponentProvenance() {
+        let manager = AXManager()
+        let windowId = 10
+        let frame = CGRect(x: 40, y: 50, width: 300, height: 200)
+        let translatedFrame = frame.offsetBy(dx: 30, dy: 0)
+        let resizedFrame = CGRect(
+            x: translatedFrame.minX,
+            y: translatedFrame.minY,
+            width: translatedFrame.width + 20,
+            height: translatedFrame.height
+        )
+        manager.confirmFrameWrite(for: windowId, frame: frame)
+        manager.recordSkyLightMove(windowId: windowId, origin: translatedFrame.origin)
+
+        XCTAssertEqual(
+            manager.animationFrameComponents(for: windowId, targetFrame: translatedFrame),
+            .position
+        )
+        XCTAssertEqual(
+            manager.animationFrameComponents(for: windowId, targetFrame: resizedFrame),
+            .all
+        )
+
+        manager.cleanup()
+
+        XCTAssertNil(manager.lastAppliedFrame(for: windowId))
+        XCTAssertNil(manager.skyLightLivePosition(for: windowId))
+        XCTAssertEqual(
+            manager.animationFrameComponents(for: windowId, targetFrame: translatedFrame),
+            .all
+        )
     }
 
     @MainActor
@@ -6206,6 +6421,7 @@ final class RuntimeArchitectureTests: XCTestCase {
             expectedWindow: request.expectedWindow,
             targetFrame: request.frame,
             currentFrameHint: request.currentFrameHint,
+            components: request.components,
             failureReason: failureReason
         )
     }
@@ -6217,6 +6433,7 @@ final class RuntimeArchitectureTests: XCTestCase {
         expectedWindow: AXWindowRef,
         targetFrame: CGRect,
         currentFrameHint: CGRect?,
+        components: AXFrameComponents = .all,
         failureReason: AXFrameWriteFailureReason? = nil
     ) -> AXFrameApplyResult {
         AXFrameApplyResult(
@@ -6227,12 +6444,12 @@ final class RuntimeArchitectureTests: XCTestCase {
             targetFrame: targetFrame,
             currentFrameHint: currentFrameHint,
             writeResult: AXFrameWriteResult(
-                targetFrame: targetFrame,
                 observedFrame: failureReason == nil ? targetFrame : nil,
                 writeOrder: .sizeThenPosition,
                 sizeError: .success,
                 positionError: .success,
-                failureReason: failureReason
+                failureReason: failureReason,
+                components: components
             )
         )
     }
@@ -6637,7 +6854,7 @@ final class RuntimeArchitectureTests: XCTestCase {
             token, in: leftWs, onMonitor: leftMonitor.id, activateWorkspaceOnMonitor: true
         )
 
-        controller.commandHandler.handleHotkeyCommand(.move(.right))
+        controller.commandHandler.performCommand(.move(.right))
 
         XCTAssertEqual(controller.workspaceManager.workspace(for: token), leftWs)
     }
@@ -6734,14 +6951,14 @@ final class RuntimeArchitectureTests: XCTestCase {
 
         controller.motionPolicy.animationsEnabled = false
         XCTAssertEqual(
-            controller.commandHandler.handleHotkeyCommand(.setContainerPrimarySpan(.setProportion(50))),
+            controller.commandHandler.performCommand(.setContainerPrimarySpan(.setProportion(50))),
             .executed
         )
         let sourceColumn = try XCTUnwrap(engine.findColumn(containing: node, in: leftWs))
         XCTAssertEqual(sourceColumn.width, .proportion(0.5))
         XCTAssertTrue(sourceColumn.hasManualSingleWindowWidthOverride)
 
-        XCTAssertEqual(controller.commandHandler.handleHotkeyCommand(.move(.right)), .executed)
+        XCTAssertEqual(controller.commandHandler.performCommand(.move(.right)), .executed)
 
         XCTAssertEqual(controller.workspaceManager.workspace(for: token), rightWs)
         let movedNode = try XCTUnwrap(engine.findNode(for: token, in: rightWs))
@@ -6792,14 +7009,14 @@ final class RuntimeArchitectureTests: XCTestCase {
 
         controller.motionPolicy.animationsEnabled = false
         XCTAssertEqual(
-            controller.commandHandler.handleHotkeyCommand(.setContainerPrimarySpan(.setProportion(50))),
+            controller.commandHandler.performCommand(.setContainerPrimarySpan(.setProportion(50))),
             .executed
         )
         let sourceColumn = try XCTUnwrap(engine.findColumn(containing: node, in: leftWs))
         XCTAssertEqual(sourceColumn.width, .proportion(0.5))
         XCTAssertTrue(sourceColumn.hasManualSingleWindowWidthOverride)
 
-        XCTAssertEqual(controller.commandHandler.handleHotkeyCommand(.move(.right)), .executed)
+        XCTAssertEqual(controller.commandHandler.performCommand(.move(.right)), .executed)
 
         XCTAssertEqual(controller.workspaceManager.workspace(for: token), rightWs)
         let movedNode = try XCTUnwrap(engine.findNode(for: token, in: rightWs))
@@ -6842,7 +7059,7 @@ final class RuntimeArchitectureTests: XCTestCase {
             sourceToken, in: leftWs, onMonitor: leftMonitor.id, activateWorkspaceOnMonitor: true
         )
         XCTAssertEqual(
-            controller.commandHandler.handleHotkeyCommand(.setContainerPrimarySpan(.setProportion(50))),
+            controller.commandHandler.performCommand(.setContainerPrimarySpan(.setProportion(50))),
             .executed
         )
         let sourceColumn = try XCTUnwrap(engine.findColumn(containing: sourceNode, in: leftWs))
@@ -6988,7 +7205,7 @@ final class RuntimeArchitectureTests: XCTestCase {
         node.renderedFrame = CGRect(x: 420, y: 20, width: 360, height: 760)
 
         controller.motionPolicy.animationsEnabled = true
-        controller.commandHandler.handleHotkeyCommand(.move(.up))
+        controller.commandHandler.performCommand(.move(.up))
 
         XCTAssertEqual(controller.workspaceManager.workspace(for: token), destWs)
         let movedNode = try XCTUnwrap(engine.findNode(for: token, in: destWs))
@@ -7066,7 +7283,7 @@ final class RuntimeArchitectureTests: XCTestCase {
         node.renderedFrame = CGRect(x: 420, y: 820, width: 360, height: 760)
 
         controller.motionPolicy.animationsEnabled = true
-        controller.commandHandler.handleHotkeyCommand(.move(.down))
+        controller.commandHandler.performCommand(.move(.down))
 
         XCTAssertEqual(controller.workspaceManager.workspace(for: token), destWs)
         let movedNode = try XCTUnwrap(engine.findNode(for: token, in: destWs))
@@ -7145,7 +7362,7 @@ final class RuntimeArchitectureTests: XCTestCase {
         node.renderedFrame = CGRect(x: 1220, y: 20, width: 360, height: 360)
 
         controller.motionPolicy.animationsEnabled = true
-        controller.commandHandler.handleHotkeyCommand(.move(.left))
+        controller.commandHandler.performCommand(.move(.left))
 
         XCTAssertEqual(controller.workspaceManager.workspace(for: token), leftWs)
         let movedNode = try XCTUnwrap(engine.findNode(for: token, in: leftWs))

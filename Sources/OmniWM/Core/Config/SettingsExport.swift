@@ -16,6 +16,7 @@ struct SettingsColor: Codable, Equatable {
 struct SettingsExport: Equatable {
     var hotkeysEnabled: Bool
     var focusFollowsMouse: Bool
+    var raiseOnMouseFocus: Bool
     var focusLockModifier: String
     var moveMouseToFocusedWindow: Bool
     var focusFollowsWindowToMonitor: Bool
@@ -31,6 +32,7 @@ struct SettingsExport: Equatable {
     var outerGapRight: Double
     var outerGapTop: Double
     var outerGapBottom: Double
+    var fullscreenUsesOuterGaps: Bool
 
     var niriVisibleContainerCount: Int
     var niriInfiniteLoop: Bool
@@ -146,6 +148,7 @@ extension SettingsExport {
         SettingsExport(
             hotkeysEnabled: true,
             focusFollowsMouse: false,
+            raiseOnMouseFocus: false,
             focusLockModifier: FocusLockModifier.off.rawValue,
             moveMouseToFocusedWindow: false,
             focusFollowsWindowToMonitor: false,
@@ -161,6 +164,7 @@ extension SettingsExport {
             outerGapRight: 0,
             outerGapTop: 0,
             outerGapBottom: 0,
+            fullscreenUsesOuterGaps: false,
             niriVisibleContainerCount: 2,
             niriInfiniteLoop: false,
             niriCenterFocusedColumn: CenterFocusedColumn.never.rawValue,

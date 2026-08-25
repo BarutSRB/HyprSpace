@@ -6,6 +6,16 @@ import AppKit
 @MainActor
 final class SwapTargetOverlay {
     private var overlayWindow: NSPanel?
+    private let surfaceCoordinator: SurfaceCoordinator
+    private var surfaceId: String?
+
+    init(surfaceCoordinator: SurfaceCoordinator = .shared) {
+        self.surfaceCoordinator = surfaceCoordinator
+    }
+
+    isolated deinit {
+        destroy()
+    }
 
     func show(at frame: CGRect) {
         if overlayWindow == nil {
@@ -20,6 +30,16 @@ final class SwapTargetOverlay {
 
     func hide() {
         overlayWindow?.orderOut(nil)
+    }
+
+    func destroy() {
+        if let surfaceId {
+            surfaceCoordinator.unregister(id: surfaceId)
+            self.surfaceId = nil
+        }
+        overlayWindow?.orderOut(nil)
+        overlayWindow?.close()
+        overlayWindow = nil
     }
 
     private func createOverlayWindow() -> NSPanel {
@@ -50,9 +70,11 @@ final class SwapTargetOverlay {
         contentView.layer?.backgroundColor = NSColor(red: 0, green: 120.0 / 255.0, blue: 1.0, alpha: 0.25).cgColor
         panel.contentView = contentView
 
-        SurfaceCoordinator.shared.register(
+        let surfaceId = "swap-target-\(ObjectIdentifier(panel).hashValue)"
+        self.surfaceId = surfaceId
+        surfaceCoordinator.register(
             window: panel,
-            id: "swap-target-\(ObjectIdentifier(panel).hashValue)",
+            id: surfaceId,
             policy: SurfacePolicy(
                 kind: .dragGhost,
                 hitTestPolicy: .passthrough,

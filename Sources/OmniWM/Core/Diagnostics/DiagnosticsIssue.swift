@@ -78,7 +78,7 @@ struct DiagnosticsIssue: Identifiable, Equatable {
         case let .fixedDock(monitorName, _, _, _): "Fixed Dock detected on \(monitorName)"
         case .horizontalDisplayArrangement: "Unsupported vertical display overlap detected"
         case .unknownConfigKeys: "Unrecognized settings keys"
-        case .settingsFileCorrupt: "Settings file was reset"
+        case .settingsFileCorrupt: "Settings recovery file available"
         }
     }
 
@@ -108,8 +108,8 @@ struct DiagnosticsIssue: Identifiable, Equatable {
             "settings.toml contains keys OmniWM does not recognize: \(keyPaths.joined(separator: ", ")). "
                 + "They are ignored."
         case .settingsFileCorrupt:
-            "OmniWM could not parse settings.toml and reset it to defaults. "
-                + "Your previous file was kept as settings.toml.corrupt."
+            "OmniWM preserved settings data it could not parse as settings.toml.corrupt "
+                + "or settings.toml.corrupt.1."
         }
     }
 
@@ -135,7 +135,8 @@ struct DiagnosticsIssue: Identifiable, Equatable {
         case .unknownConfigKeys:
             "Remove or fix the keys in ~/.config/omniwm/settings.toml."
         case .settingsFileCorrupt:
-            "Inspect ~/.config/omniwm/settings.toml.corrupt to recover values, then delete it to dismiss this notice."
+            "Inspect settings.toml.corrupt and settings.toml.corrupt.1 in ~/.config/omniwm if present, "
+                + "then delete the recovery files to dismiss this notice."
         }
     }
 

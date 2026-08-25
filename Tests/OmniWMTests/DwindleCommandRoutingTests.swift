@@ -28,7 +28,7 @@ final class DwindleCommandRoutingTests: XCTestCase {
 
         XCTAssertEqual(fixture.engine.activeToken(in: fixture.sourceWorkspaceId), fixture.activeToken)
         XCTAssertEqual(
-            fixture.controller.commandHandler.handleHotkeyCommand(.focus(.down)),
+            fixture.controller.commandHandler.performCommand(.focus(.down)),
             .executed
         )
 
@@ -51,7 +51,7 @@ final class DwindleCommandRoutingTests: XCTestCase {
 
         XCTAssertEqual(fixture.engine.activeToken(in: fixture.sourceWorkspaceId), fixture.activeToken)
         XCTAssertEqual(
-            fixture.controller.commandHandler.handleHotkeyCommand(.focus(.down)),
+            fixture.controller.commandHandler.performCommand(.focus(.down)),
             .executed
         )
 
@@ -95,7 +95,7 @@ final class DwindleCommandRoutingTests: XCTestCase {
         defer { unblockLayoutRefresh(fixture.controller, blocker: blocker) }
 
         XCTAssertEqual(
-            fixture.controller.commandHandler.handleHotkeyCommand(.focus(.down)),
+            fixture.controller.commandHandler.performCommand(.focus(.down)),
             .executed
         )
 
@@ -112,7 +112,7 @@ final class DwindleCommandRoutingTests: XCTestCase {
         defer { unblockLayoutRefresh(fixture.controller, blocker: blocker) }
 
         XCTAssertEqual(
-            fixture.controller.commandHandler.handleHotkeyCommand(.focusWindowDownOrTop),
+            fixture.controller.commandHandler.performCommand(.focusWindowDownOrTop),
             .executed
         )
         XCTAssertEqual(fixture.engine.activeToken(in: fixture.sourceWorkspaceId), fixture.firstToken)
@@ -122,13 +122,13 @@ final class DwindleCommandRoutingTests: XCTestCase {
         )
         fixture.controller.layoutRefreshController.layoutState.pendingRefresh = nil
         XCTAssertEqual(
-            fixture.controller.commandHandler.handleHotkeyCommand(.focusWindowUpOrBottom),
+            fixture.controller.commandHandler.performCommand(.focusWindowUpOrBottom),
             .executed
         )
         XCTAssertEqual(fixture.engine.activeToken(in: fixture.sourceWorkspaceId), fixture.activeToken)
 
         XCTAssertEqual(
-            fixture.controller.commandHandler.handleHotkeyCommand(.moveWindowUp),
+            fixture.controller.commandHandler.performCommand(.moveWindowUp),
             .executed
         )
         XCTAssertEqual(
@@ -139,7 +139,7 @@ final class DwindleCommandRoutingTests: XCTestCase {
             [fixture.activeToken, fixture.firstToken]
         )
         XCTAssertEqual(
-            fixture.controller.commandHandler.handleHotkeyCommand(.moveWindowUp),
+            fixture.controller.commandHandler.performCommand(.moveWindowUp),
             .executed
         )
         XCTAssertEqual(
@@ -150,7 +150,7 @@ final class DwindleCommandRoutingTests: XCTestCase {
             [fixture.activeToken, fixture.firstToken]
         )
         XCTAssertEqual(
-            fixture.controller.commandHandler.handleHotkeyCommand(.moveWindowDown),
+            fixture.controller.commandHandler.performCommand(.moveWindowDown),
             .executed
         )
         XCTAssertEqual(
@@ -170,7 +170,7 @@ final class DwindleCommandRoutingTests: XCTestCase {
         defer { unblockLayoutRefresh(fixture.controller, blocker: blocker) }
 
         XCTAssertEqual(
-            fixture.controller.commandHandler.handleHotkeyCommand(.move(.down)),
+            fixture.controller.commandHandler.performCommand(.move(.down)),
             .executed
         )
 
@@ -207,7 +207,7 @@ final class DwindleCommandRoutingTests: XCTestCase {
         defer { unblockLayoutRefresh(fixture.controller, blocker: blocker) }
 
         XCTAssertEqual(
-            fixture.controller.commandHandler.handleHotkeyCommand(.move(.down)),
+            fixture.controller.commandHandler.performCommand(.move(.down)),
             .executed
         )
 
@@ -267,7 +267,7 @@ final class DwindleCommandRoutingTests: XCTestCase {
         defer { unblockLayoutRefresh(fixture.controller, blocker: blocker) }
 
         XCTAssertEqual(
-            fixture.controller.commandHandler.handleHotkeyCommand(.moveColumn(.right)),
+            fixture.controller.commandHandler.performCommand(.moveColumn(.right)),
             .executed
         )
 
@@ -289,7 +289,7 @@ final class DwindleCommandRoutingTests: XCTestCase {
         fixture.controller.layoutRefreshController.layoutState.pendingRefresh = nil
 
         XCTAssertEqual(
-            fixture.controller.commandHandler.handleHotkeyCommand(.moveColumn(.down)),
+            fixture.controller.commandHandler.performCommand(.moveColumn(.down)),
             .executed
         )
 
@@ -329,7 +329,7 @@ final class DwindleCommandRoutingTests: XCTestCase {
         fixture.controller.layoutRefreshController.layoutState.pendingRefresh = nil
 
         XCTAssertEqual(
-            fixture.controller.commandHandler.handleHotkeyCommand(.cycleSizeForward),
+            fixture.controller.commandHandler.performCommand(.cycleSizeForward),
             .executed
         )
 

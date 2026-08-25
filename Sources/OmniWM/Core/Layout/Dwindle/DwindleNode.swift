@@ -88,15 +88,6 @@ final class DwindleTile {
     }
 
     @discardableResult
-    func moveActive(offset: Int) -> Bool {
-        let destination = activeIndex + offset
-        guard members.indices.contains(destination) else { return false }
-        members.swapAt(activeIndex, destination)
-        activeIndex = destination
-        return true
-    }
-
-    @discardableResult
     func move(_ token: WindowToken, to destination: Int) -> Bool {
         guard let source = memberIndex(for: token),
               members.indices.contains(destination),
@@ -124,6 +115,13 @@ struct DwindleTileSnapshot: Equatable {
     var isGrouped: Bool {
         members.count > 1
     }
+}
+
+struct DwindleGroupedTileGeometry {
+    let id: DwindleTileId
+    let activeToken: WindowToken
+    let tileFrame: CGRect?
+    let contentFrame: CGRect?
 }
 
 enum DwindleWindowActivationOutcome: Equatable {

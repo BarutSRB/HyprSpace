@@ -17,11 +17,6 @@ final class CommandHandler {
     }
 
     @discardableResult
-    func handleHotkeyCommand(_ command: HotkeyCommand) -> ExternalCommandResult {
-        performCommand(command)
-    }
-
-    @discardableResult
     func handleHotkeyInvocation(_ invocation: HotkeyInvocation) -> ExternalCommandResult {
         guard let controller else { return .notFound }
         guard controller.isEnabled else { return .ignoredDisabled }
@@ -36,11 +31,6 @@ final class CommandHandler {
         case .inactive:
             return performCommand(invocation.command)
         }
-    }
-
-    @discardableResult
-    func handleCommand(_ command: HotkeyCommand) -> ExternalCommandResult {
-        performCommand(command)
     }
 
     @discardableResult
@@ -208,13 +198,6 @@ final class CommandHandler {
             clearPreselectInDwindle()
         case .workspaceBackAndForth:
             controller.workspaceNavigationHandler.workspaceBackAndForth()
-        case let .focusWorkspaceAnywhere(index):
-            controller.workspaceNavigationHandler.focusWorkspaceAnywhere(index: index)
-        case let .moveWindowToWorkspaceOnMonitor(wsIdx, monDir):
-            controller.workspaceNavigationHandler.moveWindowToWorkspaceOnMonitor(
-                workspaceIndex: wsIdx,
-                monitorDirection: monDir
-            )
         case .openCommandPalette:
             controller.openCommandPalette()
         case .raiseAllFloatingWindows:

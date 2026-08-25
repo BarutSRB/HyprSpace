@@ -338,7 +338,6 @@ extension NiriLayoutEngine {
                 viewFrame: monitorForWorkspace(workspaceId)?.frame,
                 orientation: orientation
             )
-            projectedState.selectionProgress = 0
             state = projectedState
             state.activeColumnIndex = projectedColumns[targetProjectedIndex].durableIndex
         }

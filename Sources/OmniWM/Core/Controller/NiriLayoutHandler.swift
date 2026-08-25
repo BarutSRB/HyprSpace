@@ -140,6 +140,9 @@ enum StructuralMutationOutcome: Equatable {
         if scrollAnimationByDisplay[displayId] == workspaceId {
             return false
         }
+        if let displacedWorkspaceId = scrollAnimationByDisplay[displayId] {
+            cancelAnimationMotion(for: displacedWorkspaceId, gestureDisposition: .settleLiveOffset)
+        }
         scrollAnimationByDisplay[displayId] = workspaceId
         return true
     }
@@ -150,19 +153,25 @@ enum StructuralMutationOutcome: Equatable {
 
     func tickScrollAnimation(targetTime: CFTimeInterval, displayId: CGDirectDisplayID) {
         guard let wsId = scrollAnimationByDisplay[displayId] else { return }
-        guard let controller, let engine = controller.niriEngine else {
-            controller?.layoutRefreshController.stopScrollAnimation(for: displayId)
+        guard let controller else {
+            scrollAnimationByDisplay.removeValue(forKey: displayId)
+            return
+        }
+        guard let engine = controller.niriEngine else {
+            cancelAnimationMotion(for: wsId)
+            controller.layoutRefreshController.stopScrollAnimation(for: displayId)
             return
         }
 
         guard let monitor = controller.workspaceManager.monitors.first(where: { $0.displayId == displayId }) else {
+            cancelAnimationMotion(for: wsId, gestureDisposition: .settleLiveOffset)
             controller.layoutRefreshController.stopScrollAnimation(for: displayId)
             return
         }
 
         guard controller.workspaceManager.activeWorkspaceOrFirst(on: monitor.id)?.id == wsId else {
+            cancelAnimationMotion(for: wsId, gestureDisposition: .settleLiveOffset)
             controller.layoutRefreshController.stopScrollAnimation(for: displayId)
-            controller.workspaceManager.animationDriver.removeMotions(for: [wsId])
             controller.layoutRefreshController.hideInactiveWorkspaces(
                 activeWorkspaceIds: activeWorkspaceIds(controller: controller)
             )
@@ -173,9 +182,24 @@ enum StructuralMutationOutcome: Equatable {
         let animsStart = scrollTrace ? CACurrentMediaTime() : 0
         let windowAnimationsRunning = engine.tickAllWindowAnimations(in: wsId, at: targetTime)
         let columnAnimationsRunning = engine.tickAllColumnAnimations(in: wsId, at: targetTime)
-        let viewportMotionRunning = controller.workspaceManager.animationDriver.tick(in: wsId, at: targetTime)
+        let viewportTick = controller.workspaceManager.animationDriver.tickResult(in: wsId, at: targetTime)
+        if case let .expiredGesture(relativeOffset, sessionID) = viewportTick {
+            controller.workspaceManager.withNiriViewportState(for: wsId) { state in
+                state.jumpOffset(to: state.viewOffset + CGFloat(relativeOffset))
+                state.viewOffsetToRestore = nil
+                state.activatePrevColumnOnRemoval = nil
+            }
+            controller.mouseEventHandler.handleExpiredViewportGesture(
+                in: wsId,
+                sessionID: sessionID
+            )
+        }
+        let viewportMotionRunning = viewportTick.isRunning
         let animsMs = scrollTrace ? (CACurrentMediaTime() - animsStart) * 1000 : 0
         let state = controller.workspaceManager.niriViewportState(for: wsId)
+        let animationsOngoing = viewportMotionRunning
+            || windowAnimationsRunning
+            || columnAnimationsRunning
 
         let didApplyFrames = applyFramesOnDemand(
             wsId: wsId,
@@ -183,6 +207,7 @@ enum StructuralMutationOutcome: Equatable {
             engine: engine,
             monitor: monitor,
             animationTime: targetTime,
+            settlesAnimation: !animationsOngoing,
             animsMs: animsMs
         )
         guard didApplyFrames else {
@@ -192,17 +217,8 @@ enum StructuralMutationOutcome: Equatable {
             )
             return
         }
-        let animationsOngoing = viewportMotionRunning
-            || windowAnimationsRunning
-            || columnAnimationsRunning
 
         if !animationsOngoing {
-            applyFramesOnDemand(
-                wsId: wsId,
-                state: controller.workspaceManager.niriViewportState(for: wsId),
-                engine: engine,
-                monitor: monitor
-            )
             finalizeAnimation()
             controller.layoutRefreshController.hideInactiveWorkspaces(
                 activeWorkspaceIds: activeWorkspaceIds(controller: controller)
@@ -228,6 +244,7 @@ enum StructuralMutationOutcome: Equatable {
         engine: NiriLayoutEngine,
         monitor: Monitor,
         animationTime: TimeInterval? = nil,
+        settlesAnimation: Bool = false,
         animsMs: Double = 0
     ) -> Bool {
         guard let controller,
@@ -255,7 +272,8 @@ enum StructuralMutationOutcome: Equatable {
             snapshot: snapshot,
             engine: engine,
             monitor: monitor,
-            animationTime: animationTime
+            animationTime: animationTime,
+            settlesAnimation: settlesAnimation
         )
         let buildSeconds = CACurrentMediaTime() - buildStart
         controller.layoutRefreshController.recordScrollBuild(
@@ -306,6 +324,7 @@ enum StructuralMutationOutcome: Equatable {
         ScrollTickTrace.shared.record(
             ScrollTickTrace.Record(
                 mediaTime: CACurrentMediaTime(),
+                effectId: FrameEffectTraceContext.currentOrigin.effectId,
                 displayId: monitor.displayId,
                 animsMs: spans.anims,
                 snapshotMs: spans.snapshot,
@@ -316,7 +335,7 @@ enum StructuralMutationOutcome: Equatable {
                 hide: hide,
                 frames: plan.diff.frameChanges.count,
                 windowCount: windowCount,
-                isAnimationTick: true
+                isAnimationTick: plan.isAnimationTick
             )
         )
     }
@@ -340,13 +359,9 @@ enum StructuralMutationOutcome: Equatable {
         guard let controller else { return }
 
         let hadScrollAnimation = scrollAnimationByDisplay.values.contains(workspaceId)
+        let hadMotion = cancelAnimationMotion(for: workspaceId, gestureDisposition: .settleLiveOffset)
         for (displayId, wsId) in scrollAnimationByDisplay where wsId == workspaceId {
             controller.layoutRefreshController.stopScrollAnimation(for: displayId)
-        }
-
-        let hadMotion = controller.workspaceManager.animationDriver.hasMotion(in: workspaceId)
-        controller.workspaceManager.withNiriViewportState(for: workspaceId) { state in
-            state.cancelAnimation()
         }
 
         guard hadScrollAnimation || hadMotion,
@@ -362,6 +377,40 @@ enum StructuralMutationOutcome: Equatable {
             engine: engine,
             monitor: monitor
         )
+    }
+
+    @discardableResult
+    func cancelAnimationMotion(
+        for workspaceId: WorkspaceDescriptor.ID,
+        gestureDisposition: MouseEventHandler.ViewportGestureTerminationDisposition = .settleLiveOffset
+    ) -> Bool {
+        guard let controller else { return false }
+        let driver = controller.workspaceManager.animationDriver
+        let engine = controller.niriEngine
+        let hadViewportMotion = driver.hasMotion(in: workspaceId)
+        terminateViewportGesture(for: workspaceId, disposition: gestureDisposition)
+        driver.removeMotions(for: [workspaceId])
+        let hadEngineAnimations = engine?.cancelAnimations(in: workspaceId) == true
+        return hadViewportMotion || hadEngineAnimations
+    }
+
+    @discardableResult
+    func terminateViewportGesture(
+        for workspaceId: WorkspaceDescriptor.ID,
+        disposition: MouseEventHandler.ViewportGestureTerminationDisposition
+    ) -> Bool {
+        guard let controller else { return false }
+        let driver = controller.workspaceManager.animationDriver
+        guard let sessionID = driver.gestureSessionID(in: workspaceId) else { return false }
+        let terminated = controller.mouseEventHandler.terminateViewportGesture(
+            in: workspaceId,
+            sessionID: sessionID,
+            disposition: disposition
+        )
+        if driver.gestureSessionID(in: workspaceId) == sessionID {
+            driver.removeMotions(for: [workspaceId])
+        }
+        return terminated
     }
 
     private func requestLayoutCommandRelayout(
@@ -422,7 +471,7 @@ enum StructuralMutationOutcome: Equatable {
             shouldRequestRelayout = state.offsetTransition.kind == .jump
         }
 
-        controller.focusWindow(window.token, origin: .pointerHover)
+        controller.focusWindow(window.token, origin: .focusFollowsMouse)
 
         if shouldStartScrollAnimation {
             startScrollAnimationIfNeeded(
@@ -520,8 +569,10 @@ enum StructuralMutationOutcome: Equatable {
         snapshot: NiriWorkspaceSnapshot,
         engine: NiriLayoutEngine,
         monitor: Monitor,
-        animationTime: TimeInterval?
+        animationTime: TimeInterval?,
+        settlesAnimation: Bool
     ) -> WorkspaceLayoutPlan {
+        let sampledAnimationTime = settlesAnimation ? nil : animationTime
         let gaps = LayoutGaps(
             horizontal: snapshot.gap,
             vertical: snapshot.gap,
@@ -541,11 +592,11 @@ enum StructuralMutationOutcome: Equatable {
             gaps: gaps,
             state: snapshot.viewportState,
             workingArea: area,
-            animationTime: animationTime,
+            animationTime: sampledAnimationTime,
             viewOffsetOverride: controller?.workspaceManager.animationDriver.liveViewOffset(
                 in: snapshot.workspaceId,
                 semanticOffset: snapshot.viewportState.viewOffset,
-                at: animationTime ?? CACurrentMediaTime()
+                at: sampledAnimationTime ?? CACurrentMediaTime()
             ),
             settledVisibilityOffset: controller?.workspaceManager.animationDriver.settledVisibilityOffset(
                 in: snapshot.workspaceId,
@@ -554,17 +605,41 @@ enum StructuralMutationOutcome: Equatable {
             excludedTokens: snapshot.excludedTokens
         )
 
-        let diff = layoutDiff(
+        var diff = layoutDiff(
             windows: snapshot.windows,
             frames: frames,
             hiddenHandles: hiddenHandles,
             engine: engine,
             workspaceId: snapshot.workspaceId,
             canRestoreHiddenWorkspaceWindows: snapshot.isActiveWorkspace,
-            reassertHidden: animationTime == nil,
+            reassertHidden: animationTime == nil || settlesAnimation,
             excludedTokens: snapshot.excludedTokens,
             pendingParkWindowIds: controller?.axManager.pendingParkWindowIds ?? []
         )
+        if sampledAnimationTime != nil {
+            if let axManager = controller?.axManager {
+                for index in diff.frameChanges.indices {
+                    let change = diff.frameChanges[index]
+                    diff.frameChanges[index] = LayoutFrameChange(
+                        token: change.token,
+                        frame: change.frame,
+                        components: axManager.animationFrameComponents(
+                            for: change.token.windowId,
+                            targetFrame: change.frame
+                        ),
+                        forceApply: change.forceApply,
+                        allowsTerminalRecovery: change.allowsTerminalRecovery
+                    )
+                }
+            }
+        }
+        if animationTime != nil {
+            diff.tabRailGeometryCommands = niriTabRailGeometryCommands(
+                engine: engine,
+                workspaceId: snapshot.workspaceId,
+                monitor: snapshot.monitor
+            )
+        }
 
         return WorkspaceLayoutPlan(
             workspaceId: snapshot.workspaceId,
@@ -575,7 +650,7 @@ enum StructuralMutationOutcome: Equatable {
                 plannedSeq: snapshot.plannedSeq
             ),
             diff: diff,
-            isAnimationTick: animationTime != nil,
+            isAnimationTick: sampledAnimationTime != nil,
             isActiveWorkspace: snapshot.isActiveWorkspace
         )
     }
@@ -1093,7 +1168,6 @@ enum StructuralMutationOutcome: Equatable {
         state.activeColumnIndex = columnIndex
         state.activatePrevColumnOnRemoval = nil
         state.viewOffsetToRestore = nil
-        state.selectionProgress = 0
 
         if let viewOrigin {
             restoreViewOrigin(viewOrigin, pass: pass, state: &state)
@@ -1144,7 +1218,6 @@ enum StructuralMutationOutcome: Equatable {
         state.jumpOffset(to: 0)
         state.activatePrevColumnOnRemoval = nil
         state.viewOffsetToRestore = nil
-        state.selectionProgress = 0
     }
 
     private func computeLayoutPlan(
@@ -1359,6 +1432,40 @@ enum StructuralMutationOutcome: Equatable {
         return infos
     }
 
+    func niriTabRailGeometryCommands(
+        engine: NiriLayoutEngine,
+        workspaceId: WorkspaceDescriptor.ID,
+        monitor: LayoutMonitorSnapshot
+    ) -> [TabRailGeometryCommand] {
+        var commands: [TabRailGeometryCommand] = []
+        for column in engine.columns(in: workspaceId) where column.isTabbed {
+            let key = TabRailKey(workspaceId: workspaceId, owner: .niriColumn(column.id))
+            guard let frame = column.renderedFrame,
+                  !frame.isNull,
+                  !frame.isInfinite,
+                  frame.width > 0,
+                  frame.height > 0
+            else {
+                commands.append(
+                    TabRailGeometryCommand(
+                        key: key,
+                        tileFrame: .zero,
+                        visibleTileFrame: .null
+                    )
+                )
+                continue
+            }
+            commands.append(
+                TabRailGeometryCommand(
+                    key: key,
+                    tileFrame: frame,
+                    visibleTileFrame: frame.intersection(monitor.visibleFrame)
+                )
+            )
+        }
+        return commands
+    }
+
     private func niriTabRailInfos(
         engine: NiriLayoutEngine,
         workspaceId: WorkspaceDescriptor.ID,
@@ -1367,13 +1474,6 @@ enum StructuralMutationOutcome: Equatable {
         guard let controller else { return [] }
         var infos: [TabRailInfo] = []
         for column in engine.columns(in: workspaceId) where column.isTabbed {
-            guard let frame = column.renderedFrame ?? column.frame else { continue }
-            let visibleColumnFrame = frame.intersection(monitor.visibleFrame)
-            guard TabRailManager.shouldShowRail(
-                tileFrame: frame,
-                visibleFrame: monitor.visibleFrame
-            ) else { continue }
-
             let windows = engine.projectedWindows(in: column, workspaceId: workspaceId)
             guard windows.count > 1 else { continue }
 
@@ -1389,6 +1489,11 @@ enum StructuralMutationOutcome: Equatable {
                 activeVisualIndex: activeVisualIndex,
                 controller: controller
             )
+            let candidateFrame = column.renderedFrame ?? column.frame
+            let frame = candidateFrame.map {
+                !$0.isNull && !$0.isInfinite && $0.width > 0 && $0.height > 0 ? $0 : .zero
+            } ?? .zero
+            let visibleColumnFrame = frame == .zero ? CGRect.null : frame.intersection(monitor.visibleFrame)
 
             infos.append(
                 TabRailInfo(
@@ -2938,4 +3043,4 @@ struct NodeActivationOptions {
     }
 }
 
-extension NiriLayoutHandler: LayoutFocusable, LayoutSizable {}
+extension NiriLayoutHandler: LayoutSizable {}

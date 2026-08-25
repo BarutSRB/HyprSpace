@@ -82,7 +82,8 @@ final class NativeFullscreenPlaceholderDiagnosticsTests: XCTestCase {
         XCTAssertTrue(lifecycleDump.contains("op=record_upsert original=982004:982104"))
         XCTAssertFalse(lifecycleDump.contains("op=panel_moved"))
         XCTAssertFalse(lifecycleDump.contains("op=panel_resized"))
-        XCTAssertEqual(motionDump.split(separator: "\n").count, 2_048)
+        XCTAssertTrue(motionDump.hasPrefix("incomplete=true evicted="))
+        XCTAssertEqual(motionDump.split(separator: "\n").count, 2_049)
     }
 
     func testLifecycleAndDeadlineOperationsAreTraced() throws {

@@ -49,9 +49,6 @@ enum CLIRuntime {
         let terminationStatus: Int32
     }
 
-    typealias WatchChildRunner = @Sendable (IPCEventEnvelope, [String], CLIWatchProcessState) async throws
-        -> WatchChildResult
-
     static func run(arguments: [String], client: IPCClient = IPCClient()) async -> Int32 {
         let outputFormat = CLIParser.outputFormat(arguments: arguments)
 

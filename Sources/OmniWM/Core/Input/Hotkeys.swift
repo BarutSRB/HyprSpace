@@ -208,8 +208,8 @@ final class HotkeyCenter {
     private var configuration = HotkeyRuntimeConfiguration()
     private var sideSpecificDispatch: [CommandHotkeyTapMatcher.Entry] = []
     private var suppressedHotkeyKeyCodes: Set<UInt32> = []
-    private var hyperTriggerTap: CFMachPort?
-    private var hyperTriggerRunLoopSource: CFRunLoopSource?
+    var hyperTriggerTap: CFMachPort?
+    var hyperTriggerRunLoopSource: CFRunLoopSource?
     private var hyperTrigger = HyperTriggerStateMachine(trigger: .none, capsLockRemapped: false)
     private let capsLockHyperRemapper = CapsLockHyperRemapper()
     private var capsLockToggler = CapsLockToggler()
@@ -515,8 +515,11 @@ final class HotkeyCenter {
         }
         hyperTriggerRunLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
         guard let source = hyperTriggerRunLoopSource else {
+            EventTapTeardown.tearDown(
+                tap: &hyperTriggerTap,
+                runLoopSource: &hyperTriggerRunLoopSource
+            )
             FallbackFiringRecorder.shared.note(.input, "hyperTapRunLoopSourceFailed")
-            hyperTriggerTap = nil
             return false
         }
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
@@ -524,17 +527,13 @@ final class HotkeyCenter {
         return true
     }
 
-    private func stopHyperTriggerTap() {
+    func stopHyperTriggerTap() {
         hyperTrigger.reset()
         suppressedHotkeyKeyCodes.removeAll()
-        if let source = hyperTriggerRunLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
-            hyperTriggerRunLoopSource = nil
-        }
-        if let tap = hyperTriggerTap {
-            CGEvent.tapEnable(tap: tap, enable: false)
-            hyperTriggerTap = nil
-        }
+        EventTapTeardown.tearDown(
+            tap: &hyperTriggerTap,
+            runLoopSource: &hyperTriggerRunLoopSource
+        )
     }
 
     private func handleHyperTriggerEvent(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {

@@ -57,4 +57,15 @@ final class SwipeTrackerTests: XCTestCase {
         XCTAssertEqual(tracker.position, 80)
         XCTAssertEqual(tracker.velocity(), 2000, accuracy: 0.001)
     }
+
+    func testNonfiniteSamplesAreRejectedWithoutPoisoningState() {
+        let tracker = SwipeTracker()
+
+        XCTAssertTrue(tracker.push(delta: 40, timestamp: 1))
+        XCTAssertFalse(tracker.push(delta: .nan, timestamp: 1.01))
+        XCTAssertFalse(tracker.push(delta: 40, timestamp: .infinity))
+
+        XCTAssertEqual(tracker.position, 40)
+        XCTAssertTrue(tracker.velocity().isFinite)
+    }
 }

@@ -144,8 +144,4 @@ enum BuiltInSettingsDefaults {
         }
         return uuid
     }
-
-    static func canonicalDefaults() -> CanonicalTOMLConfig {
-        CanonicalTOMLConfig(export: SettingsExport.defaults())
-    }
 }

@@ -454,4 +454,218 @@ final class ManagedFocusAdmissionTests: XCTestCase {
         let nonManagedWorld = WorldView(controller: controller, borderFrameResolver: { _ in popupFrame })
         XCTAssertNil(SurfaceDerivation.deriveBorder(world: nonManagedWorld))
     }
+
+    func testBackgroundFocusedWindowChangeRequiresMouseAuthorityBeforeMutation() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let frontmostToken = WindowToken(pid: 468_001, windowId: 468_002)
+        let backgroundToken = WindowToken(pid: 468_003, windowId: 468_004)
+        _ = WindowAdmissionTestSupport.track(frontmostToken, in: workspaceId, controller: controller)
+        let backgroundRef = WindowAdmissionTestSupport.track(
+            backgroundToken,
+            in: workspaceId,
+            controller: controller
+        )
+        XCTAssertTrue(
+            controller.workspaceManager.confirmManagedFocus(
+                frontmostToken,
+                in: workspaceId,
+                activateWorkspaceOnMonitor: false
+            )
+        )
+        var requestedPIDs: [pid_t] = []
+        controller.factResolver.factProvider = { pid in
+            requestedPIDs.append(pid)
+            return nil
+        }
+        controller.axEventHandler.frontmostApplicationPIDProvider = { frontmostToken.pid }
+        controller.hasStartedServices = true
+
+        _ = controller.axEventHandler.handleAppActivation(
+            pid: frontmostToken.pid,
+            source: .workspaceDidActivateApplication
+        )
+        XCTAssertFalse(
+            controller.axEventHandler.handleAppActivation(
+                pid: backgroundToken.pid,
+                source: .focusedWindowChanged
+            )
+        )
+
+        XCTAssertEqual(requestedPIDs, [frontmostToken.pid])
+        XCTAssertEqual(controller.workspaceManager.focusedToken, frontmostToken)
+        XCTAssertFalse(controller.workspaceManager.isNonManagedFocusActive)
+
+        controller.axEventHandler.noteMouseFocusIntent(token: backgroundToken)
+        _ = controller.axEventHandler.handleAppActivation(
+            pid: backgroundToken.pid,
+            source: .focusedWindowChanged
+        )
+        XCTAssertEqual(requestedPIDs, [frontmostToken.pid, backgroundToken.pid])
+        controller.axEventHandler.handleActivationFactsResolved(
+            ActivationFacts(
+                pid: backgroundToken.pid,
+                source: .focusedWindowChanged,
+                origin: .external,
+                observationGeneration: 2,
+                requestedAtSeq: 0,
+                focusedWindow: FocusedWindowFact(
+                    axRef: backgroundRef,
+                    isFullscreen: false,
+                    isSystemModalSurface: false
+                )
+            )
+        )
+        XCTAssertEqual(controller.workspaceManager.focusedToken, backgroundToken)
+    }
+
+    func testFocusedWindowFactsAreRejectedIfNativeFrontmostEvidenceChangesDuringResolution() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let pid: pid_t = 468_011
+        let originalToken = WindowToken(pid: pid, windowId: 468_012)
+        let staleToken = WindowToken(pid: pid, windowId: 468_013)
+        _ = WindowAdmissionTestSupport.track(originalToken, in: workspaceId, controller: controller)
+        let staleRef = WindowAdmissionTestSupport.track(staleToken, in: workspaceId, controller: controller)
+        XCTAssertTrue(
+            controller.workspaceManager.confirmManagedFocus(
+                originalToken,
+                in: workspaceId,
+                activateWorkspaceOnMonitor: false
+            )
+        )
+        var frontmostPID = pid
+        controller.axEventHandler.frontmostApplicationPIDProvider = { frontmostPID }
+        controller.factResolver.factProvider = { _ in nil }
+        controller.hasStartedServices = true
+        _ = controller.axEventHandler.handleAppActivation(
+            pid: pid,
+            source: .workspaceDidActivateApplication
+        )
+        _ = controller.axEventHandler.handleAppActivation(
+            pid: pid,
+            source: .focusedWindowChanged
+        )
+
+        frontmostPID = 468_014
+        controller.axEventHandler.latestNativeActivationPID = frontmostPID
+        controller.axEventHandler.handleActivationFactsResolved(
+            ActivationFacts(
+                pid: pid,
+                source: .focusedWindowChanged,
+                origin: .external,
+                observationGeneration: 2,
+                requestedAtSeq: 0,
+                focusedWindow: FocusedWindowFact(
+                    axRef: staleRef,
+                    isFullscreen: false,
+                    isSystemModalSurface: false
+                )
+            )
+        )
+
+        XCTAssertEqual(controller.workspaceManager.focusedToken, originalToken)
+    }
+
+    func testBackgroundFocusedWindowChangeRequiresExactManagedFocusRequestAtFactResolution() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let frontmostToken = WindowToken(pid: 468_021, windowId: 468_022)
+        let requestedToken = WindowToken(pid: 468_023, windowId: 468_024)
+        let staleSiblingToken = WindowToken(pid: requestedToken.pid, windowId: 468_025)
+        _ = WindowAdmissionTestSupport.track(frontmostToken, in: workspaceId, controller: controller)
+        let requestedRef = WindowAdmissionTestSupport.track(
+            requestedToken,
+            in: workspaceId,
+            controller: controller
+        )
+        let staleSiblingRef = WindowAdmissionTestSupport.track(
+            staleSiblingToken,
+            in: workspaceId,
+            controller: controller
+        )
+        XCTAssertTrue(
+            controller.workspaceManager.confirmManagedFocus(
+                frontmostToken,
+                in: workspaceId,
+                activateWorkspaceOnMonitor: false
+            )
+        )
+        controller.axEventHandler.frontmostApplicationPIDProvider = { frontmostToken.pid }
+        var requestedPIDs: [pid_t] = []
+        controller.factResolver.factProvider = { pid in
+            requestedPIDs.append(pid)
+            return nil
+        }
+        controller.hasStartedServices = true
+        _ = controller.axEventHandler.handleAppActivation(
+            pid: frontmostToken.pid,
+            source: .workspaceDidActivateApplication
+        )
+        let request = controller.intentLedger.beginManagedRequest(
+            token: requestedToken,
+            workspaceId: workspaceId
+        )
+        XCTAssertTrue(
+            controller.workspaceManager.beginManagedFocusRequest(
+                requestedToken,
+                in: workspaceId,
+                requestId: request.requestId
+            )
+        )
+
+        _ = controller.axEventHandler.handleAppActivation(
+            pid: requestedToken.pid,
+            source: .focusedWindowChanged
+        )
+        XCTAssertEqual(requestedPIDs, [frontmostToken.pid, requestedToken.pid])
+        controller.axEventHandler.handleActivationFactsResolved(
+            ActivationFacts(
+                pid: requestedToken.pid,
+                source: .focusedWindowChanged,
+                origin: .external,
+                observationGeneration: 2,
+                requestedAtSeq: 0,
+                focusedWindow: FocusedWindowFact(
+                    axRef: staleSiblingRef,
+                    isFullscreen: false,
+                    isSystemModalSurface: false
+                )
+            )
+        )
+
+        XCTAssertEqual(controller.workspaceManager.focusedToken, frontmostToken)
+        XCTAssertEqual(controller.intentLedger.activeManagedRequest?.requestId, request.requestId)
+        XCTAssertEqual(controller.workspaceManager.pendingFocusedToken, requestedToken)
+
+        _ = controller.axEventHandler.handleAppActivation(
+            pid: requestedToken.pid,
+            source: .focusedWindowChanged
+        )
+        XCTAssertEqual(requestedPIDs, [frontmostToken.pid, requestedToken.pid, requestedToken.pid])
+        controller.axEventHandler.handleActivationFactsResolved(
+            ActivationFacts(
+                pid: requestedToken.pid,
+                source: .focusedWindowChanged,
+                origin: .external,
+                observationGeneration: 3,
+                requestedAtSeq: 0,
+                focusedWindow: FocusedWindowFact(
+                    axRef: requestedRef,
+                    isFullscreen: false,
+                    isSystemModalSurface: false
+                )
+            )
+        )
+
+        XCTAssertEqual(controller.workspaceManager.focusedToken, requestedToken)
+        XCTAssertNil(controller.intentLedger.activeManagedRequest)
+        XCTAssertNil(controller.workspaceManager.pendingFocusedToken)
+    }
 }

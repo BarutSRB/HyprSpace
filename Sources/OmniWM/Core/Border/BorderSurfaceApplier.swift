@@ -122,6 +122,7 @@ final class BorderSurfaceApplier {
             applied = nil
             appliedCornerRadii = nil
             clearCornerState()
+            unregisterSurface()
             return BorderSurfaceApplyResult(didApply: false, needsCornerRadiiRetry: false)
         }
         applied = desired
@@ -146,12 +147,11 @@ final class BorderSurfaceApplier {
     private func hide() {
         if applied != nil || registeredSurfaceWindowNumber != nil {
             borderWindow?.hide()
-            surfaceCoordinator.unregister(id: surfaceID)
+            unregisterSurface()
         }
         applied = nil
         appliedCornerRadii = nil
         clearCornerState()
-        registeredSurfaceWindowNumber = nil
     }
 
     private func resolvedCornerRadii(
@@ -265,8 +265,7 @@ final class BorderSurfaceApplier {
 
     private func syncSurfaceRegistration() {
         guard let borderWindow, let windowNumber = borderWindow.windowId.map(Int.init) else {
-            surfaceCoordinator.unregister(id: surfaceID)
-            registeredSurfaceWindowNumber = nil
+            unregisterSurface()
             return
         }
         guard registeredSurfaceWindowNumber != windowNumber else { return }
@@ -288,5 +287,10 @@ final class BorderSurfaceApplier {
             )
         )
         registeredSurfaceWindowNumber = windowNumber
+    }
+
+    private func unregisterSurface() {
+        surfaceCoordinator.unregister(id: surfaceID)
+        registeredSurfaceWindowNumber = nil
     }
 }

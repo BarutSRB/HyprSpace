@@ -1,7 +1,7 @@
-.PHONY: format format-check lint lint-fix build run release-check verify check check-tool-versions check-swiftformat-version check-swiftlint-version
+.PHONY: format format-check lint lint-fix build run energy-profile test-skylight-live release-check verify check check-tool-versions check-swiftformat-version check-swiftlint-version
 
 SWIFTFORMAT_VERSION = 0.62.1
-SWIFTLINT_VERSION = 0.65.0
+SWIFTLINT_VERSION = 0.65.1
 SWIFT_WITH_GHOSTTY = LIBRARY_PATH="$$(./Scripts/ghostty-preflight.sh print-library-dir)$${LIBRARY_PATH:+:$$LIBRARY_PATH}"
 
 check-swiftformat-version:
@@ -35,6 +35,12 @@ run:
 	./Scripts/package-app.sh debug dev
 	-pkill -x OmniWM
 	open ./dist/OmniWM.app
+
+energy-profile:
+	./Scripts/energy-profile.sh
+
+test-skylight-live:
+	OMNIWM_RUN_SKYLIGHT_LIVE_TESTS=1 swift test --filter SkyLightNativeSpaceInventoryLiveTests/testLiveTransactionMoveIsObservedThroughWindowServerBounds
 
 release-check: build
 

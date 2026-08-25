@@ -6,9 +6,9 @@ import Foundation
 
 enum OverviewState {
     case closed
-    case opening(progress: Double)
+    case opening
     case open
-    case closing(targetWindow: WindowHandle?, progress: Double)
+    case closing(targetWindow: WindowHandle?)
 
     var isOpen: Bool {
         switch self {

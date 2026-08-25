@@ -101,8 +101,11 @@ final class EventInterpreter: EventIntakeSink {
         case let .hotkeyInvocation(invocation):
             _ = controller.commandHandler.handleHotkeyInvocation(invocation)
 
-        case let .intentExpired(intentId):
-            controller.axEventHandler.handleIntentExpired(intentId)
+        case let .intentExpired(intentId, deadlineGeneration):
+            controller.axEventHandler.handleIntentExpired(
+                intentId,
+                deadlineGeneration: deadlineGeneration
+            )
 
         case let .ipcCommand(intake):
             intake.completion(intake.perform(controller))

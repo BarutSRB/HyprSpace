@@ -32,15 +32,20 @@ final class WorkspaceBarNativeFullscreenSettingsTests: XCTestCase {
         XCTAssertTrue(decoded.workspaceBarHideInNativeFullscreen)
     }
 
-    func testMissingKeyRecoversToDefault() throws {
+    func testMissingKeyRejectsDecode() throws {
         let toml = String(decoding: try SettingsTOMLCodec.encode(.defaults()), as: UTF8.self)
         let withoutKey = toml
             .split(separator: "\n", omittingEmptySubsequences: false)
             .filter { !$0.contains("hideInNativeFullscreen") }
             .joined(separator: "\n")
 
-        let decoded = try SettingsTOMLCodec.decode(Data(withoutKey.utf8))
-        XCTAssertFalse(decoded.workspaceBarHideInNativeFullscreen)
+        XCTAssertThrowsError(try SettingsTOMLCodec.decode(Data(withoutKey.utf8))) { error in
+            guard case let DecodingError.keyNotFound(key, context) = error else {
+                return XCTFail("expected keyNotFound, got \(error)")
+            }
+            XCTAssertEqual(key.stringValue, "hideInNativeFullscreen")
+            XCTAssertEqual(context.codingPath.map(\.stringValue), ["workspaceBar"])
+        }
     }
 
     @MainActor

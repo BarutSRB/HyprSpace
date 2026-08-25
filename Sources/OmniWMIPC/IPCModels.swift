@@ -2049,20 +2049,6 @@ public struct IPCRect: Codable, Equatable, Sendable {
     }
 }
 
-public struct IPCWorkspaceSummary: Codable, Equatable, Sendable {
-    public let id: String
-    public let rawName: String
-    public let displayName: String
-    public let number: Int?
-
-    public init(id: String, rawName: String, displayName: String, number: Int?) {
-        self.id = id
-        self.rawName = rawName
-        self.displayName = displayName
-        self.number = number
-    }
-}
-
 public struct IPCWorkspaceBarWindow: Codable, Equatable, Sendable {
     public let id: String
     public let title: String
@@ -2376,6 +2362,7 @@ public struct IPCDisplayQuerySnapshot: Codable, Equatable, Sendable {
     public let outerGapRight: Double?
     public let outerGapTop: Double?
     public let outerGapBottom: Double?
+    public let fullscreenUsesOuterGaps: Bool?
     public let activeWorkspace: IPCWorkspaceRef?
 
     public init(
@@ -2392,6 +2379,7 @@ public struct IPCDisplayQuerySnapshot: Codable, Equatable, Sendable {
         outerGapRight: Double? = nil,
         outerGapTop: Double? = nil,
         outerGapBottom: Double? = nil,
+        fullscreenUsesOuterGaps: Bool? = nil,
         activeWorkspace: IPCWorkspaceRef? = nil
     ) {
         self.id = id
@@ -2407,6 +2395,7 @@ public struct IPCDisplayQuerySnapshot: Codable, Equatable, Sendable {
         self.outerGapRight = outerGapRight
         self.outerGapTop = outerGapTop
         self.outerGapBottom = outerGapBottom
+        self.fullscreenUsesOuterGaps = fullscreenUsesOuterGaps
         self.activeWorkspace = activeWorkspace
     }
 }

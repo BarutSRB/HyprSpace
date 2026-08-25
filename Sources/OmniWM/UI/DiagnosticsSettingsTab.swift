@@ -24,12 +24,36 @@ func diagnosticsRecordingStartStatus(for outcome: TraceCaptureOutcome) -> Diagno
     }
 }
 
+func privateAPIProbePresentationStatus(for report: PrivateAPIProbeReport) -> DiagnosticsActionStatus {
+    let failures = report.selfTests.filter { $0.outcome == .failed }.count
+    let checks = "\(report.selfTests.count) checks, \(failures) failures"
+    guard let foreign = report.foreign else {
+        let prefix = failures == 0 ? "Inconclusive: " : ""
+        return .failure("\(prefix)\(checks) · no unmanaged foreign window probed")
+    }
+    let foreignResult = "foreign transaction move=\(foreign.skylightMoved ? "yes" : "no")"
+        + ", restored=\(foreign.restored ? "yes" : "no")"
+    guard failures == 0 else {
+        return .failure("\(checks) · \(foreignResult)")
+    }
+    switch foreign.outcome {
+    case .works where foreign.skylightMoved && foreign.restored:
+        return .success("\(checks) · \(foreignResult)")
+    case .inconclusive:
+        return .failure("Inconclusive: \(checks) · \(foreignResult)")
+    case .works,
+         .failed:
+        return .failure("\(checks) · \(foreignResult)")
+    }
+}
+
 struct DiagnosticsSettingsTab: View {
     @Bindable var controller: WMController
     let navigation: SettingsNavigationModel
 
     @State private var traceStatus: DiagnosticsActionStatus = .idle
     @State private var probeStatus: DiagnosticsActionStatus = .idle
+    @State private var isPrivateAPIProbeRunning = false
     @State private var recentFiles: [DiagnosticsFile] = []
     @State private var reloadToken = 0
 
@@ -43,6 +67,7 @@ struct DiagnosticsSettingsTab: View {
             healthSection
             privateAPICapabilitySection
             recordingSection
+            performanceRecordingSection
             savedDiagnosticsSection
         }
         .formStyle(.grouped)
@@ -54,7 +79,11 @@ struct DiagnosticsSettingsTab: View {
         .onChange(of: controller.traceCaptureStatus.lastArtifact) { _, artifact in
             guard let artifact else { return }
             NSWorkspace.shared.activateFileViewerSelecting([artifact.url])
-            traceStatus = .success("Recording saved \(artifact.url.lastPathComponent)")
+            traceStatus = .success(
+                artifact.profile == .performance
+                    ? "Performance capture saved \(artifact.url.lastPathComponent)"
+                    : "Recording saved \(artifact.url.lastPathComponent)"
+            )
             reloadToken += 1
         }
     }
@@ -142,11 +171,12 @@ struct DiagnosticsSettingsTab: View {
             Button("Run Private-API Probe") {
                 runPrivateAPIProbe()
             }
+            .disabled(isPrivateAPIProbeRunning)
             statusLabel(probeStatus)
             SettingsCaption(
                 "On-demand check of every private window-server API on this Mac, confirming each actually works. "
-                    + "It briefly nudges one of your real open windows a few pixels and moves it back, so you may see "
-                    + "a window jump for an instant; OmniWM re-tiles immediately afterward. The full result is written "
+                    + "It briefly nudges one unmanaged open window a few pixels and restores its verified starting "
+                    + "position, so you may see a window jump for an instant. The full result is written "
                     + "into the Private API Capability section of your next diagnostics report."
             )
         }
@@ -160,10 +190,25 @@ struct DiagnosticsSettingsTab: View {
                 Button("Start Recording") {
                     startRecording()
                 }
+            case .starting:
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(
+                        controller.traceCaptureStatus.profile == .problem
+                            ? "Starting diagnostics…"
+                            : "A performance capture is starting."
+                    )
+                }
             case .recording:
-                recordingProgressLabel
-                Button("Stop & Save Recording") {
-                    stopRecording()
+                if controller.traceCaptureStatus.profile == .problem {
+                    recordingProgressLabel
+                    Button("Stop & Save Recording") {
+                        stopRecording()
+                    }
+                } else {
+                    Text("A performance capture is running.")
+                        .foregroundStyle(.secondary)
                 }
             case .finalizing:
                 HStack(spacing: 8) {
@@ -175,7 +220,51 @@ struct DiagnosticsSettingsTab: View {
             statusLabel(traceStatus)
             SettingsCaption(
                 "Start recording, reproduce one problem, then stop and attach the saved trace log. "
-                    + "The app and window evidence is captured automatically."
+                    + "The app and window evidence is captured automatically. This detailed recording changes runtime "
+                    + "work and must not be used for energy comparisons."
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var performanceRecordingSection: some View {
+        Section("Measure Performance") {
+            switch controller.traceCaptureStatus.phase {
+            case .idle:
+                Button("Start Performance Capture") {
+                    startPerformanceCapture()
+                }
+            case .starting:
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(
+                        controller.traceCaptureStatus.profile == .performance
+                            ? "Starting performance capture…"
+                            : "A detailed problem recording is starting."
+                    )
+                }
+            case .recording:
+                if controller.traceCaptureStatus.profile == .performance {
+                    Label("Performance capture in progress", systemImage: "gauge.with.dots.needle.67percent")
+                    Button("Stop & Save Performance Capture") {
+                        stopPerformanceCapture()
+                    }
+                } else {
+                    Text("A detailed problem recording is running.")
+                        .foregroundStyle(.secondary)
+                }
+            case .finalizing:
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Finalizing capture…")
+                }
+            }
+            SettingsCaption(
+                "Records aggregate operation counts, CPU energy, CPU time, wakeups and memory with one final write. "
+                    + "It does not enable detailed event traces. Use Instruments or powermetrics separately to measure "
+                    + "WindowServer and GPU energy."
             )
         }
     }
@@ -275,16 +364,12 @@ struct DiagnosticsSettingsTab: View {
     }
 
     private func runPrivateAPIProbe() {
+        guard !isPrivateAPIProbeRunning else { return }
+        isPrivateAPIProbeRunning = true
         Task {
+            defer { isPrivateAPIProbeRunning = false }
             let report = await controller.runPrivateAPIProbe()
-            let failures = report.selfTests.filter { $0.outcome == .failed }.count
-            let foreign = report.foreign
-                .map { "foreign-window move=\($0.skylightMoved ? "yes" : "no")" } ?? "no foreign window probed"
-            if failures == 0 {
-                probeStatus = .success("\(report.selfTests.count) checks, 0 failures · \(foreign)")
-            } else {
-                probeStatus = .failure("\(failures) of \(report.selfTests.count) checks failed · \(foreign)")
-            }
+            probeStatus = privateAPIProbePresentationStatus(for: report)
         }
     }
 
@@ -306,6 +391,34 @@ struct DiagnosticsSettingsTab: View {
                 traceStatus = .failure("No recording is running")
             case .started:
                 traceStatus = .failure("Unexpected recording state")
+            }
+        }
+    }
+
+    private func startPerformanceCapture() {
+        Task {
+            let outcome = await controller.toggleTraceCaptureForUI(
+                desiredState: .active,
+                profile: .performance
+            )
+            traceStatus = diagnosticsRecordingStartStatus(for: outcome)
+        }
+    }
+
+    private func stopPerformanceCapture() {
+        Task {
+            switch await controller.toggleTraceCaptureForUI(
+                desiredState: .inactive,
+                profile: .performance
+            ) {
+            case .stopped:
+                break
+            case let .writeFailed(reason):
+                traceStatus = .failure("Failed to write the performance capture: \(reason)")
+            case .noChange:
+                traceStatus = .failure("No performance capture is running")
+            case .started:
+                traceStatus = .failure("Unexpected capture state")
             }
         }
     }
@@ -340,6 +453,9 @@ struct DiagnosticsSettingsTab: View {
         let name = file.name
         if name.hasPrefix("omniwm-trace-") {
             return name.hasSuffix(".partial.log") ? "Trace (incomplete)" : "Trace"
+        }
+        if name.hasPrefix("omniwm-performance-") {
+            return "Performance"
         }
         if name.hasPrefix("omniwm-crash-") {
             return "Crash"

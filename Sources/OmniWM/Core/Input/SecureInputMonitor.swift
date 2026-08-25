@@ -23,16 +23,25 @@ private func secureInputMonitorEventTapCallback(
 
 @MainActor @Observable
 final class SecureInputMonitor {
+    struct PerformanceSnapshot: Equatable, Sendable {
+        let recoveryTimerFires: UInt64
+    }
+
     private(set) var isSecureInputActive: Bool = false
 
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var recoveryTimer: Timer?
     private var onStateChange: ((Bool) -> Void)?
+    private var performanceRecoveryTimerFires: UInt64?
+    var secureInputStateProviderForTests: (() -> Bool)?
+    var eventTapInstallerForTests: (() -> (tap: CFMachPort, runLoopSource: CFRunLoopSource))?
 
     private static var sharedMonitor: SecureInputMonitor?
 
     func start(onStateChange: @escaping (Bool) -> Void) {
+        tearDownEventTap()
+        stopRecoveryTimer()
         self.onStateChange = onStateChange
         SecureInputMonitor.sharedMonitor = self
         setupEventTap()
@@ -40,20 +49,32 @@ final class SecureInputMonitor {
     }
 
     func stop() {
-        if let source = runLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
-            runLoopSource = nil
-        }
-        if let tap = eventTap {
-            CGEvent.tapEnable(tap: tap, enable: false)
-            eventTap = nil
-        }
-        recoveryTimer?.invalidate()
-        recoveryTimer = nil
+        tearDownEventTap()
+        stopRecoveryTimer()
         SecureInputMonitor.sharedMonitor = nil
+        onStateChange = nil
+    }
+
+    func beginPerformanceCapture() {
+        performanceRecoveryTimerFires = 0
+    }
+
+    func performanceSnapshot() -> PerformanceSnapshot? {
+        performanceRecoveryTimerFires.map { PerformanceSnapshot(recoveryTimerFires: $0) }
+    }
+
+    func endPerformanceCapture() -> PerformanceSnapshot? {
+        let snapshot = performanceSnapshot()
+        performanceRecoveryTimerFires = nil
+        return snapshot
     }
 
     private func setupEventTap() {
+        if let installation = eventTapInstallerForTests?() {
+            eventTap = installation.tap
+            runLoopSource = installation.runLoopSource
+            return
+        }
         let eventMask: CGEventMask = 1 << CGEventType.keyDown.rawValue
 
         eventTap = CGEvent.tapCreate(
@@ -70,7 +91,9 @@ final class SecureInputMonitor {
             if let source = runLoopSource {
                 CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
             } else {
+                tearDownEventTap()
                 FallbackFiringRecorder.shared.note(.input, "secureInputTapRunLoopSourceFailed")
+                return
             }
             CGEvent.tapEnable(tap: tap, enable: true)
         } else {
@@ -106,7 +129,7 @@ final class SecureInputMonitor {
 
     private func handleSecureInputDetected() {
         guard !isSecureInputActive else { return }
-        if IsSecureEventInputEnabled() {
+        if secureInputState() {
             isSecureInputActive = true
             onStateChange?(true)
             startRecoveryTimer()
@@ -114,7 +137,7 @@ final class SecureInputMonitor {
     }
 
     private func checkSecureInputEnded() {
-        if !IsSecureEventInputEnabled() {
+        if !secureInputState() {
             isSecureInputActive = false
             onStateChange?(false)
             stopRecoveryTimer()
@@ -125,6 +148,7 @@ final class SecureInputMonitor {
         stopRecoveryTimer()
         recoveryTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
+                self?.performanceRecoveryTimerFires? &+= 1
                 self?.checkSecureInputEnded()
             }
         }
@@ -139,7 +163,7 @@ final class SecureInputMonitor {
     }
 
     private func checkSecureInput() {
-        let newState = IsSecureEventInputEnabled()
+        let newState = secureInputState()
         if newState != isSecureInputActive {
             isSecureInputActive = newState
             onStateChange?(newState)
@@ -147,5 +171,13 @@ final class SecureInputMonitor {
                 startRecoveryTimer()
             }
         }
+    }
+
+    private func secureInputState() -> Bool {
+        secureInputStateProviderForTests?() ?? IsSecureEventInputEnabled()
+    }
+
+    private func tearDownEventTap() {
+        EventTapTeardown.tearDown(tap: &eventTap, runLoopSource: &runLoopSource)
     }
 }

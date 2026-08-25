@@ -492,7 +492,8 @@ final class MonitorSettingsIdentityTests: XCTestCase {
                 monitorName: "Wrong",
                 monitorDisplayUUID: displayUUIDB,
                 monitorDisplayId: 7,
-                innerGap: 0
+                innerGap: 0,
+                fullscreenUsesOuterGaps: false
             ),
             for: monitor
         )
@@ -503,6 +504,7 @@ final class MonitorSettingsIdentityTests: XCTestCase {
         assertIdentity(try XCTUnwrap(settings.monitorNiriSettings.first), monitor: monitor)
         assertIdentity(try XCTUnwrap(settings.monitorDwindleSettings.first), monitor: monitor)
         assertIdentity(try XCTUnwrap(settings.monitorGapSettings.first), monitor: monitor)
+        XCTAssertEqual(settings.monitorGapSettings.first?.fullscreenUsesOuterGaps, false)
     }
 
     func testAllOverrideTypesPreserveRuntimeIdWhenUUIDIsUnavailable() throws {

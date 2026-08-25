@@ -260,7 +260,6 @@ extension LayoutRefreshController {
             },
             verify: true
         )
-        axManager.clearSkyLightLivePositions()
     }
 
     func mergeFollowUp(

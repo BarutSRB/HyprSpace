@@ -513,6 +513,23 @@ final class IssueReporterTests: XCTestCase {
         XCTAssertEqual(model.selectedEvidence, .trace(newTraceURL))
     }
 
+    func testPerformanceArtifactIsNotAcceptedAsTraceEvidence() {
+        let oldTrace = IssueDiagnosticEvidence.trace(URL(fileURLWithPath: "/tmp/omniwm-trace-old.log"))
+        let model = makeModel(engine: FakeIssueEngine())
+        model.updateAvailableEvidence([oldTrace])
+        model.selectEvidence(oldTrace)
+
+        model.recordingFinished(artifact: TraceCaptureArtifact(
+            profile: .performance,
+            url: URL(fileURLWithPath: "/tmp/omniwm-performance.log"),
+            startedAt: Date(timeIntervalSince1970: 1),
+            endedAt: Date(timeIntervalSince1970: 2)
+        ))
+
+        XCTAssertEqual(model.availableEvidence, [oldTrace])
+        XCTAssertEqual(model.selectedEvidence, oldTrace)
+    }
+
     func testEvidenceCatalogRefreshRetainsMissingSelectionForSubmissionWarning() async {
         let selectedTrace = IssueDiagnosticEvidence.trace(URL(fileURLWithPath: "/tmp/missing-trace.log"))
         let attachment = URL(fileURLWithPath: "/tmp/omniwm-diagnostics.log")

@@ -43,6 +43,38 @@ final class ClosingAnimationAXLaneTests: XCTestCase {
         )
     }
 
+    func testFailedDisplayLinkCreationRollsBackClosingAnimationState() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        controller.setAnimationsEnabled(true, persist: false)
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let displayId: CGDirectDisplayID = 91_100
+        controller.layoutRefreshController.displayLinkCreationAllowedForTests = { _ in false }
+        let monitor = Monitor(
+            id: .init(displayId: displayId),
+            displayId: displayId,
+            frame: CGRect(x: 0, y: 0, width: 1440, height: 900),
+            visibleFrame: CGRect(x: 0, y: 0, width: 1440, height: 900),
+            hasNotch: false,
+            name: "Unavailable Display"
+        )
+        let token = WindowToken(pid: 91_106, windowId: 91_107)
+        _ = WindowAdmissionTestSupport.track(token, in: workspaceId, controller: controller)
+        controller.layoutRefreshController.fastFrameProvider = { _, _ in
+            CGRect(x: 20, y: 20, width: 800, height: 600)
+        }
+
+        controller.layoutRefreshController.startWindowCloseAnimation(
+            entry: try XCTUnwrap(controller.workspaceManager.entry(for: token)),
+            monitor: monitor
+        )
+
+        XCTAssertNil(controller.layoutRefreshController.layoutState.closingAnimationsByDisplay[displayId])
+        XCTAssertTrue(controller.layoutRefreshController.closingAnimationIdsByObjectId.isEmpty)
+        XCTAssertTrue(controller.layoutRefreshController.lastSubmittedClosingFramesByAnimationId.isEmpty)
+    }
+
     func testClosingFrameWriteUsesExactElementWithoutVerificationOrRefresh() {
         let pid: pid_t = 91_001
         let windowId = 91_002
@@ -81,7 +113,6 @@ final class ClosingAnimationAXLaneTests: XCTestCase {
                     receivedHint = hint
                     receivedVerify = verify
                     return AXFrameWriteResult(
-                        targetFrame: frame,
                         observedFrame: nil,
                         writeOrder: .sizeThenPosition,
                         sizeError: .success,

@@ -33,6 +33,23 @@
       <sub>@siketyan</sub>
     </td>
     <td align="center" valign="top">
+      <a href="https://github.com/bluelabs-eu">
+        <img src="https://avatars.githubusercontent.com/u/47787801?v=4" width="72" alt="BlueLabs">
+      </a>
+      <br>
+      <a href="https://github.com/bluelabs-eu"><strong>BlueLabs</strong></a>
+      <br>
+      <sub>━━━━━━━━</sub>
+      <br>
+      <a href="https://github.com/crbelaus" title="Cristian Álvarez Belaustegui">
+        <img src="https://github.com/crbelaus.png?size=96" width="72" alt="Cristian Álvarez Belaustegui">
+      </a>
+      <br>
+      <a href="https://github.com/crbelaus"><strong>Cristian Álvarez Belaustegui</strong></a>
+      <br>
+      <sub>@crbelaus</sub>
+    </td>
+    <td align="center" valign="top">
       <a href="https://github.com/epam">
         <img src="https://avatars.githubusercontent.com/u/1589802?v=4" width="72" alt="EPAM Systems">
       </a>
@@ -296,6 +313,9 @@
       </a>
       <a href="https://github.com/chen259456754" title="chen259456754">
         <img src="https://github.com/chen259456754.png?size=96" width="72" alt="chen259456754">
+      </a>
+      <a href="https://github.com/crbelaus" title="Cristian Álvarez Belaustegui">
+        <img src="https://github.com/crbelaus.png?size=96" width="72" alt="Cristian Álvarez Belaustegui">
       </a>
       <a href="https://github.com/nekonora" title="Filippo Zaffoni">
         <img src="https://github.com/nekonora.png?size=96" width="72" alt="Filippo Zaffoni">
@@ -797,6 +817,11 @@ make run
 ```
 
 `make run` builds, packages, development-signs, and opens `dist/OmniWM.app` through LaunchServices. This is the canonical development launch because it gives OmniWM its normal app identity. OmniWM uses its native status bar item while Hidden Bar concealment is inactive. While concealment is active, it uses a separate fallback icon next to the workspace bar because macOS can conceal the app-owned status item with the other restricted items. This behavior applies to both bundled and raw `swift run OmniWM` launches and is not specific to Debug builds.
+
+## Community Integrations
+
+- **[OmniWM Computer Use](https://github.com/nick-s5/omniwm-computer-use)** is a community-maintained Codex skill for focus-safe Computer Use, browser automation, and app testing through `omniwmctl` across OmniWM workspaces and displays.
+- **[OmniCast](https://github.com/imprisonedmind/omni-cast)** is a community-maintained Raycast extension for controlling OmniWM with plain-English search and commands through `omniwmctl`.
 
 ## Related Forks
 

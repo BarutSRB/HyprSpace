@@ -40,38 +40,6 @@ final class OverviewSettingsTOMLTests: XCTestCase {
         XCTAssertEqual(decoded.overviewSelectedBorderColor, export.overviewSelectedBorderColor)
     }
 
-    func testMissingOverviewTableRecoversCanonicalDefaults() throws {
-        let defaults = SettingsExport.defaults()
-        let toml = String(decoding: try SettingsTOMLCodec.encode(defaults), as: UTF8.self)
-        let decoded = try SettingsTOMLCodec.decode(Data(removingOverviewTables(from: toml).utf8))
-
-        XCTAssertEqual(decoded.overviewZoom, defaults.overviewZoom)
-        XCTAssertEqual(decoded.overviewBackdropColor, defaults.overviewBackdropColor)
-        XCTAssertEqual(decoded.overviewNormalBorderColor, defaults.overviewNormalBorderColor)
-        XCTAssertEqual(decoded.overviewHoveredBorderColor, defaults.overviewHoveredBorderColor)
-        XCTAssertEqual(decoded.overviewSelectedBorderColor, defaults.overviewSelectedBorderColor)
-    }
-
-    func testMissingNestedOverviewKeysRecoverIndependently() throws {
-        let defaults = SettingsExport.defaults()
-        var toml = String(decoding: try SettingsTOMLCodec.encode(defaults), as: UTF8.self)
-        toml = replacingValue(in: toml, table: "overview", key: "zoom", with: "1.25")
-        toml = replacingValue(in: toml, table: "overview.backdrop", key: "red", with: "0.2")
-        toml = removingValue(in: toml, table: "overview.backdrop", key: "green")
-        toml = removingTable("overview.windowBorders.hovered", from: toml)
-        toml = replacingValue(in: toml, table: "overview.windowBorders.selected", key: "blue", with: "0.9")
-        toml = removingValue(in: toml, table: "overview.windowBorders.selected", key: "alpha")
-
-        let decoded = try SettingsTOMLCodec.decode(Data(toml.utf8))
-
-        XCTAssertEqual(decoded.overviewZoom, 1.25)
-        XCTAssertEqual(decoded.overviewBackdropColor.red, 0.2)
-        XCTAssertEqual(decoded.overviewBackdropColor.green, defaults.overviewBackdropColor.green)
-        XCTAssertEqual(decoded.overviewHoveredBorderColor, defaults.overviewHoveredBorderColor)
-        XCTAssertEqual(decoded.overviewSelectedBorderColor.blue, 0.9)
-        XCTAssertEqual(decoded.overviewSelectedBorderColor.alpha, defaults.overviewSelectedBorderColor.alpha)
-    }
-
     func testMalformedOverviewTypesRejectDecode() throws {
         let defaults = String(
             decoding: try SettingsTOMLCodec.encode(SettingsExport.defaults()),

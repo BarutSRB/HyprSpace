@@ -21,7 +21,7 @@ enum IntakeEvent: Sendable {
     case cgs(CGSWindowEvent)
     case display(DisplayConfigurationObserver.DisplayEvent)
     case hotkeyInvocation(HotkeyInvocation)
-    case intentExpired(intentId: IntentID)
+    case intentExpired(intentId: IntentID, deadlineGeneration: UInt64)
     case ipcCommand(IPCCommandIntake)
     case mouseDragged(button: MouseEventHandler.MouseButton, location: CGPoint)
     case mouseMoved(location: CGPoint, modifiersRawValue: UInt64, windowIdUnderPointer: Int?)
@@ -89,6 +89,107 @@ protocol EventIntakeSink: AnyObject {
 
 @MainActor
 final class EventIntake {
+    struct EventCategoryPerformanceSnapshot: Equatable, Sendable {
+        let acceptedEvents: UInt64
+        let coalescedEvents: UInt64
+        let deliveredEvents: UInt64
+    }
+
+    struct PerformanceSnapshot: Equatable, Sendable {
+        let acceptedEvents: UInt64
+        let coalescedEvents: UInt64
+        let deliveredEvents: UInt64
+        let drainBatches: UInt64
+        let currentQueueDepth: Int
+        let maximumQueueDepth: Int
+        let maximumBatchSize: Int
+        let cgsCreatedEvents: EventCategoryPerformanceSnapshot
+        let cgsDestroyedEvents: EventCategoryPerformanceSnapshot
+        let cgsFrameChangedEvents: EventCategoryPerformanceSnapshot
+        let cgsTitleChangedEvents: EventCategoryPerformanceSnapshot
+        let axLifecycleEvents: EventCategoryPerformanceSnapshot
+        let axFocusedWindowChangedEvents: EventCategoryPerformanceSnapshot
+    }
+
+    private struct EventCategoryPerformanceCounters {
+        var acceptedEvents: UInt64 = 0
+        var coalescedEvents: UInt64 = 0
+        var deliveredEvents: UInt64 = 0
+
+        var snapshot: EventCategoryPerformanceSnapshot {
+            EventCategoryPerformanceSnapshot(
+                acceptedEvents: acceptedEvents,
+                coalescedEvents: coalescedEvents,
+                deliveredEvents: deliveredEvents
+            )
+        }
+    }
+
+    private struct PerformanceCounters {
+        var acceptedEvents: UInt64 = 0
+        var coalescedEvents: UInt64 = 0
+        var deliveredEvents: UInt64 = 0
+        var drainBatches: UInt64 = 0
+        var maximumQueueDepth = 0
+        var maximumBatchSize = 0
+        var cgsCreatedEvents = EventCategoryPerformanceCounters()
+        var cgsDestroyedEvents = EventCategoryPerformanceCounters()
+        var cgsFrameChangedEvents = EventCategoryPerformanceCounters()
+        var cgsTitleChangedEvents = EventCategoryPerformanceCounters()
+        var axLifecycleEvents = EventCategoryPerformanceCounters()
+        var axFocusedWindowChangedEvents = EventCategoryPerformanceCounters()
+
+        func snapshot(currentQueueDepth: Int) -> PerformanceSnapshot {
+            PerformanceSnapshot(
+                acceptedEvents: acceptedEvents,
+                coalescedEvents: coalescedEvents,
+                deliveredEvents: deliveredEvents,
+                drainBatches: drainBatches,
+                currentQueueDepth: currentQueueDepth,
+                maximumQueueDepth: maximumQueueDepth,
+                maximumBatchSize: maximumBatchSize,
+                cgsCreatedEvents: cgsCreatedEvents.snapshot,
+                cgsDestroyedEvents: cgsDestroyedEvents.snapshot,
+                cgsFrameChangedEvents: cgsFrameChangedEvents.snapshot,
+                cgsTitleChangedEvents: cgsTitleChangedEvents.snapshot,
+                axLifecycleEvents: axLifecycleEvents.snapshot,
+                axFocusedWindowChangedEvents: axFocusedWindowChangedEvents.snapshot
+            )
+        }
+
+        mutating func recordAccepted(
+            _ event: IntakeEvent,
+            coalesced: Bool,
+            queueDepth: Int
+        ) {
+            acceptedEvents &+= 1
+            if coalesced {
+                coalescedEvents &+= 1
+            }
+            maximumQueueDepth = max(maximumQueueDepth, queueDepth)
+            guard let keyPath = EventIntake.performanceCategoryKeyPath(for: event) else { return }
+            self[keyPath: keyPath].acceptedEvents &+= 1
+            if coalesced {
+                self[keyPath: keyPath].coalescedEvents &+= 1
+            }
+        }
+
+        mutating func recordDelivered(_ event: IntakeEvent) {
+            guard let keyPath = EventIntake.performanceCategoryKeyPath(for: event) else { return }
+            self[keyPath: keyPath].deliveredEvents &+= 1
+        }
+
+        mutating func recordDrain(_ events: [StampedIntakeEvent]) {
+            guard !events.isEmpty else { return }
+            drainBatches &+= 1
+            deliveredEvents &+= UInt64(events.count)
+            maximumBatchSize = max(maximumBatchSize, events.count)
+            for stamped in events {
+                recordDelivered(stamped.event)
+            }
+        }
+    }
+
     private struct Buffer {
         var isOpen = false
         var drainScheduled = false
@@ -100,6 +201,7 @@ final class EventIntake {
         var openLeftDraggedSeq: UInt64?
         var openRightDraggedSeq: UInt64?
         var openScrollSeq: UInt64?
+        var performanceCounters: PerformanceCounters?
 
         mutating func closeMouseCoalescingWindows() {
             openMouseMovedSeq = nil
@@ -124,6 +226,30 @@ final class EventIntake {
 
     nonisolated var hasPendingEvents: Bool {
         buffer.withLock { !$0.orderedEvents.isEmpty }
+    }
+
+    nonisolated func beginPerformanceCapture() {
+        buffer.withLock { state in
+            state.performanceCounters = PerformanceCounters(
+                maximumQueueDepth: state.orderedEvents.count
+            )
+        }
+    }
+
+    nonisolated func performanceSnapshot() -> PerformanceSnapshot? {
+        buffer.withLock { state in
+            state.performanceCounters?.snapshot(currentQueueDepth: state.orderedEvents.count)
+        }
+    }
+
+    nonisolated func endPerformanceCapture() -> PerformanceSnapshot? {
+        buffer.withLock { state in
+            let snapshot = state.performanceCounters?.snapshot(
+                currentQueueDepth: state.orderedEvents.count
+            )
+            state.performanceCounters = nil
+            return snapshot
+        }
     }
 
     @discardableResult
@@ -166,7 +292,19 @@ final class EventIntake {
     nonisolated func enqueue(_ event: IntakeEvent) -> Bool {
         let (didEnqueue, shouldScheduleDrain) = buffer.withLock { state -> (Bool, Bool) in
             guard state.isOpen else { return (false, false) }
-            stampAndCoalesce(event, into: &state)
+            if state.performanceCounters == nil {
+                stampAndCoalesce(event, into: &state)
+            } else {
+                let sequenceBefore = state.nextSeq
+                stampAndCoalesce(event, into: &state)
+                let wasCoalesced = state.nextSeq == sequenceBefore
+                let queueDepth = state.orderedEvents.count
+                state.performanceCounters?.recordAccepted(
+                    event,
+                    coalesced: wasCoalesced,
+                    queueDepth: queueDepth
+                )
+            }
             guard !state.drainScheduled else { return (true, false) }
             state.drainScheduled = true
             return (true, true)
@@ -316,6 +454,7 @@ final class EventIntake {
             state.pendingCGSFrameWindowIds.removeAll(keepingCapacity: true)
             state.closeMouseCoalescingWindows()
             state.drainScheduled = false
+            state.performanceCounters?.recordDrain(events)
             return events
         }
         defer {
@@ -334,6 +473,29 @@ final class EventIntake {
                   events.capacity > state.spareOrderedEvents.capacity
             else { return }
             state.spareOrderedEvents = events
+        }
+    }
+
+    private nonisolated static func performanceCategoryKeyPath(
+        for event: IntakeEvent
+    ) -> WritableKeyPath<PerformanceCounters, EventCategoryPerformanceCounters>? {
+        switch event {
+        case .cgs(.created):
+            \.cgsCreatedEvents
+        case .cgs(.destroyed),
+             .cgs(.closed):
+            \.cgsDestroyedEvents
+        case .cgs(.frameChanged):
+            \.cgsFrameChangedEvents
+        case .cgs(.titleChanged):
+            \.cgsTitleChangedEvents
+        case .axWindowDestroyed,
+             .axWindowMiniaturized:
+            \.axLifecycleEvents
+        case .axFocusedWindowChanged:
+            \.axFocusedWindowChangedEvents
+        default:
+            nil
         }
     }
 }

@@ -123,35 +123,6 @@ actor IPCClientConnection {
         return try IPCWire.decodeEvent(from: Data(line.utf8))
     }
 
-    func hasPendingData(timeoutMilliseconds: Int32) throws -> Bool {
-        if readBuffer.contains(0x0A) {
-            return true
-        }
-
-        var descriptor = pollfd(
-            fd: fileDescriptor,
-            events: Int16(POLLIN),
-            revents: 0
-        )
-
-        while true {
-            let result = Darwin.poll(&descriptor, 1, timeoutMilliseconds)
-            if result > 0 {
-                let readableMask = Int16(POLLIN | POLLHUP | POLLERR)
-                return descriptor.revents & readableMask != 0
-            }
-            if result == 0 {
-                return false
-            }
-            if errno == EINTR {
-                continue
-            }
-
-            let error = POSIXErrorCode(rawValue: errno) ?? .EIO
-            throw POSIXError(error)
-        }
-    }
-
     func eventStream() -> AsyncThrowingStream<IPCEventEnvelope, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {

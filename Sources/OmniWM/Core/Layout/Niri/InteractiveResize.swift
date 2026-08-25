@@ -93,18 +93,6 @@ struct InteractiveResize {
     let originalViewOffset: CGFloat?
 }
 
-struct ResizeHitTestResult {
-    let windowToken: WindowToken
-
-    let nodeId: NodeId
-
-    let edges: ResizeEdge
-
-    let columnIndex: Int
-
-    let windowFrame: CGRect
-}
-
 struct ResizeConfiguration {
     var edgeThreshold: CGFloat = 8.0
     var minWindowWeight: CGFloat = 0.3

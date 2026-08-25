@@ -85,20 +85,53 @@ struct DwindleWorkspaceSnapshot {
     let isActiveWorkspace: Bool
 }
 
+struct DwindleAnimationGeometryContext: Equatable {
+    let monitorId: Monitor.ID
+    let displayId: CGDirectDisplayID
+    let workingFrame: CGRect
+    let fullscreenLayoutFrame: CGRect
+    let scale: CGFloat
+    let settings: ResolvedDwindleSettings
+    let tabRailWidth: CGFloat
+}
+
+struct DwindleAnimationTargetCandidate {
+    let workspaceId: WorkspaceDescriptor.ID
+    let engineIdentifier: ObjectIdentifier
+    let geometry: DwindleAnimationGeometryContext
+    let targetFrames: [WindowToken: CGRect]
+}
+
+enum DwindleAnimationTargetDisposition {
+    case replace(DwindleAnimationTargetCandidate)
+    case clear(engineIdentifier: ObjectIdentifier, geometry: DwindleAnimationGeometryContext)
+}
+
+struct FrameMutationComponents: OptionSet, Equatable, Hashable, Sendable {
+    let rawValue: UInt8
+
+    static let position = Self(rawValue: 1 << 0)
+    static let size = Self(rawValue: 1 << 1)
+    static let all: Self = [.position, .size]
+}
+
 struct LayoutFrameChange {
     let token: WindowToken
     let frame: CGRect
+    let components: FrameMutationComponents
     let forceApply: Bool
     let allowsTerminalRecovery: Bool
 
     init(
         token: WindowToken,
         frame: CGRect,
+        components: FrameMutationComponents = .all,
         forceApply: Bool,
         allowsTerminalRecovery: Bool = false
     ) {
         self.token = token
         self.frame = frame
+        self.components = components
         self.forceApply = forceApply
         self.allowsTerminalRecovery = allowsTerminalRecovery
     }
@@ -126,6 +159,12 @@ struct NativeFullscreenSlotProjection: Equatable {
     let visible: Bool
 }
 
+struct TabRailGeometryCommand: Equatable {
+    let key: TabRailKey
+    let tileFrame: CGRect
+    let visibleTileFrame: CGRect
+}
+
 // `frameChanges` imply active, restore-eligible windows for this pass.
 // `visibilityChanges` are reserved for explicit hide/show transitions.
 struct WorkspaceLayoutDiff {
@@ -134,6 +173,7 @@ struct WorkspaceLayoutDiff {
     var restoreChanges: [LayoutRestoreChange] = []
     var deferredHides: [LayoutDeferredHide] = []
     var nativeFullscreenSlots: [WindowToken: NativeFullscreenSlotProjection] = [:]
+    var tabRailGeometryCommands: [TabRailGeometryCommand] = []
 }
 
 struct WorkspaceSessionPatch {
@@ -169,6 +209,7 @@ struct WorkspaceLayoutPlan {
     var diff: WorkspaceLayoutDiff
     var niriRestorePlacements: [WindowToken: PersistedNiriPlacement] = [:]
     var animationDirectives: [AnimationDirective] = []
+    var dwindleAnimationTargetDisposition: DwindleAnimationTargetDisposition?
     var isAnimationTick = false
     var isActiveWorkspace = true
 }

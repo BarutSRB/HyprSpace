@@ -553,18 +553,18 @@ struct RestorePlanner {
         if shouldUseNormalizedOrigin,
            let normalizedFloatingOrigin = intent.normalizedFloatingOrigin
         {
-            let origin = floatingOrigin(
+            let origin = FloatingFrameGeometry.origin(
                 from: normalizedFloatingOrigin,
                 windowSize: floatingFrame.size,
                 in: preferredMonitor.visibleFrame
             )
-            return clampedFloatingFrame(
+            return FloatingFrameGeometry.clamped(
                 CGRect(origin: origin, size: floatingFrame.size),
                 in: preferredMonitor.visibleFrame
             )
         }
 
-        return clampedFloatingFrame(floatingFrame, in: preferredMonitor.visibleFrame)
+        return FloatingFrameGeometry.clamped(floatingFrame, in: preferredMonitor.visibleFrame)
     }
 
     private func reconcileInteractionMonitors(
@@ -603,30 +603,6 @@ struct RestorePlanner {
 
     private func restoreKeySortKey(_ restoreKey: MonitorRestoreKey) -> (CGFloat, CGFloat, UInt32) {
         (restoreKey.anchorPoint.x, -restoreKey.anchorPoint.y, restoreKey.displayId)
-    }
-
-    private func floatingOrigin(
-        from normalizedOrigin: CGPoint,
-        windowSize: CGSize,
-        in visibleFrame: CGRect
-    ) -> CGPoint {
-        let availableWidth = max(0, visibleFrame.width - windowSize.width)
-        let availableHeight = max(0, visibleFrame.height - windowSize.height)
-        return CGPoint(
-            x: visibleFrame.minX + min(max(0, normalizedOrigin.x), 1) * availableWidth,
-            y: visibleFrame.minY + min(max(0, normalizedOrigin.y), 1) * availableHeight
-        )
-    }
-
-    private func clampedFloatingFrame(
-        _ frame: CGRect,
-        in visibleFrame: CGRect
-    ) -> CGRect {
-        let maxX = visibleFrame.maxX - frame.width
-        let maxY = visibleFrame.maxY - frame.height
-        let clampedX = min(max(frame.origin.x, visibleFrame.minX), maxX >= visibleFrame.minX ? maxX : visibleFrame.minX)
-        let clampedY = min(max(frame.origin.y, visibleFrame.minY), maxY >= visibleFrame.minY ? maxY : visibleFrame.minY)
-        return CGRect(origin: CGPoint(x: clampedX, y: clampedY), size: frame.size)
     }
 }
 

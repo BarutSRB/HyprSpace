@@ -117,7 +117,7 @@ final class NiriFocusPreviousTests: XCTestCase {
         let blocker = blockLayoutRefresh(fixture.controller, workspaceId: fixture.workspaceB)
         defer { unblockLayoutRefresh(fixture.controller, blocker: blocker) }
 
-        let result = fixture.controller.commandHandler.handleHotkeyCommand(.focusPrevious)
+        let result = fixture.controller.commandHandler.performCommand(.focusPrevious)
 
         XCTAssertEqual(result, .executed)
         XCTAssertEqual(fixture.controller.activeWorkspace()?.id, fixture.workspaceA)
@@ -165,7 +165,7 @@ final class NiriFocusPreviousTests: XCTestCase {
         defer { unblockLayoutRefresh(fixture.controller, blocker: blocker) }
 
         XCTAssertEqual(
-            fixture.controller.commandHandler.handleHotkeyCommand(.focusPrevious),
+            fixture.controller.commandHandler.performCommand(.focusPrevious),
             .executed
         )
         XCTAssertEqual(fixture.controller.activeWorkspace()?.id, fixture.workspaceB)
@@ -219,7 +219,7 @@ final class NiriFocusPreviousTests: XCTestCase {
         let blocker = blockLayoutRefresh(controller, workspaceId: workspaceB)
         defer { unblockLayoutRefresh(controller, blocker: blocker) }
 
-        XCTAssertEqual(controller.commandHandler.handleHotkeyCommand(.focusPrevious), .executed)
+        XCTAssertEqual(controller.commandHandler.performCommand(.focusPrevious), .executed)
         XCTAssertEqual(
             controller.workspaceManager.mostRecentlyFocusedTiledToken(excluding: tokenA),
             tokenB
@@ -301,7 +301,7 @@ final class NiriFocusPreviousTests: XCTestCase {
         defer { unblockLayoutRefresh(fixture.controller, blocker: blocker) }
 
         XCTAssertEqual(
-            fixture.controller.commandHandler.handleHotkeyCommand(.focusPrevious),
+            fixture.controller.commandHandler.performCommand(.focusPrevious),
             .executed
         )
         let postLayout = try XCTUnwrap(
@@ -329,7 +329,7 @@ final class NiriFocusPreviousTests: XCTestCase {
         )
 
         XCTAssertEqual(
-            fixture.controller.commandHandler.handleHotkeyCommand(.focusPrevious),
+            fixture.controller.commandHandler.performCommand(.focusPrevious),
             .executed
         )
         let postLayout = try XCTUnwrap(
@@ -402,7 +402,7 @@ final class NiriFocusPreviousTests: XCTestCase {
         let blocker = blockLayoutRefresh(controller, workspaceId: workspaceB)
         defer { unblockLayoutRefresh(controller, blocker: blocker) }
 
-        XCTAssertEqual(controller.commandHandler.handleHotkeyCommand(.focusPrevious), .executed)
+        XCTAssertEqual(controller.commandHandler.performCommand(.focusPrevious), .executed)
         let postLayout = try XCTUnwrap(
             controller.layoutRefreshController.layoutState.pendingRefresh?.postLayoutActions.first
         )
@@ -426,7 +426,7 @@ final class NiriFocusPreviousTests: XCTestCase {
         )
 
         XCTAssertEqual(
-            fixture.controller.commandHandler.handleHotkeyCommand(.focusPrevious),
+            fixture.controller.commandHandler.performCommand(.focusPrevious),
             .executed
         )
         let postLayout = try XCTUnwrap(

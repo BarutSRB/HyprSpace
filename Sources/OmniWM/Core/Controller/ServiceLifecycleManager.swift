@@ -108,6 +108,45 @@ struct NativeSpaceInventoryRequest: Sendable {
 
 @MainActor
 final class ServiceLifecycleManager {
+    enum TopologyInventoryTerminalReason: String, Equatable, Sendable {
+        case authoritative
+        case globalFallback
+        case cancelled
+        case superseded
+    }
+
+    struct PerformanceSnapshot: Equatable, Sendable {
+        let topologySamples: UInt64
+        let topologyGlobalFallbacks: UInt64
+        let authoritativeTerminations: UInt64
+        let globalFallbackTerminations: UInt64
+        let cancelledTerminations: UInt64
+        let supersededTerminations: UInt64
+        let lastTopologyTerminalReason: TopologyInventoryTerminalReason?
+    }
+
+    private struct PerformanceCounters {
+        var topologySamples: UInt64 = 0
+        var topologyGlobalFallbacks: UInt64 = 0
+        var authoritativeTerminations: UInt64 = 0
+        var globalFallbackTerminations: UInt64 = 0
+        var cancelledTerminations: UInt64 = 0
+        var supersededTerminations: UInt64 = 0
+        var lastTopologyTerminalReason: TopologyInventoryTerminalReason?
+
+        var snapshot: PerformanceSnapshot {
+            PerformanceSnapshot(
+                topologySamples: topologySamples,
+                topologyGlobalFallbacks: topologyGlobalFallbacks,
+                authoritativeTerminations: authoritativeTerminations,
+                globalFallbackTerminations: globalFallbackTerminations,
+                cancelledTerminations: cancelledTerminations,
+                supersededTerminations: supersededTerminations,
+                lastTopologyTerminalReason: lastTopologyTerminalReason
+            )
+        }
+    }
+
     weak var controller: WMController?
 
     private var displayObserver: DisplayConfigurationObserver?
@@ -124,12 +163,47 @@ final class ServiceLifecycleManager {
     private var topologyInventoryStabilityTask: Task<Void, Never>?
     private var topologyInventoryStabilityGeneration: UInt64 = 0
     private var topologyInventoryRequest: NativeSpaceInventoryRequest?
+    private var performanceCounters: PerformanceCounters?
+    var topologyInventorySampleProvider: (@MainActor () -> NativeSpaceTopologySample?)?
+    var topologyInventorySleeper: @MainActor (Duration) async throws -> Void = {
+        try await Task.sleep(for: $0)
+    }
+
     private(set) var isSecureInputActive = false
     private static let topologyInventorySampleInterval: Duration = .milliseconds(100)
     private static let topologyInventoryRetryInterval: Duration = .seconds(1)
 
     init(controller: WMController) {
         self.controller = controller
+    }
+
+    func beginPerformanceCapture() {
+        performanceCounters = PerformanceCounters()
+    }
+
+    func performanceSnapshot() -> PerformanceSnapshot? {
+        performanceCounters?.snapshot
+    }
+
+    func endPerformanceCapture() -> PerformanceSnapshot? {
+        let snapshot = performanceCounters?.snapshot
+        performanceCounters = nil
+        return snapshot
+    }
+
+    private func recordTopologyTerminal(_ reason: TopologyInventoryTerminalReason) {
+        guard performanceCounters != nil else { return }
+        performanceCounters?.lastTopologyTerminalReason = reason
+        switch reason {
+        case .authoritative:
+            performanceCounters?.authoritativeTerminations &+= 1
+        case .globalFallback:
+            performanceCounters?.globalFallbackTerminations &+= 1
+        case .cancelled:
+            performanceCounters?.cancelledTerminations &+= 1
+        case .superseded:
+            performanceCounters?.supersededTerminations &+= 1
+        }
     }
 
     func start() {
@@ -249,9 +323,9 @@ final class ServiceLifecycleManager {
         }
 
         controller.spaceTracker.start()
+        startLockScreenObserver()
         performStartupRefresh()
         startSecureInputMonitor()
-        startLockScreenObserver()
     }
 
     func handleFrameApplySucceeded(_ result: AXFrameApplyResult) {
@@ -262,7 +336,7 @@ final class ServiceLifecycleManager {
         controller.surfaceReconciler.handleVerifiedFrameApplySuccess(result)
     }
 
-    private func startLockScreenObserver() {
+    func startLockScreenObserver() {
         guard let controller else { return }
         controller.lockScreenObserver.onLockDetected = { [weak controller] in
             controller?.isLockScreenActive = true
@@ -273,6 +347,15 @@ final class ServiceLifecycleManager {
             controller.serviceLifecycleManager.handleUnlockDetected()
         }
         controller.lockScreenObserver.start()
+        let isLockScreenActive = controller.lockScreenObserver.isFrontmostAppLockScreen()
+        if isLockScreenActive {
+            controller.isLockScreenActive = true
+            controller.layoutRefreshController.suspendForLockScreen()
+            return
+        }
+        guard controller.isLockScreenActive != isLockScreenActive else { return }
+        controller.isLockScreenActive = isLockScreenActive
+        handleUnlockDetected()
     }
 
     private func startSecureInputMonitor() {
@@ -324,7 +407,6 @@ final class ServiceLifecycleManager {
 
         controller.workspaceManager.withEngineMutationScope {
             controller.niriEngine?.cleanupRemovedMonitor(monitorId)
-            controller.dwindleEngine?.cleanupRemovedMonitor(monitorId)
         }
     }
 
@@ -527,12 +609,20 @@ final class ServiceLifecycleManager {
         controller.layoutRefreshController.beginInventoryStabilityBarrier()
         topologyInventoryStabilityGeneration &+= 1
         let generation = topologyInventoryStabilityGeneration
+        if topologyInventoryStabilityTask != nil {
+            recordTopologyTerminal(.superseded)
+        }
         topologyInventoryStabilityTask?.cancel()
         topologyInventoryStabilityTask = Task { @MainActor [weak self] in
             var gate = NativeSpaceInventoryStabilityGate()
             while !Task.isCancelled {
                 guard let self, let controller = self.controller else { return }
-                let sample = controller.spaceTracker.currentTopologySample()
+                let sample = if let provider = self.topologyInventorySampleProvider {
+                    provider()
+                } else {
+                    controller.spaceTracker.currentTopologySample()
+                }
+                self.performanceCounters?.topologySamples &+= 1
                 let observation = gate.observe(sample)
                 if let topologyToApply = observation.topologyToApply {
                     controller.spaceTracker.refresh(
@@ -540,6 +630,7 @@ final class ServiceLifecycleManager {
                         windowMembershipUpdate: .carryForwardKnown,
                         reconcilesNativeFullscreen: false
                     )
+                    controller.layoutRefreshController.resumeAfterPostUnlockTopologySample()
                 }
                 if let authoritativeTopologyToApply = observation.authoritativeTopologyToApply {
                     guard
@@ -559,6 +650,7 @@ final class ServiceLifecycleManager {
                     )
                     let authoritativeTopology = authoritativeTopologyToApply.topology
                     let resolution = request.resolution(for: authoritativeTopology)
+                    self.recordTopologyTerminal(.authoritative)
                     self.topologyInventoryStabilityTask = nil
                     self.topologyInventoryRequest = nil
                     if resolution.recordsActiveSpaceChange {
@@ -585,18 +677,24 @@ final class ServiceLifecycleManager {
                         generation == self.topologyInventoryStabilityGeneration,
                         let request = self.topologyInventoryRequest
                     else { return }
+                    self.performanceCounters?.topologyGlobalFallbacks &+= 1
+                    self.recordTopologyTerminal(.globalFallback)
                     controller.layoutRefreshController.requestFullRescan(
                         reason: .staleFullRescan,
                         scope: .all,
                         reconcilesWorkspaceMonitorState: request.reconcilesWorkspaceMonitorState
                     )
-                    controller.layoutRefreshController.releaseInventoryStabilityHold()
+                    self.topologyInventoryStabilityTask = nil
+                    self.topologyInventoryRequest = nil
+                    controller.layoutRefreshController.endInventoryStabilityBarrier()
+                    controller.layoutRefreshController.resumeAfterPostUnlockTopologySample()
+                    return
                 }
                 let interval = gate.usesRetryInterval
                     ? Self.topologyInventoryRetryInterval
                     : Self.topologyInventorySampleInterval
                 do {
-                    try await Task.sleep(for: interval)
+                    try await self.topologyInventorySleeper(interval)
                 } catch {
                     return
                 }
@@ -612,6 +710,9 @@ final class ServiceLifecycleManager {
 
     private func cancelStableTopologyInventory() {
         topologyInventoryStabilityGeneration &+= 1
+        if topologyInventoryStabilityTask != nil {
+            recordTopologyTerminal(.cancelled)
+        }
         topologyInventoryStabilityTask?.cancel()
         topologyInventoryStabilityTask = nil
         topologyInventoryRequest = nil
@@ -748,7 +849,13 @@ final class ServiceLifecycleManager {
 
     func stop() {
         guard let controller else { return }
+        if let request = controller.intentLedger.activeManagedRequest,
+           case .awaitingSameAppActivation = request.phase
+        {
+            controller.cancelManagedFocusRequestAndRestoreSource(request)
+        }
         controller.hasStartedServices = false
+        controller.invalidateOverviewDeferredActionsForServiceStop()
         cancelStableTopologyInventory()
 
         let hiddenPIDs = controller.workspaceManager.hiddenAppPIDs

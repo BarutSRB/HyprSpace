@@ -508,6 +508,13 @@ extension AXEventHandler {
         managedReplacementMetadata: ManagedReplacementMetadata?
     ) -> WindowState? {
         guard let controller else { return nil }
+        if oldToken.pid != newToken.pid,
+           let request = controller.intentLedger.activeManagedRequest,
+           case let .awaitingSameAppActivation(sourceToken, _) = request.phase,
+           request.token == oldToken || sourceToken == oldToken
+        {
+            controller.cancelManagedFocusRequestAndRestoreSource(request)
+        }
         let focusTransactionIds = controller.dwindleLayoutHandler
             .currentPendingGroupRevealFocusTransactionIds(for: oldToken)
         return controller.withRuntimeFrameJobCancellationSuppressed {

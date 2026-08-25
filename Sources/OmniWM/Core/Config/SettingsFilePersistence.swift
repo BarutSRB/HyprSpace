@@ -4,6 +4,17 @@
 import Darwin
 import Foundation
 
+enum SettingsFilePersistenceError: Error, Equatable, LocalizedError {
+    case corruptBackupSlotsExhausted
+
+    var errorDescription: String? {
+        switch self {
+        case .corruptBackupSlotsExhausted:
+            "Both settings recovery slots are occupied."
+        }
+    }
+}
+
 @MainActor
 final class SettingsFilePersistence {
     struct FileFingerprint: Equatable {
@@ -16,9 +27,15 @@ final class SettingsFilePersistence {
         let fileSize: UInt64
     }
 
-    private struct FileSnapshot {
-        let export: SettingsExport
+    private struct FileContents {
+        let data: Data
         let fingerprint: FileFingerprint
+    }
+
+    private enum CorruptSlotState {
+        case absent
+        case matching
+        case occupied
     }
 
     private struct FileIdentity: Equatable {
@@ -36,6 +53,8 @@ final class SettingsFilePersistence {
     nonisolated static let defaultDirectoryURL = OmniWMStoragePaths.live.configDirectory
     nonisolated static let fileName = "settings.toml"
     nonisolated static let corruptFileName = "settings.toml.corrupt"
+    nonisolated static let secondaryCorruptFileName = "settings.toml.corrupt.1"
+    nonisolated static let corruptFileNames = [corruptFileName, secondaryCorruptFileName]
     nonisolated static var fileURL: URL {
         defaultDirectoryURL.appendingPathComponent(fileName, isDirectory: false)
     }
@@ -86,7 +105,6 @@ final class SettingsFilePersistence {
     }
 
     func load() -> SettingsExport {
-        var targetURL: URL?
         do {
             try ensureDirectoryExists()
             guard FileManager.default.fileExists(atPath: fileURL.path) else {
@@ -95,19 +113,26 @@ final class SettingsFilePersistence {
                 return defaults
             }
 
-            let resolvedTargetURL = try Self.settingsTarget(for: fileURL)
-            targetURL = resolvedTargetURL
-            let snapshot = try readSnapshot(at: resolvedTargetURL)
-            lastObservedFingerprint = snapshot.fingerprint
-            lastPersistedExport = snapshot.export
-            return snapshot.export
+            let targetURL = try Self.settingsTarget(for: fileURL)
+            let contents = try readContents(at: targetURL)
+            do {
+                let export = try SettingsTOMLCodec.decode(contents.data)
+                lastObservedFingerprint = contents.fingerprint
+                lastPersistedExport = export
+                return export
+            } catch {
+                report("Failed to load \(fileURL.path): \(error.localizedDescription)")
+                let defaults = SettingsExport.defaults()
+                do {
+                    try recoverInvalidSettings(contents.data, at: targetURL, replacingWith: defaults)
+                } catch {
+                    report("Failed to recover invalid settings file: \(error.localizedDescription)")
+                }
+                return defaults
+            }
         } catch {
             report("Failed to load \(fileURL.path): \(error.localizedDescription)")
-            let defaults = SettingsExport.defaults()
-            if let targetURL {
-                recoverCorruptFile(at: targetURL, with: defaults)
-            }
-            return defaults
+            return SettingsExport.defaults()
         }
     }
 
@@ -135,15 +160,16 @@ final class SettingsFilePersistence {
             return
         }
 
-        let previous = FileManager.default.fileExists(atPath: targetURL.path) ? try? Data(contentsOf: targetURL) : nil
-        let data = try SettingsTOMLCodec.encode(export, preservingUnknownKeysFrom: previous)
-        try data.write(to: targetURL, options: .atomic)
-
-        let fingerprint = currentFingerprint()
-        lastWrittenFingerprint = fingerprint
-        lastObservedFingerprint = fingerprint
-        lastPersistedExport = export
-        refreshSettingsFileWatcher(for: fingerprint)
+        let previous = try existingData(at: targetURL)
+        do {
+            let data = try SettingsTOMLCodec.encode(export, preservingUnknownKeysFrom: previous)
+            try persist(data, at: targetURL, export: export)
+        } catch SettingsTOMLCodecError.cannotSafelyPreservePreviousData {
+            guard let previous else {
+                throw SettingsTOMLCodecError.cannotSafelyPreservePreviousData
+            }
+            try recoverInvalidSettings(previous, at: targetURL, replacingWith: export)
+        }
     }
 
     func scheduleSave(_ export: @autoclosure () -> SettingsExport) {
@@ -179,10 +205,11 @@ final class SettingsFilePersistence {
 
         do {
             let targetURL = try Self.settingsTarget(for: fileURL)
-            let snapshot = try readSnapshot(at: targetURL)
-            lastObservedFingerprint = snapshot.fingerprint
-            lastPersistedExport = snapshot.export
-            return snapshot.export
+            let contents = try readContents(at: targetURL)
+            let export = try SettingsTOMLCodec.decode(contents.data)
+            lastObservedFingerprint = contents.fingerprint
+            lastPersistedExport = export
+            return export
         } catch {
             report("Ignoring invalid external settings edit at \(fileURL.path): \(error.localizedDescription)")
             return nil
@@ -299,23 +326,21 @@ final class SettingsFilePersistence {
         try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
     }
 
-    private func readSnapshot(at targetURL: URL) throws -> FileSnapshot {
+    private func readContents(at targetURL: URL) throws -> FileContents {
         let handle = try FileHandle(forReadingFrom: targetURL)
         defer {
             try? handle.close()
         }
 
-        guard let data = try handle.readToEnd() else {
-            throw CocoaError(.fileReadUnknown)
-        }
+        let data = try handle.readToEnd() ?? Data()
 
         var statBuffer = stat()
         guard Darwin.fstat(handle.fileDescriptor, &statBuffer) == 0 else {
             throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
         }
 
-        return FileSnapshot(
-            export: try SettingsTOMLCodec.decode(data),
+        return FileContents(
+            data: data,
             fingerprint: Self.fingerprint(from: statBuffer)
         )
     }
@@ -396,16 +421,112 @@ final class SettingsFilePersistence {
         }
     }
 
-    private func recoverCorruptFile(at targetURL: URL, with defaults: SettingsExport) {
-        let corruptURL = directoryURL.appendingPathComponent(Self.corruptFileName, isDirectory: false)
-
-        do {
-            let corruptData = try Data(contentsOf: targetURL)
-            try corruptData.write(to: corruptURL, options: .atomic)
-            try saveImmediately(defaults, to: targetURL)
-        } catch {
-            report("Failed to recover corrupt settings file: \(error.localizedDescription)")
+    private func existingData(at targetURL: URL) throws -> Data? {
+        var fileStatus = stat()
+        let result = targetURL.withUnsafeFileSystemRepresentation { path -> CInt in
+            guard let path else { return -1 }
+            return Darwin.lstat(path, &fileStatus)
         }
+
+        guard result == 0 else {
+            let code = errno
+            guard code == ENOENT else {
+                throw POSIXError(POSIXErrorCode(rawValue: code) ?? .EIO)
+            }
+            return nil
+        }
+
+        guard fileStatus.st_mode & S_IFMT == S_IFREG else { throw POSIXError(.EFTYPE) }
+        return try readContents(at: targetURL).data
+    }
+
+    private func recoverInvalidSettings(
+        _ invalidData: Data,
+        at targetURL: URL,
+        replacingWith export: SettingsExport
+    ) throws {
+        try secureCorruptData(invalidData)
+        let replacement = try SettingsTOMLCodec.encode(export)
+        try persist(replacement, at: targetURL, export: export)
+    }
+
+    private func secureCorruptData(_ data: Data) throws {
+        var firstAbsentURL: URL?
+        for fileName in Self.corruptFileNames {
+            let slotURL = directoryURL.appendingPathComponent(fileName, isDirectory: false)
+            switch Self.corruptSlotState(at: slotURL, matching: data) {
+            case .matching:
+                return
+            case .absent:
+                if firstAbsentURL == nil {
+                    firstAbsentURL = slotURL
+                }
+            case .occupied:
+                break
+            }
+        }
+
+        guard let firstAbsentURL else {
+            throw SettingsFilePersistenceError.corruptBackupSlotsExhausted
+        }
+        try Self.writeExclusive(data, to: firstAbsentURL)
+    }
+
+    private static func corruptSlotState(at url: URL, matching expectedData: Data) -> CorruptSlotState {
+        let fileDescriptor = url.withUnsafeFileSystemRepresentation { path -> CInt in
+            guard let path else { return -1 }
+            return Darwin.open(path, O_RDONLY | O_NOFOLLOW)
+        }
+
+        guard fileDescriptor >= 0 else {
+            return errno == ENOENT ? .absent : .occupied
+        }
+
+        let handle = FileHandle(fileDescriptor: fileDescriptor, closeOnDealloc: true)
+        defer {
+            try? handle.close()
+        }
+
+        var fileStatus = stat()
+        guard Darwin.fstat(fileDescriptor, &fileStatus) == 0,
+              fileStatus.st_mode & S_IFMT == S_IFREG
+        else {
+            return .occupied
+        }
+        do {
+            return (try handle.readToEnd() ?? Data()) == expectedData ? .matching : .occupied
+        } catch {
+            return .occupied
+        }
+    }
+
+    private static func writeExclusive(_ data: Data, to url: URL) throws {
+        let fileDescriptor = url.withUnsafeFileSystemRepresentation { path -> CInt in
+            guard let path else { return -1 }
+            return Darwin.open(path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, S_IRUSR | S_IWUSR)
+        }
+        guard fileDescriptor >= 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+
+        let handle = FileHandle(fileDescriptor: fileDescriptor, closeOnDealloc: true)
+        do {
+            try handle.write(contentsOf: data)
+            try handle.synchronize()
+            try handle.close()
+        } catch {
+            try? handle.close()
+            throw error
+        }
+    }
+
+    private func persist(_ data: Data, at targetURL: URL, export: SettingsExport) throws {
+        try data.write(to: targetURL, options: .atomic)
+        let fingerprint = currentFingerprint()
+        lastWrittenFingerprint = fingerprint
+        lastObservedFingerprint = fingerprint
+        lastPersistedExport = export
+        refreshSettingsFileWatcher(for: fingerprint)
     }
 
     private func report(_ message: String) {

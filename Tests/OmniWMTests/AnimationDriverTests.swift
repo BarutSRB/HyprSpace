@@ -248,16 +248,51 @@ final class AnimationDriverTests: XCTestCase {
         XCTAssertNil(driver.liveViewOffset(in: workspaceId, semanticOffset: 25))
     }
 
-    func testTickKeepsGestureAliveAndCompletesSpring() {
+    func testTickExpiresGestureOneSecondAfterLastUpdateAndCompletesSpring() throws {
         let driver = AnimationDriver()
-        driver.beginGesture(in: workspaceId, isTrackpad: true)
-        XCTAssertTrue(driver.tick(in: workspaceId, at: CACurrentMediaTime() + 100))
-        driver.removeMotions(for: [workspaceId])
+        let livenessClock = GestureLivenessTestClock(time: 10)
+        driver.gestureLivenessNow = { livenessClock.time }
+        let sessionID = try XCTUnwrap(
+            driver.beginGesture(in: workspaceId, isTrackpad: true, timestamp: 10)
+        )
+        livenessClock.time = 10.25
+        driver.updateGesture(
+            in: workspaceId,
+            delta: 10,
+            timestamp: 10.25,
+            isTrackpad: true,
+            viewportWidth: AnimationDriver.gestureWorkingAreaMovement
+        )
+        XCTAssertTrue(driver.tick(in: workspaceId, at: 11.249))
+        XCTAssertEqual(
+            driver.tickResult(in: workspaceId, at: 11.25),
+            .expiredGesture(relativeOffset: 10, sessionID: sessionID)
+        )
+        XCTAssertFalse(driver.hasGesture(in: workspaceId))
 
         _ = commit(driver, previous: 0) { $0.springOffset(to: 100) }
         XCTAssertTrue(driver.tick(in: workspaceId, at: CACurrentMediaTime()))
         XCTAssertFalse(driver.tick(in: workspaceId, at: CACurrentMediaTime() + 600))
         XCTAssertFalse(driver.hasMotion(in: workspaceId))
+    }
+
+    func testNonfiniteGestureInputFailsClosed() {
+        let driver = AnimationDriver()
+        driver.beginGesture(in: workspaceId, isTrackpad: true, timestamp: .nan)
+        XCTAssertFalse(driver.hasGesture(in: workspaceId))
+
+        driver.beginGesture(in: workspaceId, isTrackpad: true, timestamp: 1)
+        driver.gestureLivenessNow = { .nan }
+        driver.updateGesture(
+            in: workspaceId,
+            delta: .infinity,
+            timestamp: 1.1,
+            isTrackpad: true,
+            viewportWidth: AnimationDriver.gestureWorkingAreaMovement
+        )
+        XCTAssertEqual(driver.liveViewOffset(in: workspaceId, semanticOffset: 50), 50)
+        XCTAssertFalse(driver.tick(in: workspaceId, at: .nan))
+        XCTAssertFalse(driver.hasGesture(in: workspaceId))
     }
 
     func testRemoveMotionsDropsWorkspaceState() {
@@ -266,5 +301,14 @@ final class AnimationDriverTests: XCTestCase {
         driver.removeMotions(for: [workspaceId])
         XCTAssertFalse(driver.hasMotion(in: workspaceId))
         XCTAssertFalse(driver.tick(in: workspaceId, at: CACurrentMediaTime()))
+    }
+}
+
+@MainActor
+private final class GestureLivenessTestClock {
+    var time: TimeInterval
+
+    init(time: TimeInterval) {
+        self.time = time
     }
 }

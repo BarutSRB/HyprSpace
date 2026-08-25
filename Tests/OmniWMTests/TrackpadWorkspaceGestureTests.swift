@@ -8,6 +8,14 @@ import XCTest
 
 @MainActor
 final class TrackpadWorkspaceGestureTests: XCTestCase {
+    private final class GestureLivenessClock {
+        var time: TimeInterval
+
+        init(time: TimeInterval) {
+            self.time = time
+        }
+    }
+
     private struct Fixture {
         let controller: WMController
         let monitor: Monitor
@@ -50,6 +58,7 @@ final class TrackpadWorkspaceGestureTests: XCTestCase {
             settings: makeSettings(),
             windowFocusOperations: windowFocusOperations
         )
+        controller.layoutRefreshController.displayLinkActivationForTests = { _ in true }
         controller.settings.scrollGestureEnabled = scrollGestureEnabled
         controller.settings.gestureFingerCount = columnFingers
         controller.settings.workspaceSwipeEnabled = workspaceSwipeEnabled
@@ -108,9 +117,12 @@ final class TrackpadWorkspaceGestureTests: XCTestCase {
         }
     }
 
-    private func beginCommittedColumnGesture(_ fixture: Fixture) -> TimeInterval {
+    private func beginCommittedColumnGesture(
+        _ fixture: Fixture,
+        location: CGPoint = CGPoint(x: 800, y: 450)
+    ) -> TimeInterval {
         var time: TimeInterval = 100
-        sendFrame(fixture, phase: .began, fingers: 3, x: 0.8, y: 0.5, at: time)
+        sendFrame(fixture, phase: .began, fingers: 3, x: 0.8, y: 0.5, at: time, location: location)
         for step in 1 ... 4 {
             time += 0.01
             sendFrame(
@@ -119,13 +131,22 @@ final class TrackpadWorkspaceGestureTests: XCTestCase {
                 fingers: 3,
                 x: 0.8 - 0.03 * CGFloat(step),
                 y: 0.5,
-                at: time
+                at: time,
+                location: location
             )
         }
         XCTAssertTrue(fixture.controller.mouseEventHandler.isViewportGestureActive)
         for _ in 0 ..< 20 {
             time += 0.01
-            sendFrame(fixture, phase: .changed, fingers: 3, x: 0.68, y: 0.5, at: time)
+            sendFrame(
+                fixture,
+                phase: .changed,
+                fingers: 3,
+                x: 0.68,
+                y: 0.5,
+                at: time,
+                location: location
+            )
         }
         return time
     }
@@ -534,6 +555,320 @@ final class TrackpadWorkspaceGestureTests: XCTestCase {
         XCTAssertNil(fixture.controller.intentLedger.activeManagedRequest)
     }
 
+    func testLostColumnGestureCommitsOffsetAndReleasesInputSession() throws {
+        var focusOperationCount = 0
+        let fixture = try makeFixture(
+            workspaceSwipeEnabled: false,
+            scrollGestureEnabled: true,
+            windowFocusOperations: WindowFocusOperations(
+                activateApp: { _ in focusOperationCount += 1 },
+                focusSpecificWindow: { _, _, _ in focusOperationCount += 1 },
+                raiseWindow: { _ in focusOperationCount += 1 }
+            )
+        )
+        try addColumnGestureWindows(to: fixture)
+        let manager = fixture.controller.workspaceManager
+        let driver = manager.animationDriver
+        let livenessClock = GestureLivenessClock(time: 1)
+        driver.gestureLivenessNow = { livenessClock.time }
+
+        _ = beginCommittedColumnGesture(fixture)
+
+        let handler = fixture.controller.mouseEventHandler
+        let semanticOffset = manager.niriViewportState(for: fixture.ws1).viewOffset
+        let expectedOffset = try XCTUnwrap(
+            driver.liveViewOffset(in: fixture.ws1, semanticOffset: semanticOffset)
+        )
+        XCTAssertEqual(handler.state.gesturePhase, .committed)
+        XCTAssertTrue(handler.isTrackpadSwipeSessionActive)
+        XCTAssertEqual(
+            fixture.controller.niriLayoutHandler.scrollAnimationByDisplay[fixture.monitor.displayId],
+            fixture.ws1
+        )
+        focusOperationCount = 0
+        livenessClock.time = 2
+
+        fixture.controller.niriLayoutHandler.tickScrollAnimation(
+            targetTime: 2,
+            displayId: fixture.monitor.displayId
+        )
+
+        XCTAssertEqual(
+            manager.niriViewportState(for: fixture.ws1).viewOffset,
+            expectedOffset,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(handler.state.gesturePhase, .idle)
+        XCTAssertFalse(handler.isTrackpadSwipeSessionActive)
+        XCTAssertFalse(
+            scrollVerdict(
+                fixture,
+                momentumPhase: 0,
+                phase: CGScrollPhase.changed.rawValue
+            )
+        )
+        XCTAssertEqual(focusOperationCount, 0)
+        XCTAssertNil(fixture.controller.intentLedger.activeManagedRequest)
+        XCTAssertFalse(driver.hasMotion(in: fixture.ws1))
+        XCTAssertNil(
+            fixture.controller.niriLayoutHandler.scrollAnimationByDisplay[fixture.monitor.displayId]
+        )
+        XCTAssertNil(
+            fixture.controller.layoutRefreshController.layoutState.displayLinksByDisplay[fixture.monitor.displayId]
+        )
+    }
+
+    func testDisplayLinkCreationFailureSettlesGestureWithoutFocus() throws {
+        var focusOperationCount = 0
+        let fixture = try makeFixture(
+            workspaceSwipeEnabled: false,
+            scrollGestureEnabled: true,
+            windowFocusOperations: WindowFocusOperations(
+                activateApp: { _ in focusOperationCount += 1 },
+                focusSpecificWindow: { _, _, _ in focusOperationCount += 1 },
+                raiseWindow: { _ in focusOperationCount += 1 }
+            )
+        )
+        try addColumnGestureWindows(to: fixture)
+        let manager = fixture.controller.workspaceManager
+        let handler = fixture.controller.mouseEventHandler
+        let semanticOffset = manager.niriViewportState(for: fixture.ws1).viewOffset
+        fixture.controller.layoutRefreshController.displayLinkActivationForTests = nil
+        fixture.controller.layoutRefreshController.displayLinkCreationAllowedForTests = { _ in false }
+        focusOperationCount = 0
+
+        sendFrame(fixture, phase: .began, fingers: 3, x: 0.8, y: 0.5, at: 100)
+        sendFrame(fixture, phase: .changed, fingers: 3, x: 0.74, y: 0.5, at: 100.01)
+
+        XCTAssertEqual(handler.state.gesturePhase, .idle)
+        XCTAssertFalse(handler.isTrackpadSwipeSessionActive)
+        XCTAssertFalse(manager.animationDriver.hasMotion(in: fixture.ws1))
+        XCTAssertFalse(fixture.controller.niriLayoutHandler.hasScrollAnimation(for: fixture.ws1))
+        XCTAssertNotEqual(manager.niriViewportState(for: fixture.ws1).viewOffset, semanticOffset)
+        XCTAssertEqual(focusOperationCount, 0)
+        XCTAssertNil(fixture.controller.intentLedger.activeManagedRequest)
+        XCTAssertTrue(handler.state.suppressGestureStartUntilAllTouchesLift)
+
+        sendFrame(fixture, phase: .changed, fingers: 3, x: 0.7, y: 0.5, at: 100.02)
+        XCTAssertEqual(handler.state.gesturePhase, .idle)
+        sendFrame(fixture, phase: .ended, fingers: 0, x: 0, y: 0, at: 100.03)
+    }
+
+    func testInactiveWorkspaceAbortSettlesGestureWithoutFocus() throws {
+        var focusOperationCount = 0
+        let fixture = try makeFixture(
+            workspaceSwipeEnabled: false,
+            scrollGestureEnabled: true,
+            windowFocusOperations: WindowFocusOperations(
+                activateApp: { _ in focusOperationCount += 1 },
+                focusSpecificWindow: { _, _, _ in focusOperationCount += 1 },
+                raiseWindow: { _ in focusOperationCount += 1 }
+            )
+        )
+        try addColumnGestureWindows(to: fixture)
+        _ = beginCommittedColumnGesture(fixture)
+        let manager = fixture.controller.workspaceManager
+        let handler = fixture.controller.mouseEventHandler
+        let semanticOffset = manager.niriViewportState(for: fixture.ws1).viewOffset
+        let expectedOffset = try XCTUnwrap(
+            manager.animationDriver.liveViewOffset(in: fixture.ws1, semanticOffset: semanticOffset)
+        )
+        focusOperationCount = 0
+
+        fixture.controller.workspaceNavigationHandler.switchWorkspaceRelative(isNext: true)
+
+        XCTAssertEqual(activeWorkspace(fixture), fixture.ws2)
+        XCTAssertEqual(
+            manager.niriViewportState(for: fixture.ws1).viewOffset,
+            expectedOffset,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(handler.state.gesturePhase, .idle)
+        XCTAssertFalse(manager.animationDriver.hasMotion(in: fixture.ws1))
+        XCTAssertFalse(fixture.controller.niriLayoutHandler.hasScrollAnimation(for: fixture.ws1))
+        XCTAssertEqual(focusOperationCount, 0)
+        XCTAssertNil(fixture.controller.intentLedger.activeManagedRequest)
+    }
+
+    func testMonitorLossSettlesGestureWithoutFocus() throws {
+        var focusOperationCount = 0
+        let fixture = try makeFixture(
+            workspaceSwipeEnabled: false,
+            scrollGestureEnabled: true,
+            windowFocusOperations: WindowFocusOperations(
+                activateApp: { _ in focusOperationCount += 1 },
+                focusSpecificWindow: { _, _, _ in focusOperationCount += 1 },
+                raiseWindow: { _ in focusOperationCount += 1 }
+            )
+        )
+        try addColumnGestureWindows(to: fixture)
+        let manager = fixture.controller.workspaceManager
+        let semanticOffset = manager.niriViewportState(for: fixture.ws1).viewOffset
+        _ = beginCommittedColumnGesture(fixture)
+        let expectedOffset = try XCTUnwrap(
+            manager.animationDriver.liveViewOffset(in: fixture.ws1, semanticOffset: semanticOffset)
+        )
+        focusOperationCount = 0
+
+        fixture.controller.layoutRefreshController.cleanupForMonitorDisconnect(
+            displayId: fixture.monitor.displayId,
+            migrateAnimations: false
+        )
+
+        XCTAssertEqual(manager.niriViewportState(for: fixture.ws1).viewOffset, expectedOffset, accuracy: 0.001)
+        XCTAssertEqual(fixture.controller.mouseEventHandler.state.gesturePhase, .idle)
+        XCTAssertFalse(manager.animationDriver.hasMotion(in: fixture.ws1))
+        XCTAssertFalse(fixture.controller.niriLayoutHandler.hasScrollAnimation(for: fixture.ws1))
+        XCTAssertEqual(focusOperationCount, 0)
+        XCTAssertNil(fixture.controller.intentLedger.activeManagedRequest)
+    }
+
+    func testResetSettlesGestureWithoutStartingPostResetRefresh() throws {
+        var focusOperationCount = 0
+        let fixture = try makeFixture(
+            workspaceSwipeEnabled: false,
+            scrollGestureEnabled: true,
+            windowFocusOperations: WindowFocusOperations(
+                activateApp: { _ in focusOperationCount += 1 },
+                focusSpecificWindow: { _, _, _ in focusOperationCount += 1 },
+                raiseWindow: { _ in focusOperationCount += 1 }
+            )
+        )
+        try addColumnGestureWindows(to: fixture)
+        let manager = fixture.controller.workspaceManager
+        let semanticOffset = manager.niriViewportState(for: fixture.ws1).viewOffset
+        _ = beginCommittedColumnGesture(fixture)
+        let expectedOffset = try XCTUnwrap(
+            manager.animationDriver.liveViewOffset(in: fixture.ws1, semanticOffset: semanticOffset)
+        )
+        focusOperationCount = 0
+        fixture.controller.hasStartedServices = false
+
+        fixture.controller.layoutRefreshController.resetState()
+
+        XCTAssertEqual(manager.niriViewportState(for: fixture.ws1).viewOffset, expectedOffset, accuracy: 0.001)
+        XCTAssertEqual(fixture.controller.mouseEventHandler.state.gesturePhase, .idle)
+        XCTAssertFalse(manager.animationDriver.hasMotion(in: fixture.ws1))
+        XCTAssertFalse(fixture.controller.niriLayoutHandler.hasScrollAnimation(for: fixture.ws1))
+        XCTAssertNil(fixture.controller.layoutRefreshController.layoutState.pendingRefresh)
+        XCTAssertNil(fixture.controller.layoutRefreshController.layoutState.activeRefreshTask)
+        XCTAssertEqual(focusOperationCount, 0)
+        XCTAssertNil(fixture.controller.intentLedger.activeManagedRequest)
+    }
+
+    func testWorkspaceMonitorMoveSettlesGestureBeforeStateMutation() throws {
+        let fixture = try makeFixture(workspaceSwipeEnabled: false, scrollGestureEnabled: true)
+        let target = try configureSecondMonitor(fixture)
+        try addColumnGestureWindows(to: fixture)
+        let manager = fixture.controller.workspaceManager
+        let semanticOffset = manager.niriViewportState(for: fixture.ws1).viewOffset
+        _ = beginCommittedColumnGesture(fixture)
+        let expectedOffset = try XCTUnwrap(
+            manager.animationDriver.liveViewOffset(in: fixture.ws1, semanticOffset: semanticOffset)
+        )
+
+        let outcome = fixture.controller.workspaceNavigationHandler.moveWorkspaceToMonitor(
+            fixture.ws1,
+            direction: .right,
+            force: true
+        )
+
+        XCTAssertNotNil(outcome)
+        XCTAssertEqual(manager.monitorForWorkspace(fixture.ws1)?.id, target.monitor.id)
+        XCTAssertEqual(manager.niriViewportState(for: fixture.ws1).viewOffset, expectedOffset, accuracy: 0.001)
+        XCTAssertEqual(fixture.controller.mouseEventHandler.state.gesturePhase, .idle)
+        XCTAssertFalse(manager.animationDriver.hasMotion(in: fixture.ws1))
+        XCTAssertFalse(fixture.controller.niriLayoutHandler.hasScrollAnimation(for: fixture.ws1))
+    }
+
+    func testRuntimeMonitorOverrideClearSettlesGestureBeforeMotionRemoval() throws {
+        let fixture = try makeFixture(workspaceSwipeEnabled: false, scrollGestureEnabled: true)
+        let target = try configureSecondMonitor(fixture)
+        try addColumnGestureWindows(to: fixture)
+        XCTAssertNotNil(fixture.controller.workspaceNavigationHandler.moveWorkspaceToMonitor(
+            fixture.ws1,
+            direction: .right,
+            force: true
+        ))
+        let manager = fixture.controller.workspaceManager
+        let semanticOffset = manager.niriViewportState(for: fixture.ws1).viewOffset
+        _ = beginCommittedColumnGesture(
+            fixture,
+            location: CGPoint(x: target.monitor.frame.midX, y: target.monitor.frame.midY)
+        )
+        let expectedOffset = try XCTUnwrap(
+            manager.animationDriver.liveViewOffset(in: fixture.ws1, semanticOffset: semanticOffset)
+        )
+
+        fixture.controller.updateWorkspaceConfig()
+
+        XCTAssertEqual(manager.monitorForWorkspace(fixture.ws1)?.id, fixture.monitor.id)
+        XCTAssertEqual(manager.niriViewportState(for: fixture.ws1).viewOffset, expectedOffset, accuracy: 0.001)
+        XCTAssertEqual(fixture.controller.mouseEventHandler.state.gesturePhase, .idle)
+        XCTAssertFalse(manager.animationDriver.hasMotion(in: fixture.ws1))
+        XCTAssertFalse(fixture.controller.niriLayoutHandler.hasScrollAnimation(for: fixture.ws1))
+    }
+
+    func testViewportForgetSettlesGestureBeforeRemovingViewportState() throws {
+        let fixture = try makeFixture(workspaceSwipeEnabled: false, scrollGestureEnabled: true)
+        try addColumnGestureWindows(to: fixture)
+        let manager = fixture.controller.workspaceManager
+        manager.updateNiriViewportState(ViewportState(), for: fixture.ws1)
+        _ = beginCommittedColumnGesture(fixture)
+
+        XCTAssertNotNil(manager.reconcileSnapshot().viewports[fixture.ws1])
+
+        manager.recordReconcileEvent(
+            .viewportForgotten(workspaceIds: [fixture.ws1], source: .workspaceManager)
+        )
+
+        XCTAssertNil(manager.reconcileSnapshot().viewports[fixture.ws1])
+        XCTAssertEqual(fixture.controller.mouseEventHandler.state.gesturePhase, .idle)
+        XCTAssertFalse(manager.animationDriver.hasMotion(in: fixture.ws1))
+        XCTAssertFalse(fixture.controller.niriLayoutHandler.hasScrollAnimation(for: fixture.ws1))
+    }
+
+    func testExpiredGestureDoesNotReleaseNewerOrDifferentSession() throws {
+        let fixture = try makeFixture(
+            workspaceSwipeEnabled: false,
+            scrollGestureEnabled: true
+        )
+        try addColumnGestureWindows(to: fixture)
+        _ = beginCommittedColumnGesture(fixture)
+        let handler = fixture.controller.mouseEventHandler
+        let driver = fixture.controller.workspaceManager.animationDriver
+        let expiredSessionID = try XCTUnwrap(driver.gestureSessionID(in: fixture.ws1))
+        let newerSessionID = try XCTUnwrap(
+            driver.beginGesture(in: fixture.ws1, isTrackpad: true, timestamp: 101)
+        )
+        handler.applyTrackpadViewportScrollDelta(
+            1,
+            engine: try XCTUnwrap(fixture.controller.niriEngine),
+            wsId: fixture.ws1,
+            monitor: fixture.monitor,
+            orientation: .horizontal,
+            timestamp: 101
+        )
+        XCTAssertNotEqual(expiredSessionID, newerSessionID)
+
+        handler.handleExpiredViewportGesture(
+            in: fixture.ws2,
+            sessionID: newerSessionID
+        )
+        XCTAssertFalse(handler.terminateViewportGesture(
+            in: fixture.ws1,
+            sessionID: expiredSessionID,
+            disposition: .settleLiveOffset
+        ))
+
+        XCTAssertEqual(handler.state.gesturePhase, .committed)
+        XCTAssertTrue(handler.isTrackpadSwipeSessionActive)
+        XCTAssertEqual(handler.state.viewportGestureSessionID, newerSessionID)
+        XCTAssertTrue(driver.hasGesture(in: fixture.ws1))
+        fixture.controller.niriLayoutHandler.cancelActiveAnimations(for: fixture.ws1)
+        handler.handleAppVisibilityChanged()
+    }
+
     func testWorkspaceOnlyNiriGestureDoesNotClaimViewportWhileArmed() throws {
         let fixture = try makeFixture()
         sendFrame(fixture, phase: .began, fingers: 3, x: 0.5, y: 0.2, at: 100)
@@ -753,7 +1088,7 @@ final class TrackpadWorkspaceGestureTests: XCTestCase {
         XCTAssertTrue(manager.setActiveWorkspace(wsB1, on: secondary.monitor.id))
 
         XCTAssertEqual(
-            fixture.controller.commandHandler.handleHotkeyCommand(.switchWorkspaceNext),
+            fixture.controller.commandHandler.performCommand(.switchWorkspaceNext),
             .executed
         )
 

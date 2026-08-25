@@ -353,6 +353,7 @@ final class AXEventHandler {
     var nextAdmissionRetryExecutionOwner: UInt64 = 1
     private var nextActivationObservationGeneration: UInt64 = 1
     private var latestActivationObservationGeneration: UInt64 = 0
+    var latestNativeActivationPID: pid_t?
     var terminalFrameFailureStateByWindowId: [Int: TerminalFrameFailureState] = [:]
     var admissionQuarantineByWindowId: [Int: AdmissionQuarantine] = [:]
     var identityAliasesByWindowId: [Int: WindowIdentityAliasHistory] = [:]
@@ -1550,7 +1551,7 @@ final class AXEventHandler {
             recentMouseFocusIntent = nil
             return false
         }
-        return intent.token.pid == pid
+        return managedWindowTokenUsingCachedIdentity(intent.token, matchesObservedPid: pid)
     }
 
     private func isWorkspaceActive(_ workspaceId: WorkspaceDescriptor.ID) -> Bool {
@@ -1574,6 +1575,11 @@ final class AXEventHandler {
         guard let controller else { return false }
         guard controller.hasStartedServices else { return false }
         guard !controller.workspaceManager.isAppHidden(pid: pid) else { return false }
+        guard acceptsActivationObservation(
+            pid: pid,
+            source: source,
+            origin: origin
+        ) else { return false }
         if handleAppTerminationFocusActivation(
             pid: pid,
             source: source,
@@ -1643,6 +1649,7 @@ final class AXEventHandler {
         } ?? true
         let focusedToken = controller.workspaceManager.focusedToken
         if origin == .external,
+           source != .focusedWindowChanged,
            conflictsWithActiveRequest,
            activeRequest != nil || focusedToken.map({ !managedWindowToken($0, matchesObservedPid: pid) }) ?? true
         {
@@ -1718,12 +1725,21 @@ final class AXEventHandler {
         let origin = facts.origin
         let axRef = facts.focusedWindow?.axRef
         let observedToken = axRef.map { canonicalObservedWindowToken(pid: pid, axRef: $0) }
+        guard acceptsActivationFacts(facts, observedToken: observedToken) else { return }
         let activeRequest = controller.intentLedger.activeManagedRequest
         let requestDisposition = activationRequestDisposition(
             for: pid,
             token: observedToken,
             activeRequest: activeRequest
         )
+
+        if let activeRequest,
+           case let .awaitingSameAppActivation(sourceToken, _) = activeRequest.phase,
+           facts.pid == activeRequest.token.pid,
+           observedToken == nil || observedToken == sourceToken
+        {
+            return
+        }
 
         guard let axRef, let focusedWindow = facts.focusedWindow else {
             controller.workspaceManager.setSystemModalFocus(nil)
@@ -2219,6 +2235,13 @@ final class AXEventHandler {
         }
         let shouldConfirmRequest = confirmRequest ?? true
         let focusObservation = controller.intentLedger.classifyFocusObservation(token: entry.token)
+        let omitsExplicitOrdering = switch focusObservation {
+        case let .echoOf(intent),
+             let .lateEcho(intent):
+            intent.origin == .focusFollowsMouse && !controller.settings.raiseOnMouseFocus
+        case .external:
+            false
+        }
 
         if shouldConfirmRequest {
             if let request = activeRequest,
@@ -2288,7 +2311,8 @@ final class AXEventHandler {
             )
         }
 
-        if isRetriedAuthoritativeSystemModalFocus,
+        if !omitsExplicitOrdering,
+           isRetriedAuthoritativeSystemModalFocus,
            frontmostApplicationPIDProvider() == entry.pid,
            controller.workspaceManager.focusedToken == entry.token
         {
@@ -3816,6 +3840,11 @@ final class AXEventHandler {
         reason: ActivationRetryReason
     ) {
         guard let controller else { return }
+        guard controller.intentLedger.activeManagedRequest(
+            requestId: request.requestId
+        )?.phase == .awaitingConfirmation else {
+            return
+        }
         if let updatedRequest = controller.intentLedger.recordRetry(
             requestId: request.requestId,
             source: source,

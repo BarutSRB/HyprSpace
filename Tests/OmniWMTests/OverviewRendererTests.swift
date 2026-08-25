@@ -221,6 +221,127 @@ final class OverviewRendererTests: XCTestCase {
         assertColor(view.palette.backdrop, equals: [0.2, 0.3, 0.4, 0.5])
     }
 
+    @MainActor
+    func testAnimationProgressIsPanelLocalAndSurvivesDiscreteLayoutUpdates() {
+        let first = OverviewView(
+            frame: CGRect(x: 0, y: 0, width: 800, height: 600),
+            displayId: 101
+        )
+        let second = OverviewView(
+            frame: CGRect(x: 0, y: 0, width: 800, height: 600),
+            displayId: 202
+        )
+        let layout = OverviewLayout()
+        first.updateLayout(layout, state: .opening, searchQuery: "", selectedWindowHandle: nil)
+        second.updateLayout(layout, state: .opening, searchQuery: "", selectedWindowHandle: nil)
+        OverviewFrameTrace.shared.beginCapture()
+        defer { OverviewFrameTrace.shared.endCapture() }
+
+        first.updateAnimationProgress(0.35, generation: 7, sequence: 1)
+        XCTAssertEqual(first.presentationProgress, 0.35)
+        XCTAssertEqual(second.presentationProgress, 0)
+        XCTAssertEqual(first.tracePendingInvalidations, 1)
+        XCTAssertEqual(second.tracePendingInvalidations, 0)
+
+        second.updateAnimationProgress(0.7, generation: 7, sequence: 1)
+        first.updateLayout(layout, state: .opening, searchQuery: "updated", selectedWindowHandle: nil)
+
+        XCTAssertEqual(first.presentationProgress, 0.35)
+        XCTAssertEqual(second.presentationProgress, 0.7)
+        XCTAssertEqual(first.tracePendingInvalidations, 1)
+        XCTAssertEqual(second.tracePendingInvalidations, 1)
+
+        first.updateLayout(layout, state: .open, searchQuery: "updated", selectedWindowHandle: nil)
+        XCTAssertEqual(first.presentationProgress, 1)
+    }
+
+    @MainActor
+    func testOverviewFrameTraceSeparatesInvalidationAndDrawTiming() throws {
+        let view = OverviewView(
+            frame: CGRect(x: 0, y: 0, width: 64, height: 64),
+            displayId: 303
+        )
+        view.updateLayout(.init(), state: .opening, searchQuery: "", selectedWindowHandle: nil)
+        let bitmap = try XCTUnwrap(
+            CGContext(
+                data: nil,
+                width: 64,
+                height: 64,
+                bitsPerComponent: 8,
+                bytesPerRow: 256,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            )
+        )
+        let graphicsContext = NSGraphicsContext(cgContext: bitmap, flipped: false)
+
+        OverviewFrameTrace.shared.beginCapture()
+        view.updateAnimationProgress(0.5, generation: 9, sequence: 4)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = graphicsContext
+        view.draw(view.bounds)
+        NSGraphicsContext.restoreGraphicsState()
+        OverviewFrameTrace.shared.endCapture()
+
+        let trace = OverviewFrameTrace.shared.dump()
+        XCTAssertTrue(trace.contains("event=invalidation"))
+        XCTAssertTrue(trace.contains("event=draw"))
+        XCTAssertTrue(trace.contains("disp=303 gen=9 seq=4"))
+    }
+
+    @MainActor
+    func testOverviewFrameTraceDoesNotCarryPendingStateAcrossCaptureRestart() throws {
+        let drawnAfterStop = OverviewView(
+            frame: CGRect(x: 0, y: 0, width: 64, height: 64),
+            displayId: 304
+        )
+        let notDrawnAfterStop = OverviewView(
+            frame: CGRect(x: 0, y: 0, width: 64, height: 64),
+            displayId: 305
+        )
+        let bitmap = try XCTUnwrap(
+            CGContext(
+                data: nil,
+                width: 64,
+                height: 64,
+                bitsPerComponent: 8,
+                bytesPerRow: 256,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            )
+        )
+        let graphicsContext = NSGraphicsContext(cgContext: bitmap, flipped: false)
+
+        OverviewFrameTrace.shared.beginCapture()
+        drawnAfterStop.updateAnimationProgress(0.25, generation: 10, sequence: 1)
+        notDrawnAfterStop.updateAnimationProgress(0.25, generation: 10, sequence: 1)
+        OverviewFrameTrace.shared.endCapture()
+
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = graphicsContext
+        drawnAfterStop.draw(drawnAfterStop.bounds)
+        NSGraphicsContext.restoreGraphicsState()
+        XCTAssertEqual(drawnAfterStop.tracePendingInvalidations, 0)
+        XCTAssertEqual(notDrawnAfterStop.tracePendingInvalidations, 1)
+
+        OverviewFrameTrace.shared.beginCapture()
+        drawnAfterStop.updateAnimationProgress(0.75, generation: 11, sequence: 1)
+        notDrawnAfterStop.updateAnimationProgress(0.75, generation: 11, sequence: 1)
+        XCTAssertEqual(drawnAfterStop.tracePendingInvalidations, 1)
+        XCTAssertEqual(notDrawnAfterStop.tracePendingInvalidations, 1)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = graphicsContext
+        drawnAfterStop.draw(drawnAfterStop.bounds)
+        notDrawnAfterStop.draw(notDrawnAfterStop.bounds)
+        NSGraphicsContext.restoreGraphicsState()
+        OverviewFrameTrace.shared.endCapture()
+
+        let trace = OverviewFrameTrace.shared.dump()
+        XCTAssertTrue(trace.contains("disp=304 gen=11 seq=1"))
+        XCTAssertTrue(trace.contains("disp=305 gen=11 seq=1"))
+        XCTAssertFalse(trace.contains("pending=2"))
+    }
+
     private func assertColor(
         _ color: CGColor,
         equals expected: [CGFloat],

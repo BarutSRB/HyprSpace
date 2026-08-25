@@ -177,7 +177,7 @@ final class BorderWindow {
     private func draw(frame: CGRect) {
         guard let context else { return }
         needsRedraw = false
-        BorderOpMetricsRecorder.shared.noteRedraw()
+        BorderOpMetricsRecorder.shared.noteRedraw(rasterizedArea: frame.width * frame.height)
 
         let borderWidth = config.width
         let cornerRadii = currentCornerRadii
@@ -204,6 +204,7 @@ final class BorderWindow {
         context.restoreGState()
         context.flush()
         operations.flushWindow(wid)
+        BorderOpMetricsRecorder.shared.noteFlush()
     }
 
     static func roundedRectPath(in rect: CGRect, radii: WindowCornerRadii) -> CGPath {

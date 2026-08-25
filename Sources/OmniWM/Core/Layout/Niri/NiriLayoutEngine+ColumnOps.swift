@@ -133,59 +133,6 @@ extension NiriLayoutEngine {
         )
     }
 
-    func createColumnAndMove(
-        _ node: NiriWindow,
-        from sourceColumn: NiriContainer,
-        direction: Direction,
-        in workspaceId: WorkspaceDescriptor.ID,
-        motion: MotionSnapshot,
-        state: inout ViewportState,
-        gaps: CGFloat,
-        workingFrame: CGRect,
-        orientation: Monitor.Orientation
-    ) {
-        guard let root = root(for: workspaceId) else { return }
-
-        let sourceWasTabbed = sourceColumn.displayMode == .tabbed
-        sourceColumn.adjustActiveTileIdxForRemoval(of: node)
-
-        let newColumn = NiriContainer()
-        initializeNewContainerSizing(newColumn, in: workspaceId)
-
-        if direction == .right {
-            root.insertAfter(newColumn, reference: sourceColumn)
-        } else {
-            root.insertBefore(newColumn, reference: sourceColumn)
-        }
-
-        if let newColIdx = columnIndex(of: newColumn, in: workspaceId) {
-            if newColIdx == state.activeColumnIndex + 1 {
-                state.activatePrevColumnOnRemoval = state.viewOffset
-            }
-            animateColumnsForAddition(
-                columnIndex: newColIdx,
-                in: workspaceId,
-                motion: motion,
-                state: state,
-                gaps: gaps,
-                workingFrame: workingFrame,
-                orientation: orientation
-            )
-        }
-
-        node.detach()
-        newColumn.appendChild(node)
-
-        node.isHiddenInTabbedMode = false
-
-        if sourceWasTabbed, !sourceColumn.children.isEmpty {
-            sourceColumn.clampActiveTileIdx()
-            updateTabbedColumnVisibility(column: sourceColumn)
-        }
-
-        cleanupEmptyColumn(sourceColumn, in: workspaceId, state: &state)
-    }
-
     func insertWindowInNewColumn(
         _ window: NiriWindow,
         insertIndex: Int,
@@ -265,32 +212,6 @@ extension NiriLayoutEngine {
 
         // Window-close removals use removeWindows(...); this is structural cleanup for move/consume paths.
         column.remove()
-    }
-
-    func normalizeColumnSizes(in workspaceId: WorkspaceDescriptor.ID) {
-        let cols = columns(in: workspaceId)
-        guard cols.count > 1 else { return }
-
-        let totalSize = cols.reduce(CGFloat(0)) { $0 + $1.size }
-        let avgSize = totalSize / CGFloat(cols.count)
-
-        for col in cols {
-            let normalized = col.size / avgSize
-            col.size = max(0.5, min(2.0, normalized))
-        }
-    }
-
-    func normalizeWindowSizes(in column: NiriContainer) {
-        let windows = column.children.compactMap { $0 as? NiriWindow }
-        guard !windows.isEmpty else { return }
-
-        let totalSize = windows.reduce(CGFloat(0)) { $0 + $1.size }
-        let avgSize = totalSize / CGFloat(windows.count)
-
-        for window in windows {
-            let normalized = window.size / avgSize
-            window.size = max(0.5, min(2.0, normalized))
-        }
     }
 
     private func clampedSpan(

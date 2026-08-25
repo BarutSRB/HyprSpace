@@ -9,6 +9,12 @@ import OmniWMIPC
 @MainActor @Observable
 final class SettingsStore {
     private nonisolated static let defaultExport = SettingsExport.defaults()
+    private nonisolated static let scrollSensitivityRange = 0.1 ... 100.0
+
+    private nonisolated static func normalizedScrollSensitivity(_ value: Double) -> Double {
+        guard value.isFinite else { return defaultExport.scrollSensitivity }
+        return min(max(value, scrollSensitivityRange.lowerBound), scrollSensitivityRange.upperBound)
+    }
 
     private struct NormalizedWorkspaceBarIconOverride {
         let foldedBundleID: String
@@ -24,12 +30,17 @@ final class SettingsStore {
 
     var onIPCEnabledChanged: (@MainActor (Bool) -> Void)?
     var onExternalSettingsReloaded: (@MainActor () -> Void)?
+    var onTrackpadGestureAvailabilityChanged: (@MainActor (Bool) -> Void)?
 
     var hotkeysEnabled = SettingsStore.defaultExport.hotkeysEnabled {
         didSet { scheduleSave() }
     }
 
     var focusFollowsMouse = SettingsStore.defaultExport.focusFollowsMouse {
+        didSet { scheduleSave() }
+    }
+
+    var raiseOnMouseFocus = SettingsStore.defaultExport.raiseOnMouseFocus {
         didSet { scheduleSave() }
     }
 
@@ -121,6 +132,10 @@ final class SettingsStore {
     }
 
     var outerGapBottom = SettingsStore.defaultExport.outerGapBottom {
+        didSet { scheduleSave() }
+    }
+
+    var fullscreenUsesOuterGaps = SettingsStore.defaultExport.fullscreenUsesOuterGaps {
         didSet { scheduleSave() }
     }
 
@@ -407,11 +422,26 @@ final class SettingsStore {
     }
 
     var scrollGestureEnabled = SettingsStore.defaultExport.scrollGestureEnabled {
-        didSet { scheduleSave() }
+        didSet {
+            guard oldValue != scrollGestureEnabled else { return }
+            if !isApplyingExport,
+               (oldValue || workspaceSwipeEnabled) != (scrollGestureEnabled || workspaceSwipeEnabled)
+            {
+                onTrackpadGestureAvailabilityChanged?(scrollGestureEnabled || workspaceSwipeEnabled)
+            }
+            scheduleSave()
+        }
     }
 
     var scrollSensitivity = SettingsStore.defaultExport.scrollSensitivity {
-        didSet { scheduleSave() }
+        didSet {
+            let normalized = SettingsStore.normalizedScrollSensitivity(scrollSensitivity)
+            guard normalized == scrollSensitivity else {
+                scrollSensitivity = normalized
+                return
+            }
+            scheduleSave()
+        }
     }
 
     var scrollModifierKey = ScrollModifierKey(
@@ -449,7 +479,15 @@ final class SettingsStore {
     }
 
     var workspaceSwipeEnabled = SettingsStore.defaultExport.workspaceSwipeEnabled {
-        didSet { scheduleSave() }
+        didSet {
+            guard oldValue != workspaceSwipeEnabled else { return }
+            if !isApplyingExport,
+               (scrollGestureEnabled || oldValue) != (scrollGestureEnabled || workspaceSwipeEnabled)
+            {
+                onTrackpadGestureAvailabilityChanged?(scrollGestureEnabled || workspaceSwipeEnabled)
+            }
+            scheduleSave()
+        }
     }
 
     var workspaceSwipeFingerCount = GestureFingerCount(
@@ -694,6 +732,7 @@ final class SettingsStore {
         SettingsExport(
             hotkeysEnabled: hotkeysEnabled,
             focusFollowsMouse: focusFollowsMouse,
+            raiseOnMouseFocus: raiseOnMouseFocus,
             focusLockModifier: focusLockModifier.rawValue,
             moveMouseToFocusedWindow: moveMouseToFocusedWindow,
             focusFollowsWindowToMonitor: focusFollowsWindowToMonitor,
@@ -709,6 +748,7 @@ final class SettingsStore {
             outerGapRight: outerGapRight,
             outerGapTop: outerGapTop,
             outerGapBottom: outerGapBottom,
+            fullscreenUsesOuterGaps: fullscreenUsesOuterGaps,
             niriVisibleContainerCount: niriVisibleContainerCount,
             niriInfiniteLoop: niriInfiniteLoop,
             niriCenterFocusedColumn: niriCenterFocusedColumn.rawValue,
@@ -809,11 +849,19 @@ final class SettingsStore {
 
     func applyExport(_ export: SettingsExport) {
         let baseline = SettingsStore.defaultExport
+        let trackpadGesturesWereAvailable = scrollGestureEnabled || workspaceSwipeEnabled
         isApplyingExport = true
-        defer { isApplyingExport = false }
+        defer {
+            isApplyingExport = false
+            let trackpadGesturesAreAvailable = scrollGestureEnabled || workspaceSwipeEnabled
+            if trackpadGesturesWereAvailable != trackpadGesturesAreAvailable {
+                onTrackpadGestureAvailabilityChanged?(trackpadGesturesAreAvailable)
+            }
+        }
 
         hotkeysEnabled = export.hotkeysEnabled
         focusFollowsMouse = export.focusFollowsMouse
+        raiseOnMouseFocus = export.raiseOnMouseFocus
         focusLockModifier = FocusLockModifier(rawValue: export.focusLockModifier) ?? .off
         moveMouseToFocusedWindow = export.moveMouseToFocusedWindow
         focusFollowsWindowToMonitor = export.focusFollowsWindowToMonitor
@@ -829,6 +877,7 @@ final class SettingsStore {
         outerGapRight = export.outerGapRight
         outerGapTop = export.outerGapTop
         outerGapBottom = export.outerGapBottom
+        fullscreenUsesOuterGaps = export.fullscreenUsesOuterGaps
 
         niriVisibleContainerCount = export.niriVisibleContainerCount
         niriInfiniteLoop = export.niriInfiniteLoop
@@ -997,28 +1046,6 @@ final class SettingsStore {
         systemHyperTrigger = SettingsStore.defaultExport.systemHyperTrigger
     }
 
-    func hotkeyBindings(applyingPreset mappings: [(id: String, trigger: HotkeyTrigger)]) -> [HotkeyBinding] {
-        var proposed = hotkeyBindings
-        for mapping in mappings {
-            for index in proposed.indices where proposed[index].id != mapping.id &&
-                proposed[index].binding.conflicts(with: mapping.trigger)
-            {
-                proposed[index] = HotkeyBinding(
-                    id: proposed[index].id,
-                    command: proposed[index].command,
-                    trigger: .unassigned
-                )
-            }
-            guard let index = proposed.firstIndex(where: { $0.id == mapping.id }) else { continue }
-            proposed[index] = HotkeyBinding(
-                id: proposed[index].id,
-                command: proposed[index].command,
-                trigger: mapping.trigger
-            )
-        }
-        return proposed
-    }
-
     func updateBinding(for commandId: String, newBinding: KeyBinding) {
         updateTrigger(for: commandId, newTrigger: newBinding.isUnassigned ? .unassigned : .chord(newBinding))
     }
@@ -1041,10 +1068,6 @@ final class SettingsStore {
               let index = hotkeyBindings.firstIndex(where: { $0.id == commandId })
         else { return }
         hotkeyBindings[index] = defaultBinding
-    }
-
-    func findConflicts(for binding: KeyBinding, excluding commandId: String) -> [HotkeyBinding] {
-        findConflicts(for: binding.isUnassigned ? .unassigned : .chord(binding), excluding: commandId)
     }
 
     func findConflicts(for trigger: HotkeyTrigger, excluding commandId: String) -> [HotkeyBinding] {
@@ -1191,10 +1214,6 @@ final class SettingsStore {
         return true
     }
 
-    func appRule(for bundleId: String) -> AppRule? {
-        appRules.first { $0.bundleId == bundleId }
-    }
-
     func orientationSettings(for monitor: Monitor) -> MonitorOrientationSettings? {
         MonitorSettingsStore.get(for: monitor, in: monitorOrientationSettings)
     }
@@ -1216,16 +1235,8 @@ final class SettingsStore {
         MonitorSettingsStore.remove(for: monitor, from: &monitorOrientationSettings)
     }
 
-    func routingSettings(for monitor: Monitor) -> MonitorRoutingSettings? {
-        MonitorSettingsStore.get(for: monitor, in: monitorRoutingSettings)
-    }
-
     func updateRoutingSettings(_ settings: MonitorRoutingSettings, for monitor: Monitor) {
         MonitorSettingsStore.update(settings, for: monitor, in: &monitorRoutingSettings)
-    }
-
-    func removeRoutingSettings(for monitor: Monitor) {
-        MonitorSettingsStore.remove(for: monitor, from: &monitorRoutingSettings)
     }
 
     func niriSettings(for monitor: Monitor) -> MonitorNiriSettings? {
@@ -1311,7 +1322,8 @@ final class SettingsStore {
             outerGapLeft: CGFloat(override?.outerGapLeft ?? outerGapLeft),
             outerGapRight: CGFloat(override?.outerGapRight ?? outerGapRight),
             outerGapTop: CGFloat(override?.outerGapTop ?? outerGapTop),
-            outerGapBottom: CGFloat(override?.outerGapBottom ?? outerGapBottom)
+            outerGapBottom: CGFloat(override?.outerGapBottom ?? outerGapBottom),
+            fullscreenUsesOuterGaps: override?.fullscreenUsesOuterGaps ?? fullscreenUsesOuterGaps
         )
     }
 

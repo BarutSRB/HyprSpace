@@ -183,7 +183,12 @@ struct ReportIssueSettingsTab: View {
                 }
             }
             if controller.traceCaptureStatus.phase != .idle {
-                SettingsCaption("Stop, Save & Include the recording before submitting so this trace is attached.")
+                SettingsCaption(
+                    controller.traceCaptureStatus.profile == .problem
+                        ? "Stop, Save & Include the recording before submitting so this trace is attached."
+                        : "Finish the performance capture before submitting. Performance artifacts are not attached "
+                        + "as problem traces."
+                )
             }
             if let hint = model.submitRequirementHint {
                 SettingsCaption(hint)
@@ -292,17 +297,36 @@ extension ReportIssueSettingsTab {
     private var traceSection: some View {
         Section("Diagnostics recording") {
             switch controller.traceCaptureStatus.phase {
+            case .starting:
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(
+                        controller.traceCaptureStatus.profile == .problem
+                            ? "Starting diagnostics…"
+                            : "A performance capture is starting."
+                    )
+                }
             case .recording:
-                recordingLabel
-                Button("Stop, Save & Include Recording") { stopRecording() }
-                SettingsCaption(
-                    "Stop, save, and include before submitting — an in-progress recording isn't ready to attach."
-                )
+                if controller.traceCaptureStatus.profile == .problem {
+                    recordingLabel
+                    Button("Stop, Save & Include Recording") { stopRecording() }
+                    SettingsCaption(
+                        "Stop, save, and include before submitting — an in-progress recording isn't ready to attach."
+                    )
+                } else {
+                    Label("Performance capture in progress", systemImage: "gauge.with.dots.needle.67percent")
+                    SettingsCaption("Performance captures are not diagnostic trace attachments.")
+                }
             case .finalizing:
                 HStack(spacing: 8) {
                     ProgressView()
                         .controlSize(.small)
-                    Text("Finalizing diagnostics…")
+                    Text(
+                        controller.traceCaptureStatus.profile == .problem
+                            ? "Finalizing diagnostics…"
+                            : "Finalizing performance capture…"
+                    )
                 }
             case .idle:
                 Label("Fresh diagnostic snapshot (always included)", systemImage: "checkmark.circle.fill")
@@ -449,11 +473,21 @@ extension ReportIssueSettingsTab {
     }
 
     private func stopRecording() {
+        guard controller.traceCaptureStatus.phase == .recording,
+              controller.traceCaptureStatus.profile == .problem
+        else {
+            traceStatus = .failure("No diagnostic recording is running")
+            return
+        }
         Task {
             switch await controller.toggleTraceCaptureForUI(desiredState: .inactive) {
             case let .stopped(artifact):
+                guard artifact.profile == .problem else {
+                    traceStatus = .failure("The active capture was not a diagnostic recording")
+                    return
+                }
                 traceStatus = .idle
-                model.recordingFinished(traceURL: artifact.url)
+                model.recordingFinished(artifact: artifact)
                 await refreshAvailableEvidence()
                 NSWorkspace.shared.activateFileViewerSelecting([artifact.url])
             case let .writeFailed(reason):

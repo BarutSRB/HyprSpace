@@ -460,6 +460,7 @@ final class ActiveLayoutRoutingTests: XCTestCase {
                         orientation: .horizontal
                     )
                     column.displayMode = .tabbed
+                    column.frame = staleNiriFrame.offsetBy(dx: 700, dy: 0)
                     column.renderedFrame = staleNiriFrame
                 }
             }
@@ -469,6 +470,14 @@ final class ActiveLayoutRoutingTests: XCTestCase {
 
         XCTAssertTrue(controller.workspaceManager.setActiveWorkspace(niriWorkspaceId, on: monitor.id))
         XCTAssertEqual(controller.niriLayoutHandler.desiredTabRailInfos().map(\.workspaceId), [niriWorkspaceId])
+        let renderedCommands = controller.niriLayoutHandler.niriTabRailGeometryCommands(
+            engine: niriEngine,
+            workspaceId: niriWorkspaceId,
+            monitor: controller.layoutRefreshController.buildMonitorSnapshot(for: monitor)
+        )
+        XCTAssertEqual(renderedCommands.count, 1)
+        XCTAssertEqual(renderedCommands.first?.tileFrame, staleNiriFrame)
+        XCTAssertEqual(renderedCommands.first?.visibleTileFrame, staleNiriFrame.intersection(screenFrame))
 
         XCTAssertTrue(controller.workspaceManager.setActiveWorkspace(dwindleWorkspaceId, on: monitor.id))
         XCTAssertTrue(controller.niriLayoutHandler.desiredTabRailInfos().isEmpty)

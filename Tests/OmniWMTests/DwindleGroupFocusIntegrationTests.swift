@@ -574,12 +574,34 @@ final class DwindleGroupFocusIntegrationTests: XCTestCase {
         XCTAssertNil(fixture.controller.layoutRefreshController.layoutState.pendingRefresh)
     }
 
-    func testDwindleTabRailIsSuppressedDuringStructuralAnimation() throws {
+    func testDwindleTabRailIdentityRemainsProjectedDuringStructuralAnimation() throws {
         let fixture = try makeFixture { _, _ in }
         let monitor = try XCTUnwrap(
             fixture.controller.workspaceManager.monitor(for: fixture.workspaceId)
         )
         XCTAssertFalse(fixture.controller.dwindleLayoutHandler.desiredTabRailInfos().isEmpty)
+        let monitorSnapshot = fixture.controller.layoutRefreshController.buildMonitorSnapshot(for: monitor)
+        _ = fixture.controller.dwindleLayoutHandler.acceptAnimationTarget(
+            .replace(
+                DwindleAnimationTargetCandidate(
+                    workspaceId: fixture.workspaceId,
+                    engineIdentifier: ObjectIdentifier(fixture.engine),
+                    geometry: DwindleAnimationGeometryContext(
+                        monitorId: monitor.id,
+                        displayId: monitor.displayId,
+                        workingFrame: monitorSnapshot.workingFrame,
+                        fullscreenLayoutFrame: monitorSnapshot.fullscreenLayoutFrame,
+                        scale: monitorSnapshot.scale,
+                        settings: fixture.controller.settings.resolvedDwindleSettings(for: monitor),
+                        tabRailWidth: TabRailManager.tabIndicatorWidth
+                    ),
+                    targetFrames: [:]
+                )
+            ),
+            workspaceId: fixture.workspaceId,
+            displayId: monitor.displayId,
+            plannedSeq: fixture.controller.workspaceManager.worldSeq
+        )
         XCTAssertTrue(
             fixture.controller.dwindleLayoutHandler.registerDwindleAnimation(
                 fixture.workspaceId,
@@ -588,7 +610,64 @@ final class DwindleGroupFocusIntegrationTests: XCTestCase {
             )
         )
 
-        XCTAssertTrue(fixture.controller.dwindleLayoutHandler.desiredTabRailInfos().isEmpty)
+        XCTAssertFalse(fixture.controller.dwindleLayoutHandler.desiredTabRailInfos().isEmpty)
+    }
+
+    func testDwindleTabRailAnimationGeometryUsesPresentedTileFrame() throws {
+        let fixture = try makeFixture { _, _ in }
+        let monitor = try XCTUnwrap(fixture.controller.workspaceManager.monitor(for: fixture.workspaceId))
+        let snapshot = try XCTUnwrap(
+            fixture.engine.tileSnapshot(for: fixture.activeToken, in: fixture.workspaceId)
+        )
+        let tileFrame = try XCTUnwrap(snapshot.tileFrame)
+        let contentFrame = try XCTUnwrap(snapshot.contentFrame)
+        let node = try XCTUnwrap(fixture.engine.findNode(for: fixture.activeToken, in: fixture.workspaceId))
+        let fromFrame = CGRect(
+            x: contentFrame.minX - 180,
+            y: contentFrame.minY + 40,
+            width: contentFrame.width - 120,
+            height: contentFrame.height - 60
+        )
+        node.animateFrom(
+            oldFrame: fromFrame,
+            newFrame: contentFrame,
+            startTime: 10,
+            config: CubicConfig(duration: 1),
+            animated: true
+        )
+        let targetTime = 10.5
+        let monitorSnapshot = fixture.controller.layoutRefreshController.buildMonitorSnapshot(for: monitor)
+        let presentedContent = try XCTUnwrap(
+            fixture.engine.presentedFrame(
+                for: fixture.activeToken,
+                in: fixture.workspaceId,
+                at: targetTime
+            )
+        )
+
+        let command = try XCTUnwrap(
+            fixture.controller.dwindleLayoutHandler.dwindleTabRailGeometryCommands(
+                engine: fixture.engine,
+                workspaceId: fixture.workspaceId,
+                monitor: monitorSnapshot,
+                targetTime: targetTime
+            ).first
+        )
+        let left = contentFrame.minX - tileFrame.minX
+        let right = tileFrame.maxX - contentFrame.maxX
+        let bottom = contentFrame.minY - tileFrame.minY
+        let top = tileFrame.maxY - contentFrame.maxY
+        let expectedTileFrame = CGRect(
+            x: presentedContent.minX - left,
+            y: presentedContent.minY - bottom,
+            width: presentedContent.width + left + right,
+            height: presentedContent.height + bottom + top
+        ).roundedToPhysicalPixels(scale: monitorSnapshot.scale)
+
+        XCTAssertEqual(command.key, TabRailKey(workspaceId: fixture.workspaceId, owner: .dwindleTile(snapshot.id)))
+        XCTAssertEqual(command.tileFrame, expectedTileFrame)
+        XCTAssertNotEqual(command.tileFrame, tileFrame)
+        XCTAssertEqual(command.visibleTileFrame, expectedTileFrame.intersection(monitorSnapshot.visibleFrame))
     }
 
     func testValidRailSelectionIgnoresSuspendedPeer() throws {
@@ -688,23 +767,30 @@ final class DwindleGroupFocusIntegrationTests: XCTestCase {
         )
     }
 
-    func testFocusWaitsForVerifiedGroupReveal() throws {
+    func testPointerHoverFocusWaitsForVerifiedGroupReveal() throws {
+        try assertFocusWaitsForVerifiedGroupReveal(origin: .pointerHover)
+    }
+
+    func testFocusFollowsMouseWaitsForVerifiedGroupReveal() throws {
+        try assertFocusWaitsForVerifiedGroupReveal(origin: .focusFollowsMouse)
+    }
+
+    func testDisabledFocusFollowsMouseDropsDeferredGroupRevealFocus() throws {
         var frontedTokens: [WindowToken] = []
         let fixture = try makeFixture { pid, windowId in
             frontedTokens.append(WindowToken(pid: pid, windowId: Int(windowId)))
         }
+        fixture.controller.setFocusFollowsMouse(true)
         let pending = try beginPendingReveal(fixture)
         XCTAssertTrue(
             fixture.controller.dwindleLayoutHandler.deferGroupSelectionCompletion(
                 fixture.inactiveToken,
                 workspaceId: fixture.workspaceId,
                 focusAfterReveal: true,
-                focusOrigin: .pointerHover
+                focusOrigin: .focusFollowsMouse
             )
         )
-
-        XCTAssertTrue(frontedTokens.isEmpty)
-        XCTAssertNil(fixture.controller.intentLedger.activeManagedRequest)
+        fixture.controller.setFocusFollowsMouse(false)
 
         fixture.controller.dwindleLayoutHandler.completePendingGroupRevealTransaction(
             with: frameResult(
@@ -714,9 +800,53 @@ final class DwindleGroupFocusIntegrationTests: XCTestCase {
             transactionId: pending.transactionId
         )
 
-        XCTAssertEqual(frontedTokens, [fixture.inactiveToken])
-        XCTAssertEqual(fixture.controller.intentLedger.activeManagedRequest?.origin, .pointerHover)
-        XCTAssertNil(fixture.controller.workspaceManager.hiddenState(for: fixture.inactiveToken))
+        XCTAssertTrue(frontedTokens.isEmpty)
+        XCTAssertNil(fixture.controller.intentLedger.activeManagedRequest)
+        XCTAssertNil(fixture.controller.workspaceManager.pendingFocusedToken)
+    }
+
+    private func assertFocusWaitsForVerifiedGroupReveal(
+        origin: ManagedFocusOrigin,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        var frontedTokens: [WindowToken] = []
+        let fixture = try makeFixture { pid, windowId in
+            frontedTokens.append(WindowToken(pid: pid, windowId: Int(windowId)))
+        }
+        if origin == .focusFollowsMouse {
+            fixture.controller.setFocusFollowsMouse(true)
+        }
+        let pending = try beginPendingReveal(fixture)
+        XCTAssertTrue(
+            fixture.controller.dwindleLayoutHandler.deferGroupSelectionCompletion(
+                fixture.inactiveToken,
+                workspaceId: fixture.workspaceId,
+                focusAfterReveal: true,
+                focusOrigin: origin
+            ),
+            file: file,
+            line: line
+        )
+
+        XCTAssertTrue(frontedTokens.isEmpty, file: file, line: line)
+        XCTAssertNil(fixture.controller.intentLedger.activeManagedRequest, file: file, line: line)
+
+        fixture.controller.dwindleLayoutHandler.completePendingGroupRevealTransaction(
+            with: frameResult(
+                token: fixture.inactiveToken,
+                frame: pending.frame
+            ),
+            transactionId: pending.transactionId
+        )
+
+        XCTAssertEqual(frontedTokens, [fixture.inactiveToken], file: file, line: line)
+        XCTAssertEqual(fixture.controller.intentLedger.activeManagedRequest?.origin, origin, file: file, line: line)
+        XCTAssertNil(
+            fixture.controller.workspaceManager.hiddenState(for: fixture.inactiveToken),
+            file: file,
+            line: line
+        )
     }
 
     func testFailedGroupRevealRollsBackWithoutFronting() throws {
@@ -1308,7 +1438,6 @@ final class DwindleGroupFocusIntegrationTests: XCTestCase {
             targetFrame: frame,
             currentFrameHint: nil,
             writeResult: AXFrameWriteResult(
-                targetFrame: frame,
                 observedFrame: failureReason == nil ? frame : nil,
                 writeOrder: .sizeThenPosition,
                 sizeError: .success,

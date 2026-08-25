@@ -420,54 +420,6 @@ enum WMEvent: Equatable {
         }
     }
 
-    var source: WMEventSource {
-        switch self {
-        case let .windowAdmitted(_, _, _, _, _, _, _, _, _, source),
-             let .windowRekeyed(_, _, _, _, _, _, _, source),
-             let .windowRemoved(_, _, source),
-             let .workspaceAssigned(_, _, _, _, source),
-             let .windowModeChanged(_, _, _, _, source),
-             let .floatingGeometryUpdated(_, _, _, _, _, _, source),
-             let .floatingStateChanged(_, _, _, source),
-             let .manualLayoutOverrideChanged(_, _, _, source),
-             let .windowAdmissionHintsChanged(_, _, _, source),
-             let .niriPlacementsResolved(_, source),
-             let .hiddenApplicationsChanged(_, _, source),
-             let .appVisibilityInvalidated(_, _, source),
-             let .hiddenStateChanged(_, _, _, _, source),
-             let .nativeFullscreenTransition(_, _, _, _, source),
-             let .managedReplacementMetadataChanged(_, _, _, _, source),
-             let .topologyChanged(_, source),
-             let .activeSpaceChanged(source),
-             let .focusLeaseChanged(_, source),
-             let .managedFocusRequested(_, _, _, _, source),
-             let .managedFocusConfirmed(_, _, _, _, source),
-             let .managedFocusCancelled(_, _, _, source),
-             let .nonManagedFocusChanged(_, _, _, source),
-             let .focusRemembered(_, _, _, source),
-             let .focusFallbackRemembered(_, _, _, source),
-             let .focusForgotten(_, source),
-             let .nonManagedFocusTargetChanged(_, source),
-             let .suppressedFocusChanged(_, source),
-             let .systemModalFocusChanged(_, source),
-             let .workspaceFocusCleared(_, source),
-             let .nativeFullscreenPlaceholderSelected(_, _, source),
-             let .interactionMonitorChanged(_, _, source),
-             let .layoutOperationPerformed(_, _, source),
-             let .viewportChanged(_, _, source),
-             let .viewportCommitted(_, _, source),
-             let .viewportForgotten(_, source),
-             let .selectionChanged(_, _, source),
-             let .scratchpadChanged(_, source),
-             let .visibleWorkspacesChanged(_, source),
-             let .spaceTopologyChanged(_, source),
-             let .systemSleep(source),
-             let .systemWake(source),
-             let .userCommand(_, _, source):
-            source
-        }
-    }
-
     var summary: String {
         switch self {
         case let .windowAdmitted(token, workspaceId, _, mode, _, _, _, _, _, _):

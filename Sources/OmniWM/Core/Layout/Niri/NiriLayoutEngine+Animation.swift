@@ -232,24 +232,19 @@ extension NiriLayoutEngine {
         return root.columns.contains { $0.hasMoveAnimationRunning || $0.hasWidthAnimationRunning }
     }
 
-    func calculateCombinedLayout(
-        in workspaceId: WorkspaceDescriptor.ID,
-        monitor: Monitor,
-        gaps: LayoutGaps,
-        state: ViewportState,
-        workingArea: WorkingAreaContext? = nil,
-        animationTime: TimeInterval? = nil,
-        excludedTokens: Set<WindowToken>? = nil
-    ) -> [WindowToken: CGRect] {
-        calculateCombinedLayoutWithVisibility(
-            in: workspaceId,
-            monitor: monitor,
-            gaps: gaps,
-            state: state,
-            workingArea: workingArea,
-            animationTime: animationTime,
-            excludedTokens: excludedTokens
-        ).frames
+    @discardableResult
+    func cancelAnimations(in workspaceId: WorkspaceDescriptor.ID) -> Bool {
+        guard let root = root(for: workspaceId) else { return false }
+        var hadAnimations = false
+        for column in root.columns {
+            hadAnimations = hadAnimations || column.hasMoveAnimationRunning || column.hasWidthAnimationRunning
+            column.stopAnimations()
+        }
+        for window in root.allWindows {
+            hadAnimations = hadAnimations || window.hasMoveAnimationsRunning
+            window.stopMoveAnimations()
+        }
+        return hadAnimations
     }
 
     func calculateCombinedLayoutWithVisibility(

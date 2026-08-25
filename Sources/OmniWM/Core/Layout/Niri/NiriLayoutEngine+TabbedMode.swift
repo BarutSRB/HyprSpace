@@ -144,27 +144,4 @@ extension NiriLayoutEngine {
             }
         }
     }
-
-    @discardableResult
-    func activateTab(at index: Int, in column: NiriContainer) -> Bool {
-        guard column.displayMode == .tabbed else { return false }
-
-        let prevIdx = column.activeTileIdx
-        column.setActiveTileIdx(index)
-
-        if prevIdx != column.activeTileIdx {
-            updateTabbedColumnVisibility(column: column)
-            return true
-        }
-        return false
-    }
-
-    func activeColumn(in workspaceId: WorkspaceDescriptor.ID, state: ViewportState) -> NiriContainer? {
-        guard let selectedId = state.selectedNodeId,
-              let selectedNode = findNode(by: selectedId, in: workspaceId)
-        else {
-            return nil
-        }
-        return column(of: selectedNode)
-    }
 }

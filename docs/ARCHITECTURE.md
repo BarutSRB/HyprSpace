@@ -386,8 +386,6 @@ Some apps (Ghostty, browsers) destroy and recreate windows during internal opera
 
 **Scheduling.** It owns a single-slot scheduler (`activeRefresh` + `pendingRefresh`): if a refresh is in flight, incoming requests merge into the pending slot and fire when the active one completes. Each `RefreshReason` (`Core/Controller/RefreshReason.swift`, ~27 cases) maps to a `RefreshRequestRoute` and a per-reason debounce policy.
 
-> **Two route enums.** `RefreshReason.RefreshRequestRoute` has five cases including `fullRescan`. `LayoutRefreshController.RefreshRoute` is a distinct four-case enum used internally for execution (no `fullRescan`). They are not the same type.
-
 | Route | When | What it does |
 |-------|------|--------------|
 | `fullRescan` | Startup/global fallback, app launch/rebind recovery, space/wake/display inventory | Global or scope-limited enumeration + relayout |
@@ -621,8 +619,12 @@ Focus management is split across several objects (there is no single coordinator
           so the upcoming AX echo classifies as echoOf (not external).
      b. workspaceManager.beginManagedFocusRequest
         → commits WMEvent.managedFocusRequested (records the request in the world).
-4. WMController.performWindowFronting activates the app + window via private APIs
-   (activateApp, focusSpecificWindow, raiseWindow), then probes the focused window.
+4. WMController applies the effect selected from the merged request origin and live settings:
+     - keyboard/programmatic and pointer-hover requests use the full
+       activateApp + focusSpecificWindow + raiseWindow sequence;
+     - focus-follows-mouse uses the focus-only applicator without an explicit
+       public app activation or AX raise unless focus.raiseOnMouseFocus is enabled.
+   The applicator then probes the focused window.
 5. macOS emits an AX focused-window-changed echo → posted into EventIntake.
 6. FactResolver gathers the focused-window fact off-main, re-enters the intake.
 7. AXEventHandler.handleActivationFactsResolved:
@@ -635,8 +637,14 @@ Focus management is split across several objects (there is no single coordinator
 | Type | Purpose |
 |------|---------|
 | `KeyboardFocusTarget` | Resolved focus: `token`, `axRef`, `workspaceId`, `isManaged`. |
-| `ManagedFocusRequest` | In-flight request: `requestId`, `token`, `workspaceId`, `origin`, `retryCount`, `status` (`.pending`/`.confirmed`). |
+| `ManagedFocusRequest` | In-flight request: `requestId`, `token`, `workspaceId`, `origin`, `phase` (`.awaitingSameAppActivation(sourceToken:isRetry:)`/`.awaitingConfirmation`), `retryCount`, `status` (`.pending`/`.confirmed`). |
 | `EchoClassification` | `.echoOf` / `.lateEcho` / `.external` — see [3.7](#37-echo-classification--intents). |
+
+Managed origins merge with `keyboardOrProgrammatic > pointerHover > focusFollowsMouse`; the request returned by `IntentLedger.beginManagedRequest` is authoritative, so a weaker hover cannot downgrade an existing request for the same target. Only `keyboardOrProgrammatic` confirmation may move the cursor into the focused window. Real Niri, Dwindle, deferred-Dwindle, and floating-window pointer focus use `focusFollowsMouse`; tab clicks and completed gestures retain `pointerHover` and therefore full fronting.
+
+Focus-follows-mouse has two effects. The generated default is `focus.raiseOnMouseFocus = false`; in that mode OmniWM omits `NSRunningApplication.activate`, `kAXRaiseAction`, and explicit SkyLight ordering. The private specific-window primitive still establishes keyboard routing through `_SLPSSetFrontProcessWithOptions`, so focus without raise is a best-effort ordering contract: macOS or the client may activate or reorder itself. With `raiseOnMouseFocus = true`, OmniWM uses the existing full-fronting sequence. Both effects pass through the same hidden-app, lock-screen, interaction-policy, and foreign-transient gates.
+
+Focus-only switching between key windows inside one application requires a staged private handoff. OmniWM deactivates the source key window, schedules the target activation phase on the existing `DeadlineWheel` after a fixed 40 ms internal gap, and begins the normal 100 ms confirmation interval only after that phase runs. A handoff started by a confirmation retry retains retry-origin fact verification after activation, while the 40 ms phase itself does not consume retry budget. The gap is neither a pointer dwell preference nor a blocking sleep. If focus-follows-mouse is disabled or the pointer target becomes stale during the gap, OmniWM restores the source only while the handoff still owns focus; an external, modal, or lock-screen takeover is abandoned without restoration to avoid stealing focus. Cancellation retires the deadline and pending world request. Disabling focus-follows-mouse cancels only when the merged origin remains exactly `focusFollowsMouse`, while a stronger merged origin continues.
 
 `FocusPolicyEngine` (`Core/Reconcile/`) is a separate concern: time-bounded `FocusPolicyLease`s that suppress focus-follows-mouse during menus and app-switch transitions, scheduled on the same `DeadlineWheel`.
 
@@ -644,13 +652,13 @@ Focus management is split across several objects (there is no single coordinator
 
 **Hotkeys** (`Sources/OmniWM/Core/Input/`)
 
-`ActionCatalog` is the source of truth for action metadata and shortcut assignability. `buildSpecs()` materializes **153** `ActionSpec`s (99 standalone actions + 6 loop templates × 9), each with a title, search keywords, category, layout compatibility, default binding, and visibility. `HotkeyBinding`/`HotkeyBindingRegistry` persist and canonicalize bindings only for specs that are not `.unassignable` (an assignable action can have several shortcuts); unassignable specs remain available to non-hotkey command surfaces such as IPC.
+`ActionCatalog` is the source of truth for action metadata and shortcut assignability. `buildSpecs()` materializes **153** `ActionSpec`s (99 standalone actions + 6 loop templates × 9), each with a title, search keywords, category, layout compatibility, default binding, and visibility. `HotkeyBinding`/`HotkeyBindingRegistry` persist exactly one binding per spec that is not `.unassignable`. `HotkeyBindingRegistry.resolve` matches the persisted list against the current defaults and rejects unknown, missing, or duplicate action IDs rather than repairing the file; each accepted trigger is still normalized through `canonicalizeTrigger`. Unassignable specs are never persisted but remain available to non-hotkey command surfaces such as IPC.
 
 `HotkeyCenter` (`Hotkeys.swift`) installs one Carbon `InstallEventHandler` and registers each binding via `RegisterEventHotKey`, plus a virtual-hyper synthesis path. On a press it emits a `HotkeyInvocation` through `onCommand`; the invocation carries the semantic `HotkeyCommand` and optional `PhysicalHotkeyTrigger` metadata (`keyCode`, modifiers, and repeat state). `WMController` wires it to `eventIntake.enqueue(.hotkeyInvocation(invocation))`, so physical commands enter the same ordered intake pipeline as everything else (falling back to `CommandHandler.handleHotkeyInvocation` only if intake is closed).
 
 **Command routing** (`Core/Controller/CommandHandler.swift`). `handleHotkeyInvocation` gives `OverviewController` first refusal while Overview is open. The modal router uses physical keys for Escape, Enter, and non-repeating Command-W, recognizes the configured physical Overview toggle, and routes assigned structural commands against the selected Overview `WindowHandle`; recognized no-ops are consumed. Unsupported commands and triggerless external/IPC commands remain blocked. When Overview is inactive, `performCommand` enforces `isEnabled` and the **layout-compatibility guard**: a `.niri`-only command is ignored under Dwindle and vice versa (`.shared` commands work everywhere).
 
-**Mouse events** (`Core/Controller/MouseEventHandler.swift`). A `CGEventTap` drives focus-follows-mouse (debounced) and interactive move/resize, while raw multitouch frames (`MultitouchGestureSource`) drive trackpad swipes through one idle→armed→committed state machine with two routed modes: Niri viewport container scrolling on the active monitor's configured orientation axis and one-shot workspace switching (`TrackpadGestureIntent` resolves the mode from finger count and dominant axis; the switch fires through the same `switchWorkspaceRelative` seam as hotkeys, targeting the monitor under the cursor). A committed viewport gesture retains its resolved axis for the rest of the gesture. Transient mouse events are coalesced *in the intake* before draining.
+**Mouse events** (`Core/Controller/MouseEventHandler.swift`). A `CGEventTap` drives focus-follows-mouse through the existing 100 ms action-rate throttle and interactive move/resize, while raw multitouch frames (`MultitouchGestureSource`) drive trackpad swipes through one idle→armed→committed state machine with two routed modes: Niri viewport container scrolling on the active monitor's configured orientation axis and one-shot workspace switching (`TrackpadGestureIntent` resolves the mode from finger count and dominant axis; the switch fires through the same `switchWorkspaceRelative` seam as hotkeys, targeting the monitor under the cursor). The throttle is not a configurable hover delay and has no new trailing-edge scheduler. A committed viewport gesture retains its resolved axis for the rest of the gesture. Transient mouse events are coalesced *in the intake* before draining.
 
 **SkyLight events** (`Core/SkyLight/CGSEventObserver.swift`). Registers for window-server notifications and posts them into the intake:
 

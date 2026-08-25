@@ -9,17 +9,23 @@ import OmniWMIPC
 struct WindowFocusOperations {
     let activateApp: (pid_t) -> Void
     let focusSpecificWindow: (pid_t, UInt32, AXUIElement) -> Void
+    let deactivateSameAppWindow: (pid_t, UInt32) -> Bool
+    let activateAndFocusSameAppWindow: (pid_t, UInt32, AXUIElement) -> Bool
     let raiseWindow: (AXUIElement) -> Void
     let orderWindow: (UInt32) -> Void
 
     init(
         activateApp: @escaping (pid_t) -> Void,
         focusSpecificWindow: @escaping (pid_t, UInt32, AXUIElement) -> Void,
+        deactivateSameAppWindow: @escaping (pid_t, UInt32) -> Bool = { _, _ in false },
+        activateAndFocusSameAppWindow: @escaping (pid_t, UInt32, AXUIElement) -> Bool = { _, _, _ in false },
         raiseWindow: @escaping (AXUIElement) -> Void,
         orderWindow: @escaping (UInt32) -> Void = { _ in }
     ) {
         self.activateApp = activateApp
         self.focusSpecificWindow = focusSpecificWindow
+        self.deactivateSameAppWindow = deactivateSameAppWindow
+        self.activateAndFocusSameAppWindow = activateAndFocusSameAppWindow
         self.raiseWindow = raiseWindow
         self.orderWindow = orderWindow
     }
@@ -32,6 +38,16 @@ struct WindowFocusOperations {
         },
         focusSpecificWindow: { pid, windowId, element in
             OmniWM.focusWindow(pid: pid, windowId: windowId, windowRef: element)
+        },
+        deactivateSameAppWindow: { pid, windowId in
+            OmniWM.deactivateSameAppWindow(pid: pid, windowId: windowId)
+        },
+        activateAndFocusSameAppWindow: { pid, windowId, element in
+            OmniWM.activateAndFocusSameAppWindow(
+                pid: pid,
+                windowId: windowId,
+                windowRef: element
+            )
         },
         raiseWindow: { element in
             performAXAction(element, kAXRaiseAction as CFString, noteKey: "performRaiseFailed")
@@ -85,9 +101,14 @@ final class WMController {
     let lockScreenObserver = LockScreenObserver()
     var isLockScreenActive: Bool = false {
         didSet {
-            guard isLockScreenActive, oldValue != isLockScreenActive else { return }
-            resetWorkspaceBarReveal()
-            mouseEventHandler.handleInputSuppressionBegan()
+            guard oldValue != isLockScreenActive else { return }
+            if isLockScreenActive {
+                layoutRefreshController.suspendForLockScreen()
+                resetWorkspaceBarReveal()
+                mouseEventHandler.handleInputSuppressionBegan()
+            } else {
+                layoutRefreshController.awaitPostUnlockTopologySample()
+            }
         }
     }
 
@@ -114,7 +135,12 @@ final class WMController {
 
     var dwindleEngine: DwindleLayoutEngine? {
         get { workspaceManager.dwindleEngine }
-        set { workspaceManager.dwindleEngine = newValue }
+        set {
+            if let current = workspaceManager.dwindleEngine, current !== newValue {
+                layoutRefreshController.stopAllDwindleAnimations()
+            }
+            workspaceManager.dwindleEngine = newValue
+        }
     }
 
     let tabRailManager = TabRailManager()
@@ -153,7 +179,7 @@ final class WMController {
     }()
 
     @ObservationIgnored
-    private let hiddenBarController: HiddenBarController
+    let hiddenBarController: HiddenBarController
     @ObservationIgnored
     private lazy var quakeTerminalController: QuakeTerminalController = .init(
         settings: settings,
@@ -227,7 +253,7 @@ final class WMController {
     }
 
     @ObservationIgnored
-    private lazy var clipboardHistoryService = ClipboardHistoryService(configuration: clipboardHistoryConfiguration())
+    lazy var clipboardHistoryService = ClipboardHistoryService(configuration: clipboardHistoryConfiguration())
     @ObservationIgnored
     private(set) lazy var focusNotificationDispatcher = FocusNotificationDispatcher(controller: self)
     @ObservationIgnored
@@ -326,6 +352,24 @@ final class WMController {
         }
         workspaceManager.onDeferredWorkspaceMonitorMove = { [weak self] outcome in
             self?.layoutRefreshController.commitWorkspaceMonitorTransition(outcome)
+        }
+        workspaceManager.onAnimationMotionsWillBeRemoved = { [weak self] workspaceIds in
+            guard let self else { return }
+            for workspaceId in workspaceIds {
+                self.niriLayoutHandler.terminateViewportGesture(
+                    for: workspaceId,
+                    disposition: .settleLiveOffset
+                )
+                let displayIds = self.niriLayoutHandler.scrollAnimationByDisplay.compactMap { displayId, registered in
+                    registered == workspaceId ? displayId : nil
+                }
+                for displayId in displayIds {
+                    self.layoutRefreshController.stopScrollAnimation(for: displayId)
+                }
+                for displayId in self.dwindleLayoutHandler.animationDisplayIds(for: workspaceId) {
+                    self.layoutRefreshController.stopDwindleAnimation(for: displayId)
+                }
+            }
         }
         focusPolicyEngine.onLeaseChanged = { [weak self] lease in
             self?.workspaceManager.recordReconcileEvent(
@@ -538,6 +582,7 @@ final class WMController {
         }
         pruneHiddenWorkspaceBarMonitorIds()
         workspaceBarManager.setup(controller: self, settings: settings)
+        workspaceManager.invalidateAllLayouts()
         layoutRefreshController.requestRelayout(reason: .monitorSettingsChanged)
         surfaceReconciler.noteWorldChanged()
         syncWorkspaceBarRevealMonitor()
@@ -547,6 +592,10 @@ final class WMController {
     func cleanupUIOnStop() {
         workspaceBarRevealMonitor.stop()
         workspaceBarManager.cleanup()
+    }
+
+    func invalidateOverviewDeferredActionsForServiceStop() {
+        windowActionHandlerStorage?.invalidateOverviewDeferredActionsForServiceStop()
     }
 
     func setPreventSleepEnabled(_ enabled: Bool) {
@@ -625,6 +674,7 @@ final class WMController {
             hiddenWorkspaceBarMonitorIds.insert(monitor.id)
         }
 
+        workspaceManager.invalidateAllLayouts()
         layoutRefreshController.requestRelayout(reason: .monitorSettingsChanged)
         surfaceReconciler.noteWorldChanged()
         hiddenBarController.dismissPanel()
@@ -717,6 +767,7 @@ final class WMController {
             forceReload: forceIconReload
         )
         pruneHiddenWorkspaceBarMonitorIds()
+        workspaceManager.invalidateAllLayouts()
         layoutRefreshController.requestRelayout(reason: .monitorSettingsChanged)
         surfaceReconciler.noteWorldChanged()
         syncWorkspaceBarRevealMonitor()
@@ -787,17 +838,13 @@ final class WMController {
     }
 
     func updateMonitorDwindleSettings() {
-        guard let engine = dwindleEngine else { return }
-        workspaceManager.withEngineMutationScope {
-            for monitor in workspaceManager.monitors {
-                let resolved = settings.resolvedDwindleSettings(for: monitor)
-                engine.updateMonitorSettings(resolved, for: monitor.id)
-            }
-        }
+        guard dwindleEngine != nil else { return }
+        workspaceManager.invalidateAllLayouts()
         layoutRefreshController.requestRelayout(reason: .monitorSettingsChanged)
     }
 
     func updateMonitorGapSettings() {
+        workspaceManager.invalidateAllLayouts()
         layoutRefreshController.requestRelayout(reason: .monitorSettingsChanged)
         publishDisplayChanged()
     }
@@ -807,21 +854,6 @@ final class WMController {
         Task {
             await ipcApplicationBridge.publishEvent(.displayChanged)
         }
-    }
-
-    func workspaceBarItems(
-        for monitor: Monitor,
-        projection options: WorkspaceBarProjectionOptions
-    ) -> [WorkspaceBarItem] {
-        WorkspaceBarDataSource.workspaceBarItems(
-            for: monitor,
-            options: options,
-            workspaceManager: workspaceManager,
-            appInfoCache: appInfoCache,
-            iconResolver: workspaceBarIconResolver,
-            focusedToken: workspaceManager.focusedToken,
-            settings: settings
-        )
     }
 
     func workspaceBarProjection(
@@ -927,6 +959,13 @@ final class WMController {
 
     func setFocusFollowsMouse(_ enabled: Bool) {
         focusFollowsMouseEnabled = enabled
+        guard !enabled,
+              let request = intentLedger.activeManagedRequest,
+              request.origin == .focusFollowsMouse
+        else {
+            return
+        }
+        cancelManagedFocusRequestAndRestoreSource(request)
     }
 
     func setMoveMouseToFocusedWindow(_ enabled: Bool) {
@@ -1005,8 +1044,10 @@ final class WMController {
         return innerGap(for: monitor)
     }
 
-    func insetWorkingFrame(for monitor: Monitor) -> CGRect {
-        let scale = NSScreen.screens.first(where: { $0.displayId == monitor.displayId })?.backingScaleFactor ?? 2.0
+    func layoutFrames(
+        for monitor: Monitor,
+        scale: CGFloat
+    ) -> (workingFrame: CGRect, fullscreenLayoutFrame: CGRect) {
         let reservedTopInset = workspaceBarReservedTopInset(for: monitor)
         let gaps = settings.resolvedGapSettings(for: monitor)
         let menuBarInset = max(0, monitor.frame.maxY - monitor.visibleFrame.maxY)
@@ -1020,13 +1061,28 @@ final class WMController {
             ),
             bottom: gaps.outerGapBottom
         )
-        return computeWorkingArea(parentArea: monitor.visibleFrame, scale: scale, struts: struts)
+        let workingFrame = computeWorkingArea(parentArea: monitor.visibleFrame, scale: scale, struts: struts)
+        let fullscreenLayoutFrame: CGRect
+        if gaps.fullscreenUsesOuterGaps {
+            fullscreenLayoutFrame = workingFrame
+        } else {
+            fullscreenLayoutFrame = computeWorkingArea(
+                parentArea: monitor.visibleFrame,
+                scale: scale,
+                struts: Struts(top: reservedTopInset)
+            )
+        }
+        return (workingFrame, fullscreenLayoutFrame)
+    }
+
+    func insetWorkingFrame(for monitor: Monitor) -> CGRect {
+        let scale = NSScreen.screens.first(where: { $0.displayId == monitor.displayId })?.backingScaleFactor ?? 2.0
+        return layoutFrames(for: monitor, scale: scale).workingFrame
     }
 
     func fullscreenLayoutFrame(for monitor: Monitor) -> CGRect {
         let scale = NSScreen.screens.first(where: { $0.displayId == monitor.displayId })?.backingScaleFactor ?? 2.0
-        let struts = Struts(top: workspaceBarReservedTopInset(for: monitor))
-        return computeWorkingArea(parentArea: monitor.visibleFrame, scale: scale, struts: struts)
+        return layoutFrames(for: monitor, scale: scale).fullscreenLayoutFrame
     }
 
     private func workspaceBarReservedTopInset(for monitor: Monitor) -> CGFloat {
@@ -1349,6 +1405,7 @@ final class WMController {
         guard observedMin.width > 1 || observedMin.height > 1 else { return }
 
         guard workspaceManager.setObservedMinSize(observedMin, for: token) else { return }
+        workspaceManager.invalidateLayout(for: [entry.workspaceId])
         layoutRefreshController.requestRelayout(
             reason: .observedConstraintsChanged,
             affectedWorkspaceIds: [entry.workspaceId]
@@ -1410,17 +1467,6 @@ final class WMController {
         return workspaceManager.monitors.first
     }
 
-    private func clampedFloatingFrame(
-        _ frame: CGRect,
-        in visibleFrame: CGRect
-    ) -> CGRect {
-        let maxX = visibleFrame.maxX - frame.width
-        let maxY = visibleFrame.maxY - frame.height
-        let clampedX = min(max(frame.origin.x, visibleFrame.minX), max(maxX, visibleFrame.minX))
-        let clampedY = min(max(frame.origin.y, visibleFrame.minY), max(maxY, visibleFrame.minY))
-        return CGRect(origin: CGPoint(x: clampedX, y: clampedY), size: frame.size)
-    }
-
     private func initialFloatingFrame(
         for entry: WindowState,
         preferredMonitor: Monitor?,
@@ -1436,7 +1482,7 @@ final class WMController {
         ) else {
             return offsetFrame
         }
-        return clampedFloatingFrame(offsetFrame, in: monitor.visibleFrame)
+        return FloatingFrameGeometry.clamped(offsetFrame, in: monitor.visibleFrame)
     }
 
     private func shouldApplyFloatingFrameImmediately(
@@ -1687,15 +1733,6 @@ final class WMController {
         if workspaceManager.clearScratchpadIfMatches(token) {
             requestWorkspaceBarRefresh()
         }
-    }
-
-    func cleanupScratchpadWindowResourcesIfNeeded(for token: WindowToken) {
-        guard workspaceManager.isScratchpadToken(token)
-            || workspaceManager.hiddenState(for: token)?.isScratchpad == true
-        else {
-            return
-        }
-        cleanupScratchpadWindowResources(for: token)
     }
 
     func rekeyScratchpadWindowResources(from oldToken: WindowToken, to newToken: WindowToken, axRef: AXWindowRef) {
@@ -2228,18 +2265,6 @@ final class WMController {
             axEventHandler.resolveWindowInfo(windowId),
             for: token
         )
-    }
-
-    func decideWindowDisposition(
-        axRef: AXWindowRef,
-        pid: pid_t,
-        appFullscreen: Bool? = nil
-    ) -> WindowDecision {
-        evaluateWindowDisposition(
-            axRef: axRef,
-            pid: pid,
-            appFullscreen: appFullscreen
-        ).decision
     }
 
     func makeWindowDecisionDebugSnapshot(
@@ -3202,16 +3227,6 @@ extension WMController {
         lockScreenObserver.isFrontmostAppLockScreen()
     }
 
-    func isPointInQuakeTerminal(_ point: CGPoint) -> Bool {
-        guard settings.quakeTerminalEnabled,
-              quakeTerminalController.visible,
-              let window = quakeTerminalController.window
-        else {
-            return false
-        }
-        return window.frame.contains(point)
-    }
-
     func isPointInOwnWindow(_ point: CGPoint) -> Bool {
         ownedWindowRegistry.contains(point: point)
     }
@@ -3239,23 +3254,36 @@ extension WMController {
         return hasFrontmostOwnedWindow || workspaceManager.nonManagedFocusToken != nil
     }
 
-    func performWindowFronting(
+    private func windowFocusPolicy(
         pid: pid_t,
-        windowId: Int,
-        axRef: AXWindowRef
-    ) {
-        guard !workspaceManager.isAppHidden(pid: pid) else { return }
+        windowId: Int
+    ) -> WindowInteractionPolicy? {
+        guard !isLockScreenActive else { return nil }
+        if hasStartedServices, isFrontmostAppLockScreen() {
+            return nil
+        }
+        guard !workspaceManager.isAppHidden(pid: pid) else { return nil }
         if let entry = workspaceManager.entry(forWindowId: windowId),
            workspaceManager.isAppHidden(pid: entry.pid)
         {
-            return
+            return nil
         }
         let policy = workspaceManager.entry(forWindowId: windowId)?.interactionPolicy ?? .full
         guard policy.mayFocus,
               focusPolicyEngine.evaluate(.windowFronting).allowsFocusChange
         else {
-            return
+            return nil
         }
+        return policy
+    }
+
+    @discardableResult
+    func performWindowFronting(
+        pid: pid_t,
+        windowId: Int,
+        axRef: AXWindowRef
+    ) -> Bool {
+        guard let policy = windowFocusPolicy(pid: pid, windowId: windowId) else { return false }
         if policy.mayActivateApp {
             windowFocusOperations.activateApp(pid)
         }
@@ -3263,6 +3291,18 @@ extension WMController {
         if policy.mayRaise {
             windowFocusOperations.raiseWindow(axRef.element)
         }
+        return true
+    }
+
+    @discardableResult
+    private func performWindowFocusOnly(
+        pid: pid_t,
+        windowId: Int,
+        axRef: AXWindowRef
+    ) -> Bool {
+        guard windowFocusPolicy(pid: pid, windowId: windowId) != nil else { return false }
+        windowFocusOperations.focusSpecificWindow(pid, UInt32(windowId), axRef.element)
+        return true
     }
 
     func performWindowOrdering(windowId: Int) {
@@ -3277,17 +3317,259 @@ extension WMController {
     }
 
     func retryManagedFocusFronting(_ request: ManagedFocusRequest) {
-        guard let entry = workspaceManager.entry(for: request.token),
+        guard let liveRequest = intentLedger.activeManagedRequest(requestId: request.requestId),
+              liveRequest.token == request.token,
+              let entry = workspaceManager.entry(for: liveRequest.token),
               entry.workspaceId == request.workspaceId,
-              !isManagedWindowSuppressedByMacOSHide(request.token)
+              !isManagedWindowSuppressedByMacOSHide(liveRequest.token)
         else {
             return
         }
-        guard !isLockScreenActive else { return }
-        if hasStartedServices {
-            guard !isFrontmostAppLockScreen() else { return }
+        _ = applyManagedFocusRequest(
+            liveRequest,
+            entry: entry,
+            validatesPointer: true,
+            isRetry: true
+        )
+    }
+
+    @discardableResult
+    private func applyManagedFocusRequest(
+        _ request: ManagedFocusRequest,
+        entry: WindowState,
+        validatesPointer: Bool,
+        isRetry: Bool = false,
+        preferredSameAppSourceToken: WindowToken? = nil
+    ) -> Bool {
+        guard let liveRequest = intentLedger.activeManagedRequest(requestId: request.requestId),
+              liveRequest.token == entry.token,
+              liveRequest.workspaceId == entry.workspaceId,
+              workspaceManager.pendingManagedFocusMatches(
+                  token: liveRequest.token,
+                  workspaceId: liveRequest.workspaceId,
+                  requestId: liveRequest.requestId
+              )
+        else {
+            return false
         }
-        performWindowFronting(pid: entry.pid, windowId: entry.windowId, axRef: entry.axRef)
+
+        if liveRequest.origin == .focusFollowsMouse {
+            guard focusFollowsMouseEnabled else {
+                cancelManagedFocusRequestAndRestoreSource(liveRequest)
+                return false
+            }
+            if validatesPointer,
+               mouseEventHandler.hasLatestFocusFollowsMouseSample,
+               mouseEventHandler.latestFocusFollowsMouseToken() != liveRequest.token
+            {
+                cancelManagedFocusRequestAndRestoreSource(liveRequest)
+                return false
+            }
+            guard focusPolicyEngine.evaluate(.focusFollowsMouse).allowsFocusChange else {
+                cancelManagedFocusRequestAndRestoreSource(liveRequest)
+                return false
+            }
+        }
+
+        let focusesWithoutRaise = liveRequest.origin == .focusFollowsMouse
+            && !settings.raiseOnMouseFocus
+        guard focusesWithoutRaise else {
+            let applied = performWindowFronting(
+                pid: entry.pid,
+                windowId: entry.windowId,
+                axRef: entry.axRef
+            )
+            if applied, case .awaitingSameAppActivation = liveRequest.phase {
+                _ = intentLedger.completeSameAppActivationHandoff(
+                    requestId: liveRequest.requestId
+                )
+            } else if !applied,
+                      case let .awaitingSameAppActivation(sourceToken, _) = liveRequest.phase
+            {
+                cancelManagedFocusRequestAndRestoreSource(
+                    liveRequest,
+                    sourceToken: sourceToken
+                )
+            } else if !applied, liveRequest.origin == .focusFollowsMouse {
+                cancelManagedFocusRequest(liveRequest)
+            }
+            return applied
+        }
+        guard windowFocusPolicy(pid: entry.pid, windowId: entry.windowId) != nil else {
+            cancelManagedFocusRequestAndRestoreSource(liveRequest)
+            return false
+        }
+        if case .awaitingSameAppActivation = liveRequest.phase {
+            return false
+        }
+        if let sourceToken = preferredSameAppSourceToken ?? workspaceManager.renderableFocusToken,
+           sourceToken != liveRequest.token,
+           sourceToken.pid == liveRequest.token.pid,
+           let sourceEntry = workspaceManager.entry(for: sourceToken),
+           sourceEntry.pid == entry.pid,
+           isManagedWindowDisplayable(sourceToken),
+           let sourceWindowId = UInt32(exactly: sourceEntry.windowId)
+        {
+            guard let stagedRequest = intentLedger.beginSameAppActivationHandoff(
+                requestId: liveRequest.requestId,
+                sourceToken: sourceToken,
+                isRetry: isRetry
+            ) else {
+                return false
+            }
+            guard windowFocusOperations.deactivateSameAppWindow(entry.pid, sourceWindowId) else {
+                cancelManagedFocusRequest(stagedRequest)
+                return false
+            }
+            return false
+        }
+        return performWindowFocusOnly(
+            pid: entry.pid,
+            windowId: entry.windowId,
+            axRef: entry.axRef
+        )
+    }
+
+    func completeSameAppFocusHandoff(_ request: ManagedFocusRequest) {
+        guard let liveRequest = intentLedger.activeManagedRequest(requestId: request.requestId),
+              liveRequest.token == request.token,
+              case let .awaitingSameAppActivation(sourceToken, isRetry) = liveRequest.phase,
+              let entry = workspaceManager.entry(for: liveRequest.token),
+              entry.workspaceId == liveRequest.workspaceId,
+              workspaceManager.pendingManagedFocusMatches(
+                  token: liveRequest.token,
+                  workspaceId: liveRequest.workspaceId,
+                  requestId: liveRequest.requestId
+              )
+        else {
+            return
+        }
+        guard focusFollowsMouseEnabled,
+              !mouseEventHandler.hasLatestFocusFollowsMouseSample
+              || mouseEventHandler.latestFocusFollowsMouseToken() == liveRequest.token,
+              focusPolicyEngine.evaluate(.focusFollowsMouse).allowsFocusChange,
+              let policy = windowFocusPolicy(pid: entry.pid, windowId: entry.windowId)
+        else {
+            cancelManagedFocusRequestAndRestoreSource(
+                liveRequest,
+                sourceToken: sourceToken
+            )
+            return
+        }
+        let raisesWindow = settings.raiseOnMouseFocus
+        if raisesWindow, policy.mayActivateApp {
+            windowFocusOperations.activateApp(entry.pid)
+        }
+        guard windowFocusOperations.activateAndFocusSameAppWindow(
+            entry.pid,
+            UInt32(entry.windowId),
+            entry.axRef.element
+        ) else {
+            cancelManagedFocusRequestAndRestoreSource(
+                liveRequest,
+                sourceToken: sourceToken
+            )
+            return
+        }
+        if raisesWindow, policy.mayRaise {
+            windowFocusOperations.raiseWindow(entry.axRef.element)
+        }
+        guard let confirmationRequest = intentLedger.completeSameAppActivationHandoff(
+            requestId: liveRequest.requestId
+        ) else {
+            cancelManagedFocusRequestAndRestoreSource(
+                liveRequest,
+                sourceToken: sourceToken
+            )
+            return
+        }
+        if isRetry {
+            _ = axEventHandler.handleAppActivation(
+                pid: confirmationRequest.token.pid,
+                source: confirmationRequest.lastActivationSource ?? .focusedWindowChanged,
+                origin: .retry
+            )
+        } else {
+            axEventHandler.probeFocusedWindowAfterFronting(
+                expectedToken: confirmationRequest.token,
+                workspaceId: confirmationRequest.workspaceId
+            )
+        }
+    }
+
+    @discardableResult
+    func cancelManagedFocusRequest(_ request: ManagedFocusRequest) -> ManagedFocusRequest? {
+        cancelManagedFocusRequest(request, restoringSameAppSource: nil)
+    }
+
+    @discardableResult
+    func cancelManagedFocusRequestAndRestoreSource(
+        _ request: ManagedFocusRequest,
+        sourceToken: WindowToken? = nil
+    ) -> ManagedFocusRequest? {
+        let resolvedSourceToken: WindowToken? = if let sourceToken {
+            sourceToken
+        } else if case let .awaitingSameAppActivation(sourceToken, _) = request.phase {
+            sourceToken
+        } else {
+            nil
+        }
+        return cancelManagedFocusRequest(
+            request,
+            restoringSameAppSource: resolvedSourceToken
+        )
+    }
+
+    @discardableResult
+    private func cancelManagedFocusRequest(
+        _ request: ManagedFocusRequest,
+        restoringSameAppSource sourceToken: WindowToken?
+    ) -> ManagedFocusRequest? {
+        guard let liveRequest = intentLedger.activeManagedRequest(requestId: request.requestId),
+              liveRequest.token == request.token,
+              liveRequest.workspaceId == request.workspaceId,
+              let canceledRequest = intentLedger.cancelManagedRequest(requestId: request.requestId)
+        else {
+            return nil
+        }
+        _ = workspaceManager.cancelManagedFocusRequest(
+            matching: canceledRequest.token,
+            workspaceId: canceledRequest.workspaceId,
+            requestId: canceledRequest.requestId
+        )
+        if let sourceToken {
+            restoreSameAppFocusSource(sourceToken, canceledRequest: canceledRequest)
+        }
+        return canceledRequest
+    }
+
+    private func restoreSameAppFocusSource(
+        _ sourceToken: WindowToken,
+        canceledRequest: ManagedFocusRequest
+    ) {
+        guard sourceToken.pid == canceledRequest.token.pid,
+              sourceToken != canceledRequest.token,
+              workspaceManager.renderableFocusToken == sourceToken,
+              !workspaceManager.isNonManagedFocusActive,
+              !hasFrontmostOwnedWindow,
+              let sourceEntry = workspaceManager.entry(for: sourceToken),
+              isManagedWindowDisplayable(sourceToken),
+              focusPolicyEngine.evaluate(.focusFollowsMouse).allowsFocusChange,
+              windowFocusPolicy(pid: sourceEntry.pid, windowId: sourceEntry.windowId) != nil
+        else {
+            return
+        }
+        if hasStartedServices,
+           axEventHandler.frontmostApplicationPIDProvider() != sourceEntry.pid
+        {
+            return
+        }
+        axEventHandler.noteMouseFocusIntent(token: sourceToken)
+        _ = windowFocusOperations.activateAndFocusSameAppWindow(
+            sourceEntry.pid,
+            UInt32(sourceEntry.windowId),
+            sourceEntry.axRef.element
+        )
     }
 
     func activateNativeFullscreenPlaceholder(_ originalToken: WindowToken) {
@@ -3444,6 +3726,13 @@ extension WMController {
         _ token: WindowToken,
         origin: ManagedFocusOrigin = .keyboardOrProgrammatic
     ) {
+        guard origin != .focusFollowsMouse || focusFollowsMouseEnabled else { return }
+        if origin == .focusFollowsMouse,
+           mouseEventHandler.hasLatestFocusFollowsMouseSample,
+           mouseEventHandler.latestFocusFollowsMouseToken() != token
+        {
+            return
+        }
         guard let entry = workspaceManager.entry(for: token) else { return }
         guard !isLockScreenActive else { return }
         if hasStartedServices {
@@ -3463,30 +3752,78 @@ extension WMController {
         }
 
         let workspaceId = entry.workspaceId
+        var promotedHandoffSourceToken: WindowToken?
+        var supersededHandoff: (request: ManagedFocusRequest, sourceToken: WindowToken)?
+        var preferredSameAppSourceToken: WindowToken?
+        if let activeRequest = intentLedger.activeManagedRequest {
+            switch activeRequest.phase {
+            case let .awaitingSameAppActivation(sourceToken, _):
+                if activeRequest.token == token {
+                    promotedHandoffSourceToken = sourceToken
+                } else if let canceledRequest = cancelManagedFocusRequest(activeRequest) {
+                    supersededHandoff = (canceledRequest, sourceToken)
+                }
+            case .awaitingConfirmation:
+                if activeRequest.token != token, activeRequest.token.pid == token.pid {
+                    preferredSameAppSourceToken = activeRequest.token
+                }
+            }
+        }
         let request = intentLedger.beginManagedRequest(
             token: token,
             workspaceId: workspaceId,
             origin: origin
         )
         _ = workspaceManager.beginManagedFocusRequest(
-            token,
-            in: workspaceId,
-            onMonitor: workspaceManager.monitorId(for: workspaceId),
+            request.token,
+            in: request.workspaceId,
+            onMonitor: workspaceManager.monitorId(for: request.workspaceId),
             requestId: request.requestId
         )
         recordNiriCreateFocusTrace(
             .pendingFocusStarted(
                 requestId: request.requestId,
-                token: token,
-                workspaceId: workspaceId
+                token: request.token,
+                workspaceId: request.workspaceId
             )
         )
 
-        performWindowFronting(pid: entry.pid, windowId: entry.windowId, axRef: entry.axRef)
-        axEventHandler.probeFocusedWindowAfterFronting(
-            expectedToken: token,
-            workspaceId: workspaceId
+        let applied = applyManagedFocusRequest(
+            request,
+            entry: entry,
+            validatesPointer: false,
+            preferredSameAppSourceToken: preferredSameAppSourceToken
         )
+        if let promotedHandoffSourceToken,
+           request.origin != .focusFollowsMouse,
+           !applied
+        {
+            cancelManagedFocusRequestAndRestoreSource(
+                request,
+                sourceToken: promotedHandoffSourceToken
+            )
+        }
+        let replacementIsStaged: Bool
+        if case .some(.awaitingSameAppActivation) = intentLedger.activeManagedRequest(
+            requestId: request.requestId
+        )?.phase {
+            replacementIsStaged = true
+        } else {
+            replacementIsStaged = false
+        }
+        if let supersededHandoff, !applied, !replacementIsStaged {
+            cancelManagedFocusRequest(request)
+            restoreSameAppFocusSource(
+                supersededHandoff.sourceToken,
+                canceledRequest: supersededHandoff.request
+            )
+        }
+        if intentLedger.activeManagedRequest(requestId: request.requestId)?.phase == .awaitingConfirmation {
+            axEventHandler.probeFocusedWindowAfterFronting(
+                expectedToken: request.token,
+                workspaceId: request.workspaceId
+            )
+        }
     }
 
     private func deferInactiveDwindleGroupFocus(

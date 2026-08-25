@@ -13,6 +13,10 @@ final class OverviewWindow: NSPanel {
         monitor.id
     }
 
+    var displayId: CGDirectDisplayID {
+        monitor.displayId
+    }
+
     var onWindowSelected: ((Monitor.ID, WindowHandle) -> Void)?
     var onWindowClosed: ((Monitor.ID, WindowHandle) -> Void)?
     var onDismiss: ((Monitor.ID) -> Void)?
@@ -25,7 +29,7 @@ final class OverviewWindow: NSPanel {
 
     init(monitor: Monitor, palette: OverviewRenderPalette = .default) {
         self.monitor = monitor
-        overlayView = OverviewView(frame: .zero, palette: palette)
+        overlayView = OverviewView(frame: .zero, displayId: monitor.displayId, palette: palette)
 
         super.init(
             contentRect: monitor.frame,
@@ -137,6 +141,18 @@ final class OverviewWindow: NSPanel {
         overlayView.updateThumbnails(thumbnails)
     }
 
+    func updateAnimationProgress(
+        _ progress: Double,
+        generation: UInt64,
+        sequence: UInt64
+    ) {
+        overlayView.updateAnimationProgress(
+            progress,
+            generation: generation,
+            sequence: sequence
+        )
+    }
+
     func updatePalette(_ palette: OverviewRenderPalette) {
         overlayView.updatePalette(palette)
     }
@@ -145,11 +161,13 @@ final class OverviewWindow: NSPanel {
 @MainActor
 final class OverviewView: NSView {
     private(set) var layout: OverviewLayout = .init()
-    private(set) var overviewState: OverviewState = .closed
     private(set) var searchQuery: String = ""
     private(set) var thumbnails: [Int: CGImage] = [:]
     private(set) var palette: OverviewRenderPalette
     private(set) var selectedWindowHandle: WindowHandle?
+    private(set) var presentationProgress: Double = 0
+
+    private let displayId: CGDirectDisplayID
 
     var onWindowSelected: ((WindowHandle) -> Void)?
     var onWindowClosed: ((WindowHandle) -> Void)?
@@ -168,10 +186,20 @@ final class OverviewView: NSView {
     private var hoveredWindowHandle: WindowHandle?
     private var closeButtonHovered = false
     private var textLineCache = OverviewTextLineCache()
+    private var traceCaptureGeneration: UInt64 = 0
+    private var traceGeneration: UInt64 = 0
+    private var traceSequence: UInt64 = 0
+    private var traceInvalidatedAt: CFTimeInterval = 0
+    private(set) var tracePendingInvalidations = 0
     private let dragThreshold: CGFloat = 6.0
     private let scrollAxisEpsilon: CGFloat = 0.0001
 
-    init(frame: NSRect, palette: OverviewRenderPalette = .default) {
+    init(
+        frame: NSRect,
+        displayId: CGDirectDisplayID = CGMainDisplayID(),
+        palette: OverviewRenderPalette = .default
+    ) {
+        self.displayId = displayId
         self.palette = palette
         selectedWindowHandle = nil
         super.init(frame: frame)
@@ -192,7 +220,6 @@ final class OverviewView: NSView {
         thumbnails: [Int: CGImage]? = nil
     ) {
         self.layout = layout
-        overviewState = state
         self.searchQuery = searchQuery
         self.selectedWindowHandle = selectedWindowHandle
         if let hoveredWindowHandle,
@@ -201,8 +228,15 @@ final class OverviewView: NSView {
             self.hoveredWindowHandle = nil
             closeButtonHovered = false
         }
-        if case .closed = state {
+        switch state {
+        case .closed:
+            presentationProgress = 0
             textLineCache.removeAll()
+        case .open:
+            presentationProgress = 1
+        case .opening,
+             .closing:
+            break
         }
         if let palette {
             self.palette = palette
@@ -211,6 +245,51 @@ final class OverviewView: NSView {
             self.thumbnails = thumbnails
         }
         needsDisplay = true
+    }
+
+    func updateAnimationProgress(
+        _ progress: Double,
+        generation: UInt64,
+        sequence: UInt64
+    ) {
+        let activeTraceCaptureGeneration = OverviewFrameTrace.shared.captureGeneration
+        let traceActive = activeTraceCaptureGeneration != 0
+        let startTime = traceActive ? CACurrentMediaTime() : 0
+        presentationProgress = progress.isFinite ? min(max(progress, 0), 1) : 0
+        needsDisplay = true
+
+        guard traceActive else {
+            resetFrameTraceState()
+            traceCaptureGeneration = 0
+            return
+        }
+        if traceCaptureGeneration != activeTraceCaptureGeneration {
+            resetFrameTraceState()
+            traceCaptureGeneration = activeTraceCaptureGeneration
+        }
+        let endTime = CACurrentMediaTime()
+        if tracePendingInvalidations == 0 {
+            traceInvalidatedAt = endTime
+        }
+        traceGeneration = generation
+        traceSequence = sequence
+        tracePendingInvalidations += 1
+        OverviewFrameTrace.shared.record(
+            OverviewFrameTrace.Record(
+                event: .invalidation,
+                mediaTime: endTime,
+                displayId: displayId,
+                generation: generation,
+                sequence: sequence,
+                progress: presentationProgress,
+                durationMs: (endTime - startTime) * 1000,
+                waitMs: 0,
+                targetLeadMs: 0,
+                pendingInvalidations: tracePendingInvalidations,
+                endpointScheduled: false,
+                sessionCompleted: false
+            )
+        )
     }
 
     func updateThumbnails(_ thumbnails: [Int: CGImage]) {
@@ -367,14 +446,41 @@ final class OverviewView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        guard let context = NSGraphicsContext.current?.cgContext else { return }
-
-        let progress: Double = switch overviewState {
-        case .closed: 0.0
-        case let .opening(p): p
-        case .open: 1.0
-        case let .closing(_, p): 1.0 - p
+        let activeTraceCaptureGeneration = OverviewFrameTrace.shared.captureGeneration
+        let traceActive = activeTraceCaptureGeneration != 0
+        if traceCaptureGeneration != activeTraceCaptureGeneration {
+            resetFrameTraceState()
+            traceCaptureGeneration = activeTraceCaptureGeneration
         }
+        let startTime = traceActive ? CACurrentMediaTime() : 0
+        let generation = traceGeneration
+        let sequence = traceSequence
+        let pendingInvalidations = tracePendingInvalidations
+        let invalidatedAt = traceInvalidatedAt
+        defer {
+            if traceActive {
+                let endTime = CACurrentMediaTime()
+                OverviewFrameTrace.shared.record(
+                    OverviewFrameTrace.Record(
+                        event: .draw,
+                        mediaTime: endTime,
+                        displayId: displayId,
+                        generation: generation,
+                        sequence: sequence,
+                        progress: presentationProgress,
+                        durationMs: (endTime - startTime) * 1000,
+                        waitMs: invalidatedAt > 0 ? (startTime - invalidatedAt) * 1000 : 0,
+                        targetLeadMs: 0,
+                        pendingInvalidations: pendingInvalidations,
+                        endpointScheduled: false,
+                        sessionCompleted: false
+                    )
+                )
+                resetPendingFrameTraceState()
+            }
+        }
+
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
         OverviewRenderer.render(
             context: context,
             layout: layout,
@@ -384,9 +490,20 @@ final class OverviewView: NSView {
             hoveredWindowHandle: hoveredWindowHandle,
             closeButtonHovered: closeButtonHovered,
             textLineCache: &textLineCache,
-            progress: progress,
+            progress: presentationProgress,
             bounds: bounds,
             palette: palette
         )
+    }
+
+    private func resetFrameTraceState() {
+        traceGeneration = 0
+        traceSequence = 0
+        resetPendingFrameTraceState()
+    }
+
+    private func resetPendingFrameTraceState() {
+        traceInvalidatedAt = 0
+        tracePendingInvalidations = 0
     }
 }

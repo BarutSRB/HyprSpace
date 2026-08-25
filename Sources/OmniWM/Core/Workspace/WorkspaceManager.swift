@@ -7,9 +7,6 @@ import OmniWMIPC
 
 @MainActor
 final class WorkspaceManager {
-    typealias NativeFullscreenTransition = WorkspaceNativeFullscreenTransition
-    typealias NativeFullscreenRecord = WorkspaceNativeFullscreenRecord
-
     private struct MonitorResolutionContext {
         let monitors: [Monitor]
         let sortedMonitors: [Monitor]
@@ -65,6 +62,7 @@ final class WorkspaceManager {
     var onWindowPresenceObserved: ((WindowHandle) -> Void)?
     var onWindowRemoved: ((WindowState) -> Void)?
     var onDeferredWorkspaceMonitorMove: ((WorkspaceMonitorMoveOutcome) -> Void)?
+    var onAnimationMotionsWillBeRemoved: ((Set<WorkspaceDescriptor.ID>) -> Void)?
 
     init(settings: SettingsStore) {
         self.settings = settings
@@ -85,31 +83,31 @@ final class WorkspaceManager {
     }
 
     func reconcileSnapshot() -> ReconcileSnapshot {
-        let windowSnapshots = world.allEntries()
-            .sorted {
-                if $0.workspaceId != $1.workspaceId {
-                    return $0.workspaceId < $1.workspaceId
-                }
-                if $0.pid != $1.pid {
-                    return $0.pid < $1.pid
-                }
-                return $0.windowId < $1.windowId
-            }
-            .map { entry in
-                ReconcileWindowSnapshot(
-                    token: entry.token,
-                    workspaceId: entry.workspaceId,
-                    mode: entry.mode,
-                    lifecyclePhase: entry.lifecyclePhase,
-                    observedState: entry.observedState,
-                    desiredState: entry.desiredState,
-                    restoreIntent: entry.restoreIntent,
-                    interactionPolicy: entry.interactionPolicy
-                )
-            }
+        var entries = world.allEntries()
+        entries.sort {
+            $0.workspaceId == $1.workspaceId
+                ? ($0.pid == $1.pid ? $0.windowId < $1.windowId : $0.pid < $1.pid)
+                : $0.workspaceId < $1.workspaceId
+        }
+
+        var workspaceIds: Set<WorkspaceDescriptor.ID> = []
+        workspaceIds.reserveCapacity(min(entries.count, workspacesById.count))
+        let windowSnapshots = entries.map { entry in
+            workspaceIds.insert(entry.workspaceId)
+            return ReconcileWindowSnapshot(
+                token: entry.token,
+                workspaceId: entry.workspaceId,
+                mode: entry.mode,
+                lifecyclePhase: entry.lifecyclePhase,
+                observedState: entry.observedState,
+                desiredState: entry.desiredState,
+                restoreIntent: entry.restoreIntent,
+                interactionPolicy: entry.interactionPolicy
+            )
+        }
 
         var layouts: [WorkspaceDescriptor.ID: LayoutTopology] = [:]
-        for workspaceId in Set(windowSnapshots.map(\.workspaceId)) {
+        for workspaceId in workspaceIds {
             let topology = world.layoutTopology(for: workspaceId)
             if topology.hasColumns || !topology.dwindleFullscreenTokens.isEmpty {
                 layouts[workspaceId] = topology
@@ -168,6 +166,9 @@ final class WorkspaceManager {
 
     @discardableResult
     func recordReconcileEvent(_ event: WMEvent) -> ReconcileTxn {
+        if case let .viewportForgotten(workspaceIds, _) = event {
+            removeAnimationMotions(for: workspaceIds)
+        }
         let previousFocus = world.focus
         let viewportWorkspaceId = viewportWorkspaceId(for: event)
         let previousViewport = viewportWorkspaceId.flatMap { world.viewports[$0] }
@@ -221,9 +222,6 @@ final class WorkspaceManager {
                     transition: eventState.offsetTransition
                 )
             }
-        }
-        if case let .viewportForgotten(workspaceIds, _) = event {
-            animationDriver.removeMotions(for: workspaceIds)
         }
         return txn
     }
@@ -397,6 +395,7 @@ final class WorkspaceManager {
              .appVisibilityInvalidated,
              .floatingStateChanged,
              .hiddenApplicationsChanged,
+             .layoutOperationPerformed,
              .manualLayoutOverrideChanged,
              .systemSleep,
              .systemWake,
@@ -409,7 +408,6 @@ final class WorkspaceManager {
              .focusRemembered,
              .hiddenStateChanged,
              .interactionMonitorChanged,
-             .layoutOperationPerformed,
              .managedFocusCancelled,
              .managedFocusConfirmed,
              .managedFocusRequested,
@@ -848,15 +846,6 @@ final class WorkspaceManager {
 
     func monitor(byId id: Monitor.ID) -> Monitor? {
         _monitorsById[id]
-    }
-
-    func monitor(named name: String) -> Monitor? {
-        guard let matches = _monitorsByName[name], matches.count == 1 else { return nil }
-        return matches[0]
-    }
-
-    func monitors(named name: String) -> [Monitor] {
-        _monitorsByName[name] ?? []
     }
 
     var interactionMonitorId: Monitor.ID? {
@@ -1645,30 +1634,6 @@ final class WorkspaceManager {
         )
     }
 
-    private func floatingOrigin(
-        from normalizedOrigin: CGPoint,
-        windowSize: CGSize,
-        in visibleFrame: CGRect
-    ) -> CGPoint {
-        let availableWidth = max(0, visibleFrame.width - windowSize.width)
-        let availableHeight = max(0, visibleFrame.height - windowSize.height)
-        return CGPoint(
-            x: visibleFrame.minX + min(max(0, normalizedOrigin.x), 1) * availableWidth,
-            y: visibleFrame.minY + min(max(0, normalizedOrigin.y), 1) * availableHeight
-        )
-    }
-
-    private func clampedFloatingFrame(
-        _ frame: CGRect,
-        in visibleFrame: CGRect
-    ) -> CGRect {
-        let maxX = visibleFrame.maxX - frame.width
-        let maxY = visibleFrame.maxY - frame.height
-        let clampedX = min(max(frame.origin.x, visibleFrame.minX), maxX >= visibleFrame.minX ? maxX : visibleFrame.minX)
-        let clampedY = min(max(frame.origin.y, visibleFrame.minY), maxY >= visibleFrame.minY ? maxY : visibleFrame.minY)
-        return CGRect(origin: CGPoint(x: clampedX, y: clampedY), size: frame.size)
-    }
-
     private func rebuildMonitorIndexes() {
         _cachedSortedMonitors = nil
         _cachedTopologyProfile = nil
@@ -1961,10 +1926,12 @@ final class WorkspaceManager {
         onGapsChanged?()
     }
 
-    func invalidateLayout(for workspaceIds: Set<WorkspaceDescriptor.ID>) {
-        for workspaceId in workspaceIds {
-            noteInvalidation(workspaceId: workspaceId, domains: .layout)
-        }
+    func invalidateLayout(for ids: Set<WorkspaceDescriptor.ID>) {
+        noteInvalidation(workspaceIds: ids, domains: .layout)
+    }
+
+    func invalidateAllLayouts() {
+        noteInvalidation(workspaceId: nil, domains: .layout)
     }
 
     private func monitor(
@@ -2106,10 +2073,6 @@ final class WorkspaceManager {
         return entries
     }
 
-    func hasTiledOccupancy(in workspace: WorkspaceDescriptor.ID) -> Bool {
-        !tiledEntries(in: workspace).isEmpty
-    }
-
     func floatingEntries(in workspace: WorkspaceDescriptor.ID) -> [WindowState] {
         world.windows(in: workspace, mode: .floating)
     }
@@ -2157,10 +2120,6 @@ final class WorkspaceManager {
 
     func allEntries() -> [WindowState] {
         world.allEntries()
-    }
-
-    func allTiledEntries() -> [WindowState] {
-        world.allEntries(mode: .tiling)
     }
 
     func allFloatingEntries() -> [WindowState] {
@@ -2383,15 +2342,15 @@ final class WorkspaceManager {
         if let targetMonitor,
            floatingState.referenceMonitorId == targetMonitor.id || floatingState.normalizedOrigin == nil
         {
-            return clampedFloatingFrame(floatingState.lastFrame, in: visibleFrame)
+            return FloatingFrameGeometry.clamped(floatingState.lastFrame, in: visibleFrame)
         }
 
-        let origin = floatingOrigin(
+        let origin = FloatingFrameGeometry.origin(
             from: floatingState.normalizedOrigin ?? .zero,
             windowSize: floatingState.lastFrame.size,
             in: visibleFrame
         )
-        return clampedFloatingFrame(
+        return FloatingFrameGeometry.clamped(
             CGRect(origin: origin, size: floatingState.lastFrame.size),
             in: visibleFrame
         )
@@ -2802,7 +2761,7 @@ final class WorkspaceManager {
             ? nil
             : OutputId(from: targetMonitor)
 
-        animationDriver.removeMotions(for: [workspaceId])
+        removeAnimationMotions(for: [workspaceId])
         world.commit(
             .userCommand(
                 workspaceId: workspaceId,
@@ -3220,7 +3179,7 @@ final class WorkspaceManager {
             return $0.token.windowId < $1.token.windowId
         }
 
-        animationDriver.removeMotions(for: moves.lazy.map(\.workspaceId))
+        removeAnimationMotions(for: moves.lazy.map(\.workspaceId))
         world.commit(
             .userCommand(
                 workspaceId: nil,
@@ -3306,7 +3265,7 @@ final class WorkspaceManager {
             }
         }
         world.removeInvalidationMarks(for: ids)
-        animationDriver.removeMotions(for: ids)
+        removeAnimationMotions(for: ids)
 
         _cachedSortedWorkspaces = nil
         workspaceIdByName = workspaceIdByName.filter { !toRemove.contains($0.value) }
@@ -3379,15 +3338,6 @@ final class WorkspaceManager {
         guard sessions != world.monitorSessions else { return false }
         commitMonitorSessions(sessions)
         return true
-    }
-
-    private func pruneRestoredDisconnectedVisibleWorkspaces() {
-        let context = monitorResolutionContext()
-        disconnectedVisibleWorkspaceCache = disconnectedVisibleWorkspaceCache.filter { _, workspaceId in
-            guard descriptor(for: workspaceId) != nil else { return false }
-            guard let homeMonitorId = homeMonitorId(for: workspaceId, context: context) else { return true }
-            return visibleWorkspaceId(on: homeMonitorId) != workspaceId
-        }
     }
 
     func reconcileConfiguredVisibleWorkspaces(notify: Bool = true) {
@@ -3510,23 +3460,6 @@ final class WorkspaceManager {
         Set(monitors.compactMap { monitor in
             defaultVisibleWorkspaceId(on: monitor.id) == nil ? nil : monitor.id
         })
-    }
-
-    private func replaceVisibleWorkspaceIfNeeded(on monitorId: Monitor.ID) {
-        guard let monitor = monitor(byId: monitorId) else { return }
-        if let defaultWorkspaceId = defaultVisibleWorkspaceId(on: monitor.id) {
-            _ = setActiveWorkspaceInternal(
-                defaultWorkspaceId,
-                on: monitor.id,
-                anchorPoint: monitor.workspaceAnchorPoint
-            )
-        } else {
-            updateMonitorSession(monitor.id) { session in
-                session.visibleWorkspaceId = nil
-                session.previousVisibleWorkspaceId = nil
-            }
-            notifySessionStateChanged()
-        }
     }
 
     private func sourceReplacementWorkspaceId(
@@ -3900,7 +3833,8 @@ extension WorkspaceManager {
             noteInvalidation(workspaceId: workspaceId, domains: [.workspace, .layout])
 
         case let .floatingStateChanged(_, workspaceId, _, _),
-             let .manualLayoutOverrideChanged(_, workspaceId, _, _):
+             let .manualLayoutOverrideChanged(_, workspaceId, _, _),
+             let .layoutOperationPerformed(workspaceId, _, _):
             noteInvalidation(workspaceId: workspaceId, domains: .layout)
 
         case .niriPlacementsResolved:
@@ -3952,7 +3886,6 @@ extension WorkspaceManager {
 
         case .focusForgotten,
              .interactionMonitorChanged,
-             .layoutOperationPerformed,
              .nativeFullscreenPlaceholderSelected,
              .nonManagedFocusTargetChanged,
              .scratchpadChanged,

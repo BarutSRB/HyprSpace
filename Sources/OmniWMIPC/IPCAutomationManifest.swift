@@ -347,6 +347,7 @@ public enum IPCAutomationManifest {
         "outer-gap-right",
         "outer-gap-top",
         "outer-gap-bottom",
+        "fullscreen-uses-outer-gaps",
         "active-workspace"
     ]
 
@@ -1105,10 +1106,6 @@ public enum IPCAutomationManifest {
                 guard actionWords.count >= descriptor.actionWords.count else { return false }
                 return Array(actionWords.prefix(descriptor.actionWords.count)) == descriptor.actionWords
             }
-    }
-
-    public static func subscriptionDescriptor(for channel: IPCSubscriptionChannel) -> IPCSubscriptionDescriptor? {
-        subscriptionDescriptors.first { $0.channel == channel }
     }
 
     public static func expandedChannels(for request: IPCSubscribeRequest) -> [IPCSubscriptionChannel] {

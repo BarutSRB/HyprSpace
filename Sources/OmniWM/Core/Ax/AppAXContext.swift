@@ -3,6 +3,7 @@
 
 import AppKit
 import ApplicationServices
+import Dispatch
 import Foundation
 
 final class LockedWindowIdSet: @unchecked Sendable {
@@ -96,6 +97,31 @@ final class LockedWindowGenerationMap: @unchecked Sendable {
     func retainOnly(_ retainedIds: Set<Int>) {
         lock.lock()
         generations = generations.filter { retainedIds.contains($0.key) }
+        lock.unlock()
+    }
+}
+
+final class LockedEnhancedUIStateMap: @unchecked Sendable {
+    static let shared = LockedEnhancedUIStateMap()
+
+    private let lock = NSLock()
+    private var statesByPid: [pid_t: Bool] = [:]
+
+    func state(for pid: pid_t) -> Bool? {
+        lock.lock()
+        defer { lock.unlock() }
+        return statesByPid[pid]
+    }
+
+    func store(_ enabled: Bool, for pid: pid_t) {
+        lock.lock()
+        statesByPid[pid] = enabled
+        lock.unlock()
+    }
+
+    func invalidate(_ pid: pid_t) {
+        lock.lock()
+        statesByPid.removeValue(forKey: pid)
         lock.unlock()
     }
 }
@@ -224,6 +250,7 @@ struct AppAXWindowSubscription: @unchecked Sendable {
 struct AppAXPendingNotificationRemoval: @unchecked Sendable {
     let element: AXUIElement
     let notification: AppAXWindowNotification
+    var attempts: UInt8 = 0
 }
 
 struct AppAXWindowNotificationInstallResult: @unchecked Sendable {
@@ -269,8 +296,34 @@ struct AppAXFrameWriteRequest: Sendable {
     let expectedWindow: AXWindowRef
     let frame: CGRect
     let currentFrameHint: CGRect?
+    let components: AXFrameComponents
     let generation: UInt64
     let verify: Bool
+    let traceRequestId: UInt64
+
+    init(
+        requestId: AXFrameRequestId,
+        pid: pid_t,
+        windowId: Int,
+        expectedWindow: AXWindowRef,
+        frame: CGRect,
+        currentFrameHint: CGRect?,
+        components: AXFrameComponents = .all,
+        generation: UInt64,
+        verify: Bool,
+        traceRequestId: UInt64 = 0
+    ) {
+        self.requestId = requestId
+        self.pid = pid
+        self.windowId = windowId
+        self.expectedWindow = expectedWindow
+        self.frame = frame
+        self.currentFrameHint = currentFrameHint
+        self.components = components
+        self.generation = generation
+        self.verify = verify
+        self.traceRequestId = traceRequestId
+    }
 }
 
 struct AppAXClosingFrameWriteRequest: Sendable {
@@ -297,6 +350,9 @@ private final class AppAXContextCreationState: @unchecked Sendable {
 
 @MainActor
 final class AppAXContext {
+    nonisolated static let pendingNotificationRemovalLimit = 512
+    nonisolated static let pendingNotificationRemovalAttemptLimit: UInt8 = 3
+
     let pid: pid_t
     let nsApp: NSRunningApplication
 
@@ -308,7 +364,11 @@ final class AppAXContext {
     }
 
     private var activeFrameBatchJobs: [UUID: RunLoopJob] = [:]
+    private var activeParkFrameBatchJob: RunLoopJob?
     private var activeClosingFrameBatchJobs: [UUID: RunLoopJob] = [:]
+    private let frameMailbox = AppAXFrameMailbox()
+    private let parkFrameMailbox = AppAXFrameMailbox(lane: .park)
+    private let closingFrameMailbox = AppAXClosingFrameMailbox()
     private let frameWriteGenerations = LockedWindowGenerationMap()
     private let parkFrameWriteGenerations = LockedWindowGenerationMap()
     private let closingFrameWriteGenerations = LockedClosingFrameGenerationMap()
@@ -328,6 +388,19 @@ final class AppAXContext {
         generation: UInt64,
         task: Task<AppAXContext?, Error>
     )] = [:]
+
+    static func aggregateRuntimeMailboxDepths() -> AppAXMailboxDepths {
+        contexts.values.reduce(into: AppAXMailboxDepths()) { depths, context in
+            depths.add(context.runtimeMailboxDepths)
+        }
+    }
+
+    private var runtimeMailboxDepths: AppAXMailboxDepths {
+        var depths = frameMailbox.runtimeDepths
+        depths.add(parkFrameMailbox.runtimeDepths)
+        depths.add(closingFrameMailbox.runtimeDepths)
+        return depths
+    }
 
     private nonisolated init(
         _ nsApp: NSRunningApplication,
@@ -515,7 +588,8 @@ final class AppAXContext {
                             appAXCallbackGenerationRegistry.register(
                                 observerKey: $0,
                                 serviceGeneration: generation,
-                                callbackGeneration: callbackGeneration
+                                callbackGeneration: callbackGeneration,
+                                windowSubscriptions: guardedSubscribedWindows
                             )
                         } ?? true
                         let focusedObserverRegistered = focusedWindowObserverCallbackKey.map {
@@ -571,14 +645,21 @@ final class AppAXContext {
         element: AXUIElement,
         observerKey: UInt,
         callbackGeneration: UInt64?,
-        refcon: UnsafeMutableRawPointer?
+        refcon: UnsafeMutableRawPointer?,
+        registry: AXCallbackGenerationRegistry = appAXCallbackGenerationRegistry,
+        postEvent: (IntakeEvent) -> Void = { EventIntake.post($0) }
     ) {
         guard let windowId = destroyNotificationWindowId(from: refcon) else {
             assertionFailure("Received AX destroy callback without a valid windowId refcon")
             return
         }
-        appAXCallbackGenerationRegistry.performIfCurrent(observerKey: observerKey) {
-            EventIntake.post(
+        registry.performIfCurrentWindowNotification(
+            observerKey: observerKey,
+            windowId: windowId,
+            element: element,
+            notification: .destroyed
+        ) {
+            postEvent(
                 .axWindowDestroyed(
                     pid: pid,
                     axRef: AXWindowRef(element: element, windowId: windowId),
@@ -590,16 +671,24 @@ final class AppAXContext {
 
     nonisolated static func handleWindowMiniaturizedCallback(
         pid: pid_t,
+        element: AXUIElement,
         observerKey: UInt,
         callbackGeneration: UInt64?,
-        refcon: UnsafeMutableRawPointer?
+        refcon: UnsafeMutableRawPointer?,
+        registry: AXCallbackGenerationRegistry = appAXCallbackGenerationRegistry,
+        postEvent: (IntakeEvent) -> Void = { EventIntake.post($0) }
     ) {
         guard let windowId = destroyNotificationWindowId(from: refcon) else {
             assertionFailure("Received AX miniaturize callback without a valid windowId refcon")
             return
         }
-        appAXCallbackGenerationRegistry.performIfCurrent(observerKey: observerKey) {
-            EventIntake.post(
+        registry.performIfCurrentWindowNotification(
+            observerKey: observerKey,
+            windowId: windowId,
+            element: element,
+            notification: .miniaturized
+        ) {
+            postEvent(
                 .axWindowMiniaturized(
                     pid: pid,
                     windowId: windowId,
@@ -739,6 +828,12 @@ final class AppAXContext {
         checkCancellation: () throws -> Void,
         recordPendingRemovals: ([AppAXPendingNotificationRemoval]) -> Void
     ) throws -> AppAXWindowNotificationInstallResult {
+        guard appAXCallbackGenerationRegistry.allowsWindowRegistration(
+            observerKey: axCallbackObserverKey(observer),
+            element: element
+        ) else {
+            return .init(subscription: nil, newlyInstalled: [], pendingRemovals: [])
+        }
         let result = try installWindowNotifications(
             element: element,
             windowId: windowId,
@@ -768,18 +863,50 @@ final class AppAXContext {
         }
     }
 
-    private nonisolated static func appendPendingNotificationRemovals(
+    nonisolated static func appendPendingNotificationRemovals(
         _ additions: [AppAXPendingNotificationRemoval],
-        to state: ThreadGuardedValue<[AppAXPendingNotificationRemoval]>
+        to state: ThreadGuardedValue<[AppAXPendingNotificationRemoval]>,
+        observerKey: UInt?
     ) {
         guard !additions.isEmpty else { return }
-        var pending = state.value
+        if let observerKey,
+           pendingNotificationRemovalMergeWouldOverflow(additions, into: state.value)
+        {
+            appAXCallbackGenerationRegistry.rejectWindowNotifications(observerKey: observerKey)
+        }
+        state.value = mergePendingNotificationRemovals(additions, into: state.value)
+    }
+
+    nonisolated static func pendingNotificationRemovalMergeWouldOverflow(
+        _ additions: [AppAXPendingNotificationRemoval],
+        into existing: [AppAXPendingNotificationRemoval]
+    ) -> Bool {
+        var pending = existing
+        for addition in additions where !pending.contains(where: {
+            $0.notification == addition.notification && CFEqual($0.element, addition.element)
+        }) {
+            pending.append(addition)
+            if pending.count > pendingNotificationRemovalLimit {
+                return true
+            }
+        }
+        return false
+    }
+
+    nonisolated static func mergePendingNotificationRemovals(
+        _ additions: [AppAXPendingNotificationRemoval],
+        into existing: [AppAXPendingNotificationRemoval]
+    ) -> [AppAXPendingNotificationRemoval] {
+        var pending = existing
         for addition in additions where !pending.contains(where: {
             $0.notification == addition.notification && CFEqual($0.element, addition.element)
         }) {
             pending.append(addition)
         }
-        state.value = pending
+        if pending.count > pendingNotificationRemovalLimit {
+            pending.removeFirst(pending.count - pendingNotificationRemovalLimit)
+        }
+        return pending
     }
 
     private nonisolated static func drainPendingNotificationRemovals(
@@ -787,19 +914,46 @@ final class AppAXContext {
         observer: AXObserver,
         checkCancellation: () throws -> Void
     ) throws {
+        state.value = try retryPendingNotificationRemovals(
+            state.value,
+            checkCancellation: checkCancellation,
+            removeNotification: {
+                AXObserverRemoveNotification(observer, $0, $1.name)
+            },
+            recordAbandonedElement: {
+                appAXCallbackGenerationRegistry.retireWindowElement(
+                    observerKey: axCallbackObserverKey(observer),
+                    element: $0
+                )
+            }
+        )
+    }
+
+    nonisolated static func retryPendingNotificationRemovals(
+        _ pending: [AppAXPendingNotificationRemoval],
+        checkCancellation: () throws -> Void,
+        removeNotification: (AXUIElement, AppAXWindowNotification) -> AXError,
+        recordAbandonedElement: (AXUIElement) -> Void = { _ in }
+    ) throws -> [AppAXPendingNotificationRemoval] {
         var remaining: [AppAXPendingNotificationRemoval] = []
-        for removal in state.value {
+        remaining.reserveCapacity(pending.count)
+        for var removal in pending {
             try checkCancellation()
-            let result = AXObserverRemoveNotification(
-                observer,
-                removal.element,
-                removal.notification.name
-            )
-            if result != .success, result != .notificationNotRegistered {
+            let result = removeNotification(removal.element, removal.notification)
+            guard result != .success,
+                  result != .notificationNotRegistered,
+                  result != .invalidUIElement
+            else {
+                continue
+            }
+            if removal.attempts < pendingNotificationRemovalAttemptLimit - 1 {
+                removal.attempts += 1
                 remaining.append(removal)
+            } else {
+                recordAbandonedElement(removal.element)
             }
         }
-        state.value = remaining
+        return remaining
     }
 
     nonisolated static func hasPendingNotificationRemoval(
@@ -862,7 +1016,8 @@ final class AppAXContext {
 
     private nonisolated static func stageSubscriptionRemoval(
         _ subscription: AppAXWindowSubscription,
-        in state: ThreadGuardedValue<[AppAXPendingNotificationRemoval]>
+        in state: ThreadGuardedValue<[AppAXPendingNotificationRemoval]>,
+        observerKey: UInt?
     ) {
         appendPendingNotificationRemovals(
             AppAXWindowNotification.allCases.compactMap { notification in
@@ -873,7 +1028,8 @@ final class AppAXContext {
                     )
                     : nil
             },
-            to: state
+            to: state,
+            observerKey: observerKey
         )
     }
 
@@ -881,7 +1037,8 @@ final class AppAXContext {
         expectedWindow: AXWindowRef,
         windows: ThreadGuardedValue<[Int: AXUIElement]>,
         subscribedWindows: ThreadGuardedValue<[Int: AppAXWindowSubscription]>,
-        pendingNotificationRemovals: ThreadGuardedValue<[AppAXPendingNotificationRemoval]>
+        pendingNotificationRemovals: ThreadGuardedValue<[AppAXPendingNotificationRemoval]>,
+        observerKey: UInt?
     ) -> AppAXWindowStateRemovalOutcome {
         let windowId = expectedWindow.windowId
         let cachedElement = windows[windowId]
@@ -893,7 +1050,11 @@ final class AppAXContext {
             CFEqual($0.element, expectedWindow.element)
         } == true
         if removesSubscription, let subscription {
-            stageSubscriptionRemoval(subscription, in: pendingNotificationRemovals)
+            stageSubscriptionRemoval(
+                subscription,
+                in: pendingNotificationRemovals,
+                observerKey: observerKey
+            )
             subscribedWindows[windowId] = nil
         }
         if removesCachedWindow {
@@ -941,7 +1102,8 @@ final class AppAXContext {
             guard !removable.notifications.isEmpty else { return }
             appendPendingNotificationRemovals(
                 removeWindowNotifications(observer: observer, subscription: removable),
-                to: pendingNotificationRemovals
+                to: pendingNotificationRemovals,
+                observerKey: axCallbackObserverKey(observer)
             )
         }
 
@@ -1299,6 +1461,7 @@ final class AppAXContext {
             return .superseded
         }
         let observer = axObserver.value
+        let observerKey = observer.map(axCallbackObserverKey)
         var retryRequired = false
         if let observer {
             try drainPendingNotificationRemovals(
@@ -1315,7 +1478,11 @@ final class AppAXContext {
                         CFEqual($0.element, subscription.element)
                     }) != true {
                         if observer != nil {
-                            stageSubscriptionRemoval(subscription, in: pendingNotificationRemovals)
+                            stageSubscriptionRemoval(
+                                subscription,
+                                in: pendingNotificationRemovals,
+                                observerKey: observerKey
+                            )
                         }
                         subscribedWindows[windowId] = nil
                     }
@@ -1351,7 +1518,8 @@ final class AppAXContext {
                     rollback.notifications = staged.newlyInstalled
                     appendPendingNotificationRemovals(
                         removeWindowNotifications(observer: observer, subscription: rollback),
-                        to: pendingNotificationRemovals
+                        to: pendingNotificationRemovals,
+                        observerKey: observerKey
                     )
                 }
             }
@@ -1391,12 +1559,17 @@ final class AppAXContext {
                     alreadyRegisteredPolicy: ownedSubscription == nil ? .replace : .adopt,
                     checkCancellation: { try job.checkCancellation() },
                     recordPendingRemovals: {
-                        appendPendingNotificationRemovals($0, to: pendingNotificationRemovals)
+                        appendPendingNotificationRemovals(
+                            $0,
+                            to: pendingNotificationRemovals,
+                            observerKey: observerKey
+                        )
                     }
                 )
                 appendPendingNotificationRemovals(
                     installation.pendingRemovals,
-                    to: pendingNotificationRemovals
+                    to: pendingNotificationRemovals,
+                    observerKey: observerKey
                 )
                 guard let subscription = installation.subscription else {
                     retryRequired = true
@@ -1416,7 +1589,11 @@ final class AppAXContext {
                     if let previous = subscribedWindows[window.windowId],
                        !CFEqual(previous.element, window.element)
                     {
-                        stageSubscriptionRemoval(previous, in: pendingNotificationRemovals)
+                        stageSubscriptionRemoval(
+                            previous,
+                            in: pendingNotificationRemovals,
+                            observerKey: observerKey
+                        )
                         subscribedWindows[window.windowId] = nil
                     }
                     if let staged = stagedSubscriptions[window.windowId] {
@@ -1549,13 +1726,15 @@ final class AppAXContext {
                 recordPendingRemovals: {
                     AppAXContext.appendPendingNotificationRemovals(
                         $0,
-                        to: pendingNotificationRemovals
+                        to: pendingNotificationRemovals,
+                        observerKey: axCallbackObserverKey(observer)
                     )
                 }
             )
             AppAXContext.appendPendingNotificationRemovals(
                 installation.pendingRemovals,
-                to: pendingNotificationRemovals
+                to: pendingNotificationRemovals,
+                observerKey: axCallbackObserverKey(observer)
             )
             guard let subscription = installation.subscription else { return nil }
             return result(
@@ -1678,7 +1857,8 @@ final class AppAXContext {
                     }
                     AppAXContext.stageSubscriptionRemoval(
                         sourceSubscription,
-                        in: pendingNotificationRemovals
+                        in: pendingNotificationRemovals,
+                        observerKey: axCallbackObserverKey(observer)
                     )
                     subscribedWindows[sourceSubscription.windowId] = nil
                     try AppAXContext.drainPendingNotificationRemovals(
@@ -1703,13 +1883,15 @@ final class AppAXContext {
                     recordPendingRemovals: {
                         AppAXContext.appendPendingNotificationRemovals(
                             $0,
-                            to: pendingNotificationRemovals
+                            to: pendingNotificationRemovals,
+                            observerKey: axCallbackObserverKey(observer)
                         )
                     }
                 )
                 AppAXContext.appendPendingNotificationRemovals(
                     installation.pendingRemovals,
-                    to: pendingNotificationRemovals
+                    to: pendingNotificationRemovals,
+                    observerKey: axCallbackObserverKey(observer)
                 )
                 guard let subscription = installation.subscription else { return false }
                 destinationSubscription = subscription
@@ -1736,7 +1918,8 @@ final class AppAXContext {
             for subscription in cleanup.subscriptions {
                 AppAXContext.stageSubscriptionRemoval(
                     subscription,
-                    in: pendingNotificationRemovals
+                    in: pendingNotificationRemovals,
+                    observerKey: observer.map(axCallbackObserverKey)
                 )
             }
             if let observer {
@@ -1863,7 +2046,8 @@ final class AppAXContext {
                     expectedWindow: expectedWindow,
                     windows: windows,
                     subscribedWindows: subscribedWindows,
-                    pendingNotificationRemovals: pendingNotificationRemovals
+                    pendingNotificationRemovals: pendingNotificationRemovals,
+                    observerKey: axObserver.value.map(axCallbackObserverKey)
                 )
                 return outcome
             }
@@ -1892,7 +2076,8 @@ final class AppAXContext {
                 expectedWindow: expectedWindow,
                 windows: windows,
                 subscribedWindows: subscribedWindows,
-                pendingNotificationRemovals: pendingNotificationRemovals
+                pendingNotificationRemovals: pendingNotificationRemovals,
+                observerKey: axObserver.value.map(axCallbackObserverKey)
             )
             if let observer = axObserver.value {
                 try? AppAXContext.drainPendingNotificationRemovals(
@@ -1932,18 +2117,203 @@ final class AppAXContext {
 
     func setClosingFramesBatch(_ frames: [AXClosingFrameTarget]) {
         guard let thread, !frames.isEmpty else { return }
-        nonisolated(unsafe) let appThread = thread
         let requests = frames.map {
             AppAXClosingFrameWriteRequest(
                 target: $0,
                 generation: closingFrameWriteGenerations.nextGeneration(for: $0.animationId)
             )
         }
-        let batchId = UUID()
+        if let drain = closingFrameMailbox.enqueue(requests) {
+            scheduleClosingFrameDrain(drain, on: thread)
+        }
+    }
 
-        let batchJob = appThread.runInLoopAsync { [self] job in
-            for request in requests {
-                _ = applyClosingFrameWriteRequest(
+    func setFramesBatch(
+        _ frames: [AXFrameApplicationRequest],
+        completion: @escaping @MainActor ([AXFrameApplyResult]) -> Void
+    ) {
+        guard let thread else {
+            completion(unavailableFrameApplyResults(for: frames))
+            return
+        }
+        let requests = makeFrameWriteRequests(
+            frames,
+            generations: frameWriteGenerations,
+            forceVerification: false
+        )
+        let outcome = frameMailbox.enqueue(
+            requests,
+            callbackGeneration: callbackGeneration,
+            completion: completion
+        )
+        for delivery in outcome.deliveries {
+            delivery.deliver()
+        }
+        if let drain = outcome.drain {
+            scheduleFrameDrain(drain, on: thread)
+        }
+    }
+
+    func setParkFramesBatch(
+        _ frames: [AXFrameApplicationRequest],
+        completion: @escaping @MainActor ([AXFrameApplyResult]) -> Void
+    ) {
+        guard let thread else {
+            completion(unavailableFrameApplyResults(for: frames))
+            return
+        }
+        let requests = makeFrameWriteRequests(
+            frames,
+            generations: parkFrameWriteGenerations,
+            forceVerification: true
+        )
+        let outcome = parkFrameMailbox.enqueue(
+            requests,
+            callbackGeneration: callbackGeneration,
+            completion: completion
+        )
+        for delivery in outcome.deliveries {
+            delivery.deliver()
+        }
+        if let drain = outcome.drain {
+            scheduleParkFrameDrain(drain, on: thread)
+        }
+    }
+
+    private func makeFrameWriteRequests(
+        _ frames: [AXFrameApplicationRequest],
+        generations: LockedWindowGenerationMap,
+        forceVerification: Bool
+    ) -> [AppAXFrameWriteRequest] {
+        frames.map {
+            AppAXFrameWriteRequest(
+                requestId: $0.requestId,
+                pid: $0.pid,
+                windowId: $0.windowId,
+                expectedWindow: $0.expectedWindow,
+                frame: $0.frame,
+                currentFrameHint: $0.currentFrameHint,
+                components: $0.components,
+                generation: generations.nextGeneration(for: $0.windowId),
+                verify: forceVerification || $0.verify,
+                traceRequestId: $0.traceRequestId
+            )
+        }
+    }
+
+    private func unavailableFrameApplyResults(
+        for frames: [AXFrameApplicationRequest]
+    ) -> [AXFrameApplyResult] {
+        frames.map {
+            AXFrameApplyResult(
+                requestId: $0.requestId,
+                pid: $0.pid,
+                windowId: $0.windowId,
+                expectedWindow: $0.expectedWindow,
+                targetFrame: $0.frame,
+                currentFrameHint: $0.currentFrameHint,
+                writeResult: .skipped(
+                    targetFrame: $0.frame,
+                    currentFrameHint: $0.currentFrameHint,
+                    failureReason: .contextUnavailable,
+                    components: $0.components
+                ),
+                traceRequestId: $0.traceRequestId
+            )
+        }
+    }
+
+    private func scheduleFrameDrain(
+        _ drain: AppAXFrameMailbox.Drain,
+        on thread: Thread
+    ) {
+        nonisolated(unsafe) let appThread = thread
+        let batchId = UUID()
+        let currentPid = pid
+        let traceBundleId = AXWriteLatencyTrace.shared.isActive ? nsApp.bundleIdentifier : nil
+
+        let batchJob = appThread.runInLoopAsync(autoCheckCancelled: false) { [self, axApp] job in
+            AppAXContextRuntimeMetrics.shared.noteOrdinaryStarted(drain.items)
+            let requests = drain.items.map(\.request)
+            let results = AppAXContext.executeFrameWriteRequests(
+                requests,
+                pid: currentPid,
+                axApp: axApp.value,
+                generations: frameWriteGenerations,
+                suppression: frameWriteSuppression,
+                hardSuppression: nil,
+                traceItems: drain.items,
+                drainId: drain.id,
+                lane: .ordinary,
+                callbackGeneration: callbackGeneration,
+                bundleId: traceBundleId,
+                isCancelled: { job.isCancelled }
+            )
+            scheduleOnMainRunLoop { [weak self] in
+                guard let self else { return }
+                activeFrameBatchJobs.removeValue(forKey: batchId)
+                let outcome = frameMailbox.finish(drainId: drain.id, results: results)
+                for delivery in outcome.deliveries {
+                    delivery.deliver()
+                }
+                if let nextDrain = outcome.drain, let nextThread = self.thread {
+                    scheduleFrameDrain(nextDrain, on: nextThread)
+                }
+            }
+        }
+        activeFrameBatchJobs[batchId] = batchJob
+    }
+
+    private func scheduleParkFrameDrain(
+        _ drain: AppAXFrameMailbox.Drain,
+        on thread: Thread
+    ) {
+        nonisolated(unsafe) let appThread = thread
+        let currentPid = pid
+        let traceBundleId = AXWriteLatencyTrace.shared.isActive ? nsApp.bundleIdentifier : nil
+        let batchJob = appThread.runInLoopAsync(autoCheckCancelled: false) { [self, axApp] job in
+            AppAXContextRuntimeMetrics.shared.noteParkStarted(drain.items)
+            let requests = drain.items.map(\.request)
+            let results = AppAXContext.executeFrameWriteRequests(
+                requests,
+                pid: currentPid,
+                axApp: axApp.value,
+                generations: parkFrameWriteGenerations,
+                suppression: nil,
+                hardSuppression: frameWriteSuppression,
+                traceItems: drain.items,
+                drainId: drain.id,
+                lane: .park,
+                callbackGeneration: callbackGeneration,
+                bundleId: traceBundleId,
+                isCancelled: { job.isCancelled }
+            )
+            scheduleOnMainRunLoop { [weak self] in
+                guard let self else { return }
+                activeParkFrameBatchJob = nil
+                let outcome = parkFrameMailbox.finish(drainId: drain.id, results: results)
+                for delivery in outcome.deliveries {
+                    delivery.deliver()
+                }
+                if let nextDrain = outcome.drain, let nextThread = self.thread {
+                    scheduleParkFrameDrain(nextDrain, on: nextThread)
+                }
+            }
+        }
+        activeParkFrameBatchJob = batchJob
+    }
+
+    private func scheduleClosingFrameDrain(
+        _ drain: AppAXClosingFrameMailbox.Drain,
+        on thread: Thread
+    ) {
+        nonisolated(unsafe) let appThread = thread
+        let batchId = UUID()
+        let batchJob = appThread.runInLoopAsync(autoCheckCancelled: false) { [self] job in
+            AppAXContextRuntimeMetrics.shared.noteClosingStarted(drain.requests.count)
+            var cancelledCount = 0
+            for request in drain.requests {
+                let applied = applyClosingFrameWriteRequest(
                     request,
                     generations: closingFrameWriteGenerations,
                     isCancelled: {
@@ -1954,202 +2324,316 @@ final class AppAXContext {
                     request.generation,
                     for: request.target.animationId
                 )
+                if !applied {
+                    cancelledCount += 1
+                }
             }
-
             scheduleOnMainRunLoop { [weak self] in
-                self?.activeClosingFrameBatchJobs.removeValue(forKey: batchId)
+                guard let self else { return }
+                activeClosingFrameBatchJobs.removeValue(forKey: batchId)
+                if let nextDrain = closingFrameMailbox.finish(
+                    drainId: drain.id,
+                    cancelledCount: cancelledCount
+                ),
+                    let nextThread = self.thread
+                {
+                    scheduleClosingFrameDrain(nextDrain, on: nextThread)
+                }
             }
         }
         activeClosingFrameBatchJobs[batchId] = batchJob
     }
 
-    func setFramesBatch(
-        _ frames: [AXFrameApplicationRequest],
-        completion: @escaping @MainActor ([AXFrameApplyResult]) -> Void
-    ) {
-        setFrameBatch(
-            frames,
-            generations: frameWriteGenerations,
-            suppression: frameWriteSuppression,
-            hardSuppression: nil,
-            forceVerification: false,
-            completion: completion
-        )
-    }
-
-    func setParkFramesBatch(
-        _ frames: [AXFrameApplicationRequest],
-        completion: @escaping @MainActor ([AXFrameApplyResult]) -> Void
-    ) {
-        setFrameBatch(
-            frames,
-            generations: parkFrameWriteGenerations,
-            suppression: nil,
-            hardSuppression: frameWriteSuppression,
-            forceVerification: true,
-            completion: completion
-        )
-    }
-
-    private func setFrameBatch(
-        _ frames: [AXFrameApplicationRequest],
+    nonisolated static func executeFrameWriteRequests(
+        _ requests: [AppAXFrameWriteRequest],
+        pid currentPid: pid_t,
+        axApp: AXUIElement,
         generations: LockedWindowGenerationMap,
         suppression: LockedWindowIdSet?,
         hardSuppression: LockedWindowIdSet?,
-        forceVerification: Bool,
-        completion: @escaping @MainActor ([AXFrameApplyResult]) -> Void
-    ) {
-        guard let thread else {
-            completion(
-                frames.map {
-                    AXFrameApplyResult(
-                        requestId: $0.requestId,
-                        pid: $0.pid,
-                        windowId: $0.windowId,
-                        expectedWindow: $0.expectedWindow,
-                        targetFrame: $0.frame,
-                        currentFrameHint: $0.currentFrameHint,
-                        writeResult: .skipped(
-                            targetFrame: $0.frame,
-                            currentFrameHint: $0.currentFrameHint,
-                            failureReason: .contextUnavailable
+        traceItems: [AppAXFrameMailbox.Item]? = nil,
+        drainId: UInt64 = 0,
+        lane: AppAXFrameLane = .ordinary,
+        callbackGeneration: UInt64 = 0,
+        bundleId: String? = nil,
+        isCancelled: () -> Bool
+    ) -> [AXFrameApplyResult] {
+        var hasEligibleRequest = false
+        var staleBeforeIPC = 0
+        for request in requests {
+            let reason = frameWriteSkipReason(
+                for: request,
+                generations: generations,
+                suppression: suppression,
+                hardSuppression: hardSuppression,
+                isCancelled: isCancelled
+            )
+            hasEligibleRequest = hasEligibleRequest || reason == nil
+            if reason == .cancelled,
+               !generations.isCurrent(request.generation, for: request.windowId)
+            {
+                staleBeforeIPC += 1
+            }
+        }
+        if AppAXContextRuntimeMetrics.shared.isActive {
+            AppAXContextRuntimeMetrics.shared.noteStaleBeforeIPC(staleBeforeIPC)
+        }
+        let latencyActive = lane.supportsFrameEffectTracing && AXWriteLatencyTrace.shared.isActive
+        guard hasEligibleRequest else {
+            return requests.enumerated().map { index, request in
+                let result = skippedFrameApplyResult(
+                    for: request,
+                    reason: frameWriteSkipReason(
+                        for: request,
+                        generations: generations,
+                        suppression: suppression,
+                        hardSuppression: hardSuppression,
+                        isCancelled: isCancelled
+                    ) ?? .cancelled
+                )
+                if latencyActive {
+                    let item = traceItems.flatMap { items in
+                        items.indices.contains(index) ? items[index] : nil
+                    }
+                    let nowNs = DispatchTime.now().uptimeNanoseconds
+                    AXWriteLatencyTrace.shared.record(
+                        AXWriteLatencyTrace.Record(
+                            kind: .attempt,
+                            uptimeNs: nowNs,
+                            requestTraceId: FrameEffectTraceContext.currentCaptureIdentifier(
+                                request.traceRequestId
+                            ),
+                            requestId: request.requestId,
+                            pid: currentPid,
+                            bundleId: bundleId,
+                            callbackGeneration: callbackGeneration,
+                            lane: lane,
+                            submissionId: item?.submissionId ?? 0,
+                            drainId: drainId,
+                            windowId: request.windowId,
+                            attempt: 0,
+                            count: 1,
+                            queueNs: queueDelay(startedNs: nowNs, enqueuedAt: item?.enqueuedAt),
+                            sizeNs: 0,
+                            positionNs: 0,
+                            verificationNs: 0,
+                            enhancedUIProbeNs: 0,
+                            enhancedUIDisableNs: 0,
+                            enhancedUIRestoreNs: 0,
+                            totalNs: 0,
+                            enhancedUI: false,
+                            failureReason: result.writeResult.failureReason
                         )
                     )
                 }
-            )
-            return
+                return result
+            }
         }
-        nonisolated(unsafe) let appThread = thread
-        let requests = frames.map {
-            AppAXFrameWriteRequest(
-                requestId: $0.requestId,
-                pid: $0.pid,
-                windowId: $0.windowId,
-                expectedWindow: $0.expectedWindow,
-                frame: $0.frame,
-                currentFrameHint: $0.currentFrameHint,
-                generation: generations.nextGeneration(for: $0.windowId),
-                verify: forceVerification || $0.verify
-            )
-        }
-        let batchId = UUID()
-        let currentPid = pid
-
-        let batchJob = appThread.runInLoopAsync { [self, axApp] job in
-            let latencyActive = AXWriteLatencyTrace.shared.isActive
-            let batchStart = latencyActive ? CACurrentMediaTime() : 0
-            var slowestWriteMs = 0.0
-            let enhancedUIKey = "AXEnhancedUserInterface" as CFString
-            var wasEnabled = false
-            var value: CFTypeRef?
-            if AXUIElementCopyAttributeValue(axApp.value, enhancedUIKey, &value) == .success,
+        let batchStartNs = latencyActive ? DispatchTime.now().uptimeNanoseconds : 0
+        let enhancedUIKey = "AXEnhancedUserInterface" as CFString
+        var wasEnabled = false
+        var value: CFTypeRef?
+        let enhancedUIProbeStartNs = latencyActive ? DispatchTime.now().uptimeNanoseconds : 0
+        if let cached = LockedEnhancedUIStateMap.shared.state(for: currentPid) {
+            wasEnabled = cached
+        } else {
+            AppAXContextRuntimeMetrics.shared.noteEnhancedUICalls(1)
+            if AXUIElementCopyAttributeValue(axApp, enhancedUIKey, &value) == .success,
                let boolValue = value as? Bool
             {
                 wasEnabled = boolValue
+                LockedEnhancedUIStateMap.shared.store(boolValue, for: currentPid)
             }
+        }
+        let enhancedUIProbeEndNs = latencyActive ? DispatchTime.now().uptimeNanoseconds : 0
 
-            if wasEnabled {
-                AXUIElementSetAttributeValue(axApp.value, enhancedUIKey, kCFBooleanFalse)
-            }
+        let enhancedUIDisableStartNs = latencyActive && wasEnabled
+            ? DispatchTime.now().uptimeNanoseconds
+            : 0
+        if wasEnabled {
+            AppAXContextRuntimeMetrics.shared.noteEnhancedUICalls(1)
+            AXUIElementSetAttributeValue(axApp, enhancedUIKey, kCFBooleanFalse)
+        }
+        let enhancedUIDisableEndNs = latencyActive && wasEnabled
+            ? DispatchTime.now().uptimeNanoseconds
+            : 0
 
-            defer {
-                if wasEnabled {
-                    AXUIElementSetAttributeValue(axApp.value, enhancedUIKey, kCFBooleanTrue)
-                }
-            }
+        var results: [AXFrameApplyResult] = []
+        results.reserveCapacity(requests.count)
 
-            var results: [AXFrameApplyResult] = []
-            results.reserveCapacity(requests.count)
-
-            for request in requests {
-                if job.isCancelled {
-                    results.append(
-                        AXFrameApplyResult(
+        for (index, request) in requests.enumerated() {
+            if let reason = frameWriteSkipReason(
+                for: request,
+                generations: generations,
+                suppression: suppression,
+                hardSuppression: hardSuppression,
+                isCancelled: isCancelled
+            ) {
+                let result = skippedFrameApplyResult(for: request, reason: reason)
+                results.append(result)
+                if latencyActive {
+                    let item = traceItems.flatMap { items in
+                        items.indices.contains(index) ? items[index] : nil
+                    }
+                    let nowNs = DispatchTime.now().uptimeNanoseconds
+                    AXWriteLatencyTrace.shared.record(
+                        AXWriteLatencyTrace.Record(
+                            kind: .attempt,
+                            uptimeNs: nowNs,
+                            requestTraceId: FrameEffectTraceContext.currentCaptureIdentifier(
+                                request.traceRequestId
+                            ),
                             requestId: request.requestId,
-                            pid: request.pid,
+                            pid: currentPid,
+                            bundleId: bundleId,
+                            callbackGeneration: callbackGeneration,
+                            lane: lane,
+                            submissionId: item?.submissionId ?? 0,
+                            drainId: drainId,
                             windowId: request.windowId,
-                            expectedWindow: request.expectedWindow,
-                            targetFrame: request.frame,
-                            currentFrameHint: request.currentFrameHint,
-                            writeResult: .skipped(
-                                targetFrame: request.frame,
-                                currentFrameHint: request.currentFrameHint,
-                                failureReason: .cancelled
-                            )
+                            attempt: 0,
+                            count: 1,
+                            queueNs: queueDelay(startedNs: nowNs, enqueuedAt: item?.enqueuedAt),
+                            sizeNs: 0,
+                            positionNs: 0,
+                            verificationNs: 0,
+                            enhancedUIProbeNs: 0,
+                            enhancedUIDisableNs: 0,
+                            enhancedUIRestoreNs: 0,
+                            totalNs: 0,
+                            enhancedUI: wasEnabled,
+                            failureReason: result.writeResult.failureReason
                         )
                     )
-                    continue
                 }
-                if !generations.isCurrent(request.generation, for: request.windowId) {
-                    results.append(
-                        AXFrameApplyResult(
-                            requestId: request.requestId,
-                            pid: request.pid,
-                            windowId: request.windowId,
-                            expectedWindow: request.expectedWindow,
-                            targetFrame: request.frame,
-                            currentFrameHint: request.currentFrameHint,
-                            writeResult: .skipped(
-                                targetFrame: request.frame,
-                                currentFrameHint: request.currentFrameHint,
-                                failureReason: .cancelled
-                            )
-                        )
-                    )
-                    continue
+                continue
+            }
+            if latencyActive {
+                let item = traceItems.flatMap { items in
+                    items.indices.contains(index) ? items[index] : nil
                 }
-                if hardSuppression?.isHardSuppressed() == true
-                    || suppression?.contains(request.windowId) == true
-                {
-                    results.append(
-                        AXFrameApplyResult(
-                            requestId: request.requestId,
-                            pid: request.pid,
-                            windowId: request.windowId,
-                            expectedWindow: request.expectedWindow,
-                            targetFrame: request.frame,
-                            currentFrameHint: request.currentFrameHint,
-                            writeResult: .skipped(
-                                targetFrame: request.frame,
-                                currentFrameHint: request.currentFrameHint,
-                                failureReason: .suppressed
-                            )
-                        )
-                    )
-                    continue
-                }
-                let writeStart = latencyActive ? CACurrentMediaTime() : 0
                 results.append(
                     applyFrameWriteRequest(
                         request,
                         pid: currentPid,
-                        generations: generations
-                    )
+                        generations: generations,
+                        traceLane: lane
+                    ) { attempt, attemptStartNs, timing, result in
+                        let endNs = DispatchTime.now().uptimeNanoseconds
+                        AXWriteLatencyTrace.shared.record(
+                            AXWriteLatencyTrace.Record(
+                                kind: .attempt,
+                                uptimeNs: endNs,
+                                requestTraceId: FrameEffectTraceContext.currentCaptureIdentifier(
+                                    request.traceRequestId
+                                ),
+                                requestId: request.requestId,
+                                pid: currentPid,
+                                bundleId: bundleId,
+                                callbackGeneration: callbackGeneration,
+                                lane: lane,
+                                submissionId: item?.submissionId ?? 0,
+                                drainId: drainId,
+                                windowId: request.windowId,
+                                attempt: attempt,
+                                count: 1,
+                                queueNs: mailboxQueueDelay(
+                                    attempt: attempt,
+                                    startedNs: attemptStartNs,
+                                    enqueuedAt: item?.enqueuedAt
+                                ),
+                                sizeNs: timing.sizeNs,
+                                positionNs: timing.positionNs,
+                                verificationNs: timing.verificationNs,
+                                enhancedUIProbeNs: 0,
+                                enhancedUIDisableNs: 0,
+                                enhancedUIRestoreNs: 0,
+                                totalNs: elapsedNanoseconds(
+                                    from: attemptStartNs,
+                                    to: endNs
+                                ),
+                                enhancedUI: wasEnabled,
+                                failureReason: result.failureReason
+                            )
+                        )
+                    }
                 )
-                if latencyActive {
-                    slowestWriteMs = max(slowestWriteMs, (CACurrentMediaTime() - writeStart) * 1000)
-                }
-            }
-
-            if latencyActive {
-                AXWriteLatencyTrace.shared.record(
-                    AXWriteLatencyTrace.Record(
-                        mediaTime: CACurrentMediaTime(),
-                        pid: currentPid,
-                        count: requests.count,
-                        totalMs: (CACurrentMediaTime() - batchStart) * 1000,
-                        slowestMs: slowestWriteMs,
-                        enhancedUI: wasEnabled
-                    )
-                )
-            }
-
-            scheduleOnMainRunLoop { [weak self] in
-                self?.activeFrameBatchJobs.removeValue(forKey: batchId)
-                completion(results)
+            } else {
+                results.append(applyFrameWriteRequest(
+                    request,
+                    pid: currentPid,
+                    generations: generations
+                ))
             }
         }
-        activeFrameBatchJobs[batchId] = batchJob
+
+        let enhancedUIRestoreStartNs = latencyActive && wasEnabled
+            ? DispatchTime.now().uptimeNanoseconds
+            : 0
+        if wasEnabled {
+            AppAXContextRuntimeMetrics.shared.noteEnhancedUICalls(1)
+            AXUIElementSetAttributeValue(axApp, enhancedUIKey, kCFBooleanTrue)
+        }
+        let enhancedUIRestoreEndNs = latencyActive && wasEnabled
+            ? DispatchTime.now().uptimeNanoseconds
+            : 0
+        if latencyActive {
+            let endNs = DispatchTime.now().uptimeNanoseconds
+            AXWriteLatencyTrace.shared.record(
+                AXWriteLatencyTrace.Record(
+                    kind: .batch,
+                    uptimeNs: endNs,
+                    requestTraceId: 0,
+                    requestId: 0,
+                    pid: currentPid,
+                    bundleId: bundleId,
+                    callbackGeneration: callbackGeneration,
+                    lane: lane,
+                    submissionId: 0,
+                    drainId: drainId,
+                    windowId: 0,
+                    attempt: 0,
+                    count: requests.count,
+                    queueNs: 0,
+                    sizeNs: 0,
+                    positionNs: 0,
+                    verificationNs: 0,
+                    enhancedUIProbeNs: elapsedNanoseconds(
+                        from: enhancedUIProbeStartNs,
+                        to: enhancedUIProbeEndNs
+                    ),
+                    enhancedUIDisableNs: elapsedNanoseconds(
+                        from: enhancedUIDisableStartNs,
+                        to: enhancedUIDisableEndNs
+                    ),
+                    enhancedUIRestoreNs: elapsedNanoseconds(
+                        from: enhancedUIRestoreStartNs,
+                        to: enhancedUIRestoreEndNs
+                    ),
+                    totalNs: elapsedNanoseconds(from: batchStartNs, to: endNs),
+                    enhancedUI: wasEnabled,
+                    failureReason: nil
+                )
+            )
+        }
+        return results
+    }
+
+    private nonisolated static func queueDelay(startedNs: UInt64, enqueuedAt: UInt64?) -> UInt64 {
+        guard let enqueuedAt, startedNs >= enqueuedAt else { return 0 }
+        return startedNs - enqueuedAt
+    }
+
+    nonisolated static func mailboxQueueDelay(
+        attempt: UInt8,
+        startedNs: UInt64,
+        enqueuedAt: UInt64?
+    ) -> UInt64 {
+        attempt == 1 ? queueDelay(startedNs: startedNs, enqueuedAt: enqueuedAt) : 0
+    }
+
+    private nonisolated static func elapsedNanoseconds(from start: UInt64, to end: UInt64) -> UInt64 {
+        end >= start ? end - start : 0
     }
 
     func destroy() {
@@ -2173,15 +2657,25 @@ final class AppAXContext {
         if AppAXContext.contexts[pid] === self {
             AppAXContext.contexts.removeValue(forKey: pid)
         }
+        LockedEnhancedUIStateMap.shared.invalidate(pid)
 
         for (_, job) in activeFrameBatchJobs {
             job.cancel()
         }
         activeFrameBatchJobs = [:]
+        for delivery in frameMailbox.beginShutdown() {
+            delivery.deliver()
+        }
+        activeParkFrameBatchJob?.cancel()
+        activeParkFrameBatchJob = nil
+        for delivery in parkFrameMailbox.beginShutdown() {
+            delivery.deliver()
+        }
         for (_, job) in activeClosingFrameBatchJobs {
             job.cancel()
         }
         activeClosingFrameBatchJobs = [:]
+        closingFrameMailbox.cancelAll()
         closingFrameWriteGenerations.invalidateAll()
 
         nonisolated(unsafe) let appThread = thread
@@ -2221,14 +2715,24 @@ final class AppAXContext {
         }
         thread = nil
     }
+}
 
-    static func garbageCollect() {
-        for (_, context) in contexts {
-            if context.nsApp.isTerminated {
-                context.destroy()
-            }
-        }
+func frameWriteSkipReason(
+    for request: AppAXFrameWriteRequest,
+    generations: LockedWindowGenerationMap,
+    suppression: LockedWindowIdSet?,
+    hardSuppression: LockedWindowIdSet?,
+    isCancelled: () -> Bool
+) -> AXFrameWriteFailureReason? {
+    if isCancelled() || !generations.isCurrent(request.generation, for: request.windowId) {
+        return .cancelled
     }
+    if hardSuppression?.isHardSuppressed() == true
+        || suppression?.contains(request.windowId) == true
+    {
+        return .suppressed
+    }
+    return nil
 }
 
 @discardableResult
@@ -2258,27 +2762,50 @@ func applyFrameWriteRequest(
     _ request: AppAXFrameWriteRequest,
     pid: pid_t,
     generations: LockedWindowGenerationMap,
-    writeFrame: (AXWindowRef, CGRect, CGRect?, Bool) -> AXFrameWriteResult = {
-        AXWindowService.setFrame($0, frame: $1, currentFrameHint: $2, verify: $3)
+    writeFrame: (AXWindowRef, CGRect, CGRect?, AXFrameComponents, Bool) -> AXFrameWriteResult = {
+        AXWindowService.setFrame($0, frame: $1, currentFrameHint: $2, components: $3, verify: $4)
     },
     refreshWindow: (UInt32, pid_t) -> AXWindowRef? = {
         AXWindowService.axWindowRef(for: $0, pid: $1)
-    }
+    },
+    traceLane: AppAXFrameLane = .ordinary,
+    traceAttempt: ((UInt8, UInt64, AXFrameSetterTiming, AXFrameWriteResult) -> Void)? = nil
 ) -> AXFrameApplyResult {
     let targetFrame = request.frame
     let currentFrameHint = request.currentFrameHint
     let windowId = request.windowId
 
+    func performWrite(_ window: AXWindowRef, attempt: UInt8) -> AXFrameWriteResult {
+        guard let traceAttempt else {
+            return writeFrame(window, targetFrame, currentFrameHint, request.components, request.verify)
+        }
+        let startedNs = DispatchTime.now().uptimeNanoseconds
+        FrameEffectObservationTracker.shared.register(
+            traceRequestId: request.traceRequestId,
+            requestId: request.requestId,
+            pid: pid,
+            windowId: windowId,
+            lane: traceLane,
+            attempt: attempt,
+            target: targetFrame,
+            startedNs: startedNs
+        )
+        let traced = AXWindowService.setFrameTraced(
+            window,
+            frame: targetFrame,
+            currentFrameHint: currentFrameHint,
+            components: request.components,
+            verify: request.verify
+        )
+        traceAttempt(attempt, startedNs, traced.timing, traced.result)
+        return traced.result
+    }
+
     let expectedWindow = request.expectedWindow
     guard generations.isCurrent(request.generation, for: windowId) else {
         return cancelledFrameApplyResult(for: request)
     }
-    let initialResult = writeFrame(
-        expectedWindow,
-        targetFrame,
-        currentFrameHint,
-        request.verify
-    )
+    let initialResult = performWrite(expectedWindow, attempt: 1)
     guard generations.isCurrent(request.generation, for: windowId) else {
         return cancelledFrameApplyResult(for: request)
     }
@@ -2298,12 +2825,7 @@ func applyFrameWriteRequest(
         guard generations.isCurrent(request.generation, for: windowId) else {
             return cancelledFrameApplyResult(for: request)
         }
-        let retryResult = writeFrame(
-            refreshedAXRef,
-            targetFrame,
-            currentFrameHint,
-            request.verify
-        )
+        let retryResult = performWrite(refreshedAXRef, attempt: 2)
         guard generations.isCurrent(request.generation, for: windowId) else {
             return cancelledFrameApplyResult(for: request)
         }
@@ -2314,7 +2836,8 @@ func applyFrameWriteRequest(
             expectedWindow: expectedWindow,
             targetFrame: targetFrame,
             currentFrameHint: currentFrameHint,
-            writeResult: retryResult
+            writeResult: retryResult,
+            traceRequestId: request.traceRequestId
         )
     }
 
@@ -2325,7 +2848,8 @@ func applyFrameWriteRequest(
         expectedWindow: expectedWindow,
         targetFrame: targetFrame,
         currentFrameHint: currentFrameHint,
-        writeResult: initialResult
+        writeResult: initialResult,
+        traceRequestId: request.traceRequestId
     )
 }
 
@@ -2340,8 +2864,10 @@ private func cancelledFrameApplyResult(for request: AppAXFrameWriteRequest) -> A
         writeResult: .skipped(
             targetFrame: request.frame,
             currentFrameHint: request.currentFrameHint,
-            failureReason: .cancelled
-        )
+            failureReason: .cancelled,
+            components: request.components
+        ),
+        traceRequestId: request.traceRequestId
     )
 }
 
@@ -2381,6 +2907,7 @@ private func axWindowNotificationCallback(
     } else {
         AppAXContext.handleWindowMiniaturizedCallback(
             pid: pid,
+            element: element,
             observerKey: observerKey,
             callbackGeneration: callbackGeneration,
             refcon: refcon

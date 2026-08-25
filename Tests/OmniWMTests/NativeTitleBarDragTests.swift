@@ -144,7 +144,6 @@ final class NativeTitleBarDragTests: NiriInteractionTestCase {
             targetFrame: fixture.frame,
             currentFrameHint: nil,
             writeResult: AXFrameWriteResult(
-                targetFrame: fixture.frame,
                 observedFrame: fixture.frame,
                 writeOrder: .sizeThenPosition,
                 sizeError: .success,
@@ -170,7 +169,6 @@ final class NativeTitleBarDragTests: NiriInteractionTestCase {
             targetFrame: fixture.frame,
             currentFrameHint: nil,
             writeResult: AXFrameWriteResult(
-                targetFrame: fixture.frame,
                 observedFrame: fixture.frame,
                 writeOrder: .sizeThenPosition,
                 sizeError: .success,
@@ -846,7 +844,6 @@ final class NativeTitleBarDragTests: NiriInteractionTestCase {
             targetFrame: fixture.frame,
             currentFrameHint: nil,
             writeResult: AXFrameWriteResult(
-                targetFrame: fixture.frame,
                 observedFrame: fixture.frame,
                 writeOrder: .sizeThenPosition,
                 sizeError: .success,

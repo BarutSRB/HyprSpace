@@ -118,7 +118,7 @@ enum StatusMenuControl: String, CaseIterable, Identifiable {
         case .preventSleepEnabled:
             "Prevents idle display sleep while your user session is active. Manual sleep and closing the laptop lid still work."
         case .focusFollowsMouse:
-            "Focuses a managed window when the pointer enters it—no click needed. Hold Focus Lock to cross windows without changing focus."
+            "Focuses a managed window when the pointer enters it—no click needed. Choose whether OmniWM explicitly raises it in Settings, or hold Focus Lock to cross windows without changing focus."
         case .focusCrossesMonitorAtEdge:
             "At the last window in any direction, Focus continues left, right, up, or down onto the adjacent display in OmniWM’s Routing Arrangement."
         case .moveMouseToFocusedWindow:
@@ -228,6 +228,10 @@ final class StatusMenuModel {
 
     var traceCapturePhase: TraceCapturePhase {
         controller?.traceCaptureStatus.phase ?? .idle
+    }
+
+    var traceCaptureProfile: TraceCaptureProfile? {
+        controller?.traceCaptureStatus.profile
     }
 
     var canShowHiddenIcons: Bool {
@@ -377,11 +381,11 @@ final class StatusMenuModel {
         NSApplication.shared.terminate(nil)
     }
 
-    func toggleTraceRecording() {
+    func toggleTraceRecording(profile: TraceCaptureProfile = .problem) {
         guard let controller else { return }
         let wasRecording = controller.isTraceCaptureActive
         Task {
-            switch await controller.toggleTraceCaptureForUI(desiredState: .toggle) {
+            switch await controller.toggleTraceCaptureForUI(desiredState: .toggle, profile: profile) {
             case .noChange,
                  .started:
                 break

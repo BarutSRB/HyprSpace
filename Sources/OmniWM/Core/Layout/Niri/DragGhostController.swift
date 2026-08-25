@@ -10,12 +10,26 @@ final class DragGhostController {
     private var captureTask: Task<Void, Never>?
     private var isActive: Bool = false
     private var swapTargetOverlay: SwapTargetOverlay?
+    private let surfaceCoordinator: SurfaceCoordinator
+    private let captureAccessAllowed: @MainActor () -> Bool
+
+    init(
+        surfaceCoordinator: SurfaceCoordinator = .shared,
+        captureAccessAllowed: @escaping @MainActor () -> Bool = { CGPreflightScreenCaptureAccess() }
+    ) {
+        self.surfaceCoordinator = surfaceCoordinator
+        self.captureAccessAllowed = captureAccessAllowed
+    }
+
+    isolated deinit {
+        destroy()
+    }
 
     func beginDrag(windowId: Int, originalFrame: CGRect, cursorLocation: CGPoint) {
         isActive = true
 
         captureTask?.cancel()
-        guard CGPreflightScreenCaptureAccess() else { return }
+        guard captureAccessAllowed() else { return }
         captureTask = Task { [weak self] in
             guard let self else { return }
 
@@ -28,7 +42,7 @@ final class DragGhostController {
                 guard isActive, !Task.isCancelled else { return }
 
                 if ghostWindow == nil {
-                    ghostWindow = DragGhostWindow()
+                    ghostWindow = DragGhostWindow(surfaceCoordinator: surfaceCoordinator)
                 }
 
                 ghostWindow?.setImage(thumbnail, size: scaledSize)
@@ -53,13 +67,21 @@ final class DragGhostController {
     func showSwapTarget(frame: CGRect) {
         guard isActive else { return }
         if swapTargetOverlay == nil {
-            swapTargetOverlay = SwapTargetOverlay()
+            swapTargetOverlay = SwapTargetOverlay(surfaceCoordinator: surfaceCoordinator)
         }
         swapTargetOverlay?.show(at: frame)
     }
 
     func hideSwapTarget() {
         swapTargetOverlay?.hide()
+    }
+
+    func destroy() {
+        endDrag()
+        ghostWindow?.destroy()
+        ghostWindow = nil
+        swapTargetOverlay?.destroy()
+        swapTargetOverlay = nil
     }
 
     private func captureWindowThumbnail(windowId: Int, targetSize: CGSize) async -> CGImage? {

@@ -7,6 +7,28 @@ import Carbon
 import XCTest
 
 @MainActor
+private final class OverviewAnimationTestClock {
+    var time: CFTimeInterval = 0
+}
+
+@MainActor
+private final class OverviewPostCloseHandoffScheduler {
+    private(set) var handoffs: [@MainActor () -> Void] = []
+
+    var count: Int {
+        handoffs.count
+    }
+
+    func schedule(_ handoff: @escaping @MainActor () -> Void) {
+        handoffs.append(handoff)
+    }
+
+    func runNext() {
+        handoffs.removeFirst()()
+    }
+}
+
+@MainActor
 final class OverviewBehaviorTests: XCTestCase {
     private let screenFrame = CGRect(x: 0, y: 0, width: 1000, height: 800)
 
@@ -498,13 +520,16 @@ final class OverviewBehaviorTests: XCTestCase {
 
     func testRegisteredEscapeUsesPhysicalDismissalBeforeAssignedCommand() throws {
         let fixture = try makeRuntimeOverviewFixture(windowCount: 1)
+        let handoffScheduler = OverviewPostCloseHandoffScheduler()
+        var environment = fixture.environment
+        environment.schedulePostCloseHandoff = handoffScheduler.schedule
         let overview = OverviewController(
             wmController: fixture.controller,
             motionPolicy: fixture.controller.motionPolicy,
-            environment: fixture.environment
+            environment: environment
         )
         overview.prepareOpenState()
-        overview.updateAnimationProgress(1, state: .open)
+        overview.onAnimationComplete(state: .open)
         let selectedHandle = try XCTUnwrap(overview.selectedWindowHandle)
         var activatedHandle: WindowHandle?
         overview.onActivateWindow = { handle, _ in activatedHandle = handle }
@@ -521,25 +546,34 @@ final class OverviewBehaviorTests: XCTestCase {
         )
 
         XCTAssertEqual(disposition, .handled)
+        XCTAssertNil(activatedHandle)
+        XCTAssertEqual(handoffScheduler.count, 1)
+        handoffScheduler.runNext()
         XCTAssertEqual(activatedHandle, selectedHandle)
         XCTAssertFalse(overview.state.isOpen)
     }
 
     func testOverviewToggleCloseFocusesCurrentSelection() throws {
         let fixture = try makeRuntimeOverviewFixture(windowCount: 1)
+        let handoffScheduler = OverviewPostCloseHandoffScheduler()
+        var environment = fixture.environment
+        environment.schedulePostCloseHandoff = handoffScheduler.schedule
         let overview = OverviewController(
             wmController: fixture.controller,
             motionPolicy: fixture.controller.motionPolicy,
-            environment: fixture.environment
+            environment: environment
         )
         overview.prepareOpenState()
-        overview.updateAnimationProgress(1, state: .open)
+        overview.onAnimationComplete(state: .open)
         let selectedHandle = try XCTUnwrap(overview.selectedWindowHandle)
         var activatedHandle: WindowHandle?
         overview.onActivateWindow = { handle, _ in activatedHandle = handle }
 
         XCTAssertEqual(overview.handleHotkeyCommand(.toggleOverview), .handled)
 
+        XCTAssertNil(activatedHandle)
+        XCTAssertEqual(handoffScheduler.count, 1)
+        handoffScheduler.runNext()
         XCTAssertEqual(activatedHandle, selectedHandle)
         XCTAssertFalse(overview.state.isOpen)
     }
@@ -552,7 +586,7 @@ final class OverviewBehaviorTests: XCTestCase {
             environment: fixture.environment
         )
         overview.prepareOpenState()
-        overview.updateAnimationProgress(1, state: .open)
+        overview.onAnimationComplete(state: .open)
         var closeCount = 0
         overview.onCloseWindow = { _ in
             closeCount += 1
@@ -632,26 +666,305 @@ final class OverviewBehaviorTests: XCTestCase {
 
     func testSelectionDismissalFocusesCurrentOverviewSelection() throws {
         let fixture = try makeRuntimeOverviewFixture(windowCount: 2)
+        let handoffScheduler = OverviewPostCloseHandoffScheduler()
+        var environment = fixture.environment
+        environment.schedulePostCloseHandoff = handoffScheduler.schedule
         let overview = OverviewController(
             wmController: fixture.controller,
             motionPolicy: fixture.controller.motionPolicy,
-            environment: fixture.environment
+            environment: environment
         )
         overview.prepareOpenState()
-        overview.updateAnimationProgress(1, state: .open)
+        overview.onAnimationComplete(state: .open)
         let selectedHandle = try XCTUnwrap(overview.selectedWindowHandle)
         var activatedHandle: WindowHandle?
         var activatedWorkspaceId: WorkspaceDescriptor.ID?
+        var wasOpenAtActivation: Bool?
         overview.onActivateWindow = { handle, workspaceId in
             activatedHandle = handle
             activatedWorkspaceId = workspaceId
+            wasOpenAtActivation = overview.state.isOpen
         }
 
         overview.dismissToSelection(animated: false)
 
+        XCTAssertNil(activatedHandle)
+        XCTAssertEqual(handoffScheduler.count, 1)
+        XCTAssertFalse(overview.state.isOpen)
+        handoffScheduler.runNext()
         XCTAssertEqual(activatedHandle, selectedHandle)
         XCTAssertEqual(activatedWorkspaceId, fixture.workspaceId)
-        XCTAssertEqual(overview.state.isOpen, false)
+        XCTAssertEqual(wasOpenAtActivation, false)
+    }
+
+    func testPostCloseFocusHandoffIsDiscardedAfterOverviewReopens() throws {
+        let fixture = try makeRuntimeOverviewFixture(windowCount: 1)
+        let handoffScheduler = OverviewPostCloseHandoffScheduler()
+        var environment = fixture.environment
+        environment.frontmostApplicationPID = { nil }
+        environment.schedulePostCloseHandoff = handoffScheduler.schedule
+        let overview = OverviewController(
+            wmController: fixture.controller,
+            motionPolicy: fixture.controller.motionPolicy,
+            environment: environment
+        )
+        overview.prepareOpenState()
+        overview.onAnimationComplete(state: .open)
+        var activatedHandle: WindowHandle?
+        overview.onActivateWindow = { handle, _ in activatedHandle = handle }
+
+        overview.dismissToSelection(animated: false)
+        XCTAssertEqual(handoffScheduler.count, 1)
+
+        overview.open()
+        handoffScheduler.runNext()
+
+        XCTAssertNil(activatedHandle)
+        XCTAssertTrue(overview.state.isOpen)
+        overview.completeCloseTransition(targetWindow: nil)
+    }
+
+    func testPostCloseFocusHandoffIsDiscardedAfterNewerFocusIntent() throws {
+        let fixture = try makeRuntimeOverviewFixture(windowCount: 2)
+        let handoffScheduler = OverviewPostCloseHandoffScheduler()
+        var environment = fixture.environment
+        environment.schedulePostCloseHandoff = handoffScheduler.schedule
+        let overview = OverviewController(
+            wmController: fixture.controller,
+            motionPolicy: fixture.controller.motionPolicy,
+            environment: environment
+        )
+        overview.prepareOpenState()
+        overview.onAnimationComplete(state: .open)
+        var activatedHandle: WindowHandle?
+        overview.onActivateWindow = { handle, _ in activatedHandle = handle }
+
+        overview.dismissToSelection(animated: false)
+        _ = fixture.controller.intentLedger.beginManagedRequest(
+            token: fixture.handles[1].id,
+            workspaceId: fixture.workspaceId
+        )
+        handoffScheduler.runNext()
+
+        XCTAssertNil(activatedHandle)
+    }
+
+    func testPostCloseFocusHandoffIsDiscardedAfterNewerAppActivationIntent() throws {
+        let fixture = try makeRuntimeOverviewFixture(windowCount: 1)
+        let handoffScheduler = OverviewPostCloseHandoffScheduler()
+        var environment = fixture.environment
+        environment.schedulePostCloseHandoff = handoffScheduler.schedule
+        let overview = OverviewController(
+            wmController: fixture.controller,
+            motionPolicy: fixture.controller.motionPolicy,
+            environment: environment
+        )
+        overview.prepareOpenState()
+        overview.onAnimationComplete(state: .open)
+        var activatedHandle: WindowHandle?
+        overview.onActivateWindow = { handle, _ in activatedHandle = handle }
+
+        overview.dismissToSelection(animated: false)
+        _ = fixture.controller.intentLedger.registerActivateApp(pid: 91_299)
+        handoffScheduler.runNext()
+
+        XCTAssertNil(activatedHandle)
+    }
+
+    func testPostCloseFocusHandoffIsDiscardedAfterIntentLedgerReset() throws {
+        let fixture = try makeRuntimeOverviewFixture(windowCount: 1)
+        let handoffScheduler = OverviewPostCloseHandoffScheduler()
+        var environment = fixture.environment
+        environment.schedulePostCloseHandoff = handoffScheduler.schedule
+        let overview = OverviewController(
+            wmController: fixture.controller,
+            motionPolicy: fixture.controller.motionPolicy,
+            environment: environment
+        )
+        overview.prepareOpenState()
+        overview.onAnimationComplete(state: .open)
+        var activatedHandle: WindowHandle?
+        overview.onActivateWindow = { handle, _ in activatedHandle = handle }
+
+        overview.dismissToSelection(animated: false)
+        fixture.controller.intentLedger.reset()
+        handoffScheduler.runNext()
+
+        XCTAssertNil(activatedHandle)
+    }
+
+    func testServiceStopInvalidationDiscardsQueuedPostCloseHandoff() throws {
+        let fixture = try makeRuntimeOverviewFixture(windowCount: 1)
+        let handoffScheduler = OverviewPostCloseHandoffScheduler()
+        var environment = fixture.environment
+        environment.schedulePostCloseHandoff = handoffScheduler.schedule
+        let overview = OverviewController(
+            wmController: fixture.controller,
+            motionPolicy: fixture.controller.motionPolicy,
+            environment: environment
+        )
+        overview.prepareOpenState()
+        overview.onAnimationComplete(state: .open)
+        var activatedHandle: WindowHandle?
+        overview.onActivateWindow = { handle, _ in activatedHandle = handle }
+
+        overview.dismissToSelection(animated: false)
+        overview.invalidateDeferredActionsForServiceStop()
+        handoffScheduler.runNext()
+
+        XCTAssertNil(activatedHandle)
+    }
+
+    func testServiceStopInvalidationClosesInFlightOverviewWithoutHandoff() throws {
+        let fixture = try makeRuntimeOverviewFixture(windowCount: 1)
+        fixture.controller.motionPolicy.animationsEnabled = true
+        let handoffScheduler = OverviewPostCloseHandoffScheduler()
+        var environment = fixture.environment
+        environment.schedulePostCloseHandoff = handoffScheduler.schedule
+        let overview = OverviewController(
+            wmController: fixture.controller,
+            motionPolicy: fixture.controller.motionPolicy,
+            environment: environment,
+            displayLinkFactory: { _, _ in .manual },
+            animationMediaTimeProvider: { 0 }
+        )
+        overview.open()
+        overview.onAnimationComplete(state: .open)
+        overview.dismissToSelection(animated: true)
+
+        overview.invalidateDeferredActionsForServiceStop()
+
+        guard case .closed = overview.state else {
+            return XCTFail("Expected service stop to close the in-flight overview")
+        }
+        XCTAssertEqual(handoffScheduler.count, 0)
+    }
+
+    func testPostCloseFocusHandoffIsDiscardedAfterReusedAppActivationIntent() throws {
+        let fixture = try makeRuntimeOverviewFixture(windowCount: 1)
+        let handoffScheduler = OverviewPostCloseHandoffScheduler()
+        var environment = fixture.environment
+        environment.schedulePostCloseHandoff = handoffScheduler.schedule
+        let overview = OverviewController(
+            wmController: fixture.controller,
+            motionPolicy: fixture.controller.motionPolicy,
+            environment: environment
+        )
+        overview.prepareOpenState()
+        overview.onAnimationComplete(state: .open)
+        var activatedHandle: WindowHandle?
+        overview.onActivateWindow = { handle, _ in activatedHandle = handle }
+        _ = fixture.controller.intentLedger.registerActivateApp(pid: 91_299)
+
+        overview.dismissToSelection(animated: false)
+        _ = fixture.controller.intentLedger.registerActivateApp(pid: 91_299)
+        handoffScheduler.runNext()
+
+        XCTAssertNil(activatedHandle)
+    }
+
+    func testPostCloseFocusHandoffIsDiscardedAfterNewerFocusIntentDuringClosing() throws {
+        let fixture = try makeRuntimeOverviewFixture(windowCount: 2)
+        fixture.controller.motionPolicy.animationsEnabled = true
+        let handoffScheduler = OverviewPostCloseHandoffScheduler()
+        var environment = fixture.environment
+        environment.frontmostApplicationPID = { nil }
+        environment.schedulePostCloseHandoff = handoffScheduler.schedule
+        let overview = OverviewController(
+            wmController: fixture.controller,
+            motionPolicy: fixture.controller.motionPolicy,
+            environment: environment,
+            displayLinkFactory: { _, _ in .manual },
+            animationMediaTimeProvider: { 0 }
+        )
+        overview.open()
+        overview.onAnimationComplete(state: .open)
+        let selectedHandle = try XCTUnwrap(overview.selectedWindowHandle)
+        let competingHandle = try XCTUnwrap(fixture.handles.first { $0.id != selectedHandle.id })
+        var activatedHandle: WindowHandle?
+        overview.onActivateWindow = { handle, _ in activatedHandle = handle }
+
+        overview.dismissToSelection(animated: true)
+        guard case .closing = overview.state else {
+            return XCTFail("Expected selection dismissal to remain in closing state")
+        }
+        _ = fixture.controller.intentLedger.beginManagedRequest(
+            token: competingHandle.id,
+            workspaceId: fixture.workspaceId
+        )
+        overview.completeCloseTransition(targetWindow: selectedHandle)
+
+        XCTAssertEqual(handoffScheduler.count, 1)
+        handoffScheduler.runNext()
+        XCTAssertNil(activatedHandle)
+    }
+
+    func testCancelApplicationHandoffIsDiscardedAfterFocusEpochChangesDuringClosing() throws {
+        let fixture = try makeRuntimeOverviewFixture(windowCount: 1)
+        fixture.controller.motionPolicy.animationsEnabled = true
+        let handoffScheduler = OverviewPostCloseHandoffScheduler()
+        var activatedPIDs: [pid_t] = []
+        var environment = fixture.environment
+        environment.frontmostApplicationPID = { 91_300 }
+        environment.currentProcessID = { 91_301 }
+        environment.activateApplication = { activatedPIDs.append($0) }
+        environment.schedulePostCloseHandoff = handoffScheduler.schedule
+        let overview = OverviewController(
+            wmController: fixture.controller,
+            motionPolicy: fixture.controller.motionPolicy,
+            environment: environment,
+            displayLinkFactory: { _, _ in .manual },
+            animationMediaTimeProvider: { 0 }
+        )
+        overview.open()
+        overview.onAnimationComplete(state: .open)
+
+        overview.dismiss(reason: .cancel, animated: true)
+        guard case .closing = overview.state else {
+            return XCTFail("Expected cancel dismissal to remain in closing state")
+        }
+        let focusEpochSeq = fixture.controller.workspaceManager.worldSeq
+        XCTAssertTrue(
+            fixture.controller.workspaceManager.beginManagedFocusRequest(
+                fixture.handles[0].id,
+                in: fixture.workspaceId,
+                requestId: 91_302
+            )
+        )
+        XCTAssertFalse(
+            fixture.controller.workspaceManager.isSeqEpochCurrent(focusEpochSeq, domains: .focus)
+        )
+        overview.completeCloseTransition(targetWindow: nil)
+
+        XCTAssertEqual(handoffScheduler.count, 1)
+        handoffScheduler.runNext()
+        XCTAssertTrue(activatedPIDs.isEmpty)
+    }
+
+    func testCancelRestoresPreviousApplicationAfterSurfaceCompletion() throws {
+        let fixture = try makeRuntimeOverviewFixture(windowCount: 1)
+        let handoffScheduler = OverviewPostCloseHandoffScheduler()
+        var activatedPIDs: [pid_t] = []
+        var environment = fixture.environment
+        environment.frontmostApplicationPID = { 91_300 }
+        environment.currentProcessID = { 91_301 }
+        environment.activateApplication = { activatedPIDs.append($0) }
+        environment.schedulePostCloseHandoff = handoffScheduler.schedule
+        let overview = OverviewController(
+            wmController: fixture.controller,
+            motionPolicy: fixture.controller.motionPolicy,
+            environment: environment
+        )
+        overview.beginOwnedSession()
+        overview.onAnimationComplete(state: .open)
+
+        overview.dismiss(reason: .cancel, animated: false)
+
+        XCTAssertTrue(activatedPIDs.isEmpty)
+        XCTAssertFalse(overview.state.isOpen)
+        XCTAssertEqual(handoffScheduler.count, 1)
+        handoffScheduler.runNext()
+        XCTAssertEqual(activatedPIDs, [91_300])
     }
 
     func testClosingStateFreezesKeyboardAndMouseSelection() throws {
@@ -662,16 +975,13 @@ final class OverviewBehaviorTests: XCTestCase {
             environment: fixture.environment
         )
         overview.prepareOpenState()
-        overview.updateAnimationProgress(1, state: .open)
+        overview.onAnimationComplete(state: .open)
         let originalSelection = try XCTUnwrap(overview.selectedWindowHandle)
         overview.cycleSelection(forward: true)
 
         let closingSelection = try XCTUnwrap(overview.selectedWindowHandle)
         XCTAssertNotEqual(closingSelection, originalSelection)
-        overview.updateAnimationProgress(
-            0,
-            state: .closing(targetWindow: closingSelection, progress: 0)
-        )
+        overview.onAnimationComplete(state: .closing(targetWindow: closingSelection))
 
         overview.cycleSelection(forward: false)
         overview.selectAndActivateWindow(originalSelection)
@@ -682,13 +992,18 @@ final class OverviewBehaviorTests: XCTestCase {
     func testDismissalCancelsDragBeforeAnimatedCloseCompletes() throws {
         let fixture = try makeRuntimeOverviewFixture(windowCount: 1)
         fixture.controller.motionPolicy.animationsEnabled = true
+        let handoffScheduler = OverviewPostCloseHandoffScheduler()
+        var environment = fixture.environment
+        environment.schedulePostCloseHandoff = handoffScheduler.schedule
         let overview = OverviewController(
             wmController: fixture.controller,
             motionPolicy: fixture.controller.motionPolicy,
-            environment: fixture.environment
+            environment: environment,
+            displayLinkFactory: { _, _ in .manual },
+            animationMediaTimeProvider: { 0 }
         )
-        overview.prepareOpenState()
-        overview.updateAnimationProgress(1, state: .open)
+        overview.open()
+        overview.onAnimationComplete(state: .open)
         let selectedHandle = try XCTUnwrap(overview.selectedWindowHandle)
         let monitorId = try XCTUnwrap(fixture.controller.workspaceManager.monitors.first?.id)
         var activatedHandle: WindowHandle?
@@ -710,7 +1025,369 @@ final class OverviewBehaviorTests: XCTestCase {
         )
 
         overview.completeCloseTransition(targetWindow: selectedHandle)
+        XCTAssertNil(activatedHandle)
+        handoffScheduler.runNext()
         XCTAssertEqual(activatedHandle, selectedHandle)
+    }
+
+    func testAnimatorRoutesIndependentDisplaySessionsThroughOneCompletionBarrier() throws {
+        let fixture = try makeRuntimeOverviewFixture(windowCount: 1)
+        let overview = OverviewController(
+            wmController: fixture.controller,
+            motionPolicy: fixture.controller.motionPolicy,
+            environment: fixture.environment
+        )
+        let animator = OverviewAnimator(
+            controller: overview,
+            displayLinkFactory: { _, _ in .manual },
+            mediaTimeProvider: { 0 }
+        )
+        let firstDisplayId: CGDirectDisplayID = 91_001
+        let secondDisplayId: CGDirectDisplayID = 91_002
+
+        animator.startOpenAnimation(displayIds: [firstDisplayId, secondDisplayId])
+        let generation = animator.generation
+
+        scheduleAnimatorEndpoint(animator, displayId: firstDisplayId, generation: generation)
+        XCTAssertEqual(animator.activeDisplayIds, [firstDisplayId, secondDisplayId])
+        XCTAssertEqual(animator.completionCount, 0)
+
+        retireAnimatorEndpoint(animator, displayId: firstDisplayId, generation: generation)
+        XCTAssertEqual(animator.activeDisplayIds, [secondDisplayId])
+        XCTAssertEqual(animator.completionCount, 0)
+
+        scheduleAnimatorEndpoint(animator, displayId: secondDisplayId, generation: generation)
+        retireAnimatorEndpoint(animator, displayId: secondDisplayId, generation: generation)
+
+        XCTAssertTrue(animator.activeDisplayIds.isEmpty)
+        XCTAssertEqual(animator.completedGeneration, generation)
+        XCTAssertEqual(animator.completionCount, 1)
+        guard case .open = overview.state else {
+            return XCTFail("Expected the shared barrier to complete the open transition")
+        }
+
+        animator.tickForTests(
+            displayId: secondDisplayId,
+            generation: generation,
+            timestamp: 11,
+            targetTimestamp: 11.01
+        )
+        XCTAssertEqual(animator.completionCount, 1)
+    }
+
+    func testAnimatorIgnoresSupersededGenerationCallbacks() throws {
+        let fixture = try makeRuntimeOverviewFixture(windowCount: 1)
+        let overview = OverviewController(
+            wmController: fixture.controller,
+            motionPolicy: fixture.controller.motionPolicy,
+            environment: fixture.environment
+        )
+        let animator = OverviewAnimator(
+            controller: overview,
+            displayLinkFactory: { _, _ in .manual },
+            mediaTimeProvider: { 0 }
+        )
+        let displayId: CGDirectDisplayID = 91_001
+
+        animator.startOpenAnimation(displayIds: [displayId])
+        let supersededGeneration = animator.generation
+        animator.startOpenAnimation(displayIds: [displayId])
+        let activeGeneration = animator.generation
+
+        animator.tickForTests(
+            displayId: displayId,
+            generation: supersededGeneration,
+            timestamp: 10,
+            targetTimestamp: 10
+        )
+        XCTAssertEqual(animator.activeDisplayIds, [displayId])
+        XCTAssertEqual(animator.completionCount, 0)
+
+        animator.tickForTests(
+            displayId: displayId,
+            generation: activeGeneration,
+            timestamp: 10,
+            targetTimestamp: 10
+        )
+        animator.tickForTests(
+            displayId: displayId,
+            generation: activeGeneration,
+            timestamp: 10.01,
+            targetTimestamp: 10.02
+        )
+        XCTAssertEqual(animator.completionCount, 1)
+    }
+
+    func testAnimatorRecordsCaptureGatedCallbackTiming() throws {
+        let fixture = try makeRuntimeOverviewFixture(windowCount: 1)
+        let overview = OverviewController(
+            wmController: fixture.controller,
+            motionPolicy: fixture.controller.motionPolicy,
+            environment: fixture.environment
+        )
+        let animator = OverviewAnimator(
+            controller: overview,
+            displayLinkFactory: { _, _ in .manual },
+            mediaTimeProvider: { 0 }
+        )
+        let displayId: CGDirectDisplayID = 91_001
+        animator.startOpenAnimation(displayIds: [displayId])
+        let generation = animator.generation
+
+        OverviewFrameTrace.shared.beginCapture()
+        animator.tickForTests(
+            displayId: displayId,
+            generation: generation,
+            timestamp: 0.01,
+            targetTimestamp: 0.02
+        )
+        OverviewFrameTrace.shared.endCapture()
+
+        let trace = OverviewFrameTrace.shared.dump()
+        XCTAssertTrue(trace.contains("event=callback"))
+        XCTAssertTrue(trace.contains("disp=91001 gen=\(generation) seq=1"))
+    }
+
+    func testAnimatorPreservesProgressWhenOpeningRetargetsToClose() throws {
+        let fixture = try makeRuntimeOverviewFixture(windowCount: 1)
+        let overview = OverviewController(
+            wmController: fixture.controller,
+            motionPolicy: fixture.controller.motionPolicy,
+            environment: fixture.environment
+        )
+        let clock = OverviewAnimationTestClock()
+        let animator = OverviewAnimator(
+            controller: overview,
+            displayLinkFactory: { _, _ in .manual },
+            mediaTimeProvider: { clock.time }
+        )
+        let displayId: CGDirectDisplayID = 91_001
+
+        animator.startOpenAnimation(displayIds: [displayId])
+        clock.time = 0.03
+        let openingProgress = animator.currentProgress
+
+        animator.startCloseAnimation(targetWindow: nil, displayIds: [displayId])
+
+        XCTAssertEqual(animator.currentProgress, openingProgress, accuracy: 0.000_000_1)
+        XCTAssertEqual(animator.activeDisplayIds, [displayId])
+    }
+
+    func testAnimatorPreservesSharedSpringStateWhenClosingRetargetsToOpen() throws {
+        let fixture = try makeRuntimeOverviewFixture(windowCount: 1)
+        let overview = OverviewController(
+            wmController: fixture.controller,
+            motionPolicy: fixture.controller.motionPolicy,
+            environment: fixture.environment
+        )
+        let clock = OverviewAnimationTestClock()
+        var startedSessions: [(CGDirectDisplayID, UInt64)] = []
+        let animator = OverviewAnimator(
+            controller: overview,
+            displayLinkFactory: { displayId, callbackProxy in
+                startedSessions.append((displayId, callbackProxy.generation))
+                return .manual
+            },
+            mediaTimeProvider: { clock.time }
+        )
+        let firstDisplayId: CGDirectDisplayID = 91_001
+        let secondDisplayId: CGDirectDisplayID = 91_002
+
+        animator.startCloseAnimation(
+            targetWindow: fixture.handles[0],
+            displayIds: [firstDisplayId, secondDisplayId]
+        )
+        let closingGeneration = animator.generation
+        clock.time = 0.03
+        let closingProgress = animator.currentProgress
+        let closingVelocity = animator.currentVelocity
+
+        animator.startOpenAnimation(displayIds: [firstDisplayId, secondDisplayId])
+        let openingGeneration = animator.generation
+
+        XCTAssertGreaterThan(openingGeneration, closingGeneration)
+        XCTAssertEqual(animator.currentProgress, closingProgress, accuracy: 0.000_000_1)
+        XCTAssertEqual(animator.currentVelocity, closingVelocity, accuracy: 0.000_000_1)
+        XCTAssertEqual(animator.activeDisplayIds, [firstDisplayId, secondDisplayId])
+        XCTAssertEqual(startedSessions.count, 4)
+        XCTAssertEqual(Set(startedSessions.suffix(2).map(\.1)), [openingGeneration])
+
+        animator.tickForTests(
+            displayId: firstDisplayId,
+            generation: closingGeneration,
+            timestamp: 10,
+            targetTimestamp: 10
+        )
+        XCTAssertEqual(animator.completionCount, 0)
+
+        scheduleAnimatorEndpoint(animator, displayId: firstDisplayId, generation: openingGeneration)
+        retireAnimatorEndpoint(animator, displayId: firstDisplayId, generation: openingGeneration)
+        scheduleAnimatorEndpoint(animator, displayId: secondDisplayId, generation: openingGeneration)
+        retireAnimatorEndpoint(animator, displayId: secondDisplayId, generation: openingGeneration)
+
+        XCTAssertEqual(animator.completionCount, 1)
+        XCTAssertEqual(animator.completedGeneration, openingGeneration)
+        guard case .open = overview.state else {
+            return XCTFail("Expected the reversed transition to finish opening")
+        }
+
+        animator.tickForTests(
+            displayId: secondDisplayId,
+            generation: closingGeneration,
+            timestamp: 11,
+            targetTimestamp: 11
+        )
+        XCTAssertEqual(animator.completionCount, 1)
+    }
+
+    func testToggleDuringClosingReversesOverviewToOpening() throws {
+        let fixture = try makeRuntimeOverviewFixture(windowCount: 1)
+        fixture.controller.motionPolicy.animationsEnabled = true
+        let clock = OverviewAnimationTestClock()
+        var environment = fixture.environment
+        environment.frontmostApplicationPID = { nil }
+        let overview = OverviewController(
+            wmController: fixture.controller,
+            motionPolicy: fixture.controller.motionPolicy,
+            environment: environment,
+            displayLinkFactory: { _, _ in .manual },
+            animationMediaTimeProvider: { clock.time }
+        )
+        overview.open()
+        clock.time = 10
+        overview.onAnimationComplete(state: .open)
+
+        overview.toggle()
+        guard case .closing = overview.state else {
+            return XCTFail("Expected toggle from open to begin closing")
+        }
+
+        clock.time = 10.03
+        overview.toggle()
+
+        guard case .opening = overview.state else {
+            return XCTFail("Expected toggle during close to reverse into opening")
+        }
+        overview.completeCloseTransition(targetWindow: nil)
+    }
+
+    func testDelayedSelectionDismissDoesNotRecloseReversedOverview() async throws {
+        let fixture = try makeRuntimeOverviewFixture(windowCount: 1)
+        fixture.controller.motionPolicy.animationsEnabled = true
+        var environment = fixture.environment
+        environment.selectionDismissDelayNanoseconds = 0
+        let overview = OverviewController(
+            wmController: fixture.controller,
+            motionPolicy: fixture.controller.motionPolicy,
+            environment: environment,
+            displayLinkFactory: { _, _ in .manual },
+            animationMediaTimeProvider: { 0 }
+        )
+        overview.open()
+        overview.onAnimationComplete(state: .open)
+        let selectedHandle = try XCTUnwrap(overview.selectedWindowHandle)
+
+        overview.selectAndActivateWindow(selectedHandle)
+        overview.toggle()
+        overview.toggle()
+        await Task.yield()
+        await Task.yield()
+
+        guard case .opening = overview.state else {
+            return XCTFail("Expected stale selection dismissal to leave reversed overview opening")
+        }
+    }
+
+    func testDelayedSelectionDismissRequiresCapturedHandleToRemainSelected() async throws {
+        let fixture = try makeRuntimeOverviewFixture(windowCount: 2)
+        var environment = fixture.environment
+        environment.selectionDismissDelayNanoseconds = 0
+        let overview = OverviewController(
+            wmController: fixture.controller,
+            motionPolicy: fixture.controller.motionPolicy,
+            environment: environment
+        )
+        overview.prepareOpenState()
+        overview.onAnimationComplete(state: .open)
+        let originalSelection = try XCTUnwrap(overview.selectedWindowHandle)
+
+        overview.selectAndActivateWindow(originalSelection)
+        overview.cycleSelection(forward: true)
+        let currentSelection = try XCTUnwrap(overview.selectedWindowHandle)
+        XCTAssertFalse(currentSelection === originalSelection)
+        await Task.yield()
+        await Task.yield()
+
+        guard case .open = overview.state else {
+            return XCTFail("Expected stale selection dismissal to leave overview open")
+        }
+        XCTAssertTrue(overview.selectedWindowHandle === currentSelection)
+    }
+
+    func testAnimatorExcludesMissingDisplayLinksWhileAvailableSessionsCompleteNormally() throws {
+        let fixture = try makeRuntimeOverviewFixture(windowCount: 1)
+        let overview = OverviewController(
+            wmController: fixture.controller,
+            motionPolicy: fixture.controller.motionPolicy,
+            environment: fixture.environment
+        )
+        let availableDisplayId: CGDirectDisplayID = 91_001
+        let missingDisplayId: CGDirectDisplayID = 91_002
+        let animator = OverviewAnimator(
+            controller: overview,
+            displayLinkFactory: { displayId, _ in
+                displayId == availableDisplayId ? .manual : nil
+            },
+            mediaTimeProvider: { 0 }
+        )
+
+        animator.startOpenAnimation(displayIds: [availableDisplayId, missingDisplayId])
+        XCTAssertEqual(animator.activeDisplayIds, [availableDisplayId])
+        XCTAssertEqual(animator.completionCount, 0)
+
+        let generation = animator.generation
+        scheduleAnimatorEndpoint(animator, displayId: availableDisplayId, generation: generation)
+        retireAnimatorEndpoint(animator, displayId: availableDisplayId, generation: generation)
+
+        XCTAssertTrue(animator.activeDisplayIds.isEmpty)
+        XCTAssertEqual(animator.completionCount, 1)
+        guard case .open = overview.state else {
+            return XCTFail("Expected the available display session to release the barrier")
+        }
+    }
+
+    func testAnimatorCompletesWhenEveryDisplayLinkIsUnavailable() throws {
+        let fixture = try makeRuntimeOverviewFixture(windowCount: 1)
+        let overview = OverviewController(
+            wmController: fixture.controller,
+            motionPolicy: fixture.controller.motionPolicy,
+            environment: fixture.environment
+        )
+        let animator = OverviewAnimator(
+            controller: overview,
+            displayLinkFactory: { _, _ in nil },
+            mediaTimeProvider: { 0 }
+        )
+
+        animator.startOpenAnimation(displayIds: [91_001, 91_002])
+
+        XCTAssertTrue(animator.activeDisplayIds.isEmpty)
+        XCTAssertEqual(animator.completionCount, 1)
+        guard case .open = overview.state else {
+            return XCTFail("Expected an unavailable clock set to snap open")
+        }
+    }
+
+    func testScreenParametersNotificationClosesOpeningOverviewSynchronously() throws {
+        try assertScreenParametersNotificationClosesOverview(during: .opening)
+    }
+
+    func testScreenParametersNotificationClosesOpenOverviewSynchronously() throws {
+        try assertScreenParametersNotificationClosesOverview(during: .open)
+    }
+
+    func testScreenParametersNotificationClosesClosingOverviewSynchronously() throws {
+        try assertScreenParametersNotificationClosesOverview(during: .closing)
     }
 
     func testCloseSelectionWaitsForAuthoritativeRemovalBeforeAdvancing() throws {
@@ -721,7 +1398,7 @@ final class OverviewBehaviorTests: XCTestCase {
             environment: fixture.environment
         )
         overview.prepareOpenState()
-        overview.updateAnimationProgress(1, state: .open)
+        overview.onAnimationComplete(state: .open)
         let removedHandle = try XCTUnwrap(overview.selectedWindowHandle)
         let expectedSuccessorToken = try XCTUnwrap(
             fixture.handles.first { $0.id != removedHandle.id }
@@ -796,7 +1473,7 @@ final class OverviewBehaviorTests: XCTestCase {
             environment: fixture.environment
         )
         overview.prepareOpenState()
-        overview.updateAnimationProgress(1, state: .open)
+        overview.onAnimationComplete(state: .open)
         let hiddenHandle = try XCTUnwrap(overview.selectedWindowHandle)
 
         titleReads = 0
@@ -846,7 +1523,7 @@ final class OverviewBehaviorTests: XCTestCase {
             environment: fixture.environment
         )
         overview.prepareOpenState()
-        overview.updateAnimationProgress(1, state: .open)
+        overview.onAnimationComplete(state: .open)
         XCTAssertEqual(titleReads, 2)
         XCTAssertEqual(frameReads, 2)
 
@@ -879,6 +1556,82 @@ final class OverviewBehaviorTests: XCTestCase {
         let workspaceId: WorkspaceDescriptor.ID
         let handles: [WindowHandle]
         var environment: OverviewEnvironment
+    }
+
+    private enum ScreenParametersOverviewPhase: Equatable {
+        case opening
+        case open
+        case closing
+    }
+
+    private func assertScreenParametersNotificationClosesOverview(
+        during phase: ScreenParametersOverviewPhase
+    ) throws {
+        let fixture = try makeRuntimeOverviewFixture(windowCount: 1)
+        fixture.controller.motionPolicy.animationsEnabled = true
+        let notificationCenter = NotificationCenter()
+        var displayLinkCallbacks: [OverviewDisplayLinkCallbackProxy] = []
+        var removedEventMonitorCount = 0
+        var environment = fixture.environment
+        environment.frontmostApplicationPID = { nil }
+        environment.activateOmniWM = {}
+        environment.notificationCenter = notificationCenter
+        environment.addLocalEventMonitor = { _, _ in NSObject() }
+        environment.removeEventMonitor = { _ in removedEventMonitorCount += 1 }
+        let overview = OverviewController(
+            wmController: fixture.controller,
+            motionPolicy: fixture.controller.motionPolicy,
+            environment: environment,
+            displayLinkFactory: { _, callback in
+                displayLinkCallbacks.append(callback)
+                return .manual
+            },
+            animationMediaTimeProvider: { 0 }
+        )
+
+        overview.open()
+        let animator = try XCTUnwrap(displayLinkCallbacks.last?.animator)
+        let openingGeneration = animator.generation
+
+        switch phase {
+        case .opening:
+            guard case .opening = overview.state else {
+                return XCTFail("Expected Overview to be opening")
+            }
+        case .open:
+            scheduleAnimatorEndpoint(animator, displayId: 91_001, generation: openingGeneration)
+            retireAnimatorEndpoint(animator, displayId: 91_001, generation: openingGeneration)
+            guard case .open = overview.state else {
+                return XCTFail("Expected Overview to be open")
+            }
+        case .closing:
+            scheduleAnimatorEndpoint(animator, displayId: 91_001, generation: openingGeneration)
+            retireAnimatorEndpoint(animator, displayId: 91_001, generation: openingGeneration)
+            overview.dismiss(reason: .cancel, animated: true)
+            guard case .closing = overview.state else {
+                return XCTFail("Expected Overview to be closing")
+            }
+        }
+
+        if phase == .open {
+            XCTAssertFalse(animator.isAnimating)
+            XCTAssertTrue(animator.activeDisplayIds.isEmpty)
+        } else {
+            XCTAssertTrue(animator.isAnimating)
+            XCTAssertEqual(animator.activeDisplayIds, [91_001])
+        }
+
+        notificationCenter.post(name: NSApplication.didChangeScreenParametersNotification, object: nil)
+
+        guard case .closed = overview.state else {
+            return XCTFail("Expected the topology notification to synchronously close Overview")
+        }
+        XCTAssertFalse(animator.isAnimating)
+        XCTAssertTrue(animator.activeDisplayIds.isEmpty)
+        XCTAssertEqual(removedEventMonitorCount, 2)
+        XCTAssertNil(overview.selectedWindowHandle)
+        XCTAssertNil(overview.activeInteractionMonitorId)
+        XCTAssertFalse(overview.hasActiveDragSession)
     }
 
     private func makeRuntimeOverviewFixture(windowCount: Int) throws -> RuntimeOverviewFixture {
@@ -939,6 +1692,32 @@ final class OverviewBehaviorTests: XCTestCase {
             workspaceId: workspaceId,
             handles: handles,
             environment: environment
+        )
+    }
+
+    private func scheduleAnimatorEndpoint(
+        _ animator: OverviewAnimator,
+        displayId: CGDirectDisplayID,
+        generation: UInt64
+    ) {
+        animator.tickForTests(
+            displayId: displayId,
+            generation: generation,
+            timestamp: 10,
+            targetTimestamp: 10
+        )
+    }
+
+    private func retireAnimatorEndpoint(
+        _ animator: OverviewAnimator,
+        displayId: CGDirectDisplayID,
+        generation: UInt64
+    ) {
+        animator.tickForTests(
+            displayId: displayId,
+            generation: generation,
+            timestamp: 10.01,
+            targetTimestamp: 10.02
         )
     }
 

@@ -36,6 +36,7 @@ final class DiagnosticsRetentionTests: XCTestCase {
         _ = try write("omniwm-trace-1.log", in: dir)
         _ = try write("omniwm-diagnostics-1.log", in: dir)
         _ = try write("omniwm-crash-1.log", in: dir)
+        _ = try write("omniwm-performance-1.log", in: dir)
         _ = try write("keep.txt", in: dir)
 
         DiagnosticsRetention.wipe(directory: dir)
@@ -54,6 +55,31 @@ final class DiagnosticsRetentionTests: XCTestCase {
         DiagnosticsRetention.wipe(directory: dir, prefixes: ["omniwm-diagnostics-", "omniwm-crash-"])
 
         XCTAssertEqual(names(in: dir), ["omniwm-trace-1.log"])
+    }
+
+    func testWipeKeepingNewestRetainsMostRecentCaptures() throws {
+        let dir = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        var urls: [URL] = []
+        for index in 0 ..< 8 {
+            let url = try write("omniwm-performance-\(index).log", in: dir)
+            try FileManager.default.setAttributes(
+                [.modificationDate: Date(timeIntervalSince1970: 1000 + Double(index))],
+                ofItemAtPath: url.path
+            )
+            urls.append(url)
+        }
+
+        DiagnosticsRetention.wipe(
+            directory: dir,
+            prefixes: ["omniwm-performance-"],
+            keepingNewest: 3
+        )
+
+        XCTAssertEqual(
+            names(in: dir),
+            ["omniwm-performance-5.log", "omniwm-performance-6.log", "omniwm-performance-7.log"]
+        )
     }
 
     func testWipeExceptPreservesExcludedURL() throws {
@@ -118,10 +144,11 @@ final class DiagnosticsRetentionTests: XCTestCase {
         let now = Date()
         let staleDiagnostics = try write(".omniwm-diagnostics-old.tmp", in: dir)
         let staleTrace = try write(".omniwm-trace-old.tmp", in: dir)
+        let stalePerformance = try write(".omniwm-performance-old.tmp", in: dir)
         let recentDiagnostics = try write(".omniwm-diagnostics-recent.tmp", in: dir)
         let unrelatedHidden = try write(".omniwm-other-old.tmp", in: dir)
         let visibleTemporary = try write("omniwm-trace-old.tmp", in: dir)
-        for url in [staleDiagnostics, staleTrace, unrelatedHidden, visibleTemporary] {
+        for url in [staleDiagnostics, staleTrace, stalePerformance, unrelatedHidden, visibleTemporary] {
             try setModified(now.addingTimeInterval(-7200), for: url)
         }
         try setModified(now.addingTimeInterval(-120), for: recentDiagnostics)

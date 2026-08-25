@@ -8,34 +8,61 @@ import QuartzCore
 final class AnimationDriver {
     nonisolated static let gestureWorkingAreaMovement: Double = 1200.0
 
+    struct GestureSessionID: Equatable {
+        fileprivate let rawValue: UInt64
+    }
+
     final class ViewportGesture {
         private static let minimumFlingVelocity: Double = 100.0
 
         let tracker = SwipeTracker()
         let isTrackpad: Bool
+        let sessionID: GestureSessionID
         private(set) var normFactor: Double = 1.0
+        private(set) var lastUpdateTime: TimeInterval
 
-        init(isTrackpad: Bool) {
+        init(
+            isTrackpad: Bool,
+            sessionID: GestureSessionID,
+            livenessTimestamp: TimeInterval
+        ) {
             self.isTrackpad = isTrackpad
+            self.sessionID = sessionID
+            lastUpdateTime = livenessTimestamp
         }
 
         var relativeOffset: Double {
-            tracker.position * normFactor
+            let offset = tracker.position * normFactor
+            return offset.isFinite ? offset : 0
         }
 
         var velocity: Double {
             let scaledVelocity = tracker.velocity() * normFactor
+            guard scaledVelocity.isFinite else { return 0 }
             return abs(scaledVelocity) < Self.minimumFlingVelocity ? 0 : scaledVelocity
         }
 
         var relativeProjectedOffset: Double {
-            relativeOffset - velocity / DecelerationAnimation.decayRate
+            let projectedOffset = relativeOffset - velocity / DecelerationAnimation.decayRate
+            return projectedOffset.isFinite ? projectedOffset : relativeOffset
         }
 
-        func update(delta: Double, timestamp: TimeInterval, viewportWidth: Double) {
-            tracker.push(delta: delta, timestamp: timestamp)
+        func update(
+            delta: Double,
+            timestamp: TimeInterval,
+            viewportWidth: Double,
+            livenessTimestamp: TimeInterval
+        ) {
+            guard delta.isFinite,
+                  timestamp.isFinite,
+                  viewportWidth.isFinite,
+                  livenessTimestamp.isFinite
+            else { return }
+            guard tracker.push(delta: delta, timestamp: timestamp) else { return }
+            lastUpdateTime = livenessTimestamp
             if isTrackpad {
-                normFactor = viewportWidth / AnimationDriver.gestureWorkingAreaMovement
+                let nextNormFactor = viewportWidth / AnimationDriver.gestureWorkingAreaMovement
+                normFactor = nextNormFactor.isFinite ? nextNormFactor : 1
             }
         }
     }
@@ -46,12 +73,25 @@ final class AnimationDriver {
         case deceleration(DecelerationAnimation)
     }
 
+    enum TickResult: Equatable {
+        case inactive
+        case running
+        case expiredGesture(relativeOffset: Double, sessionID: GestureSessionID)
+
+        var isRunning: Bool {
+            self == .running
+        }
+    }
+
     struct GestureEndSample {
         let relativeOffset: Double
         let relativeProjectedOffset: Double
     }
 
     private var motions: [WorkspaceDescriptor.ID: ViewportMotion] = [:]
+    private var nextGestureSessionID: UInt64 = 1
+    private static let gestureLivenessInterval: TimeInterval = 1
+    var gestureLivenessNow: @MainActor () -> TimeInterval = { CACurrentMediaTime() }
 
     func hasMotion(in workspaceId: WorkspaceDescriptor.ID) -> Bool {
         motions[workspaceId] != nil
@@ -127,8 +167,31 @@ final class AnimationDriver {
         }
     }
 
-    func beginGesture(in workspaceId: WorkspaceDescriptor.ID, isTrackpad: Bool) {
-        motions[workspaceId] = .gesture(ViewportGesture(isTrackpad: isTrackpad))
+    @discardableResult
+    func beginGesture(
+        in workspaceId: WorkspaceDescriptor.ID,
+        isTrackpad: Bool,
+        timestamp: TimeInterval = CACurrentMediaTime()
+    ) -> GestureSessionID? {
+        let livenessTimestamp = gestureLivenessNow()
+        guard timestamp.isFinite, livenessTimestamp.isFinite else {
+            motions.removeValue(forKey: workspaceId)
+            return nil
+        }
+        let sessionID = GestureSessionID(rawValue: nextGestureSessionID)
+        nextGestureSessionID &+= 1
+        let gesture = ViewportGesture(
+            isTrackpad: isTrackpad,
+            sessionID: sessionID,
+            livenessTimestamp: livenessTimestamp
+        )
+        motions[workspaceId] = .gesture(gesture)
+        return sessionID
+    }
+
+    func gestureSessionID(in workspaceId: WorkspaceDescriptor.ID) -> GestureSessionID? {
+        guard case let .gesture(gesture) = motions[workspaceId] else { return nil }
+        return gesture.sessionID
     }
 
     func updateGesture(
@@ -139,7 +202,12 @@ final class AnimationDriver {
         viewportWidth: Double
     ) {
         guard case let .gesture(gesture) = motions[workspaceId], gesture.isTrackpad == isTrackpad else { return }
-        gesture.update(delta: delta, timestamp: timestamp, viewportWidth: viewportWidth)
+        gesture.update(
+            delta: delta,
+            timestamp: timestamp,
+            viewportWidth: viewportWidth,
+            livenessTimestamp: gestureLivenessNow()
+        )
     }
 
     func sampleGestureEnd(
@@ -150,7 +218,12 @@ final class AnimationDriver {
     ) -> GestureEndSample? {
         guard case let .gesture(gesture) = motions[workspaceId] else { return nil }
         if let isTrackpad, gesture.isTrackpad != isTrackpad { return nil }
-        gesture.update(delta: 0, timestamp: timestamp ?? CACurrentMediaTime(), viewportWidth: viewportWidth)
+        gesture.update(
+            delta: 0,
+            timestamp: timestamp ?? CACurrentMediaTime(),
+            viewportWidth: viewportWidth,
+            livenessTimestamp: gestureLivenessNow()
+        )
         return GestureEndSample(
             relativeOffset: gesture.relativeOffset,
             relativeProjectedOffset: gesture.relativeProjectedOffset
@@ -259,25 +332,40 @@ final class AnimationDriver {
         }
     }
 
-    func tick(in workspaceId: WorkspaceDescriptor.ID, at time: TimeInterval) -> Bool {
+    func tickResult(in workspaceId: WorkspaceDescriptor.ID, at time: TimeInterval) -> TickResult {
         switch motions[workspaceId] {
-        case .gesture:
-            return true
+        case let .gesture(gesture):
+            guard time.isFinite,
+                  time >= gesture.lastUpdateTime,
+                  time - gesture.lastUpdateTime < Self.gestureLivenessInterval
+            else {
+                let relativeOffset = gesture.relativeOffset
+                motions.removeValue(forKey: workspaceId)
+                return .expiredGesture(
+                    relativeOffset: relativeOffset,
+                    sessionID: gesture.sessionID
+                )
+            }
+            return .running
         case let .spring(animation):
             if animation.isComplete(at: time) {
                 motions.removeValue(forKey: workspaceId)
-                return false
+                return .inactive
             }
-            return true
+            return .running
         case let .deceleration(animation):
             if animation.isComplete(at: time) {
                 motions.removeValue(forKey: workspaceId)
-                return false
+                return .inactive
             }
-            return true
+            return .running
         case nil:
-            return false
+            return .inactive
         }
+    }
+
+    func tick(in workspaceId: WorkspaceDescriptor.ID, at time: TimeInterval) -> Bool {
+        tickResult(in: workspaceId, at: time).isRunning
     }
 
     func removeMotions<S: Sequence>(for workspaceIds: S) where S.Element == WorkspaceDescriptor.ID {

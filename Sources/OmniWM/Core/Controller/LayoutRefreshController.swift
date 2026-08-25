@@ -8,13 +8,6 @@ import QuartzCore
 @MainActor final class LayoutRefreshController: NSObject {
     typealias PostLayoutAction = @MainActor () -> Void
 
-    enum RefreshRoute: Equatable {
-        case relayout
-        case immediateRelayout
-        case visibilityRefresh
-        case windowRemoval
-    }
-
     enum ScheduledRefreshKind: Int {
         case relayout
         case immediateRelayout
@@ -160,12 +153,16 @@ import QuartzCore
 
     var layoutState = LayoutRefreshState()
     private var layoutBuildMetrics = LayoutBuildMetrics()
+    var performanceCounters: PerformanceCounters?
+    var displayLinkActivationForTests: ((CGDirectDisplayID) -> Bool)?
+    var displayLinkCreationAllowedForTests: ((CGDirectDisplayID) -> Bool)?
+    var activeDisplayLinkCountForTests: (() -> Int)?
     private var activeFrameContext: RefreshFrameContext?
     private var nextPendingRevealTransactionId: UInt64 = 1
     private var pendingRevealTransactionsByWindowId: [Int: PendingRevealTransaction] = [:]
     private var pendingRevealVerificationTasksByWindowId: [Int: Task<Void, Never>] = [:]
-    private var closingAnimationIdsByObjectId: [ObjectIdentifier: UUID] = [:]
-    private var lastSubmittedClosingFramesByAnimationId: [UUID: CGRect] = [:]
+    var closingAnimationIdsByObjectId: [ObjectIdentifier: UUID] = [:]
+    var lastSubmittedClosingFramesByAnimationId: [UUID: CGRect] = [:]
     var nativeFullscreenRestoredFrameApplyTokens: Set<WindowToken> = []
 
     var fastFrameProvider: (WindowToken, AXWindowRef) -> CGRect? = { _, axRef in
@@ -192,306 +189,6 @@ import QuartzCore
     init(controller: WMController) {
         self.controller = controller
         super.init()
-    }
-
-    func setup() {
-        detectRefreshRates()
-        layoutState.screenChangeObserver = NotificationCenter.default.addObserver(
-            forName: NSApplication.didChangeScreenParametersNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in
-                self?.handleScreenParametersChanged()
-            }
-        }
-    }
-
-    private func getOrCreateDisplayLink(for displayId: CGDirectDisplayID) -> CADisplayLink? {
-        if let existing = layoutState.displayLinksByDisplay[displayId] {
-            return existing
-        }
-
-        guard let screen = NSScreen.screens.first(where: { $0.displayId == displayId }) else {
-            return nil
-        }
-        let link = screen.displayLink(target: self, selector: #selector(displayLinkFired(_:)))
-        layoutState.displayLinksByDisplay[displayId] = link
-        return link
-    }
-
-    private func handleScreenParametersChanged() {
-        detectRefreshRates()
-        controller?.syncMonitorsToNiriEngine()
-        controller?.surfaceReconciler.noteWorldChanged()
-    }
-
-    func cleanupForMonitorDisconnect(displayId: CGDirectDisplayID, migrateAnimations: Bool) {
-        if let link = layoutState.displayLinksByDisplay.removeValue(forKey: displayId) {
-            link.invalidate()
-        }
-
-        if let animations = layoutState.closingAnimationsByDisplay.removeValue(forKey: displayId) {
-            for animation in animations.values {
-                forgetClosingAnimation(animation)
-            }
-        }
-
-        if migrateAnimations {
-            if let wsId = niriHandler.scrollAnimationByDisplay.removeValue(forKey: displayId) {
-                startScrollAnimation(for: wsId)
-            }
-        } else if let workspaceId = niriHandler.scrollAnimationByDisplay.removeValue(forKey: displayId) {
-            controller?.workspaceManager.animationDriver.removeMotions(for: [workspaceId])
-        }
-        dwindleHandler.dwindleAnimationByDisplay.removeValue(forKey: displayId)
-    }
-
-    private func detectRefreshRates() {
-        layoutState.refreshRateByDisplay.removeAll()
-        for screen in NSScreen.screens {
-            guard let displayId = screen.displayId else { continue }
-            layoutState.refreshRateByDisplay[displayId] = Monitor.refreshRate(for: displayId)
-        }
-    }
-
-    @objc private func displayLinkFired(_ displayLink: CADisplayLink) {
-        guard let displayId = layoutState.displayLinksByDisplay.first(where: { $0.value === displayLink })?.key
-        else { return }
-
-        let traceActive = AnimationTickTrace.shared.isActive
-        let t0 = traceActive ? CACurrentMediaTime() : 0
-        var t1: CFTimeInterval = 0
-        var t2: CFTimeInterval = 0
-        var t3: CFTimeInterval = 0
-
-        SkyLight.shared.withTransactionScope {
-            niriHandler.tickScrollAnimation(targetTime: displayLink.targetTimestamp, displayId: displayId)
-            t1 = traceActive ? CACurrentMediaTime() : 0
-            dwindleHandler.tickDwindleAnimation(targetTime: displayLink.targetTimestamp, displayId: displayId)
-            t2 = traceActive ? CACurrentMediaTime() : 0
-            tickClosingAnimations(targetTime: displayLink.targetTimestamp, displayId: displayId)
-            t3 = traceActive ? CACurrentMediaTime() : 0
-            controller?.surfaceReconciler.reconcileAnimationTick()
-        }
-
-        auditParkVisibility(displayId: displayId)
-
-        guard traceActive else { return }
-        let t4 = CACurrentMediaTime()
-        let previousTimestamp = layoutState.lastDisplayLinkTimestampByDisplay[displayId]
-        layoutState.lastDisplayLinkTimestampByDisplay[displayId] = displayLink.timestamp
-
-        let expectedMs = displayLink.duration * 1000
-        let intervalMs = previousTimestamp.map { (displayLink.timestamp - $0) * 1000 } ?? 0
-        let totalMs = (t4 - t0) * 1000
-        let dropped = (previousTimestamp != nil && intervalMs > 1.5 * expectedMs)
-            || (expectedMs > 0 && totalMs > expectedMs)
-
-        AnimationTickTrace.shared.record(
-            AnimationTickTrace.Record(
-                mediaTime: t4,
-                displayId: displayId,
-                intervalMs: intervalMs,
-                expectedMs: expectedMs,
-                scrollMs: (t1 - t0) * 1000,
-                dwindleMs: (t2 - t1) * 1000,
-                closingMs: (t3 - t2) * 1000,
-                reconcileMs: (t4 - t3) * 1000,
-                totalMs: totalMs,
-                dropped: dropped
-            )
-        )
-    }
-
-    func startScrollAnimation(for workspaceId: WorkspaceDescriptor.ID, forGesture: Bool = false) {
-        guard forGesture || controller?.motionPolicy.animationsEnabled != false else { return }
-        guard let controller else { return }
-        let targetDisplayId: CGDirectDisplayID
-        if let monitor = controller.workspaceManager.monitor(for: workspaceId) {
-            targetDisplayId = monitor.displayId
-        } else if let mainDisplayId = NSScreen.main?.displayId {
-            targetDisplayId = mainDisplayId
-        } else {
-            return
-        }
-
-        guard let displayLink = getOrCreateDisplayLink(for: targetDisplayId) else { return }
-        guard niriHandler.registerScrollAnimation(workspaceId, on: targetDisplayId) else {
-            return
-        }
-        displayLink.add(to: .main, forMode: .common)
-    }
-
-    func stopScrollAnimation(for displayId: CGDirectDisplayID) {
-        niriHandler.scrollAnimationByDisplay.removeValue(forKey: displayId)
-        stopDisplayLinkIfIdle(for: displayId)
-    }
-
-    func stopAllScrollAnimations() {
-        let displayIds = Array(niriHandler.scrollAnimationByDisplay.keys)
-        niriHandler.scrollAnimationByDisplay.removeAll()
-        for displayId in displayIds {
-            stopDisplayLinkIfIdle(for: displayId)
-        }
-    }
-
-    func startDwindleAnimation(for workspaceId: WorkspaceDescriptor.ID, monitor: Monitor) {
-        guard controller?.motionPolicy.animationsEnabled != false else { return }
-        let targetDisplayId = monitor.displayId
-
-        guard dwindleHandler.registerDwindleAnimation(workspaceId, monitor: monitor, on: targetDisplayId)
-        else { return }
-
-        if let displayLink = getOrCreateDisplayLink(for: targetDisplayId) {
-            displayLink.add(to: .main, forMode: .common)
-        }
-    }
-
-    func startWindowCloseAnimation(entry: WindowState, monitor: Monitor) {
-        guard controller?.motionPolicy.animationsEnabled != false else { return }
-        guard entry.interactionPolicy.mayWriteFrame else { return }
-        guard let controller else { return }
-        guard !controller.workspaceManager.isAppHidden(entry.token) else { return }
-        guard let frame = fastFrame(for: entry.token, axRef: entry.axRef) else { return }
-
-        let displacement = CGPoint(x: 0, y: -12)
-
-        let now = CACurrentMediaTime()
-        let refreshRate = layoutState.refreshRateByDisplay[monitor.displayId] ?? 60.0
-        let animation = SpringAnimation(
-            from: 0,
-            to: 1,
-            startTime: now,
-            config: .balanced.with(epsilon: 0.01, velocityEpsilon: 0.1),
-            displayRefreshRate: refreshRate
-        )
-
-        var animations = layoutState.closingAnimationsByDisplay[monitor.displayId] ?? [:]
-        guard animations[entry.windowId] == nil else { return }
-        animations[entry.windowId] = LayoutRefreshState.ClosingAnimation(
-            pid: entry.pid,
-            windowId: entry.windowId,
-            axRef: entry.axRef,
-            fromFrame: frame,
-            displacement: displacement,
-            animation: animation
-        )
-        _ = closingAnimationId(for: animation)
-        layoutState.closingAnimationsByDisplay[monitor.displayId] = animations
-
-        if let displayLink = getOrCreateDisplayLink(for: monitor.displayId) {
-            displayLink.add(to: .main, forMode: .common)
-        }
-    }
-
-    func cancelFrameAnimations(forPID pid: pid_t) {
-        let displayIds = Array(layoutState.closingAnimationsByDisplay.keys)
-        for displayId in displayIds {
-            guard var animations = layoutState.closingAnimationsByDisplay.removeValue(forKey: displayId)
-            else { continue }
-            let removedWindowIds = animations.compactMap { windowId, animation in
-                animation.pid == pid ? windowId : nil
-            }
-            for windowId in removedWindowIds {
-                if let animation = animations.removeValue(forKey: windowId) {
-                    forgetClosingAnimation(animation)
-                }
-            }
-            if animations.isEmpty {
-                layoutState.closingAnimationsByDisplay.removeValue(forKey: displayId)
-                stopDisplayLinkIfIdle(for: displayId)
-            } else {
-                layoutState.closingAnimationsByDisplay[displayId] = animations
-            }
-        }
-    }
-
-    func stopDwindleAnimation(for displayId: CGDirectDisplayID) {
-        dwindleHandler.dwindleAnimationByDisplay.removeValue(forKey: displayId)
-        stopDisplayLinkIfIdle(for: displayId)
-    }
-
-    func stopAllDwindleAnimations() {
-        let displayIds = Array(dwindleHandler.dwindleAnimationByDisplay.keys)
-        dwindleHandler.dwindleAnimationByDisplay.removeAll()
-        for displayId in displayIds {
-            stopDisplayLinkIfIdle(for: displayId)
-        }
-    }
-
-    func hasDwindleAnimationRunning(in workspaceId: WorkspaceDescriptor.ID) -> Bool {
-        dwindleHandler.hasDwindleAnimationRunning(in: workspaceId)
-    }
-
-    private func stopDisplayLinkIfIdle(for displayId: CGDirectDisplayID) {
-        if niriHandler.scrollAnimationByDisplay[displayId] == nil,
-           dwindleHandler.dwindleAnimationByDisplay[displayId] == nil,
-           layoutState.closingAnimationsByDisplay[displayId].map({ $0.isEmpty }) ?? true
-        {
-            // Idle display links must not remain cached after teardown.
-            if let link = layoutState.displayLinksByDisplay.removeValue(forKey: displayId) {
-                link.invalidate()
-            }
-            layoutState.lastDisplayLinkTimestampByDisplay.removeValue(forKey: displayId)
-            scheduleTrailingParkAudits(displayId: displayId)
-        }
-    }
-
-    private func scheduleTrailingParkAudits(displayId: CGDirectDisplayID) {
-        guard ParkVisibilityAudit.shared.isActive else { return }
-        layoutState.trailingAuditTask?.cancel()
-        layoutState.trailingAuditTask = Task { @MainActor [weak self] in
-            for _ in 0 ..< 30 {
-                try? await Task.sleep(for: .milliseconds(100))
-                guard !Task.isCancelled, let self else { return }
-                self.auditParkVisibility(displayId: displayId)
-            }
-        }
-    }
-
-    func applyLayoutForWorkspaces(_ workspaceIds: Set<WorkspaceDescriptor.ID>) {
-        guard let controller else { return }
-
-        for monitor in controller.workspaceManager.monitors {
-            guard let workspace = controller.workspaceManager.activeWorkspaceOrFirst(on: monitor.id) else { continue }
-            let wsId = workspace.id
-            guard workspaceIds.contains(wsId) else { continue }
-
-            let layoutType = controller.settings.layoutType(for: workspace.name)
-
-            switch layoutType {
-            case .niri,
-                 .defaultLayout:
-                guard let engine = controller.niriEngine else { continue }
-                let state = controller.workspaceManager.niriViewportState(for: wsId)
-
-                niriHandler.applyFramesOnDemand(
-                    wsId: wsId,
-                    state: state,
-                    engine: engine,
-                    monitor: monitor,
-                    animationTime: nil
-                )
-
-            case .dwindle:
-                dwindleHandler.applyFramesOnDemand(workspaceId: wsId, monitor: monitor)
-            }
-        }
-
-        let preferredSides = preferredHideSides(for: controller.workspaceManager.monitors)
-        for ws in controller.workspaceManager.workspaces where workspaceIds.contains(ws.id) {
-            guard let monitor = controller.workspaceManager.monitor(for: ws.id) else { continue }
-            let isActive = controller.workspaceManager.activeWorkspace(on: monitor.id)?.id == ws.id
-            if !isActive {
-                let preferredSide = preferredSides[monitor.id] ?? .right
-                hideWorkspace(
-                    controller.workspaceManager.entries(in: ws.id),
-                    monitor: monitor,
-                    preferredSide: preferredSide
-                )
-            }
-        }
     }
 
     private func executeLayoutPlans(
@@ -529,6 +226,15 @@ import QuartzCore
         else {
             return nil
         }
+        if let disposition = plan.dwindleAnimationTargetDisposition,
+           !dwindleHandler.canAcceptAnimationTarget(
+               disposition,
+               workspaceId: plan.workspaceId,
+               monitor: plan.monitor
+           )
+        {
+            return nil
+        }
 
         controller.withRuntimeFrameJobCancellationSuppressed {
             applySessionPatch(plan.sessionPatch)
@@ -544,6 +250,19 @@ import QuartzCore
                 scale: plan.monitor.scale
             )
         )
+        controller.surfaceReconciler.applyAcceptedTabRailGeometry(
+            plan.diff.tabRailGeometryCommands,
+            workspaceId: plan.workspaceId,
+            displayId: plan.monitor.displayId
+        )
+        if let disposition = plan.dwindleAnimationTargetDisposition {
+            acceptDwindleAnimationTarget(
+                disposition,
+                workspaceId: plan.workspaceId,
+                displayId: plan.monitor.displayId,
+                plannedSeq: controller.workspaceManager.worldSeq
+            )
+        }
         applyAnimationDirectives(
             plan.animationDirectives,
             workspaceId: plan.workspaceId,
@@ -649,6 +368,7 @@ import QuartzCore
         )
         controller.workspaceManager.setCachedConstraints(fact.constraints, for: fact.token)
         if previous != fact.constraints {
+            controller.workspaceManager.invalidateLayout(for: [workspaceId])
             requestRelayout(reason: .observedConstraintsChanged, affectedWorkspaceIds: [workspaceId])
         }
     }
@@ -748,14 +468,16 @@ import QuartzCore
         for monitor: Monitor,
         orientation: Monitor.Orientation? = nil
     ) -> LayoutMonitorSnapshot {
-        LayoutMonitorSnapshot(
+        let scale = backingScale(for: monitor)
+        let layoutFrames = controller?.layoutFrames(for: monitor, scale: scale)
+        return LayoutMonitorSnapshot(
             monitorId: monitor.id,
             displayId: monitor.displayId,
             frame: monitor.frame,
             visibleFrame: monitor.visibleFrame,
-            workingFrame: controller?.insetWorkingFrame(for: monitor) ?? monitor.visibleFrame,
-            fullscreenLayoutFrame: controller?.fullscreenLayoutFrame(for: monitor) ?? monitor.visibleFrame,
-            scale: backingScale(for: monitor),
+            workingFrame: layoutFrames?.workingFrame ?? monitor.visibleFrame,
+            fullscreenLayoutFrame: layoutFrames?.fullscreenLayoutFrame ?? monitor.visibleFrame,
+            scale: scale,
             orientation: orientation ?? monitor.autoOrientation
         )
     }
@@ -1087,6 +809,7 @@ import QuartzCore
             enqueueRefresh(refresh)
             return
         }
+        performanceCounters?.refreshesEnqueued &+= 1
         mergePendingRefresh(refresh)
         guard layoutState.pendingDebounceTask == nil else { return }
         layoutState.pendingDebounceTask = Task { @MainActor [weak self] in
@@ -1104,7 +827,6 @@ import QuartzCore
         defer { layoutState.isIncrementalRefreshInProgress = false }
         return await executeRelayout(
             refresh: refresh,
-            route: .relayout,
             useScrollAnimationPath: false,
             recoverFocus: true,
             generation: generation
@@ -1113,7 +835,6 @@ import QuartzCore
 
     private func executeRelayout(
         refresh: ScheduledRefresh,
-        route: RefreshRoute,
         useScrollAnimationPath: Bool,
         recoverFocus: Bool,
         generation: UInt64
@@ -1176,7 +897,6 @@ import QuartzCore
         defer { layoutState.isImmediateLayoutInProgress = false }
         return await executeRelayout(
             refresh: refresh,
-            route: .immediateRelayout,
             useScrollAnimationPath: !niriHandler.scrollAnimationByDisplay.isEmpty,
             recoverFocus: false,
             generation: generation
@@ -1211,6 +931,8 @@ import QuartzCore
         layoutState.trailingAuditTask = nil
         layoutState.activeRefresh = nil
         layoutState.pendingRefresh = nil
+        layoutState.isRefreshSuspendedForLockScreen = false
+        layoutState.isAwaitingPostUnlockTopologySample = false
         layoutState.didExecuteEffectPlan = false
         layoutState.refreshGeneration &+= 1
         for (_, task) in pendingRevealVerificationTasksByWindowId {
@@ -1222,15 +944,7 @@ import QuartzCore
         dwindleHandler.resetPendingGroupReveals()
         nativeFullscreenRestoredFrameApplyTokens.removeAll()
 
-        for (_, link) in layoutState.displayLinksByDisplay {
-            link.invalidate()
-        }
-        layoutState.displayLinksByDisplay.removeAll()
-        niriHandler.scrollAnimationByDisplay.removeAll()
-        dwindleHandler.dwindleAnimationByDisplay.removeAll()
-        layoutState.closingAnimationsByDisplay.removeAll()
-        closingAnimationIdsByObjectId.removeAll(keepingCapacity: true)
-        lastSubmittedClosingFramesByAnimationId.removeAll(keepingCapacity: true)
+        resetDisplayLinkAndAnimationState()
 
         controller?.axManager.clearInactiveWorkspaceWindows()
 
@@ -2261,6 +1975,7 @@ import QuartzCore
     }
 
     func enqueueRefresh(_ refresh: ScheduledRefresh) {
+        performanceCounters?.refreshesEnqueued &+= 1
         if layoutState.inventoryStabilityHoldFullRescans,
            refresh.kind == .fullRescan
         {
@@ -2275,6 +1990,11 @@ import QuartzCore
             }
         }
         if let activeRefresh = layoutState.activeRefresh {
+            if refresh.kind == .immediateRelayout,
+               activeRefresh.kind == .relayout || activeRefresh.kind == .visibilityRefresh
+            {
+                performanceCounters?.immediateRefreshRestarts &+= 1
+            }
             handleRefresh(refresh, whileActive: activeRefresh)
             return
         }
@@ -2288,6 +2008,7 @@ import QuartzCore
             layoutState.pendingRefresh = refresh
             return
         }
+        performanceCounters?.refreshesMerged &+= 1
 
         var relayoutWorkspaceScope = mergedRelayoutWorkspaceScope(
             scheduledRelayoutWorkspaceScope(pendingRefresh),
@@ -2539,10 +2260,18 @@ import QuartzCore
 
     func startNextRefreshIfNeeded() {
         guard layoutState.activeRefreshTask == nil, let refresh = layoutState.pendingRefresh else { return }
+        if layoutState.isRefreshSuspendedForLockScreen
+            || controller?.isFrontmostAppLockScreen() == true
+            || controller?.isLockScreenActive == true
+        {
+            performanceCounters?.lockedRefreshDeferrals &+= 1
+            return
+        }
         guard !layoutState.inventoryStabilityHoldFullRescans || refresh.kind != .fullRescan else { return }
 
         layoutState.pendingRefresh = nil
         layoutState.activeRefresh = refresh
+        performanceCounters?.refreshesStarted &+= 1
         layoutState.didExecuteEffectPlan = false
         recordVisibilityRefresh(refresh, outcome: .started)
         let refreshGeneration = layoutState.refreshGeneration
@@ -2551,6 +2280,25 @@ import QuartzCore
             let didComplete = await self.execute(refresh, generation: refreshGeneration)
             self.finishRefresh(refresh, didComplete: didComplete, generation: refreshGeneration)
         }
+    }
+
+    func suspendForLockScreen() {
+        layoutState.isAwaitingPostUnlockTopologySample = false
+        guard !layoutState.isRefreshSuspendedForLockScreen else { return }
+        layoutState.isRefreshSuspendedForLockScreen = true
+        layoutState.activeRefreshTask?.cancel()
+    }
+
+    func awaitPostUnlockTopologySample() {
+        guard layoutState.isRefreshSuspendedForLockScreen else { return }
+        layoutState.isAwaitingPostUnlockTopologySample = true
+    }
+
+    func resumeAfterPostUnlockTopologySample() {
+        guard layoutState.isAwaitingPostUnlockTopologySample else { return }
+        layoutState.isAwaitingPostUnlockTopologySample = false
+        layoutState.isRefreshSuspendedForLockScreen = false
+        startNextRefreshIfNeeded()
     }
 
     private func isCurrentRefreshGeneration(_ generation: UInt64) -> Bool {
@@ -2590,7 +2338,19 @@ import QuartzCore
         let didExecuteEffectPlan = layoutState.didExecuteEffectPlan
 
         if !didComplete {
+            if var counters = performanceCounters {
+                counters.refreshesIncomplete &+= 1
+                counters.consecutiveRequeues &+= 1
+                counters.maximumConsecutiveRequeues = max(
+                    counters.maximumConsecutiveRequeues,
+                    counters.consecutiveRequeues
+                )
+                performanceCounters = counters
+            }
             preserveCancelledRefreshState(completedRefresh)
+        } else {
+            performanceCounters?.refreshesCompleted &+= 1
+            performanceCounters?.consecutiveRequeues = 0
         }
 
         layoutState.activeRefreshTask = nil
@@ -2782,18 +2542,6 @@ import QuartzCore
                 preferredSide: preferredSide,
                 hiddenPlacementMonitors: hiddenPlacementMonitors
             )
-        }
-    }
-
-    func unhideWorkspace(_ workspaceId: WorkspaceDescriptor.ID, monitor: Monitor) {
-        guard let controller else { return }
-        let entries = controller.workspaceManager.entries(in: workspaceId)
-        for entry in entries {
-            if isWindowOnKnownInactiveNativeSpace(entry.windowId) {
-                continue
-            }
-            controller.axManager.markWindowActive(entry.windowId)
-            unhideWindow(entry, monitor: monitor)
         }
     }
 
@@ -3802,77 +3550,6 @@ import QuartzCore
         }
 
         return CGPoint(x: clampedX, y: clampedTopLeftY - windowSize.height)
-    }
-}
-
-private extension LayoutRefreshController {
-    func closingAnimationId(for animation: SpringAnimation) -> UUID {
-        let objectId = ObjectIdentifier(animation)
-        if let animationId = closingAnimationIdsByObjectId[objectId] {
-            return animationId
-        }
-        let animationId = UUID()
-        closingAnimationIdsByObjectId[objectId] = animationId
-        return animationId
-    }
-
-    func forgetClosingAnimation(_ animation: LayoutRefreshState.ClosingAnimation) {
-        guard let animationId = closingAnimationIdsByObjectId.removeValue(
-            forKey: ObjectIdentifier(animation.animation)
-        ) else {
-            return
-        }
-        lastSubmittedClosingFramesByAnimationId.removeValue(forKey: animationId)
-    }
-
-    func tickClosingAnimations(targetTime: CFTimeInterval, displayId: CGDirectDisplayID) {
-        guard var animations = layoutState.closingAnimationsByDisplay.removeValue(forKey: displayId),
-              !animations.isEmpty
-        else {
-            return
-        }
-
-        var completedWindowIds: [Int] = []
-        completedWindowIds.reserveCapacity(animations.count)
-        var targets: [AXClosingFrameTarget] = []
-        targets.reserveCapacity(animations.count)
-
-        for (windowId, animation) in animations {
-            if controller?.workspaceManager.isAppHidden(pid: animation.pid) == true {
-                completedWindowIds.append(windowId)
-                continue
-            }
-            let frame = animation.currentFrame(at: targetTime)
-            let animationId = closingAnimationId(for: animation.animation)
-            targets.append(
-                AXClosingFrameTarget(
-                    animationId: animationId,
-                    pid: animation.pid,
-                    expectedWindow: animation.axRef,
-                    frame: frame,
-                    currentFrameHint: lastSubmittedClosingFramesByAnimationId[animationId]
-                        ?? animation.fromFrame
-                )
-            )
-            lastSubmittedClosingFramesByAnimationId[animationId] = frame
-            if animation.isComplete(at: targetTime) {
-                completedWindowIds.append(windowId)
-            }
-        }
-
-        controller?.axManager.applyClosingFrames(targets)
-
-        for windowId in completedWindowIds {
-            if let animation = animations.removeValue(forKey: windowId) {
-                forgetClosingAnimation(animation)
-            }
-        }
-
-        if animations.isEmpty {
-            stopDisplayLinkIfIdle(for: displayId)
-        } else {
-            layoutState.closingAnimationsByDisplay[displayId] = animations
-        }
     }
 }
 
