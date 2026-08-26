@@ -77,6 +77,7 @@ struct SettingsExport: Equatable {
     var workspaceBarReserveLayoutSpace: Bool
     var workspaceBarRevealModifier: String
     var workspaceBarRevealHoldMilliseconds: Double
+    var workspaceBarHideInNativeFullscreen: Bool
     var workspaceBarHeight: Double
     var workspaceBarBackgroundOpacity: Double
     var workspaceBarXOffset: Double
@@ -202,6 +203,7 @@ extension SettingsExport {
             workspaceBarReserveLayoutSpace: false,
             workspaceBarRevealModifier: WorkspaceBarRevealModifier.off.rawValue,
             workspaceBarRevealHoldMilliseconds: 200,
+            workspaceBarHideInNativeFullscreen: false,
             workspaceBarHeight: 24.0,
             workspaceBarBackgroundOpacity: 0.1,
             workspaceBarXOffset: 0.0,

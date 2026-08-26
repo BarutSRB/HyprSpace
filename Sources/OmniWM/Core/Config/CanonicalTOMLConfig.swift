@@ -156,6 +156,7 @@ struct CanonicalTOMLConfig: Codable, Equatable {
         var reserveLayoutSpace: Bool
         var revealModifier: String
         var revealHoldMilliseconds: Double
+        var hideInNativeFullscreen: Bool
         var height: Double
         var backgroundOpacity: Double
         var xOffset: Double
@@ -366,6 +367,7 @@ extension CanonicalTOMLConfig {
             reserveLayoutSpace: export.workspaceBarReserveLayoutSpace,
             revealModifier: export.workspaceBarRevealModifier,
             revealHoldMilliseconds: export.workspaceBarRevealHoldMilliseconds,
+            hideInNativeFullscreen: export.workspaceBarHideInNativeFullscreen,
             height: export.workspaceBarHeight,
             backgroundOpacity: export.workspaceBarBackgroundOpacity,
             xOffset: export.workspaceBarXOffset,
@@ -485,6 +487,7 @@ extension CanonicalTOMLConfig {
             workspaceBarReserveLayoutSpace: workspaceBar.reserveLayoutSpace,
             workspaceBarRevealModifier: workspaceBar.revealModifier,
             workspaceBarRevealHoldMilliseconds: workspaceBar.revealHoldMilliseconds,
+            workspaceBarHideInNativeFullscreen: workspaceBar.hideInNativeFullscreen,
             workspaceBarHeight: workspaceBar.height,
             workspaceBarBackgroundOpacity: workspaceBar.backgroundOpacity,
             workspaceBarXOffset: workspaceBar.xOffset,

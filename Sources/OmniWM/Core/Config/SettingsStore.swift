@@ -312,6 +312,10 @@ final class SettingsStore {
         didSet { scheduleSave() }
     }
 
+    var workspaceBarHideInNativeFullscreen = SettingsStore.defaultExport.workspaceBarHideInNativeFullscreen {
+        didSet { scheduleSave() }
+    }
+
     var workspaceBarHeight = SettingsStore.defaultExport.workspaceBarHeight {
         didSet { scheduleSave() }
     }
@@ -785,6 +789,7 @@ final class SettingsStore {
             workspaceBarReserveLayoutSpace: workspaceBarReserveLayoutSpace,
             workspaceBarRevealModifier: workspaceBarRevealModifier.rawValue,
             workspaceBarRevealHoldMilliseconds: workspaceBarRevealHoldMilliseconds,
+            workspaceBarHideInNativeFullscreen: workspaceBarHideInNativeFullscreen,
             workspaceBarHeight: workspaceBarHeight,
             workspaceBarBackgroundOpacity: workspaceBarBackgroundOpacity,
             workspaceBarXOffset: workspaceBarXOffset,
@@ -940,6 +945,7 @@ final class SettingsStore {
         workspaceBarRevealHoldMilliseconds = SettingsStore.validatedWorkspaceBarRevealHoldMilliseconds(
             export.workspaceBarRevealHoldMilliseconds
         )
+        workspaceBarHideInNativeFullscreen = export.workspaceBarHideInNativeFullscreen
         workspaceBarHeight = export.workspaceBarHeight
         workspaceBarBackgroundOpacity = export.workspaceBarBackgroundOpacity
         workspaceBarXOffset = export.workspaceBarXOffset
