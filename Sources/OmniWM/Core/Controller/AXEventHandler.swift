@@ -3761,6 +3761,10 @@ final class AXEventHandler {
         if let focusedToken = controller.workspaceManager.focusedToken,
            managedWindowToken(focusedToken, matchesObservedPid: pid)
         {
+            // The app stays frontmost with no focused window, so the focused token does
+            // not change and rescanAppThatLostFocus() sees no transition. Read the app's
+            // window list here in case it ordered the window out instead of destroying it.
+            requestTargetedFullRescan(for: [focusedToken.pid])
             return
         }
 
