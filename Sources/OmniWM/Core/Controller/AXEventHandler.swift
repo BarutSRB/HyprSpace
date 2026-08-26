@@ -323,7 +323,7 @@ final class AXEventHandler {
     static let postCreateLifecycleVerificationDelay: Duration = .milliseconds(75)
     static let createdWindowRetryLimit = 5
     static let createPlacementContextTTL: TimeInterval = 15
-    private static let activationRetryLimit = 5
+    static let activationRetryLimit = 5
     private static let windowCloseFocusRecoveryDuration: TimeInterval = 0.6
     static let sameAppCloseProbeDelay: Duration = .milliseconds(80)
     static let appTerminationFocusRecoveryTimeout: Duration = .milliseconds(600)
@@ -357,6 +357,7 @@ final class AXEventHandler {
     var terminalFrameFailureStateByWindowId: [Int: TerminalFrameFailureState] = [:]
     var admissionQuarantineByWindowId: [Int: AdmissionQuarantine] = [:]
     var identityAliasesByWindowId: [Int: WindowIdentityAliasHistory] = [:]
+    private var previouslyFocusedManagedToken: WindowToken?
     private var windowCloseFocusRecoveryContext: WindowCloseFocusRecoveryContext?
     private var recentMouseFocusIntent: RecentMouseFocusIntent?
     private var createFocusTrace =
@@ -1563,6 +1564,20 @@ final class AXEventHandler {
         return controller.workspaceManager.activeWorkspace(on: monitorId)?.id == workspaceId
     }
 
+    // Some apps order a window out instead of destroying it on close (Calendar, cmd+w).
+    // macOS sends no destroy notification then, and the window server keeps listing the
+    // window. Losing focus is the first hint, so let a rescan re-read the app's windows.
+    private func rescanAppThatLostFocus() {
+        guard let controller else { return }
+        let focusedToken = controller.workspaceManager.focusedToken
+        defer { previouslyFocusedManagedToken = focusedToken }
+        guard let previousToken = previouslyFocusedManagedToken,
+              previousToken != focusedToken,
+              controller.workspaceManager.entry(for: previousToken) != nil
+        else { return }
+        requestTargetedFullRescan(for: [previousToken.pid])
+    }
+
     @discardableResult
     func handleAppActivation(
         pid: pid_t,
@@ -1705,6 +1720,7 @@ final class AXEventHandler {
                 finishFocusedAdmissionRetryExecution(execution)
             }
         }
+        defer { rescanAppThatLostFocus() }
         guard let controller, controller.hasStartedServices else { return }
         guard facts.observationGeneration == latestActivationObservationGeneration else { return }
         guard facts.appVisibilityGeneration
@@ -3879,6 +3895,11 @@ final class AXEventHandler {
         origin: ActivationCallOrigin
     ) {
         guard let controller else { return }
+
+        // Some apps order a window out instead of destroying it on close (Calendar, cmd+w).
+        // macOS then sends no destroy notification, so focus keeps missing the window.
+        // Let the rescan decide whether the window is really gone.
+        requestTargetedFullRescan(for: [request.token.pid])
 
         _ = controller.intentLedger.cancelManagedRequest(requestId: request.requestId)
         _ = controller.workspaceManager.cancelManagedFocusRequest(

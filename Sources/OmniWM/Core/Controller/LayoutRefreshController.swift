@@ -1656,14 +1656,6 @@ import QuartzCore
                     .map(\.token)
             )
         }
-        if let eligibleKeys {
-            for entry in trackedEntries
-                where eligibleKeys.contains(entry.token)
-                && enumerationSnapshot.windowServerInfoByWindowId[entry.windowId] != nil
-            {
-                seenKeys.insert(entry.token)
-            }
-        }
         let missingCandidateKeys = eligibleKeys ?? Set(trackedEntries.map(\.token))
         let admissionProtectedMissingKeys = permitsMissingRetirement
             ? controller.axEventHandler.protectMissingEntriesDuringUnsettledAdmission(
