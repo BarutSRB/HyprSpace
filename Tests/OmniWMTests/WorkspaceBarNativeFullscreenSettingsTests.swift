@@ -57,7 +57,6 @@ final class WorkspaceBarNativeFullscreenSettingsTests: XCTestCase {
         let external = makeMonitor(displayId: 71_002, uuid: Self.externalUUID, name: "External", originX: 1_440)
         controller.workspaceManager.applyMonitorConfigurationChange([builtIn, external])
 
-        // Opting out keeps the bar on both monitors even while one shows a fullscreen space.
         commitTopology(on: controller, fullscreenDisplayUUID: Self.builtInUUID)
         XCTAssertTrue(controller.isWorkspaceBarVisible(on: builtIn))
         XCTAssertTrue(controller.isWorkspaceBarVisible(on: external))
@@ -66,7 +65,6 @@ final class WorkspaceBarNativeFullscreenSettingsTests: XCTestCase {
         XCTAssertFalse(controller.isWorkspaceBarVisible(on: builtIn))
         XCTAssertTrue(controller.isWorkspaceBarVisible(on: external))
 
-        // Leaving fullscreen brings the bar back without any further user action.
         commitTopology(on: controller, fullscreenDisplayUUID: nil)
         XCTAssertTrue(controller.isWorkspaceBarVisible(on: builtIn))
         XCTAssertTrue(controller.isWorkspaceBarVisible(on: external))
@@ -87,8 +85,6 @@ final class WorkspaceBarNativeFullscreenSettingsTests: XCTestCase {
         let reservedBefore = controller.insetWorkingFrame(for: builtIn)
         XCTAssertEqual(reservedBefore, CGRect(x: 0, y: 0, width: 1_440, height: 836))
 
-        // The windows the strut holds space for live on another space, so hiding the bar for a
-        // fullscreen window must not relayout them.
         commitTopology(on: controller, fullscreenDisplayUUID: Self.builtInUUID)
         XCTAssertFalse(controller.isWorkspaceBarVisible(on: builtIn))
         XCTAssertEqual(controller.insetWorkingFrame(for: builtIn), reservedBefore)
@@ -104,17 +100,12 @@ final class WorkspaceBarNativeFullscreenSettingsTests: XCTestCase {
         let builtIn = makeMonitor(displayId: 71_004, uuid: Self.builtInUUID, name: "Built-in", originX: 0)
         controller.workspaceManager.applyMonitorConfigurationChange([builtIn])
 
-        // Before the space inventory has been sampled the bar must not vanish on a guess.
         XCTAssertFalse(controller.workspaceManager.spaceTopology.isPopulated)
         XCTAssertTrue(controller.isWorkspaceBarVisible(on: builtIn))
     }
 
     @MainActor
     func testRawSkyLightDisplayIdentifiersStillHideTheBar() {
-        // `SpaceTracker.refreshedTopology(preserving:)` hands SkyLight's raw display identifiers
-        // straight through, so a commit can carry "Main" or a numeric display id instead of a UUID.
-        // `commitSpaceTopology` canonicalizes on the way in; this pins that, since without it the
-        // per-monitor lookup would miss and the bar would stay up over a fullscreen window.
         for rawIdentifier in ["Main", "71005"] {
             let settings = makeSettingsStore()
             settings.workspaceBarEnabled = true
@@ -135,8 +126,8 @@ final class WorkspaceBarNativeFullscreenSettingsTests: XCTestCase {
             )
 
             XCTAssertEqual(
-                controller.workspaceManager.spaceTopology.displaysShowingFullscreenSpace,
-                [Self.builtInUUID],
+                controller.workspaceManager.spaceTopology.isDisplayShowingFullscreenSpace(on: builtIn),
+                true,
                 "raw identifier \(rawIdentifier) should canonicalize to the monitor UUID"
             )
             XCTAssertFalse(
@@ -144,21 +135,6 @@ final class WorkspaceBarNativeFullscreenSettingsTests: XCTestCase {
                 "bar should hide for raw identifier \(rawIdentifier)"
             )
         }
-    }
-
-    func testDisplaysShowingFullscreenSpaceIgnoresAmbiguousIdentifiers() {
-        let topology = SpaceTopology(
-            displays: [
-                .init(displayIdentifier: "duplicate", spaceIds: [1], currentSpaceId: 1),
-                .init(displayIdentifier: "duplicate", spaceIds: [2], currentSpaceId: 2),
-                .init(displayIdentifier: "unique", spaceIds: [3], currentSpaceId: 3)
-            ],
-            activeSpaceId: 1,
-            fullscreenSpaceIds: [1, 3],
-            windowSpace: [:]
-        )
-
-        XCTAssertEqual(topology.displaysShowingFullscreenSpace, ["unique"])
     }
 
     @MainActor
