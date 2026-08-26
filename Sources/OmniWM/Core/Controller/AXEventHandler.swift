@@ -1564,9 +1564,8 @@ final class AXEventHandler {
         return controller.workspaceManager.activeWorkspace(on: monitorId)?.id == workspaceId
     }
 
-    // Some apps order a window out instead of destroying it on close (Calendar, cmd+w).
-    // macOS sends no destroy notification then, and the window server keeps listing the
-    // window. Losing focus is the first hint, so let a rescan re-read the app's windows.
+    // Some apps close a window without destroying it. macOS then sends no notification.
+    // A focus change is the first sign, so re-read the app's window list.
     private func rescanAppThatLostFocus() {
         guard let controller else { return }
         let focusedToken = controller.workspaceManager.focusedToken
@@ -3761,9 +3760,8 @@ final class AXEventHandler {
         if let focusedToken = controller.workspaceManager.focusedToken,
            managedWindowToken(focusedToken, matchesObservedPid: pid)
         {
-            // The app stays frontmost with no focused window, so the focused token does
-            // not change and rescanAppThatLostFocus() sees no transition. Read the app's
-            // window list here in case it ordered the window out instead of destroying it.
+            // This return keeps the focused token, so the focus-change rescan never fires.
+            // The app may have closed its window without destroying it.
             requestTargetedFullRescan(for: [focusedToken.pid])
             return
         }
@@ -3900,9 +3898,7 @@ final class AXEventHandler {
     ) {
         guard let controller else { return }
 
-        // Some apps order a window out instead of destroying it on close (Calendar, cmd+w).
-        // macOS then sends no destroy notification, so focus keeps missing the window.
-        // Let the rescan decide whether the window is really gone.
+        // Repeated focus failures suggest the window is gone. Let the rescan confirm it.
         requestTargetedFullRescan(for: [request.token.pid])
 
         _ = controller.intentLedger.cancelManagedRequest(requestId: request.requestId)

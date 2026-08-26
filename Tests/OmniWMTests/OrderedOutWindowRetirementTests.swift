@@ -76,7 +76,6 @@ final class OrderedOutWindowRetirementTests: XCTestCase {
         controller.hasStartedServices = true
         controller.layoutRefreshController.layoutState.activeRefresh = nil
 
-        // The app keeps focus and loses its window, so the focused token never changes.
         controller.axEventHandler.handleActivationFactsResolved(
             ActivationFacts(
                 pid: token.pid,
