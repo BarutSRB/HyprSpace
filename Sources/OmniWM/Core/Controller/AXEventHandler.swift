@@ -357,7 +357,7 @@ final class AXEventHandler {
     var terminalFrameFailureStateByWindowId: [Int: TerminalFrameFailureState] = [:]
     var admissionQuarantineByWindowId: [Int: AdmissionQuarantine] = [:]
     var identityAliasesByWindowId: [Int: WindowIdentityAliasHistory] = [:]
-    private var previouslyFocusedManagedToken: WindowToken?
+    var previouslyFocusedManagedToken: WindowToken?
     private var windowCloseFocusRecoveryContext: WindowCloseFocusRecoveryContext?
     private var recentMouseFocusIntent: RecentMouseFocusIntent?
     private var createFocusTrace =
@@ -1553,28 +1553,6 @@ final class AXEventHandler {
             return false
         }
         return managedWindowTokenUsingCachedIdentity(intent.token, matchesObservedPid: pid)
-    }
-
-    private func isWorkspaceActive(_ workspaceId: WorkspaceDescriptor.ID) -> Bool {
-        guard let controller,
-              let monitorId = controller.workspaceManager.monitorId(for: workspaceId)
-        else {
-            return false
-        }
-        return controller.workspaceManager.activeWorkspace(on: monitorId)?.id == workspaceId
-    }
-
-    // Some apps close a window without destroying it. macOS then sends no notification.
-    // A focus change is the first sign, so re-read the app's window list.
-    private func rescanAppThatLostFocus() {
-        guard let controller else { return }
-        let focusedToken = controller.workspaceManager.focusedToken
-        defer { previouslyFocusedManagedToken = focusedToken }
-        guard let previousToken = previouslyFocusedManagedToken,
-              previousToken != focusedToken,
-              controller.workspaceManager.entry(for: previousToken) != nil
-        else { return }
-        requestTargetedFullRescan(for: [previousToken.pid])
     }
 
     @discardableResult
@@ -3760,8 +3738,6 @@ final class AXEventHandler {
         if let focusedToken = controller.workspaceManager.focusedToken,
            managedWindowToken(focusedToken, matchesObservedPid: pid)
         {
-            // This return keeps the focused token, so the focus-change rescan never fires.
-            // The app may have closed its window without destroying it.
             requestTargetedFullRescan(for: [focusedToken.pid])
             return
         }
@@ -3898,7 +3874,6 @@ final class AXEventHandler {
     ) {
         guard let controller else { return }
 
-        // Repeated focus failures suggest the window is gone. Let the rescan confirm it.
         requestTargetedFullRescan(for: [request.token.pid])
 
         _ = controller.intentLedger.cancelManagedRequest(requestId: request.requestId)

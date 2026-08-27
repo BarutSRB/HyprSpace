@@ -35,7 +35,6 @@ final class OrderedOutWindowRetirementTests: XCTestCase {
         controller.hasStartedServices = true
         controller.layoutRefreshController.layoutState.activeRefresh = nil
 
-        // The window is gone but the app still runs, so every focus attempt finds no window.
         for _ in 0 ... AXEventHandler.activationRetryLimit {
             controller.axEventHandler.handleActivationFactsResolved(
                 ActivationFacts(

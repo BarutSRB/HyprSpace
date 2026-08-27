@@ -1656,6 +1656,14 @@ import QuartzCore
                     .map(\.token)
             )
         }
+        if let eligibleKeys {
+            preserveHiddenWindowsDuringTargetedFullRescan(
+                trackedEntries,
+                eligibleKeys: eligibleKeys,
+                windowServerInfoByWindowId: enumerationSnapshot.windowServerInfoByWindowId,
+                seenKeys: &seenKeys
+            )
+        }
         let missingCandidateKeys = eligibleKeys ?? Set(trackedEntries.map(\.token))
         let admissionProtectedMissingKeys = permitsMissingRetirement
             ? controller.axEventHandler.protectMissingEntriesDuringUnsettledAdmission(

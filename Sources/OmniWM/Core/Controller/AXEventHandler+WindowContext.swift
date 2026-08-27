@@ -18,6 +18,26 @@ extension AXEventHandler {
         )
     }
 
+    func isWorkspaceActive(_ workspaceId: WorkspaceDescriptor.ID) -> Bool {
+        guard let controller,
+              let monitorId = controller.workspaceManager.monitorId(for: workspaceId)
+        else {
+            return false
+        }
+        return controller.workspaceManager.activeWorkspace(on: monitorId)?.id == workspaceId
+    }
+
+    func rescanAppThatLostFocus() {
+        guard let controller else { return }
+        let focusedToken = controller.workspaceManager.focusedToken
+        defer { previouslyFocusedManagedToken = focusedToken }
+        guard let previousToken = previouslyFocusedManagedToken,
+              previousToken != focusedToken,
+              controller.workspaceManager.entry(for: previousToken) != nil
+        else { return }
+        requestTargetedFullRescan(for: [previousToken.pid])
+    }
+
     static func effectivePlacementOrigin(
         _ placementOrigin: WorkspacePlacementOrigin,
         createPlacementContext: WindowCreatePlacementContext?

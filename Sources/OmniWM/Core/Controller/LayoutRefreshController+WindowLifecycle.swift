@@ -170,6 +170,22 @@ extension LayoutRefreshController {
         return true
     }
 
+    func preserveHiddenWindowsDuringTargetedFullRescan(
+        _ entries: [WindowState],
+        eligibleKeys: Set<WindowToken>,
+        windowServerInfoByWindowId: [Int: WindowServerInfo],
+        seenKeys: inout Set<WindowToken>
+    ) {
+        guard let controller else { return }
+        for entry in entries
+            where eligibleKeys.contains(entry.token)
+            && controller.workspaceManager.hiddenState(for: entry.token) != nil
+            && windowServerInfoByWindowId[entry.windowId]?.pid == entry.pid
+        {
+            seenKeys.insert(entry.token)
+        }
+    }
+
     func confirmedMissingEntriesDuringFullRescan(
         seenKeys: Set<WindowToken>,
         eligibleKeys: Set<WindowToken>?,

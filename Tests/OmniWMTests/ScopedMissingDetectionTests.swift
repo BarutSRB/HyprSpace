@@ -104,6 +104,79 @@ final class ScopedMissingDetectionTests: XCTestCase {
         )
     }
 
+    func testTargetedRescanPreservesOnlyHiddenWindowsWithMatchingWindowServerOwner() throws {
+        let (controller, workspaceId) = try makeFixture()
+        let workspaceInactiveToken = WindowToken(pid: 468_140, windowId: 468_141)
+        let layoutTransientToken = WindowToken(pid: 468_142, windowId: 468_143)
+        let wrongOwnerToken = WindowToken(pid: 468_144, windowId: 468_145)
+        let visibleToken = WindowToken(pid: 468_146, windowId: 468_147)
+        let tokens = [
+            workspaceInactiveToken,
+            layoutTransientToken,
+            wrongOwnerToken,
+            visibleToken
+        ]
+        track(tokens, in: workspaceId, controller: controller)
+        controller.workspaceManager.setHiddenState(
+            HiddenState(
+                proportionalPosition: .zero,
+                referenceMonitorId: nil,
+                reason: .workspaceInactive
+            ),
+            for: workspaceInactiveToken
+        )
+        controller.workspaceManager.setHiddenState(
+            HiddenState(
+                proportionalPosition: .zero,
+                referenceMonitorId: nil,
+                reason: .layoutTransient(.right)
+            ),
+            for: layoutTransientToken
+        )
+        controller.workspaceManager.setHiddenState(
+            HiddenState(
+                proportionalPosition: .zero,
+                referenceMonitorId: nil,
+                reason: .workspaceInactive
+            ),
+            for: wrongOwnerToken
+        )
+        let eligibleKeys = Set(tokens)
+        let windowServerInfoByWindowId = Dictionary(
+            uniqueKeysWithValues: tokens.map { token in
+                (
+                    token.windowId,
+                    WindowServerInfo(
+                        id: UInt32(token.windowId),
+                        pid: token == wrongOwnerToken ? token.pid + 1 : token.pid,
+                        level: 0,
+                        frame: .zero
+                    )
+                )
+            }
+        )
+        let preservedKeys: Set<WindowToken> = [workspaceInactiveToken, layoutTransientToken]
+        let retiredKeys: Set<WindowToken> = [wrongOwnerToken, visibleToken]
+
+        for pass in 0 ..< 2 {
+            var seenKeys: Set<WindowToken> = []
+            controller.layoutRefreshController.preserveHiddenWindowsDuringTargetedFullRescan(
+                controller.workspaceManager.allEntries(),
+                eligibleKeys: eligibleKeys,
+                windowServerInfoByWindowId: windowServerInfoByWindowId,
+                seenKeys: &seenKeys
+            )
+
+            XCTAssertEqual(seenKeys, preservedKeys)
+            let missing = controller.layoutRefreshController.confirmedMissingEntries(
+                keys: seenKeys,
+                eligibleKeys: eligibleKeys,
+                requiredConsecutiveMisses: 2
+            )
+            XCTAssertEqual(Set(missing.map(\.token)), pass == 0 ? [] : retiredKeys)
+        }
+    }
+
     func testKnownInactiveSpaceIsPreservedWhileUnknownSpaceRemainsEligible() throws {
         let (controller, workspaceId) = try makeFixture()
         let inactiveToken = WindowToken(pid: 468_106, windowId: 468_107)
