@@ -403,19 +403,21 @@ final class WindowActionHandler {
     @discardableResult
     func navigateToExplicitlySelectedWindow(handle: WindowHandle) -> Bool {
         guard let controller else { return false }
-        let destination: AppRevealFocusDestination =
-            controller.workspaceManager.isScratchpadToken(handle.id)
-                || controller.workspaceManager.hiddenState(for: handle.id)?.isScratchpad == true
-                ? .scratchpad(monitorId: nil)
-                : .window
+        let destination: AppRevealFocusDestination = controller.workspaceManager
+            .scratchpadIndex(for: handle.id)
+            .map { .scratchpadWindow(index: $0, monitorId: nil) } ?? .window
         return requestAppRevealIfNeeded(handle: handle, destination: destination)
     }
 
     @discardableResult
-    func revealScratchpadFromBar(handle: WindowHandle, monitorId: Monitor.ID?) -> Bool {
+    func revealScratchpadFromBar(
+        handle: WindowHandle,
+        index: ScratchpadIndex,
+        monitorId: Monitor.ID?
+    ) -> Bool {
         requestAppRevealIfNeeded(
             handle: handle,
-            destination: .scratchpad(monitorId: monitorId)
+            destination: .scratchpad(index: index, monitorId: monitorId)
         )
     }
 
@@ -453,13 +455,18 @@ final class WindowActionHandler {
         guard let entry = controller.workspaceManager.entry(for: handle) else {
             return reject(.entryMissing)
         }
-        guard controller.workspaceManager.isAppHidden(pid: entry.pid) else {
-            switch destination {
-            case .window:
-                return navigateToWindowInternal(token: handle.id, workspaceId: entry.workspaceId)
-            case let .scratchpad(monitorId):
-                return controller.activateScratchpadFromBar(on: monitorId) == .executed
-            }
+        let pendingApps = pendingAppRevealApplications(
+            controller: controller,
+            targetPID: entry.pid,
+            destination: destination
+        )
+        guard !pendingApps.isEmpty else {
+            return performAppRevealDestination(
+                destination,
+                token: handle.id,
+                workspaceId: entry.workspaceId,
+                controller: controller
+            )
         }
         guard entry.layoutReason == .standard
             || controller.isManagedWindowSuspendedForNativeFullscreen(entry.token)
@@ -478,46 +485,45 @@ final class WindowActionHandler {
             )
         }
 
-        let appVisibilityGeneration = controller.workspaceManager.appVisibilityGeneration(for: entry.pid)
         let intent = controller.intentLedger.beginAppRevealFocus(
             token: entry.token,
             workspaceId: entry.workspaceId,
             handleIdentity: ObjectIdentifier(handle),
-            appVisibilityGeneration: appVisibilityGeneration,
+            pendingApps: pendingApps,
             focusFingerprint: appRevealFocusFingerprint(controller: controller),
             destination: destination
         )
-        let unhideResult = requestApplicationUnhide(entry.pid)
-        let traceOutcome: AppVisibilityTrace.Outcome
-        let traceReason: AppVisibilityTrace.Reason?
-        let keepsIntentPending: Bool
-        switch unhideResult {
-        case .applicationUnavailable:
-            traceOutcome = .failed
-            traceReason = .applicationUnavailable
-            keepsIntentPending = false
-        case .requestReportedSent:
-            traceOutcome = .requested
-            traceReason = nil
-            keepsIntentPending = true
-        case .requestReportedNotSent:
-            traceOutcome = .indeterminate
-            traceReason = .unhideRequestReportedNotSent
-            keepsIntentPending = true
+        var requestFailed = false
+        for pid in pendingApps.keys.sorted() {
+            let unhideResult = requestApplicationUnhide(pid)
+            let traceOutcome: AppVisibilityTrace.Outcome
+            let traceReason: AppVisibilityTrace.Reason?
+            switch unhideResult {
+            case .applicationUnavailable:
+                traceOutcome = .failed
+                traceReason = .applicationUnavailable
+                requestFailed = true
+            case .requestReportedSent:
+                traceOutcome = .requested
+                traceReason = nil
+            case .requestReportedNotSent:
+                traceOutcome = .indeterminate
+                traceReason = .unhideRequestReportedNotSent
+            }
+            AppVisibilityTrace.record(
+                .reveal,
+                pid: pid,
+                outcome: traceOutcome,
+                intentId: intent.id,
+                windowId: pid == entry.pid ? entry.windowId : nil,
+                workspaceId: entry.workspaceId,
+                generation: pendingApps[pid],
+                intentGeneration: pendingApps[pid],
+                destination: destination.traceDestination,
+                reason: traceReason
+            )
         }
-        AppVisibilityTrace.record(
-            .reveal,
-            pid: entry.pid,
-            outcome: traceOutcome,
-            intentId: intent.id,
-            windowId: entry.windowId,
-            workspaceId: entry.workspaceId,
-            generation: appVisibilityGeneration,
-            intentGeneration: appVisibilityGeneration,
-            destination: destination.traceDestination,
-            reason: traceReason
-        )
-        guard keepsIntentPending else {
+        guard !requestFailed else {
             controller.intentLedger.cancelAppRevealFocus(intentId: intent.id)
             return false
         }
@@ -585,13 +591,35 @@ final class WindowActionHandler {
         guard appRevealFocusFingerprint(controller: controller) == payload.focusFingerprint else {
             return reject(.focusStateChanged)
         }
+        for pid in payload.pendingAppPIDs {
+            guard let expectedGeneration = payload.coordinatedAppGenerations[pid] else {
+                return reject(.intentNotPending)
+            }
+            guard !controller.workspaceManager.isAppHidden(pid: pid) else {
+                return reject(.stillHidden)
+            }
+            let generation = controller.workspaceManager.appVisibilityGeneration(for: pid)
+            guard generation == expectedGeneration &+ 1 else {
+                return reject(.visibilityGenerationChanged)
+            }
+            guard controller.intentLedger.drainAppRevealFocus(
+                intentId: intentId,
+                pid: pid,
+                appVisibilityGeneration: generation
+            ) != nil else {
+                return reject(.intentNotPending)
+            }
+        }
+        for (pid, expectedGeneration) in payload.coordinatedAppGenerations {
+            guard !controller.workspaceManager.isAppHidden(pid: pid) else {
+                return reject(.stillHidden)
+            }
+            guard controller.workspaceManager.appVisibilityGeneration(for: pid) == expectedGeneration &+ 1 else {
+                return reject(.visibilityGenerationChanged)
+            }
+        }
         guard !controller.workspaceManager.isAppHidden(pid: payload.token.pid) else {
             return reject(.stillHidden)
-        }
-        guard controller.workspaceManager.appVisibilityGeneration(for: payload.token.pid)
-            == payload.appVisibilityGeneration &+ 1
-        else {
-            return reject(.visibilityGenerationChanged)
         }
         guard let handle = controller.workspaceManager.handle(for: payload.token) else {
             return reject(.handleMissing)
@@ -640,9 +668,81 @@ final class WindowActionHandler {
                 return finish(true)
             }
             return finish(navigateToWindowInternal(token: handle.id, workspaceId: payload.workspaceId))
-        case let .scratchpad(monitorId):
-            return finish(controller.activateScratchpadFromBar(on: monitorId) == .executed)
+        case let .scratchpad(index, monitorId):
+            return finish(controller.activateScratchpadFromBar(index: index, on: monitorId) == .executed)
+        case let .scratchpadWindow(index, monitorId):
+            return finish(
+                performSelectedScratchpadReveal(
+                    token: handle.id,
+                    workspaceId: payload.workspaceId,
+                    index: index,
+                    monitorId: monitorId,
+                    controller: controller
+                )
+            )
         }
+    }
+
+    private func pendingAppRevealApplications(
+        controller: WMController,
+        targetPID: pid_t,
+        destination: AppRevealFocusDestination
+    ) -> [pid_t: UInt64] {
+        switch destination {
+        case .window:
+            guard controller.workspaceManager.isAppHidden(pid: targetPID) else { return [:] }
+            return [
+                targetPID: controller.workspaceManager.appVisibilityGeneration(for: targetPID)
+            ]
+        case let .scratchpad(index, _),
+             let .scratchpadWindow(index, _):
+            var pendingApps: [pid_t: UInt64] = [:]
+            for token in controller.workspaceManager.scratchpadMembers(in: index) {
+                guard let pid = controller.workspaceManager.entry(for: token)?.pid,
+                      pendingApps[pid] == nil,
+                      controller.workspaceManager.isAppHidden(pid: pid)
+                else {
+                    continue
+                }
+                pendingApps[pid] = controller.workspaceManager.appVisibilityGeneration(for: pid)
+            }
+            return pendingApps
+        }
+    }
+
+    private func performAppRevealDestination(
+        _ destination: AppRevealFocusDestination,
+        token: WindowToken,
+        workspaceId: WorkspaceDescriptor.ID,
+        controller: WMController
+    ) -> Bool {
+        switch destination {
+        case .window:
+            navigateToWindowInternal(token: token, workspaceId: workspaceId)
+        case let .scratchpad(index, monitorId):
+            controller.activateScratchpadFromBar(index: index, on: monitorId) == .executed
+        case let .scratchpadWindow(index, monitorId):
+            performSelectedScratchpadReveal(
+                token: token,
+                workspaceId: workspaceId,
+                index: index,
+                monitorId: monitorId,
+                controller: controller
+            )
+        }
+    }
+
+    private func performSelectedScratchpadReveal(
+        token: WindowToken,
+        workspaceId: WorkspaceDescriptor.ID,
+        index: ScratchpadIndex,
+        monitorId: Monitor.ID?,
+        controller: WMController
+    ) -> Bool {
+        guard controller.workspaceManager.scratchpadIndex(for: token) == index else {
+            return navigateToWindowInternal(token: token, workspaceId: workspaceId)
+        }
+        return controller.revealScratchpadWindow(token, index: index, on: monitorId) == .executed
     }
 
     private func appRevealFocusFingerprint(controller: WMController) -> AppRevealFocusFingerprint {

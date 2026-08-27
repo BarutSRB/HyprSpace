@@ -109,11 +109,9 @@ extension WorkspaceManager {
         {
             return true
         }
-        if let scratchpadToken = scratchpadToken(),
-           let scratchpadEntry = entry(for: scratchpadToken),
-           scratchpadEntry.workspaceId == workspaceId,
-           scratchpadEntry.hiddenState == nil
-        {
+        if entries(in: workspaceId).contains(where: {
+            isScratchpadToken($0.token) && $0.hiddenState == nil
+        }) {
             return true
         }
         guard transfersManagedFocus, let managedFocusedEntry else { return false }
@@ -122,7 +120,7 @@ extension WorkspaceManager {
             || isAppHidden(pid: managedFocusedEntry.pid)
             || managedFocusedEntry.layoutReason != .standard
             || managedFocusedEntry.hiddenState != nil
-            || scratchpadToken() == managedFocusedEntry.token
+            || isScratchpadToken(managedFocusedEntry.token)
     }
 
     private func runtimeMonitorOverrideClearIsUnsafe(

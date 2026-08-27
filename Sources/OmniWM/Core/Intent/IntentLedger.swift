@@ -77,7 +77,8 @@ struct AppRevealFocusPayload: Equatable, Sendable {
     var token: WindowToken
     let workspaceId: WorkspaceDescriptor.ID
     let handleIdentity: ObjectIdentifier
-    let appVisibilityGeneration: UInt64
+    let coordinatedAppGenerations: [pid_t: UInt64]
+    var pendingAppPIDs: Set<pid_t>
     let focusIntentWatermark: IntentID?
     var focusFingerprint: AppRevealFocusFingerprint
     let destination: AppRevealFocusDestination
@@ -85,16 +86,23 @@ struct AppRevealFocusPayload: Equatable, Sendable {
 
 enum AppRevealFocusDestination: Equatable, Sendable {
     case window
-    case scratchpad(monitorId: Monitor.ID?)
+    case scratchpad(index: ScratchpadIndex, monitorId: Monitor.ID?)
+    case scratchpadWindow(index: ScratchpadIndex, monitorId: Monitor.ID?)
 
     var traceDestination: AppVisibilityTrace.Destination {
         switch self {
         case .window:
             .window
-        case .scratchpad:
+        case .scratchpad,
+             .scratchpadWindow:
             .scratchpad
         }
     }
+}
+
+enum AppRevealFocusDrainResult: Equatable, Sendable {
+    case awaitingApps
+    case ready
 }
 
 struct AppRevealFocusFingerprint: Equatable, Sendable {
@@ -493,7 +501,7 @@ final class IntentLedger {
         token: WindowToken,
         workspaceId: WorkspaceDescriptor.ID,
         handleIdentity: ObjectIdentifier,
-        appVisibilityGeneration: UInt64,
+        pendingApps: [pid_t: UInt64],
         focusFingerprint: AppRevealFocusFingerprint,
         destination: AppRevealFocusDestination = .window
     ) -> Intent {
@@ -509,7 +517,8 @@ final class IntentLedger {
                     token: token,
                     workspaceId: workspaceId,
                     handleIdentity: handleIdentity,
-                    appVisibilityGeneration: appVisibilityGeneration,
+                    coordinatedAppGenerations: pendingApps,
+                    pendingAppPIDs: Set(pendingApps.keys),
                     focusIntentWatermark: newestFocusIntentId(),
                     focusFingerprint: focusFingerprint,
                     destination: destination
@@ -525,7 +534,7 @@ final class IntentLedger {
             intentId: intent.id,
             windowId: token.windowId,
             workspaceId: workspaceId,
-            intentGeneration: appVisibilityGeneration,
+            intentGeneration: pendingApps[token.pid],
             destination: destination.traceDestination
         )
         return intent
@@ -538,7 +547,7 @@ final class IntentLedger {
             else {
                 return false
             }
-            return payload.token.pid == pid
+            return payload.pendingAppPIDs.contains(pid)
         }),
             case let .appRevealFocus(payload) = intent.kind
         else {
@@ -547,15 +556,45 @@ final class IntentLedger {
         return (intent, payload)
     }
 
+    func drainAppRevealFocus(
+        intentId: IntentID,
+        pid: pid_t,
+        appVisibilityGeneration: UInt64
+    ) -> AppRevealFocusDrainResult? {
+        guard let index = entries.firstIndex(where: { $0.id == intentId && $0.phase == .pending }),
+              case var .appRevealFocus(payload) = entries[index].kind,
+              payload.pendingAppPIDs.contains(pid),
+              let expectedGeneration = payload.coordinatedAppGenerations[pid]
+        else {
+            return nil
+        }
+        guard appVisibilityGeneration == expectedGeneration &+ 1 else {
+            _ = retire(
+                id: intentId,
+                phase: .cancelled,
+                source: nil,
+                reason: .visibilityGenerationChanged
+            )
+            deadlineWheel?.cancel(intentId: intentId)
+            return nil
+        }
+        payload.pendingAppPIDs.remove(pid)
+        entries[index].kind = .appRevealFocus(payload)
+        return payload.pendingAppPIDs.isEmpty ? .ready : .awaitingApps
+    }
+
     @discardableResult
     func confirmAppRevealFocus(intentId: IntentID) -> AppRevealFocusPayload? {
-        guard let intent = confirm(id: intentId),
-              case let .appRevealFocus(payload) = intent.kind
+        guard let open = openIntent(id: intentId),
+              case let .appRevealFocus(payload) = open.kind,
+              payload.pendingAppPIDs.isEmpty,
+              let intent = confirm(id: intentId),
+              case let .appRevealFocus(confirmedPayload) = intent.kind
         else {
             return nil
         }
         deadlineWheel?.cancel(intentId: intentId)
-        return payload
+        return confirmedPayload
     }
 
     func cancelAppRevealFocus(intentId: IntentID) {
@@ -783,7 +822,7 @@ final class IntentLedger {
                             intentId: entries[index].id,
                             windowId: newToken.windowId,
                             workspaceId: payload.workspaceId,
-                            intentGeneration: payload.appVisibilityGeneration,
+                            intentGeneration: payload.coordinatedAppGenerations[oldToken.pid],
                             destination: payload.destination.traceDestination
                         )
                     }
@@ -880,7 +919,7 @@ final class IntentLedger {
                 intentId: id,
                 windowId: payload.token.windowId,
                 workspaceId: payload.workspaceId,
-                intentGeneration: payload.appVisibilityGeneration,
+                intentGeneration: payload.coordinatedAppGenerations[payload.token.pid],
                 destination: payload.destination.traceDestination,
                 reason: resolvedReason
             )

@@ -684,6 +684,13 @@ enum CLIParser {
         return workspaceNumber
     }
 
+    private static func parseScratchpadIndex(_ rawValue: String) throws -> Int {
+        guard let index = Int(rawValue), IPCScratchpadSlots.range.contains(index) else {
+            throw CLIParseError.usage(usageText)
+        }
+        return index
+    }
+
     private static func parsePositiveInteger(_ rawValue: String) throws -> Int {
         guard let value = Int(rawValue), value > 0 else {
             throw CLIParseError.usage(usageText)
@@ -772,6 +779,8 @@ enum CLIParser {
             return .integer(try parseColumnIndex(token))
         case .windowIndex:
             return .integer(try parseWindowIndex(token))
+        case .scratchpadIndex:
+            return .integer(try parseScratchpadIndex(token))
         case .layout:
             return .layout(try parseWorkspaceLayout(token))
         case .resizeAxis:

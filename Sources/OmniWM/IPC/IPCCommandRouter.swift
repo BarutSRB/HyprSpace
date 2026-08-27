@@ -208,10 +208,10 @@ final class IPCCommandRouter {
             return controller.commandHandler.performCommand(.toggleHiddenBarPanel)
         case .toggleFocusedWindowFloating:
             return toggleFocusedWindowFloating()
-        case .scratchpadAssign:
-            return assignFocusedWindowToScratchpad()
-        case .scratchpadToggle:
-            return toggleScratchpad()
+        case let .scratchpadAssign(index):
+            return assignFocusedWindowToScratchpad(index)
+        case let .scratchpadToggle(index):
+            return toggleScratchpad(index)
         case .openMenuAnywhere:
             return controller.commandHandler.performCommand(.openMenuAnywhere)
         }
@@ -443,12 +443,12 @@ final class IPCCommandRouter {
         controller.commandHandler.performCommand(.toggleFocusedWindowFloating)
     }
 
-    private func assignFocusedWindowToScratchpad() -> ExternalCommandResult {
-        controller.commandHandler.performCommand(.assignFocusedWindowToScratchpad)
+    private func assignFocusedWindowToScratchpad(_ index: Int) -> ExternalCommandResult {
+        controller.commandHandler.performCommand(.assignFocusedWindowToScratchpad(index))
     }
 
-    private func toggleScratchpad() -> ExternalCommandResult {
-        controller.commandHandler.performCommand(.toggleScratchpadWindow)
+    private func toggleScratchpad(_ index: Int) -> ExternalCommandResult {
+        controller.commandHandler.performCommand(.toggleScratchpad(index))
     }
 
     private func switchWorkspace(to target: WorkspaceTarget) -> ExternalCommandResult {

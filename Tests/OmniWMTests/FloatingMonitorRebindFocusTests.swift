@@ -564,14 +564,14 @@ final class FloatingMonitorRebindFocusTests: XCTestCase {
         rebind(hidden, fixture: fixture)
         XCTAssertEqual(manager.workspace(for: hidden), fixture.targetWorkspaceId)
 
-        XCTAssertTrue(manager.setScratchpadToken(scratchpad))
+        XCTAssertTrue(manager.setScratchpadMembership(scratchpad, to: 1))
         rebind(scratchpad, fixture: fixture)
         XCTAssertEqual(manager.workspace(for: scratchpad), fixture.sourceWorkspaceId)
         XCTAssertEqual(
             manager.floatingState(for: scratchpad)?.referenceMonitorId,
             fixture.targetMonitor.id
         )
-        XCTAssertTrue(manager.setScratchpadToken(nil))
+        XCTAssertTrue(manager.clearScratchpadIfMatches(scratchpad))
         rebind(scratchpad, fixture: fixture)
         XCTAssertEqual(manager.workspace(for: scratchpad), fixture.targetWorkspaceId)
     }

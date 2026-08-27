@@ -235,6 +235,7 @@ final class WorkspaceNavigationHandler {
                 workspaceId: canceledRequest.workspaceId,
                 requestId: canceledRequest.requestId
             )
+            controller.abortScratchpadStacking(matching: canceledRequest.requestId)
             controller.intentLedger.discardPendingFocus(canceledRequest.token)
         }
         _ = controller.workspaceManager.enterNonManagedFocus()

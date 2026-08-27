@@ -23,7 +23,7 @@ final class WindowAdmissionIdentityLifecycleTests: XCTestCase {
             to: workspaceId,
             mode: .floating
         )
-        XCTAssertTrue(controller.workspaceManager.setScratchpadToken(token))
+        XCTAssertTrue(controller.workspaceManager.setScratchpadMembership(token, to: 1))
         controller.workspaceManager.setHiddenState(
             HiddenState(
                 proportionalPosition: .zero,

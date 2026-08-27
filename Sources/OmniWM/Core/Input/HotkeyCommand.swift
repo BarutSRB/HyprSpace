@@ -104,8 +104,8 @@ enum HotkeyCommand: Codable, Equatable, Hashable {
     case raiseAllFloatingWindows
     case rescueOffscreenWindows
     case toggleFocusedWindowFloating
-    case assignFocusedWindowToScratchpad
-    case toggleScratchpadWindow
+    case assignFocusedWindowToScratchpad(Int)
+    case toggleScratchpad(Int)
 
     case openMenuAnywhere
 

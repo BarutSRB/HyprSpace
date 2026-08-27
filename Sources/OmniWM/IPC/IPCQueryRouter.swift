@@ -51,7 +51,7 @@ final class IPCQueryRouter {
                 showLabels: resolved.showLabels,
                 backgroundOpacity: resolved.backgroundOpacity,
                 barHeight: Double(geometry.barHeight),
-                scratchpad: projection.scratchpad.map(workspaceBarScratchpad(from:)),
+                scratchpads: projection.scratchpads.map(workspaceBarScratchpad(from:)),
                 workspaces: projection.items.map(workspaceBarWorkspace(from:))
             )
         }
@@ -282,7 +282,9 @@ final class IPCQueryRouter {
 
     private func workspaceBarScratchpad(from item: WorkspaceBarScratchpadItem) -> IPCWorkspaceBarScratchpad {
         IPCWorkspaceBarScratchpad(
-            window: workspaceBarApp(from: item.window),
+            index: item.index,
+            label: item.label,
+            windows: item.windows.map(workspaceBarApp(from:)),
             isVisible: item.isVisible
         )
     }
@@ -298,7 +300,7 @@ final class IPCQueryRouter {
         let appInfo = controller.appInfoCache.info(for: entry.pid)
         let hiddenState = controller.workspaceManager.hiddenState(for: entry.token)
         let isAppHidden = controller.workspaceManager.isAppHidden(pid: entry.pid)
-        let isScratchpad = controller.workspaceManager.isScratchpadToken(entry.token)
+        let scratchpadIndex = controller.workspaceManager.scratchpadIndex(for: entry.token)
         let isVisible = isWindowVisible(
             entry,
             visibleWorkspaceIds: visibleWorkspaceIds,
@@ -323,7 +325,8 @@ final class IPCQueryRouter {
             isFocused: include("is-focused", in: fields) ? (entry.token == focusedToken) : nil,
             isVisible: include("is-visible", in: fields) ? isVisible : nil,
             isAppHidden: include("is-app-hidden", in: fields) ? isAppHidden : nil,
-            isScratchpad: include("is-scratchpad", in: fields) ? isScratchpad : nil,
+            isScratchpad: include("is-scratchpad", in: fields) ? scratchpadIndex != nil : nil,
+            scratchpadIndex: include("scratchpad-index", in: fields) ? scratchpadIndex?.rawValue : nil,
             hiddenReason: include("hidden-reason", in: fields) ? hiddenState.map(ipcHiddenReason(from:)) : nil
         )
     }

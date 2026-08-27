@@ -476,7 +476,7 @@ final class WorkspaceMonitorMoveStateTests: XCTestCase {
             ),
             for: hiddenToken
         )
-        XCTAssertTrue(manager.setScratchpadToken(scratchToken))
+        XCTAssertTrue(manager.setScratchpadMembership(scratchToken, to: 1))
         manager.setHiddenState(
             HiddenState(
                 proportionalPosition: .zero,
@@ -535,7 +535,7 @@ final class WorkspaceMonitorMoveStateTests: XCTestCase {
             if kind == "native" {
                 manager.setLayoutReason(.nativeFullscreen, for: token)
             } else {
-                XCTAssertTrue(manager.setScratchpadToken(token))
+                XCTAssertTrue(manager.setScratchpadMembership(token, to: 1))
             }
             let initialSeq = manager.worldSeq
             let initialEntry = try XCTUnwrap(manager.entry(for: token))
@@ -640,7 +640,7 @@ final class WorkspaceMonitorMoveStateTests: XCTestCase {
             mode: .floating,
             manager: manager
         )
-        XCTAssertTrue(manager.setScratchpadToken(token))
+        XCTAssertTrue(manager.setScratchpadMembership(token, to: 1))
         XCTAssertNil(manager.focusedToken)
         XCTAssertNil(manager.hiddenState(for: token))
         let initialSeq = manager.worldSeq
@@ -1120,7 +1120,7 @@ final class WorkspaceMonitorMoveStateTests: XCTestCase {
             ).status,
             .executed
         )
-        XCTAssertTrue(manager.setScratchpadToken(token))
+        XCTAssertTrue(manager.setScratchpadMembership(token, to: 1))
         XCTAssertEqual(manager.floatingState(for: token)?.referenceMonitorId, fixture.center.id)
         var outcomes: [WorkspaceMonitorMoveOutcome] = []
         manager.onDeferredWorkspaceMonitorMove = { outcomes.append($0) }
@@ -1172,7 +1172,7 @@ final class WorkspaceMonitorMoveStateTests: XCTestCase {
             ).status,
             .executed
         )
-        XCTAssertTrue(manager.setScratchpadToken(token))
+        XCTAssertTrue(manager.setScratchpadMembership(token, to: 1))
         var outcomes: [WorkspaceMonitorMoveOutcome] = []
         manager.onDeferredWorkspaceMonitorMove = { outcomes.append($0) }
 

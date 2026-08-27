@@ -417,7 +417,8 @@ final class WorkspaceManager {
              .niriPlacementsResolved,
              .nonManagedFocusChanged,
              .nonManagedFocusTargetChanged,
-             .scratchpadChanged,
+             .scratchpadMembershipChanged,
+             .scratchpadRevealChanged,
              .selectionChanged,
              .spaceTopologyChanged,
              .suppressedFocusChanged,
@@ -894,22 +895,44 @@ final class WorkspaceManager {
         world.focus.isNonManagedFocusActive
     }
 
-    func scratchpadToken() -> WindowToken? {
-        world.scratchpadToken
+    func scratchpadMembers(in index: ScratchpadIndex) -> [WindowToken] {
+        world.scratchpadMembers[index] ?? []
+    }
+
+    func occupiedScratchpadIndices() -> [ScratchpadIndex] {
+        world.scratchpadMembers.keys.sorted()
+    }
+
+    func scratchpadIndex(for token: WindowToken) -> ScratchpadIndex? {
+        world.scratchpadIndex(for: token)
+    }
+
+    func isScratchpadToken(_ token: WindowToken) -> Bool {
+        world.scratchpadIndex(for: token) != nil
+    }
+
+    func revealedScratchpadIndex() -> ScratchpadIndex? {
+        world.revealedScratchpad
     }
 
     @discardableResult
-    func setScratchpadToken(_ token: WindowToken?) -> Bool {
-        updateScratchpadToken(token, notify: true)
+    func setScratchpadMembership(_ token: WindowToken, to index: ScratchpadIndex?) -> Bool {
+        updateScratchpadMembership(token, to: index, notify: true)
     }
 
     @discardableResult
     func clearScratchpadIfMatches(_ token: WindowToken) -> Bool {
-        clearScratchpadToken(matching: token, notify: true)
+        updateScratchpadMembership(token, to: nil, notify: true)
     }
 
-    func isScratchpadToken(_ token: WindowToken) -> Bool {
-        world.scratchpadToken == token
+    @discardableResult
+    func setRevealedScratchpad(_ index: ScratchpadIndex?) -> Bool {
+        guard world.revealedScratchpad != index else { return false }
+        if let index, world.scratchpadMembers[index] == nil { return false }
+        recordReconcileEvent(.scratchpadRevealChanged(index: index, source: .workspaceManager))
+        notifySessionStateChanged()
+        drainPendingRuntimeMonitorOverrideClears()
+        return true
     }
 
     @discardableResult
@@ -1594,17 +1617,20 @@ final class WorkspaceManager {
     }
 
     @discardableResult
-    private func updateScratchpadToken(_ token: WindowToken?, notify: Bool) -> Bool {
-        let previousToken = world.scratchpadToken
-        guard previousToken != token else { return false }
-        let previousWorkspaceId = previousToken.flatMap { world.entry(for: $0)?.workspaceId }
-        let nextWorkspaceId = token.flatMap { world.entry(for: $0)?.workspaceId }
-        if token != nil, nextWorkspaceId == nil {
+    private func updateScratchpadMembership(
+        _ token: WindowToken,
+        to index: ScratchpadIndex?,
+        notify: Bool
+    ) -> Bool {
+        guard world.scratchpadIndex(for: token) != index else { return false }
+        let workspaceId = world.entry(for: token)?.workspaceId
+        if index != nil, workspaceId == nil {
             return false
         }
-        recordReconcileEvent(.scratchpadChanged(token: token, source: .workspaceManager))
-        let affectedWorkspaceIds = Set([previousWorkspaceId, nextWorkspaceId].compactMap { $0 })
-        for workspaceId in affectedWorkspaceIds {
+        recordReconcileEvent(
+            .scratchpadMembershipChanged(token: token, index: index, source: .workspaceManager)
+        )
+        if let workspaceId {
             noteInvalidation(workspaceId: workspaceId, domains: [.workspace, .layout, .focus])
         }
         if notify {
@@ -1612,12 +1638,6 @@ final class WorkspaceManager {
         }
         drainPendingRuntimeMonitorOverrideClears()
         return true
-    }
-
-    @discardableResult
-    private func clearScratchpadToken(matching token: WindowToken, notify: Bool) -> Bool {
-        guard world.scratchpadToken == token else { return false }
-        return updateScratchpadToken(nil, notify: notify)
     }
 
     private func normalizedFloatingOrigin(
@@ -2038,12 +2058,7 @@ final class WorkspaceManager {
         )
 
         let focusChanged = auxiliaryFocusStateChanged(from: previousFocus)
-        let scratchpadChanged = world.scratchpadToken == oldToken
-        if scratchpadChanged {
-            _ = updateScratchpadToken(newToken, notify: false)
-        }
-
-        if focusChanged || scratchpadChanged {
+        if focusChanged || world.scratchpadIndex(for: newToken) != nil {
             notifySessionStateChanged()
         }
 
@@ -2397,7 +2412,7 @@ final class WorkspaceManager {
             _ = exitNonManagedFocus()
         }
         let focusChanged = auxiliaryFocusStateChanged(from: previousFocus)
-        let scratchpadChanged = clearScratchpadToken(matching: entry.token, notify: false)
+        let scratchpadChanged = updateScratchpadMembership(entry.token, to: nil, notify: false)
         if focusChanged || scratchpadChanged {
             notifySessionStateChanged()
         }
@@ -2426,7 +2441,7 @@ final class WorkspaceManager {
                 source: .workspaceManager
             )
         )
-        if world.scratchpadToken == token,
+        if world.scratchpadIndex(for: token) != nil,
            previousWorkspace.map(pendingRuntimeMonitorOverrideClearWorkspaceIds.contains) == true
         {
             drainPendingRuntimeMonitorOverrideClears()
@@ -3888,7 +3903,8 @@ extension WorkspaceManager {
              .interactionMonitorChanged,
              .nativeFullscreenPlaceholderSelected,
              .nonManagedFocusTargetChanged,
-             .scratchpadChanged,
+             .scratchpadMembershipChanged,
+             .scratchpadRevealChanged,
              .selectionChanged,
              .spaceTopologyChanged,
              .suppressedFocusChanged,

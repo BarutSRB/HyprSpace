@@ -303,8 +303,13 @@ enum WMEvent: Equatable {
         nodeId: NodeId,
         source: WMEventSource
     )
-    case scratchpadChanged(
-        token: WindowToken?,
+    case scratchpadMembershipChanged(
+        token: WindowToken,
+        index: ScratchpadIndex?,
+        source: WMEventSource
+    )
+    case scratchpadRevealChanged(
+        index: ScratchpadIndex?,
         source: WMEventSource
     )
     case visibleWorkspacesChanged(
@@ -402,7 +407,8 @@ enum WMEvent: Equatable {
              .niriPlacementsResolved,
              .nonManagedFocusChanged,
              .nonManagedFocusTargetChanged,
-             .scratchpadChanged,
+             .scratchpadMembershipChanged,
+             .scratchpadRevealChanged,
              .selectionChanged,
              .spaceTopologyChanged,
              .suppressedFocusChanged,
@@ -494,8 +500,10 @@ enum WMEvent: Equatable {
             "viewport_forgotten workspaces=\(workspaceIds.count)"
         case let .selectionChanged(workspaceId, nodeId, _):
             "selection_changed workspace=\(workspaceId.uuidString) node=\(nodeId)"
-        case let .scratchpadChanged(token, _):
-            "scratchpad_changed token=\(token.map(String.init(describing:)) ?? "nil")"
+        case let .scratchpadMembershipChanged(token, index, _):
+            "scratchpad_membership_changed token=\(token) index=\(index.map(String.init(describing:)) ?? "nil")"
+        case let .scratchpadRevealChanged(index, _):
+            "scratchpad_reveal_changed index=\(index.map(String.init(describing:)) ?? "nil")"
         case let .visibleWorkspacesChanged(sessions, _):
             "visible_workspaces_changed monitors=\(sessions.count)"
         case let .spaceTopologyChanged(topology, _):

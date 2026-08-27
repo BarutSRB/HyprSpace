@@ -77,6 +77,7 @@ extension AXEventHandler {
                 workspaceId: activeRequest.workspaceId,
                 requestId: activeRequest.requestId
             )
+            controller.abortScratchpadStacking(matching: activeRequest.requestId)
             controller.intentLedger.discardPendingFocus(activeRequest.token)
         }
         if controller.workspaceManager.renderableFocusToken?.pid == pid {
@@ -150,20 +151,31 @@ extension AXEventHandler {
         }
         let entries = controller.workspaceManager.entries(forPid: pid)
         let affectedWorkspaceIds = Set(entries.map(\.workspaceId))
-        let revealIntentId = controller.intentLedger.openAppRevealFocusIntent(pid: pid)?.intent.id
+        let revealIntent = controller.intentLedger.openAppRevealFocusIntent(pid: pid)
         controller.workspaceManager.setAppHidden(false, pid: pid, source: source)
         controller.axManager.setMacOSAppHidden(
             false,
             pid: pid,
             entries: entries.map { (pid: $0.pid, windowId: $0.windowId) }
         )
+        controller.reconcileScratchpadMembersAfterAppUnhide(pid: pid)
         controller.windowActionHandler.refreshOverviewProjection(
             affectedWorkspaceIds: affectedWorkspaceIds
         )
-        let completeReveal = revealIntentId.map { intentId -> LayoutRefreshController.PostLayoutAction in
-            { [weak controller] in
-                _ = controller?.windowActionHandler.completeAppRevealFocus(intentId: intentId)
+        let revealReady = revealIntent.flatMap { revealIntent in
+            controller.intentLedger.drainAppRevealFocus(
+                intentId: revealIntent.intent.id,
+                pid: pid,
+                appVisibilityGeneration: controller.workspaceManager.appVisibilityGeneration(for: pid)
+            )
+        } == .ready
+        let completeReveal: LayoutRefreshController.PostLayoutAction?
+        if revealReady, let revealIntentId = revealIntent?.intent.id {
+            completeReveal = { [weak controller] in
+                _ = controller?.windowActionHandler.completeAppRevealFocus(intentId: revealIntentId)
             }
+        } else {
+            completeReveal = nil
         }
         let activeAffectedWorkspaceIds = activeWorkspaceIds(
             in: affectedWorkspaceIds,

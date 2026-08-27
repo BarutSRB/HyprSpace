@@ -212,7 +212,7 @@ final class WorkspaceBarViewLayoutTests: XCTestCase {
                 floatingWindows: []
             )
             let snapshot = WorkspaceBarSnapshot(
-                projection: WorkspaceBarProjection(items: [item], scratchpad: nil),
+                projection: WorkspaceBarProjection(items: [item], scratchpads: []),
                 showLabels: true,
                 showSystemStatsButton: false,
                 backgroundOpacity: 0.6,
@@ -230,7 +230,7 @@ final class WorkspaceBarViewLayoutTests: XCTestCase {
                         motionPolicy: MotionPolicy(animationsEnabled: false),
                         onFocusWorkspace: { _ in },
                         onFocusWindow: { _ in },
-                        onActivateScratchpad: {}
+                        onActivateScratchpad: { _ in }
                     )
                 }
             )
@@ -249,14 +249,184 @@ final class WorkspaceBarViewLayoutTests: XCTestCase {
         }
     }
 
+    func testLongRevealedScratchpadFallsBackToAllCompactWithinSplitSegment() throws {
+        let monitor = splitMonitor()
+        let resolved = splitBarSettings()
+        let activeWorkspace = WorkspaceBarItem(
+            id: UUID(),
+            name: "1",
+            rawName: "1",
+            isFocused: true,
+            tiledWindows: [],
+            floatingWindows: []
+        )
+        let secondaryWorkspace = WorkspaceBarItem(
+            id: UUID(),
+            name: "Secondary workspace",
+            rawName: "Secondary workspace",
+            isFocused: false,
+            tiledWindows: [],
+            floatingWindows: []
+        )
+        let scratchpads = (1 ... 10).map { index in
+            WorkspaceBarScratchpadItem(
+                index: index,
+                label: index == 1 ? String(repeating: "Long revealed scratchpad ", count: 20) : nil,
+                windows: (0 ..< 5).map { appIndex in
+                    makeWindowItem(
+                        appName: "App \(appIndex)",
+                        windowCount: 1,
+                        hiddenWindowCount: 0,
+                        tokenOffset: index * 100 + appIndex
+                    )
+                },
+                isVisible: false,
+                isRevealed: index == 1
+            )
+        }
+        let baseSnapshot = WorkspaceBarSnapshot(
+            projection: WorkspaceBarProjection(
+                items: [activeWorkspace, secondaryWorkspace],
+                scratchpads: []
+            ),
+            showLabels: true,
+            showSystemStatsButton: false,
+            backgroundOpacity: 0.6,
+            barHeight: 24,
+            accentColor: nil,
+            textColor: nil
+        )
+        let baseView = NSHostingView(
+            rootView: WorkspaceBarMeasurementView(snapshot: baseSnapshot, slice: .secondary)
+        )
+        baseView.layoutSubtreeIfNeeded()
+        let geometry = WorkspaceBarGeometry.resolve(monitor: monitor, resolved: resolved, isVisible: true)
+        let availableWidth = try XCTUnwrap(
+            geometry.splitAvailableWidths(monitor: monitor, resolved: resolved)
+        ).secondary
+        let compacted = WorkspaceBarScratchpadLayout.compactedItems(
+            scratchpads,
+            availableWidth: availableWidth,
+            baseWidth: baseView.fittingSize.width,
+            barHeight: 24,
+            hasAdjacentContent: true
+        )
+        let snapshot = WorkspaceBarSnapshot(
+            projection: WorkspaceBarProjection(
+                items: [activeWorkspace, secondaryWorkspace],
+                scratchpads: compacted
+            ),
+            showLabels: true,
+            showSystemStatsButton: false,
+            backgroundOpacity: 0.6,
+            barHeight: 24,
+            accentColor: nil,
+            textColor: nil
+        )
+        let hostingView = NSHostingView(
+            rootView: WorkspaceBarMeasurementView(snapshot: snapshot, slice: .secondary)
+        )
+
+        hostingView.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(compacted.allSatisfy { $0.presentation == .compact })
+        XCTAssertGreaterThan(baseView.fittingSize.width, 0)
+        XCTAssertLessThanOrEqual(hostingView.fittingSize.width, availableWidth)
+    }
+
+    func testDefaultScratchpadsCompactBeforeSplitPanelClips() throws {
+        let scratchpads = (1 ... 10).map { index in
+            WorkspaceBarScratchpadItem(
+                index: index,
+                label: nil,
+                windows: [
+                    makeWindowItem(
+                        appName: "App",
+                        windowCount: 1,
+                        hiddenWindowCount: 0,
+                        tokenOffset: index
+                    )
+                ],
+                isVisible: false
+            )
+        }
+        let result = try splitCompactionResult(for: scratchpads)
+
+        XCTAssertGreaterThan(result.expandedWidth, result.availableWidth)
+        XCTAssertTrue(result.compacted.allSatisfy { $0.presentation == .compact })
+        XCTAssertLessThanOrEqual(result.compactedWidth, result.availableWidth)
+    }
+
+    func testMixedScratchpadsCompactBeforeFractionalRoundingClips() throws {
+        let label = "A practical scratchpad label for notes and terminal work. A practica"
+        let scratchpads = (1 ... 8).map { index in
+            WorkspaceBarScratchpadItem(
+                index: index,
+                label: index == 1 ? label : nil,
+                windows: [
+                    makeWindowItem(
+                        appName: "App",
+                        windowCount: 1,
+                        hiddenWindowCount: 0,
+                        tokenOffset: index
+                    )
+                ],
+                isVisible: false,
+                isRevealed: index == 1
+            )
+        }
+        let result = try splitCompactionResult(for: scratchpads)
+
+        XCTAssertGreaterThan(result.mixedWidth, result.availableWidth)
+        XCTAssertTrue(result.compacted.allSatisfy { $0.presentation == .compact })
+        XCTAssertLessThanOrEqual(result.compactedWidth, result.availableWidth)
+    }
+
+    func testImpossibleScratchpadWidthUsesAllCompactAsTheFloor() {
+        let scratchpads = (1 ... 10).map { index in
+            WorkspaceBarScratchpadItem(
+                index: index,
+                label: index == 1 ? String(repeating: "Long label ", count: 20) : nil,
+                windows: [
+                    makeWindowItem(
+                        appName: "App",
+                        windowCount: 1,
+                        hiddenWindowCount: 0,
+                        tokenOffset: index
+                    )
+                ],
+                isVisible: false,
+                isRevealed: index == 1
+            )
+        }
+
+        let compacted = WorkspaceBarScratchpadLayout.compactedItems(
+            scratchpads,
+            availableWidth: 40,
+            baseWidth: 100,
+            barHeight: 24,
+            hasAdjacentContent: true
+        )
+
+        XCTAssertTrue(compacted.allSatisfy { $0.presentation == .compact })
+        XCTAssertGreaterThan(
+            100 + 8 + WorkspaceBarScratchpadLayout.estimatedWidth(of: compacted, barHeight: 24),
+            40
+        )
+    }
+
     private func makeWindowItem(
         appName: String,
         windowCount: Int,
         hiddenWindowCount: Int,
-        isFocused: Bool = false
+        isFocused: Bool = false,
+        tokenOffset: Int = 0
     ) -> WorkspaceBarWindowItem {
         let infos = (0 ..< windowCount).map { index in
-            let token = WindowToken(pid: 42 + Int32(index), windowId: index + 1)
+            let token = WindowToken(
+                pid: 42 + Int32(tokenOffset + index),
+                windowId: tokenOffset + index + 1
+            )
             return WorkspaceBarWindowInfo(
                 id: token,
                 handle: WindowHandle(id: token),
@@ -280,6 +450,108 @@ final class WorkspaceBarViewLayoutTests: XCTestCase {
         )
     }
 
+    private func splitMonitor() -> Monitor {
+        Monitor(
+            id: Monitor.ID(displayId: 7_001),
+            displayId: 7_001,
+            frame: CGRect(x: 0, y: 0, width: 1512, height: 982),
+            visibleFrame: CGRect(x: 0, y: 0, width: 1512, height: 950),
+            hasNotch: true,
+            notchRange: 656 ... 856,
+            name: "Test"
+        )
+    }
+
+    private func splitBarSettings() -> ResolvedBarSettings {
+        ResolvedBarSettings(
+            enabled: true,
+            showLabels: true,
+            showFloatingWindows: false,
+            deduplicateAppIcons: false,
+            hideEmptyWorkspaces: false,
+            excludedBundleIDs: [],
+            reserveLayoutSpace: false,
+            notchMode: .splitActiveLeft,
+            notchActiveZoneWidth: 180,
+            systemStatsButton: false,
+            position: .overlappingMenuBar,
+            windowLevel: .popup,
+            height: 24,
+            backgroundOpacity: 0.1,
+            xOffset: 0,
+            yOffset: 0,
+            accentColor: nil,
+            textColor: nil
+        )
+    }
+
+    private func splitCompactionResult(
+        for scratchpads: [WorkspaceBarScratchpadItem]
+    ) throws -> (
+        compacted: [WorkspaceBarScratchpadItem],
+        availableWidth: CGFloat,
+        expandedWidth: CGFloat,
+        mixedWidth: CGFloat,
+        compactedWidth: CGFloat
+    ) {
+        let activeWorkspace = WorkspaceBarItem(
+            id: UUID(),
+            name: "1",
+            rawName: "1",
+            isFocused: true,
+            tiledWindows: [],
+            floatingWindows: []
+        )
+        let baseSnapshot = WorkspaceBarSnapshot(
+            projection: WorkspaceBarProjection(items: [activeWorkspace], scratchpads: []),
+            showLabels: true,
+            showSystemStatsButton: false,
+            backgroundOpacity: 0.6,
+            barHeight: 24,
+            accentColor: nil,
+            textColor: nil
+        )
+        let baseView = NSHostingView(
+            rootView: WorkspaceBarMeasurementView(snapshot: baseSnapshot, slice: .secondary)
+        )
+        baseView.layoutSubtreeIfNeeded()
+        let monitor = splitMonitor()
+        let resolved = splitBarSettings()
+        let availableWidth = try XCTUnwrap(
+            WorkspaceBarGeometry.resolve(monitor: monitor, resolved: resolved, isVisible: true)
+                .splitAvailableWidths(monitor: monitor, resolved: resolved)
+        ).secondary
+        let compacted = WorkspaceBarScratchpadLayout.compactedItems(
+            scratchpads,
+            availableWidth: availableWidth,
+            baseWidth: baseView.fittingSize.width,
+            barHeight: 24,
+            hasAdjacentContent: false
+        )
+        let mixed = scratchpads.map {
+            $0.presented(as: $0.isRevealed ? .expanded : .compact)
+        }
+
+        func measuredWidth(_ items: [WorkspaceBarScratchpadItem]) -> CGFloat {
+            let view = NSHostingView(
+                rootView: WorkspaceBarMeasurementView(
+                    snapshot: baseSnapshot.replacingScratchpads(items),
+                    slice: .secondary
+                )
+            )
+            view.layoutSubtreeIfNeeded()
+            return view.fittingSize.width
+        }
+
+        return (
+            compacted,
+            availableWidth,
+            measuredWidth(scratchpads),
+            measuredWidth(mixed),
+            measuredWidth(compacted)
+        )
+    }
+
     private func makeSnapshot(
         windows: [WorkspaceBarWindowItem],
         barHeight: CGFloat
@@ -293,7 +565,7 @@ final class WorkspaceBarViewLayoutTests: XCTestCase {
             floatingWindows: []
         )
         return WorkspaceBarSnapshot(
-            projection: WorkspaceBarProjection(items: [item], scratchpad: nil),
+            projection: WorkspaceBarProjection(items: [item], scratchpads: []),
             showLabels: true,
             showSystemStatsButton: false,
             backgroundOpacity: 0.6,

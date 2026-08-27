@@ -20,7 +20,7 @@ struct WorkspaceBarItem: Identifiable, Equatable {
 
 struct WorkspaceBarProjection: Equatable {
     let items: [WorkspaceBarItem]
-    let scratchpad: WorkspaceBarScratchpadItem?
+    let scratchpads: [WorkspaceBarScratchpadItem]
 }
 
 struct WorkspaceBarWindowItem: Identifiable, Equatable, @unchecked Sendable {
@@ -64,15 +64,60 @@ struct WorkspaceBarWindowInfo: Identifiable, Equatable, @unchecked Sendable {
     let isAppHidden: Bool
 }
 
-struct WorkspaceBarScratchpadItem: Identifiable, Equatable {
-    let window: WorkspaceBarWindowItem
-    let isVisible: Bool
-    let workspaceId: WorkspaceDescriptor.ID
-    let workspaceName: String
-    let rawWorkspaceName: String
+enum WorkspaceBarScratchpadPresentation: Equatable {
+    case expanded
+    case compact
+}
 
-    var id: WindowToken {
-        window.id
+struct WorkspaceBarScratchpadItem: Identifiable, Equatable {
+    let index: Int
+    let label: String?
+    let windows: [WorkspaceBarWindowItem]
+    let isVisible: Bool
+    let isRevealed: Bool
+    let presentation: WorkspaceBarScratchpadPresentation
+
+    init(
+        index: Int,
+        label: String?,
+        windows: [WorkspaceBarWindowItem],
+        isVisible: Bool,
+        isRevealed: Bool? = nil,
+        presentation: WorkspaceBarScratchpadPresentation = .expanded
+    ) {
+        self.index = index
+        self.label = label
+        self.windows = windows
+        self.isVisible = isVisible
+        self.isRevealed = isRevealed ?? isVisible
+        self.presentation = presentation
+    }
+
+    var id: Int {
+        index
+    }
+
+    var name: String {
+        label ?? String(index)
+    }
+
+    var isFocused: Bool {
+        windows.contains(where: \.isFocused)
+    }
+
+    var windowCount: Int {
+        windows.reduce(0) { $0 + $1.windowCount }
+    }
+
+    func presented(as presentation: WorkspaceBarScratchpadPresentation) -> Self {
+        Self(
+            index: index,
+            label: label,
+            windows: windows,
+            isVisible: isVisible,
+            isRevealed: isRevealed,
+            presentation: presentation
+        )
     }
 }
 
@@ -89,8 +134,20 @@ struct WorkspaceBarSnapshot: Equatable {
         projection.items
     }
 
-    var scratchpad: WorkspaceBarScratchpadItem? {
-        projection.scratchpad
+    var scratchpads: [WorkspaceBarScratchpadItem] {
+        projection.scratchpads
+    }
+
+    func replacingScratchpads(_ scratchpads: [WorkspaceBarScratchpadItem]) -> Self {
+        Self(
+            projection: WorkspaceBarProjection(items: items, scratchpads: scratchpads),
+            showLabels: showLabels,
+            showSystemStatsButton: showSystemStatsButton,
+            backgroundOpacity: backgroundOpacity,
+            barHeight: barHeight,
+            accentColor: accentColor,
+            textColor: textColor
+        )
     }
 }
 
@@ -107,8 +164,8 @@ enum WorkspaceBarIslandSlice: Hashable {
         }
     }
 
-    func scratchpad(in snapshot: WorkspaceBarSnapshot) -> WorkspaceBarScratchpadItem? {
-        self == .active ? nil : snapshot.scratchpad
+    func scratchpads(in snapshot: WorkspaceBarSnapshot) -> [WorkspaceBarScratchpadItem] {
+        self == .active ? [] : snapshot.scratchpads
     }
 }
 
@@ -129,7 +186,7 @@ struct WorkspaceBarView: View {
     @Bindable var motionPolicy: MotionPolicy
     let onFocusWorkspace: (WorkspaceBarItem) -> Void
     let onFocusWindow: (WindowHandle) -> Void
-    let onActivateScratchpad: () -> Void
+    let onActivateScratchpad: (Int) -> Void
     var onToggleSystemStats: () -> Void = {}
     var onSystemStatsAnchorChange: (CGPoint?) -> Void = { _ in }
 
@@ -162,7 +219,7 @@ struct WorkspaceBarMeasurementView: View {
             animationsEnabled: false,
             onFocusWorkspace: { _ in },
             onFocusWindow: { _ in },
-            onActivateScratchpad: {},
+            onActivateScratchpad: { _ in },
             onToggleSystemStats: {},
             onSystemStatsAnchorChange: { _ in }
         )
@@ -178,7 +235,7 @@ private struct WorkspaceBarContentView: View {
     let animationsEnabled: Bool
     let onFocusWorkspace: (WorkspaceBarItem) -> Void
     let onFocusWindow: (WindowHandle) -> Void
-    let onActivateScratchpad: () -> Void
+    let onActivateScratchpad: (Int) -> Void
     let onToggleSystemStats: () -> Void
     let onSystemStatsAnchorChange: (CGPoint?) -> Void
 
@@ -234,7 +291,7 @@ private struct WorkspaceBarContentView: View {
                 )
             }
 
-            if let scratchpad = slice.scratchpad(in: snapshot) {
+            ForEach(slice.scratchpads(in: snapshot)) { scratchpad in
                 ScratchpadPillView(
                     item: scratchpad,
                     iconSize: iconSize,
@@ -558,7 +615,7 @@ private struct ScratchpadPillView: View {
     let animationsEnabled: Bool
     let accentColor: Color?
     let textColor: Color?
-    let onActivateScratchpad: () -> Void
+    let onActivateScratchpad: (Int) -> Void
 
     @State private var isHovered = false
 
@@ -570,50 +627,97 @@ private struct ScratchpadPillView: View {
         textColor ?? .secondary
     }
 
+    private var isHighlighted: Bool {
+        item.isRevealed || item.isFocused
+    }
+
+    private var shownWindows: ArraySlice<WorkspaceBarWindowItem> {
+        item.windows.prefix(WorkspaceBarScratchpadLayout.maximumVisibleAppIcons)
+    }
+
+    private var hiddenAppIconCount: Int {
+        max(0, item.windows.count - shownWindows.count)
+    }
+
     var body: some View {
-        Button(action: onActivateScratchpad) {
-            HStack(spacing: 5) {
-                Image(systemName: "tray.fill")
-                    .font(.system(size: max(10, iconSize * 0.64), weight: .semibold))
-                    .foregroundColor(item.window.isFocused ? resolvedAccentColor : resolvedSecondaryTextColor)
+        Button {
+            onActivateScratchpad(item.index)
+        } label: {
+            HStack(spacing: item.presentation == .compact ? 3 : 5) {
+                if item.presentation == .expanded {
+                    Image(systemName: "tray.fill")
+                        .font(.system(size: max(10, iconSize * 0.64), weight: .semibold))
+                        .foregroundColor(isHighlighted ? resolvedAccentColor : resolvedSecondaryTextColor)
+                        .accessibilityHidden(true)
+                }
+
+                Text(item.name)
+                    .font(.system(size: max(9, iconSize * 0.6), weight: .medium))
+                    .foregroundColor(isHighlighted ? resolvedAccentColor : resolvedSecondaryTextColor)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(
+                        maxWidth: item.presentation == .compact
+                            ? WorkspaceBarScratchpadLayout.compactLabelMaximumWidth
+                            : nil
+                    )
                     .accessibilityHidden(true)
 
-                AppIconImage(icon: item.window.icon)
-                    .frame(width: iconSize, height: iconSize)
-                    .opacity(item.window.isFocused ? 1 : 0.82)
-                    .accessibilityHidden(true)
+                if item.presentation == .compact {
+                    WindowCountBadge(
+                        count: item.windowCount,
+                        iconSize: iconSize,
+                        textColor: textColor
+                    )
+                } else {
+                    ForEach(shownWindows) { window in
+                        AppIconImage(icon: window.icon)
+                            .frame(width: iconSize, height: iconSize)
+                            .opacity(window.isFocused ? 1 : 0.82)
+                            .accessibilityHidden(true)
+                    }
+
+                    if hiddenAppIconCount > 0 {
+                        WindowCountBadge(
+                            count: hiddenAppIconCount,
+                            prefix: "+",
+                            iconSize: iconSize,
+                            textColor: textColor
+                        )
+                    }
+                }
             }
-            .padding(.horizontal, 8)
+            .padding(.horizontal, item.presentation == .compact ? 5 : 8)
             .frame(height: itemHeight)
             .contentShape(Capsule(style: .continuous))
         }
         .buttonStyle(.plain)
         .scaleEffect(scale)
         .animation(animationsEnabled ? .easeInOut(duration: 0.12) : nil, value: isHovered)
-        .animation(animationsEnabled ? .easeInOut(duration: 0.15) : nil, value: item.window.isFocused)
+        .animation(animationsEnabled ? .easeInOut(duration: 0.15) : nil, value: isHighlighted)
         .background {
             Capsule(style: .continuous)
-                .fill(item.window.isFocused ? resolvedAccentColor.opacity(0.18) : Color.secondary.opacity(0.08))
+                .fill(isHighlighted ? resolvedAccentColor.opacity(0.18) : Color.secondary.opacity(0.08))
                 .background(.regularMaterial, in: Capsule(style: .continuous))
                 .overlay {
                     Capsule(style: .continuous)
                         .strokeBorder(
-                            item.window.isFocused ? resolvedAccentColor : Color.secondary
+                            item.isFocused ? resolvedAccentColor : Color.secondary
                                 .opacity(item.isVisible ? 0.36 : 0.22),
-                            lineWidth: item.window.isFocused ? 1.2 : 0.8
+                            lineWidth: item.isFocused ? 1.2 : 0.8
                         )
                 }
         }
         .onHover { hovering in
             isHovered = hovering
         }
-        .accessibilityLabel("Scratchpad")
+        .accessibilityLabel("Scratchpad \(item.name)")
         .accessibilityValue(accessibilityValue)
-        .help("Scratchpad: \(item.window.appName), \(item.isVisible ? "visible" : "hidden")")
+        .help("Scratchpad \(item.name): \(windowSummary), \(item.isVisible ? "visible" : "hidden")")
     }
 
     private var scale: CGFloat {
-        if item.window.isFocused {
+        if item.isFocused {
             1.04
         } else if isHovered {
             1.03
@@ -622,12 +726,17 @@ private struct ScratchpadPillView: View {
         }
     }
 
+    private var windowSummary: String {
+        item.windowCount == 1
+            ? item.windows[0].appName
+            : "\(item.windowCount) windows"
+    }
+
     private var accessibilityValue: String {
-        var parts = [item.window.appName, item.isVisible ? "Visible" : "Hidden"]
-        if item.window.isFocused {
+        var parts = [windowSummary, item.isVisible ? "Visible" : "Hidden"]
+        if item.isFocused {
             parts.append("Focused")
         }
-        parts.append("Workspace \(item.workspaceName)")
         return parts.joined(separator: ", ")
     }
 }
@@ -916,11 +1025,12 @@ private struct AppIconImage: View {
 @MainActor
 private struct WindowCountBadge: View {
     let count: Int
+    var prefix = ""
     let iconSize: CGFloat
     let textColor: Color?
 
     var body: some View {
-        Text("\(count)")
+        Text("\(prefix)\(count)")
             .font(.caption2.weight(.semibold).monospacedDigit())
             .foregroundColor(textColor ?? .primary)
             .padding(.horizontal, 3)

@@ -633,8 +633,8 @@ The window-to-monitor actions send the focused window directly to the current wo
 | Clear Preselection | `Unassigned` | `Dwindle` |
 | Raise All Floating Windows | `Option + Shift + R` | `Shared` |
 | Toggle Focused Window Floating | `Unassigned` | `Shared` |
-| Assign Focused Window to Scratchpad | `Unassigned` | `Shared` |
-| Toggle Scratchpad Window | `Unassigned` | `Shared` |
+| Assign Focused Window to Scratchpad 1-10 | `Unassigned` | `Shared` |
+| Toggle Scratchpad 1-10 | `Unassigned` | `Shared` |
 | Toggle Workspace Layout | `Option + Shift + L` | `Shared` |
 
 #### Container and Column
@@ -783,6 +783,36 @@ OmniWM stores its editable config at `${XDG_CONFIG_HOME:-$HOME/.config}/omniwm/s
 - **Reveal Settings File** and **Edit Settings File** open the canonical TOML file and recreate it from the running settings if it was deleted.
 - `updateChecksEnabled` is part of the persisted settings model, so it round-trips through `settings.toml`.
 - Clipboard history, last-check timestamps, skipped-release state, and the persisted window restore catalog live in `${XDG_STATE_HOME:-$HOME/.local/state}/omniwm` and stay out of dotfile-oriented config storage.
+
+## Scratchpads
+
+A scratchpad is a slot that holds any number of floating windows and overlays them on the workspace
+you are looking at. There are ten slots, numbered 1 to 10; a slot with no windows in it is inert and
+invisible.
+
+- **Assign Focused Window to Scratchpad N** moves the focused window into slot N, floating it if it
+  was tiled and parking it off-screen. Pressing the same shortcut again on a window already in slot N
+  returns it to the layout.
+- **Toggle Scratchpad N** reveals every window in slot N on the monitor you are interacting with, or
+  parks them again if they are already there. Revealing a slot parks whichever slot was showing, so at
+  most one scratchpad is on screen at a time.
+- A revealed scratchpad follows you across workspace switches and stays up until you toggle it off.
+  If it is showing on another monitor, its shortcut summons it to the one you are on.
+- Revealed windows are ordinary floating windows: whether clicking something underneath pushes them
+  behind it is governed by the usual focus and raise behaviour, including **Raise Window When Focus
+  Follows Mouse**.
+
+Each non-empty slot gets a pill in the workspace bar showing its name and its windows' icons; clicking
+the pill toggles that scratchpad. Slots are identified by number everywhere, and an optional label
+replaces the number in the workspace bar and in `omniwmctl` output:
+
+```toml
+[scratchpads.labels]
+1 = "term"
+3 = "COMMS"
+```
+
+Scratchpad membership lasts for the lifetime of the OmniWM process; only the labels are persisted.
 
 ## App Rules
 

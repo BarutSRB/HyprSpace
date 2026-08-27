@@ -74,6 +74,7 @@ struct SettingsExport: Equatable {
     var workspaceBarHideEmptyWorkspaces: Bool
     var workspaceBarExcludedBundleIDs: [String]
     var workspaceBarIconOverrides: [String: String]
+    var scratchpadLabels: [String: String]
     var workspaceBarReserveLayoutSpace: Bool
     var workspaceBarRevealModifier: String
     var workspaceBarRevealHoldMilliseconds: Double
@@ -200,6 +201,7 @@ extension SettingsExport {
             workspaceBarHideEmptyWorkspaces: false,
             workspaceBarExcludedBundleIDs: [],
             workspaceBarIconOverrides: [:],
+            scratchpadLabels: [:],
             workspaceBarReserveLayoutSpace: false,
             workspaceBarRevealModifier: WorkspaceBarRevealModifier.off.rawValue,
             workspaceBarRevealHoldMilliseconds: 200,

@@ -26,6 +26,7 @@ extension LayoutRefreshController {
         }
         _ = workspaceManager.restoreNativeFullscreenRecord(for: trackedToken)
         markNativeFullscreenRestoredForFrameApply(trackedToken)
+        _ = controller?.reconcileScratchpadMemberAfterNativeFullscreenExit(trackedToken)
     }
 
     func exactNativeFullscreenRetirementKeys(

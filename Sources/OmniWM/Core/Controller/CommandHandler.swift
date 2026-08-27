@@ -206,10 +206,12 @@ final class CommandHandler {
             _ = controller.rescueOffscreenWindows()
         case .toggleFocusedWindowFloating:
             return controller.toggleFocusedWindowFloating()
-        case .assignFocusedWindowToScratchpad:
-            return controller.assignFocusedWindowToScratchpad()
-        case .toggleScratchpadWindow:
-            return controller.toggleScratchpadWindow()
+        case let .assignFocusedWindowToScratchpad(index):
+            guard let index = ScratchpadIndex(index) else { return .invalidArguments }
+            return controller.assignFocusedWindowToScratchpad(index)
+        case let .toggleScratchpad(index):
+            guard let index = ScratchpadIndex(index) else { return .invalidArguments }
+            return controller.toggleScratchpad(index)
         case .openMenuAnywhere:
             controller.openMenuAnywhere()
         case .toggleWorkspaceBarVisibility:

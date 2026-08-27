@@ -107,6 +107,27 @@ enum ActionCatalog {
     private static func buildSpecs() -> [ActionSpec] {
         var specs: [ActionSpec] = []
 
+        for index in ScratchpadIndex.range {
+            specs.append(
+                action(
+                    id: "toggleScratchpad.\(index)",
+                    command: .toggleScratchpad(index),
+                    category: .layout,
+                    binding: .unassigned,
+                    keywords: ["scratchpad"]
+                )
+            )
+            specs.append(
+                action(
+                    id: "assignFocusedWindowToScratchpad.\(index)",
+                    command: .assignFocusedWindowToScratchpad(index),
+                    category: .layout,
+                    binding: .unassigned,
+                    keywords: ["scratchpad"]
+                )
+            )
+        }
+
         for (idx, code) in digitCodes.enumerated() {
             specs.append(
                 action(
@@ -844,20 +865,6 @@ enum ActionCatalog {
                 keywords: ["float", "floating"]
             ),
             action(
-                id: "assignFocusedWindowToScratchpad",
-                command: .assignFocusedWindowToScratchpad,
-                category: .layout,
-                binding: .unassigned,
-                keywords: ["scratchpad"]
-            ),
-            action(
-                id: "toggleScratchpadWindow",
-                command: .toggleScratchpadWindow,
-                category: .layout,
-                binding: .unassigned,
-                keywords: ["scratchpad"]
-            ),
-            action(
                 id: "openMenuAnywhere",
                 command: .openMenuAnywhere,
                 category: .focus,
@@ -1017,7 +1024,7 @@ enum ActionCatalog {
              .rescueOffscreenWindows,
              .toggleFocusedWindowFloating,
              .assignFocusedWindowToScratchpad,
-             .toggleScratchpadWindow,
+             .toggleScratchpad,
              .openMenuAnywhere,
              .toggleWorkspaceBarVisibility,
              .toggleHiddenBarPanel,
@@ -1104,8 +1111,8 @@ enum ActionCatalog {
         case .raiseAllFloatingWindows: "Raise All Floating Windows"
         case .rescueOffscreenWindows: "Rescue Off-Screen Floating Windows"
         case .toggleFocusedWindowFloating: "Toggle Focused Window Floating"
-        case .assignFocusedWindowToScratchpad: "Assign Focused Window to Scratchpad"
-        case .toggleScratchpadWindow: "Toggle Scratchpad Window"
+        case let .assignFocusedWindowToScratchpad(index): "Assign Focused Window to Scratchpad \(index)"
+        case let .toggleScratchpad(index): "Toggle Scratchpad \(index)"
         case .openMenuAnywhere: "Open Menu Anywhere"
         case .toggleWorkspaceBarVisibility: "Toggle Workspace Bar"
         case .toggleHiddenBarPanel: "Toggle Hidden Icons Bar"
@@ -1276,7 +1283,7 @@ enum ActionCatalog {
             .toggleFocusedWindowFloating
         case .assignFocusedWindowToScratchpad:
             .scratchpadAssign
-        case .toggleScratchpadWindow:
+        case .toggleScratchpad:
             .scratchpadToggle
         case .openMenuAnywhere:
             .openMenuAnywhere

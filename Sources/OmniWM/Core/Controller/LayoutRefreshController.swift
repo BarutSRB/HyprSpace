@@ -137,6 +137,18 @@ import QuartzCore
         case failure
     }
 
+    struct ScratchpadRevealOutcome {
+        let revealedHandles: [WindowHandle]
+    }
+
+    private struct ScratchpadRevealGroup {
+        let index: ScratchpadIndex
+        var pendingTransactionIds: Set<UInt64> = []
+        var revealedHandles: [WindowHandle] = []
+        var sealed = false
+        let onComplete: (ScratchpadRevealOutcome) -> Void
+    }
+
     private struct PendingRevealTransaction {
         let id: UInt64
         var token: WindowToken
@@ -149,6 +161,7 @@ import QuartzCore
         let hiddenState: HiddenState
         var postSuccessActions: [RefreshPostLayoutAction]
         var delayedVerificationScheduled: Bool = false
+        var revealGroupId: UInt64?
     }
 
     var layoutState = LayoutRefreshState()
@@ -159,8 +172,10 @@ import QuartzCore
     var activeDisplayLinkCountForTests: (() -> Int)?
     private var activeFrameContext: RefreshFrameContext?
     private var nextPendingRevealTransactionId: UInt64 = 1
+    private var nextScratchpadRevealGroupId: UInt64 = 1
     private var pendingRevealTransactionsByWindowId: [Int: PendingRevealTransaction] = [:]
     private var pendingRevealVerificationTasksByWindowId: [Int: Task<Void, Never>] = [:]
+    private var scratchpadRevealGroups: [UInt64: ScratchpadRevealGroup] = [:]
     var closingAnimationIdsByObjectId: [ObjectIdentifier: UUID] = [:]
     var lastSubmittedClosingFramesByAnimationId: [UUID: CGRect] = [:]
     var nativeFullscreenRestoredFrameApplyTokens: Set<WindowToken> = []
@@ -316,6 +331,7 @@ import QuartzCore
             let activeWorkspaceIds = currentEffectActiveWorkspaceIds ?? currentActiveWorkspaceIds()
             currentEffectActiveWorkspaceIds = activeWorkspaceIds
             controller.withRuntimeFrameJobCancellationSuppressed {
+                controller.rehomeRevealedScratchpad(activeWorkspaceIds: activeWorkspaceIds)
                 restoreWorkspaceInactiveFloatingWindows(activeWorkspaceIds: activeWorkspaceIds)
                 hideInactiveWorkspaces(activeWorkspaceIds: activeWorkspaceIds)
             }
@@ -342,6 +358,7 @@ import QuartzCore
         for postLayoutAction in forwardedPostLayoutActions(acceptedSeqs) {
             postLayoutAction.runIfCurrent(using: controller.workspaceManager)
         }
+        controller.resumeRehomedScratchpadStackingAfterFocusHandoff()
 
         if plan.effects.markInitialRefreshComplete {
             layoutState.hasCompletedInitialRefresh = true
@@ -916,6 +933,7 @@ import QuartzCore
     }
 
     func resetState() {
+        let discardedScratchpadIndices = Set(scratchpadRevealGroups.values.map(\.index))
         layoutState.activeRefreshTask?.cancel()
         layoutState.activeRefreshTask = nil
         layoutState.pendingDebounceTask?.cancel()
@@ -940,7 +958,12 @@ import QuartzCore
         }
         pendingRevealVerificationTasksByWindowId.removeAll()
         pendingRevealTransactionsByWindowId.removeAll()
+        scratchpadRevealGroups.removeAll()
+        for index in discardedScratchpadIndices {
+            reconcileRevealedScratchpadAfterGroupDiscard(index)
+        }
         nextPendingRevealTransactionId = 1
+        nextScratchpadRevealGroupId = 1
         dwindleHandler.resetPendingGroupReveals()
         nativeFullscreenRestoredFrameApplyTokens.removeAll()
 
@@ -1421,6 +1444,7 @@ import QuartzCore
                     ruleEffects = restoredEntry.ruleEffects
                     admissionHints = restoredEntry.admissionHints
                 } else if appFullscreen {
+                    cancelPendingScratchpadReveal(for: existingEntry.token)
                     _ = controller.workspaceManager.markNativeFullscreenSuspended(
                         existingEntry.token,
                         ownsNonManagedFocus: false
@@ -1555,6 +1579,7 @@ import QuartzCore
             }
 
             if shouldPreservePreFullscreenState {
+                _ = controller.reconcileScratchpadMemberAfterNativeFullscreenExit(admittedToken)
                 seenKeys.insert(admittedToken)
                 continue
             }
@@ -1857,14 +1882,11 @@ import QuartzCore
                         confirmedFrame: visibleFrame
                     )
                 } else {
-                    cancelPendingScratchpadReveal(for: entry.token)
-                    if controller.axManager.pendingParkWindowIds.contains(entry.windowId),
-                       let visibleFrame = observation?.visibleFrame
-                    {
-                        applyPositionPlans([
-                            WindowPositionPlan(entry: entry, frame: visibleFrame)
-                        ])
+                    if controller.axManager.pendingParkWindowIds.contains(entry.windowId) {
+                        seenKeys.insert(entry.token)
+                        continue
                     }
+                    cancelPendingScratchpadReveal(for: entry.token)
                     controller.workspaceManager.setHiddenState(nil, for: entry.token)
                     controller.axManager.unsuppressFrameWrites([(entry.pid, entry.windowId)])
                 }
@@ -2718,14 +2740,15 @@ import QuartzCore
         }
     }
 
+    @discardableResult
     func hideWindow(
         _ entry: WindowState,
         monitor: Monitor,
         side: HideSide,
         reason: HideReason,
         hiddenPlacementMonitors: [HiddenPlacementMonitorContext]? = nil
-    ) {
-        guard let controller else { return }
+    ) -> Bool {
+        guard let controller else { return false }
         let frameEntry = (pid: entry.pid, windowId: entry.windowId)
         switch resolveHideOperation(
             for: entry,
@@ -2739,14 +2762,17 @@ import QuartzCore
             controller.axManager.cancelPendingFrameJobs([frameEntry])
             controller.axManager.suppressFrameWrites([frameEntry])
             applyParkPositionPlans([plan], movablePlans: [plan], animationTick: false)
+            return true
         case let .alreadyHidden(plan, hiddenState):
             controller.workspaceManager.setHiddenState(hiddenState, for: entry.token)
             controller.axManager.cancelPendingFrameJobs([frameEntry])
             controller.axManager.suppressFrameWrites([frameEntry])
             applyParkPositionPlans([plan], movablePlans: [], animationTick: false)
+            return true
         case .unavailable:
             controller.axManager.cancelPendingFrameJobs([frameEntry])
             controller.axManager.suppressFrameWrites([frameEntry])
+            return false
         }
     }
 
@@ -2853,7 +2879,8 @@ import QuartzCore
     func unhideWindow(
         _ entry: WindowState,
         monitor: Monitor,
-        onSuccess: PostLayoutAction? = nil
+        onSuccess: PostLayoutAction? = nil,
+        revealGroupId: UInt64? = nil
     ) -> Bool {
         guard let controller else { return false }
         guard let hiddenState = controller.workspaceManager.hiddenState(for: entry.token) else {
@@ -2873,7 +2900,8 @@ import QuartzCore
             entry,
             monitor: monitor,
             hiddenState: hiddenState,
-            onSuccess: onSuccess
+            onSuccess: onSuccess,
+            revealGroupId: revealGroupId
         )
     }
 
@@ -2881,7 +2909,8 @@ import QuartzCore
     func restoreScratchpadWindow(
         _ entry: WindowState,
         monitor: Monitor,
-        onSuccess: PostLayoutAction? = nil
+        onSuccess: PostLayoutAction? = nil,
+        revealGroupId: UInt64? = nil
     ) -> Bool {
         guard let controller,
               let hiddenState = controller.workspaceManager.hiddenState(for: entry.token),
@@ -2894,7 +2923,8 @@ import QuartzCore
             entry,
             monitor: monitor,
             hiddenState: hiddenState,
-            onSuccess: onSuccess
+            onSuccess: onSuccess,
+            revealGroupId: revealGroupId
         )
     }
 
@@ -2960,6 +2990,117 @@ import QuartzCore
         pendingRevealTransactionsByWindowId[windowId]?.id
     }
 
+    func beginScratchpadRevealGroup(
+        index: ScratchpadIndex,
+        onComplete: @escaping (ScratchpadRevealOutcome) -> Void
+    ) -> UInt64 {
+        let groupId = nextScratchpadRevealGroupId
+        nextScratchpadRevealGroupId &+= 1
+        scratchpadRevealGroups[groupId] = ScratchpadRevealGroup(index: index, onComplete: onComplete)
+        return groupId
+    }
+
+    func sealScratchpadRevealGroup(_ groupId: UInt64) {
+        guard var group = scratchpadRevealGroups[groupId] else { return }
+        group.sealed = true
+        guard group.pendingTransactionIds.isEmpty else {
+            scratchpadRevealGroups[groupId] = group
+            return
+        }
+        scratchpadRevealGroups.removeValue(forKey: groupId)
+        group.onComplete(ScratchpadRevealOutcome(revealedHandles: group.revealedHandles))
+    }
+
+    func discardScratchpadRevealGroup(_ groupId: UInt64) {
+        scratchpadRevealGroups.removeValue(forKey: groupId)
+    }
+
+    func discardScratchpadRevealGroupCompletions() {
+        scratchpadRevealGroups.removeAll()
+    }
+
+    func recordScratchpadRevealSuccess(_ token: WindowToken, groupId: UInt64) {
+        guard var group = scratchpadRevealGroups[groupId],
+              let controller,
+              let handle = controller.workspaceManager.handle(for: token)
+        else {
+            return
+        }
+        if !group.revealedHandles.contains(where: { $0 === handle }) {
+            group.revealedHandles.append(handle)
+        }
+        scratchpadRevealGroups[groupId] = group
+    }
+
+    private func registerScratchpadRevealTransaction(_ transactionId: UInt64, groupId: UInt64) {
+        guard var group = scratchpadRevealGroups[groupId] else { return }
+        group.pendingTransactionIds.insert(transactionId)
+        scratchpadRevealGroups[groupId] = group
+    }
+
+    private func detachScratchpadRevealTransaction(_ transactionId: UInt64, groupId: UInt64) {
+        guard var group = scratchpadRevealGroups[groupId] else { return }
+        group.pendingTransactionIds.remove(transactionId)
+        guard group.sealed, group.pendingTransactionIds.isEmpty else {
+            scratchpadRevealGroups[groupId] = group
+            return
+        }
+        scratchpadRevealGroups.removeValue(forKey: groupId)
+        group.onComplete(ScratchpadRevealOutcome(revealedHandles: group.revealedHandles))
+    }
+
+    private func settleScratchpadRevealTransaction(
+        _ transaction: PendingRevealTransaction,
+        succeeded: Bool
+    ) {
+        guard let groupId = transaction.revealGroupId,
+              var group = scratchpadRevealGroups[groupId]
+        else {
+            return
+        }
+        group.pendingTransactionIds.remove(transaction.id)
+        if succeeded,
+           let controller,
+           let handle = controller.workspaceManager.handle(for: transaction.token),
+           !group.revealedHandles.contains(where: { $0 === handle })
+        {
+            group.revealedHandles.append(handle)
+        }
+        guard group.sealed, group.pendingTransactionIds.isEmpty else {
+            scratchpadRevealGroups[groupId] = group
+            return
+        }
+        scratchpadRevealGroups.removeValue(forKey: groupId)
+        group.onComplete(ScratchpadRevealOutcome(revealedHandles: group.revealedHandles))
+    }
+
+    private func currentScratchpadRevealTransactionIds(
+        in groupId: UInt64,
+        using workspaceManager: WorkspaceManager
+    ) -> Set<UInt64> {
+        Set(pendingRevealTransactionsByWindowId.values.compactMap { transaction in
+            guard transaction.revealGroupId == groupId,
+                  pendingRevealTransactionIsCurrent(transaction, using: workspaceManager)
+            else {
+                return nil
+            }
+            return transaction.id
+        })
+    }
+
+    private func rebaseScratchpadRevealTransactions(
+        _ transactionIds: Set<UInt64>,
+        to plannedSeq: UInt64
+    ) {
+        guard !transactionIds.isEmpty else { return }
+        for (windowId, var transaction) in pendingRevealTransactionsByWindowId
+            where transactionIds.contains(transaction.id)
+        {
+            transaction.plannedSeq = plannedSeq
+            pendingRevealTransactionsByWindowId[windowId] = transaction
+        }
+    }
+
     func shouldUsePendingRevealTransaction(
         for entry: WindowState,
         hiddenState: HiddenState
@@ -2974,11 +3115,26 @@ import QuartzCore
         hiddenState: HiddenState,
         targetFrame: CGRect,
         monitor: Monitor,
-        onSuccess: PostLayoutAction? = nil
+        onSuccess: PostLayoutAction? = nil,
+        revealGroupId: UInt64? = nil
     ) -> UInt64? {
         guard let controller else { return nil }
         let entry = controller.workspaceManager.entry(for: entry.token) ?? entry
         if var pendingTransaction = pendingRevealTransactionsByWindowId[entry.windowId] {
+            if let revealGroupId {
+                if let previousGroupId = pendingTransaction.revealGroupId,
+                   previousGroupId != revealGroupId
+                {
+                    detachScratchpadRevealTransaction(pendingTransaction.id, groupId: previousGroupId)
+                }
+                pendingTransaction.revealGroupId = revealGroupId
+                if pendingTransaction.hiddenState.isScratchpad {
+                    pendingTransaction.postSuccessActions.removeAll(keepingCapacity: false)
+                }
+                pendingRevealTransactionsByWindowId[entry.windowId] = pendingTransaction
+                registerScratchpadRevealTransaction(pendingTransaction.id, groupId: revealGroupId)
+                return nil
+            }
             if let onSuccess = makePostLayoutAction(
                 onSuccess,
                 workspaceIds: [entry.workspaceId]
@@ -3005,8 +3161,12 @@ import QuartzCore
             postSuccessActions: makePostLayoutAction(
                 onSuccess,
                 workspaceIds: [entry.workspaceId]
-            ).map { [$0] } ?? []
+            ).map { [$0] } ?? [],
+            revealGroupId: revealGroupId
         )
+        if let revealGroupId {
+            registerScratchpadRevealTransaction(transactionId, groupId: revealGroupId)
+        }
         nextPendingRevealTransactionId &+= 1
         return transactionId
     }
@@ -3060,6 +3220,9 @@ import QuartzCore
               transaction.hiddenState.isScratchpad
         else {
             return
+        }
+        if let revealGroupId = transaction.revealGroupId {
+            discardScratchpadRevealGroupAndReconcile(revealGroupId)
         }
         pendingRevealTransactionsByWindowId.removeValue(forKey: token.windowId)
         pendingRevealVerificationTasksByWindowId.removeValue(forKey: token.windowId)?.cancel()
@@ -3140,6 +3303,13 @@ import QuartzCore
             pendingRevealTransactionsByWindowId[windowId] = pendingTransaction
             return
         }
+        var revealSucceeded = false
+        defer {
+            settleScratchpadRevealTransaction(
+                pendingTransaction,
+                succeeded: revealSucceeded
+            )
+        }
         pendingRevealVerificationTasksByWindowId.removeValue(forKey: windowId)?.cancel()
         guard !controller.workspaceManager.isAppHidden(pid: pendingTransaction.pid) else {
             controller.axManager.cancelPendingFrameJobs([
@@ -3159,6 +3329,12 @@ import QuartzCore
         let actionWorkspacesCurrentAtEntry = pendingTransaction.postSuccessActions.map {
             $0.currentWorkspaces(using: controller.workspaceManager)
         }
+        let currentSiblingTransactions = pendingTransaction.revealGroupId.map {
+            currentScratchpadRevealTransactionIds(
+                in: $0,
+                using: controller.workspaceManager
+            )
+        } ?? []
         let focusSeqAccepted = controller.workspaceManager.isSeqCurrent(
             pendingTransaction.plannedSeq,
             for: pendingTransaction.workspaceId,
@@ -3167,6 +3343,11 @@ import QuartzCore
         controller.withRuntimeFrameJobCancellationSuppressed {
             controller.workspaceManager.setHiddenState(nil, for: pendingTransaction.token)
         }
+        rebaseScratchpadRevealTransactions(
+            currentSiblingTransactions,
+            to: controller.workspaceManager.worldSeq
+        )
+        revealSucceeded = true
         controller.axManager.clearParkPending(for: pendingTransaction.windowId, pid: pendingTransaction.pid)
         if pendingTransaction.hiddenState.isScratchpad {
             controller.requestWorkspaceBarRefresh()
@@ -3200,6 +3381,12 @@ import QuartzCore
             pendingRevealTransactionsByWindowId[windowId] = pendingTransaction
             return
         }
+        defer {
+            settleScratchpadRevealTransaction(
+                pendingTransaction,
+                succeeded: false
+            )
+        }
         pendingRevealVerificationTasksByWindowId.removeValue(forKey: windowId)?.cancel()
         let frameEntry = [(pendingTransaction.pid, pendingTransaction.windowId)]
 
@@ -3210,6 +3397,19 @@ import QuartzCore
                 affectedWorkspaceIds: stalePendingRevealWorkspaceIds(pendingTransaction, using: controller)
             )
             return
+        }
+
+        let currentSiblingTransactions = pendingTransaction.revealGroupId.map {
+            currentScratchpadRevealTransactionIds(
+                in: $0,
+                using: controller.workspaceManager
+            )
+        } ?? []
+        defer {
+            rebaseScratchpadRevealTransactions(
+                currentSiblingTransactions,
+                to: controller.workspaceManager.worldSeq
+            )
         }
 
         if pendingTransaction.hiddenState.isScratchpad,
@@ -3315,7 +3515,12 @@ import QuartzCore
         _ transaction: PendingRevealTransaction,
         using workspaceManager: WorkspaceManager
     ) -> Bool {
-        workspaceManager.isSeqCurrent(
+        if let revealGroupId = transaction.revealGroupId,
+           scratchpadRevealGroups[revealGroupId] == nil
+        {
+            return false
+        }
+        return workspaceManager.isSeqCurrent(
             transaction.plannedSeq,
             for: transaction.workspaceId,
             domains: .layoutCommit
@@ -3381,7 +3586,8 @@ import QuartzCore
         _ entry: WindowState,
         monitor: Monitor,
         hiddenState: HiddenState,
-        onSuccess: PostLayoutAction? = nil
+        onSuccess: PostLayoutAction? = nil,
+        revealGroupId: UInt64? = nil
     ) -> Bool {
         guard let controller else { return false }
         let entry = controller.workspaceManager.entry(for: entry.token) ?? entry
@@ -3389,17 +3595,31 @@ import QuartzCore
         switch restoreWindowFromHiddenState(entry, monitor: monitor, hiddenState: hiddenState) {
         case .none:
             if hiddenState.workspaceInactive {
+                let currentTransactions = revealGroupId.map {
+                    currentScratchpadRevealTransactionIds(
+                        in: $0,
+                        using: controller.workspaceManager
+                    )
+                } ?? []
                 controller.withRuntimeFrameJobCancellationSuppressed {
                     controller.workspaceManager.setHiddenState(nil, for: entry.token)
                 }
+                rebaseScratchpadRevealTransactions(
+                    currentTransactions,
+                    to: controller.workspaceManager.worldSeq
+                )
                 if hiddenState.isScratchpad {
                     controller.requestWorkspaceBarRefresh()
                 }
                 controller.axManager.unsuppressFrameWrites(frameEntry)
-                acceptedPostLayoutAction(
-                    onSuccess,
-                    workspaceIds: [controller.workspaceManager.workspace(for: entry.token) ?? entry.workspaceId]
-                )?.runIfCurrent(using: controller.workspaceManager)
+                if let revealGroupId {
+                    recordScratchpadRevealSuccess(entry.token, groupId: revealGroupId)
+                } else {
+                    acceptedPostLayoutAction(
+                        onSuccess,
+                        workspaceIds: [controller.workspaceManager.workspace(for: entry.token) ?? entry.workspaceId]
+                    )?.runIfCurrent(using: controller.workspaceManager)
+                }
                 return true
             } else {
                 controller.axManager.suppressFrameWrites(frameEntry)
@@ -3407,23 +3627,47 @@ import QuartzCore
             }
         case let .positionPlan(plan):
             applyPositionPlans([plan])
+            let currentTransactions = revealGroupId.map {
+                currentScratchpadRevealTransactionIds(
+                    in: $0,
+                    using: controller.workspaceManager
+                )
+            } ?? []
             controller.withRuntimeFrameJobCancellationSuppressed {
                 controller.workspaceManager.setHiddenState(nil, for: entry.token)
             }
+            rebaseScratchpadRevealTransactions(
+                currentTransactions,
+                to: controller.workspaceManager.worldSeq
+            )
             if hiddenState.isScratchpad {
                 controller.requestWorkspaceBarRefresh()
             }
             controller.axManager.unsuppressFrameWrites(frameEntry)
-            acceptedPostLayoutAction(
-                onSuccess,
-                workspaceIds: [controller.workspaceManager.workspace(for: entry.token) ?? entry.workspaceId]
-            )?.runIfCurrent(using: controller.workspaceManager)
+            if let revealGroupId {
+                recordScratchpadRevealSuccess(entry.token, groupId: revealGroupId)
+            } else {
+                acceptedPostLayoutAction(
+                    onSuccess,
+                    workspaceIds: [controller.workspaceManager.workspace(for: entry.token) ?? entry.workspaceId]
+                )?.runIfCurrent(using: controller.workspaceManager)
+            }
             return true
         case let .asyncFrame(frame):
             if !shouldUsePendingRevealTransaction(for: entry, hiddenState: hiddenState) {
+                let currentTransactions = revealGroupId.map {
+                    currentScratchpadRevealTransactionIds(
+                        in: $0,
+                        using: controller.workspaceManager
+                    )
+                } ?? []
                 controller.withRuntimeFrameJobCancellationSuppressed {
                     controller.workspaceManager.setHiddenState(nil, for: entry.token)
                 }
+                rebaseScratchpadRevealTransactions(
+                    currentTransactions,
+                    to: controller.workspaceManager.worldSeq
+                )
                 if hiddenState.isScratchpad {
                     controller.requestWorkspaceBarRefresh()
                 }
@@ -3432,10 +3676,14 @@ import QuartzCore
                 controller.axManager.applyFramesParallel([
                     .init(pid: entry.pid, window: entry.axRef, frame: frame)
                 ])
-                acceptedPostLayoutAction(
-                    onSuccess,
-                    workspaceIds: [controller.workspaceManager.workspace(for: entry.token) ?? entry.workspaceId]
-                )?.runIfCurrent(using: controller.workspaceManager)
+                if let revealGroupId {
+                    recordScratchpadRevealSuccess(entry.token, groupId: revealGroupId)
+                } else {
+                    acceptedPostLayoutAction(
+                        onSuccess,
+                        workspaceIds: [controller.workspaceManager.workspace(for: entry.token) ?? entry.workspaceId]
+                    )?.runIfCurrent(using: controller.workspaceManager)
+                }
                 return true
             }
             guard let transactionId = beginPendingRevealTransaction(
@@ -3443,7 +3691,8 @@ import QuartzCore
                 hiddenState: hiddenState,
                 targetFrame: frame,
                 monitor: monitor,
-                onSuccess: onSuccess
+                onSuccess: onSuccess,
+                revealGroupId: revealGroupId
             ) else {
                 return true
             }
@@ -3554,6 +3803,24 @@ import QuartzCore
 }
 
 extension LayoutRefreshController {
+    private func discardScratchpadRevealGroupAndReconcile(_ groupId: UInt64) {
+        guard let group = scratchpadRevealGroups.removeValue(forKey: groupId) else { return }
+        reconcileRevealedScratchpadAfterGroupDiscard(group.index)
+    }
+
+    private func reconcileRevealedScratchpadAfterGroupDiscard(_ index: ScratchpadIndex) {
+        guard let controller,
+              controller.workspaceManager.revealedScratchpadIndex() == index,
+              !controller.workspaceManager.scratchpadMembers(in: index).contains(where: {
+                  controller.isManagedWindowDisplayable($0)
+              })
+        else {
+            return
+        }
+        controller.workspaceManager.setRevealedScratchpad(nil)
+        controller.requestWorkspaceBarRefresh()
+    }
+
     private func buildVisibilityEffectPlan(
         affectedWorkspaceIds: Set<WorkspaceDescriptor.ID>,
         recoverFocus: Bool

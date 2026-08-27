@@ -224,23 +224,55 @@ final class WorkspaceBarDataSourceTests: XCTestCase {
             mode: .floating,
             to: fixture
         )
-        XCTAssertTrue(fixture.workspaceManager.setScratchpadToken(token))
+        XCTAssertTrue(fixture.workspaceManager.setScratchpadMembership(token, to: 1))
 
         let unfiltered = project(
             fixture,
             showFloatingWindows: true,
             excludedBundleIDs: []
         )
-        XCTAssertEqual(unfiltered.scratchpad?.id, token)
+        XCTAssertEqual(unfiltered.scratchpads.flatMap(\.windows).map(\.id), [token])
 
         let filtered = project(
             fixture,
             showFloatingWindows: true,
             excludedBundleIDs: ["COM.EXAMPLE.SCRATCHPAD"]
         )
-        XCTAssertNil(filtered.scratchpad)
-        XCTAssertEqual(fixture.workspaceManager.scratchpadToken(), token)
+        XCTAssertTrue(filtered.scratchpads.isEmpty)
+        XCTAssertEqual(fixture.workspaceManager.scratchpadIndex(for: token), 1)
         XCTAssertEqual(fixture.workspaceManager.entry(for: token)?.mode, .floating)
+    }
+
+    func testScratchpadPillsAlwaysDeduplicateWindowsByApp() throws {
+        let fixture = try makeFixture()
+        let first = addWindow(
+            pid: 45_201,
+            windowId: 45_301,
+            bundleId: "com.example.shared-scratchpad",
+            mode: .floating,
+            to: fixture
+        )
+        let second = addWindow(
+            pid: 45_202,
+            windowId: 45_302,
+            bundleId: "COM.EXAMPLE.SHARED-SCRATCHPAD",
+            mode: .floating,
+            to: fixture
+        )
+        XCTAssertTrue(fixture.workspaceManager.setScratchpadMembership(first, to: 1))
+        XCTAssertTrue(fixture.workspaceManager.setScratchpadMembership(second, to: 1))
+
+        let projection = project(
+            fixture,
+            deduplicate: false,
+            showFloatingWindows: true,
+            excludedBundleIDs: []
+        )
+        let scratchpad = try XCTUnwrap(projection.scratchpads.first)
+
+        XCTAssertEqual(scratchpad.windows.count, 1)
+        XCTAssertEqual(scratchpad.windows[0].windowCount, 2)
+        XCTAssertEqual(Set(scratchpad.windows[0].allWindows.map(\.id)), Set([first, second]))
     }
 
     func testWorkspaceBarIPCUsesFilteredProjectionWhileWindowsQueryRetainsEntry() throws {
@@ -515,7 +547,7 @@ final class WorkspaceBarDataSourceTests: XCTestCase {
             mode: .floating,
             to: fixture
         )
-        XCTAssertTrue(fixture.workspaceManager.setScratchpadToken(scratchpad))
+        XCTAssertTrue(fixture.workspaceManager.setScratchpadMembership(scratchpad, to: 1))
         fixture.iconResolver.synchronize(
             overrides: ["com.example.override": "icons/custom.png"]
         )
@@ -528,11 +560,11 @@ final class WorkspaceBarDataSourceTests: XCTestCase {
         let item = try XCTUnwrap(projection.items.first { $0.id == fixture.workspaceId })
         let tiledItem = try XCTUnwrap(item.tiledWindows.first { $0.id == tiled })
         let floatingItem = try XCTUnwrap(item.floatingWindows.first { $0.id == floating })
-        let scratchpadItem = try XCTUnwrap(projection.scratchpad)
+        let scratchpadItem = try XCTUnwrap(projection.scratchpads.first)
 
         XCTAssertTrue(tiledItem.icon === overrideImage)
         XCTAssertTrue(floatingItem.icon === overrideImage)
-        XCTAssertTrue(scratchpadItem.window.icon === overrideImage)
+        XCTAssertTrue(scratchpadItem.windows.first?.icon === overrideImage)
     }
 
     private func project(

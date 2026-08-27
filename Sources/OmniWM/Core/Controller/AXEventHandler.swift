@@ -1602,6 +1602,7 @@ final class AXEventHandler {
                 )
             )
         )
+        controller.noteScratchpadStackingAppActivation(pid: pid, source: source)
         let observationGeneration: UInt64
         if let causalObservationGeneration {
             observationGeneration = causalObservationGeneration
@@ -1622,12 +1623,7 @@ final class AXEventHandler {
 
         if pid == getpid(), (controller.hasFrontmostOwnedWindow || controller.hasVisibleOwnedWindow) {
             if let activeRequest = controller.intentLedger.activeManagedRequest, activeRequest.token.pid == pid {
-                _ = controller.intentLedger.cancelManagedRequest(requestId: activeRequest.requestId)
-                _ = controller.workspaceManager.cancelManagedFocusRequest(
-                    matching: activeRequest.token,
-                    workspaceId: activeRequest.workspaceId,
-                    requestId: activeRequest.requestId
-                )
+                _ = controller.cancelManagedFocusRequest(activeRequest)
             }
             _ = controller.workspaceManager.enterNonManagedFocus(
                 preserveFocusedToken: true
@@ -1771,7 +1767,12 @@ final class AXEventHandler {
                 suspendManagedWindowForNativeFullscreen(entry)
                 return
             }
-            _ = restoreManagedWindowFromNativeFullscreen(entry)
+            let restoredFromNativeFullscreen = restoreManagedWindowFromNativeFullscreen(entry)
+            if restoredFromNativeFullscreen,
+               controller.reconcileScratchpadMemberAfterNativeFullscreenExit(entry.token)
+            {
+                return
+            }
             let entry = controller.workspaceManager.entry(for: token) ?? entry
             let wsId = entry.workspaceId
 
@@ -2210,7 +2211,12 @@ final class AXEventHandler {
             return
         }
 
-        _ = restoreManagedWindowFromNativeFullscreen(entry)
+        let restoredFromNativeFullscreen = restoreManagedWindowFromNativeFullscreen(entry)
+        if restoredFromNativeFullscreen,
+           controller.reconcileScratchpadMemberAfterNativeFullscreenExit(entry.token)
+        {
+            return
+        }
         let entry = controller.workspaceManager.entry(for: entry.token) ?? entry
         let wsId = entry.workspaceId
         let monitorId = controller.workspaceManager.monitorId(for: wsId)
@@ -2227,6 +2233,7 @@ final class AXEventHandler {
             activeRequest = nil
         }
         let shouldConfirmRequest = confirmRequest ?? true
+        var confirmedManagedRequest: ManagedFocusRequest?
         let focusObservation = controller.intentLedger.classifyFocusObservation(token: entry.token)
         let omitsExplicitOrdering = switch focusObservation {
         case let .echoOf(intent),
@@ -2244,12 +2251,7 @@ final class AXEventHandler {
                    requestId: request.requestId
                )
             {
-                _ = controller.intentLedger.cancelManagedRequest(requestId: request.requestId)
-                _ = controller.workspaceManager.cancelManagedFocusRequest(
-                    matching: request.token,
-                    workspaceId: request.workspaceId,
-                    requestId: request.requestId
-                )
+                _ = controller.cancelManagedFocusRequest(request)
                 return
             }
 
@@ -2272,17 +2274,12 @@ final class AXEventHandler {
 
             if let activeRequest {
                 if activeRequest.token == entry.token {
-                    _ = controller.intentLedger.confirmManagedRequest(
+                    confirmedManagedRequest = controller.intentLedger.confirmManagedRequest(
                         token: entry.token,
                         source: source
                     )
                 } else {
-                    _ = controller.intentLedger.cancelManagedRequest(requestId: activeRequest.requestId)
-                    _ = controller.workspaceManager.cancelManagedFocusRequest(
-                        matching: activeRequest.token,
-                        workspaceId: activeRequest.workspaceId,
-                        requestId: activeRequest.requestId
-                    )
+                    _ = controller.cancelManagedFocusRequest(activeRequest)
                 }
             }
 
@@ -2399,11 +2396,16 @@ final class AXEventHandler {
         {
             controller.moveMouseToWindow(entry.token, preferredFrame: preferredMouseFrame)
         }
+        controller.noteScratchpadStackingAppActivation(pid: entry.pid, source: source)
+        if let confirmedManagedRequest {
+            controller.continueScratchpadStacking(after: confirmedManagedRequest)
+        }
     }
 
     @discardableResult
     private func suspendManagedWindowForNativeFullscreen(_ entry: WindowState) -> Bool {
         guard let controller else { return false }
+        controller.layoutRefreshController.cancelPendingScratchpadReveal(for: entry.token)
         let changed = controller.workspaceManager.markNativeFullscreenSuspended(entry.token)
         if changed {
             requestNativeFullscreenRelayout(for: entry.token, fallback: entry.workspaceId)
@@ -2457,7 +2459,7 @@ final class AXEventHandler {
         guard let controller else { return false }
         guard entry.mode == .tiling else { return false }
         guard controller.workspaceManager.focusedToken == entry.token else { return false }
-        guard controller.workspaceManager.scratchpadToken() != entry.token else { return false }
+        guard !controller.workspaceManager.isScratchpadToken(entry.token) else { return false }
         guard let descriptor = controller.workspaceManager.descriptor(for: entry.workspaceId) else { return false }
         guard controller.settings.layoutType(for: descriptor.name) != .dwindle else { return false }
         if entry.observedState.isNativeFullscreen {
@@ -2467,20 +2469,6 @@ final class AXEventHandler {
             return true
         }
         return AXWindowService.isFullscreenAttributeSet(entry.axRef)
-    }
-
-    @discardableResult
-    private func restoreManagedWindowFromNativeFullscreen(_ entry: WindowState) -> Bool {
-        guard let controller else { return false }
-        let hadRecord = controller.workspaceManager.nativeFullscreenRecord(for: entry.token) != nil
-        guard hadRecord || controller.workspaceManager.layoutReason(for: entry.token) == .nativeFullscreen else {
-            return false
-        }
-        let restored = controller.workspaceManager.restoreNativeFullscreenRecord(for: entry.token) || hadRecord
-        if restored {
-            controller.layoutRefreshController.markNativeFullscreenRestoredForFrameApply(entry.token)
-        }
-        return restored
     }
 
     func awaitPendingManagedReplacementBursts(for appPIDs: Set<pid_t>? = nil) async {
@@ -3882,6 +3870,7 @@ final class AXEventHandler {
             workspaceId: request.workspaceId,
             requestId: request.requestId
         )
+        controller.advanceScratchpadStackingAfterFocusRetryExhaustion(request)
 
         if let token = controller.workspaceManager.renderableFocusToken {
             controller.surfaceReconciler.noteRestackOccurred()
@@ -3935,6 +3924,7 @@ extension AXEventHandler {
                 workspaceId: workspaceId,
                 requestId: canceledRequest.requestId
             )
+            controller.abortScratchpadStacking(matching: canceledRequest.requestId)
         } else {
             _ = controller.workspaceManager.cancelCurrentManagedFocusRequest(
                 matching: token,

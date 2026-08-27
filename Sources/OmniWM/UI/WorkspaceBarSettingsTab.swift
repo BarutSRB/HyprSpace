@@ -82,7 +82,7 @@ private struct GlobalBarSettingsSection: View {
                     .onChange(of: settings.workspaceBarDeduplicateAppIcons) { _, _ in
                         controller.updateWorkspaceBarSettings()
                     }
-                    .help("Group windows by app with badge count")
+                    .help("Group workspace windows by app with badge counts; scratchpad pills always group by app")
 
                 Toggle("Hide Empty Workspaces", isOn: $settings.workspaceBarHideEmptyWorkspaces)
                     .onChange(of: settings.workspaceBarHideEmptyWorkspaces) { _, _ in
@@ -361,7 +361,7 @@ private struct MonitorBarSettingsSection: View {
                 onChange: { newValue in updateSetting { $0.deduplicateAppIcons = newValue } },
                 onReset: { updateSetting { $0.deduplicateAppIcons = nil } }
             )
-            .help("Group windows by app with badge count")
+            .help("Group workspace windows by app with badge counts; scratchpad pills always group by app")
 
             OverridableToggle(
                 label: "Hide Empty Workspaces",

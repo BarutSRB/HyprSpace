@@ -4,7 +4,7 @@
 import Foundation
 
 public enum OmniWMIPCProtocol {
-    public static let version = 12
+    public static let version = 13
 }
 
 public struct IPCRequestEnvelope: Decodable, Sendable {
@@ -423,8 +423,8 @@ public enum IPCCommandRequest: Equatable, Sendable {
     case toggleWorkspaceBar
     case hiddenBarPanel
     case toggleFocusedWindowFloating
-    case scratchpadAssign
-    case scratchpadToggle
+    case scratchpadAssign(index: Int)
+    case scratchpadToggle(index: Int)
     case openMenuAnywhere
 
     public var name: IPCCommandName {
@@ -887,11 +887,9 @@ public enum IPCCommandRequest: Equatable, Sendable {
             try requireNoArguments()
             self = .toggleFocusedWindowFloating
         case .scratchpadAssign:
-            try requireNoArguments()
-            self = .scratchpadAssign
+            self = try .scratchpadAssign(index: requireInteger())
         case .scratchpadToggle:
-            try requireNoArguments()
-            self = .scratchpadToggle
+            self = try .scratchpadToggle(index: requireInteger())
         case .openMenuAnywhere:
             try requireNoArguments()
             self = .openMenuAnywhere
@@ -915,6 +913,10 @@ extension IPCCommandRequest: Codable {
 
     private struct IPCColumnIndexArguments: Codable, Equatable, Sendable {
         let columnIndex: Int
+    }
+
+    private struct IPCScratchpadIndexArguments: Codable, Equatable, Sendable {
+        let scratchpadIndex: Int
     }
 
     private struct IPCWindowIndexArguments: Codable, Equatable, Sendable {
@@ -1129,9 +1131,11 @@ extension IPCCommandRequest: Codable {
         case .toggleFocusedWindowFloating:
             self = .toggleFocusedWindowFloating
         case .scratchpadAssign:
-            self = .scratchpadAssign
+            let arguments = try container.decode(IPCScratchpadIndexArguments.self, forKey: .arguments)
+            self = .scratchpadAssign(index: arguments.scratchpadIndex)
         case .scratchpadToggle:
-            self = .scratchpadToggle
+            let arguments = try container.decode(IPCScratchpadIndexArguments.self, forKey: .arguments)
+            self = .scratchpadToggle(index: arguments.scratchpadIndex)
         case .openMenuAnywhere:
             self = .openMenuAnywhere
         }
@@ -1308,10 +1312,10 @@ extension IPCCommandRequest: Codable {
             break
         case .toggleFocusedWindowFloating:
             break
-        case .scratchpadAssign:
-            break
-        case .scratchpadToggle:
-            break
+        case let .scratchpadAssign(index):
+            try container.encode(IPCScratchpadIndexArguments(scratchpadIndex: index), forKey: .arguments)
+        case let .scratchpadToggle(index):
+            try container.encode(IPCScratchpadIndexArguments(scratchpadIndex: index), forKey: .arguments)
         case .openMenuAnywhere:
             break
         }
@@ -2200,11 +2204,15 @@ public struct IPCWorkspaceBarApp: Codable, Equatable, Sendable {
 }
 
 public struct IPCWorkspaceBarScratchpad: Codable, Equatable, Sendable {
-    public let window: IPCWorkspaceBarApp
+    public let index: Int
+    public let label: String?
+    public let windows: [IPCWorkspaceBarApp]
     public let isVisible: Bool
 
-    public init(window: IPCWorkspaceBarApp, isVisible: Bool) {
-        self.window = window
+    public init(index: Int, label: String?, windows: [IPCWorkspaceBarApp], isVisible: Bool) {
+        self.index = index
+        self.label = label
+        self.windows = windows
         self.isVisible = isVisible
     }
 }
@@ -2242,7 +2250,7 @@ public struct IPCWorkspaceBarMonitor: Codable, Equatable, Sendable {
     public let showLabels: Bool
     public let backgroundOpacity: Double
     public let barHeight: Double
-    public let scratchpad: IPCWorkspaceBarScratchpad?
+    public let scratchpads: [IPCWorkspaceBarScratchpad]
     public let workspaces: [IPCWorkspaceBarWorkspace]
 
     public init(
@@ -2253,7 +2261,7 @@ public struct IPCWorkspaceBarMonitor: Codable, Equatable, Sendable {
         showLabels: Bool,
         backgroundOpacity: Double,
         barHeight: Double,
-        scratchpad: IPCWorkspaceBarScratchpad?,
+        scratchpads: [IPCWorkspaceBarScratchpad],
         workspaces: [IPCWorkspaceBarWorkspace]
     ) {
         self.id = id
@@ -2263,7 +2271,7 @@ public struct IPCWorkspaceBarMonitor: Codable, Equatable, Sendable {
         self.showLabels = showLabels
         self.backgroundOpacity = backgroundOpacity
         self.barHeight = barHeight
-        self.scratchpad = scratchpad
+        self.scratchpads = scratchpads
         self.workspaces = workspaces
     }
 }
@@ -2371,6 +2379,7 @@ public struct IPCWindowQuerySnapshot: Codable, Equatable, Sendable {
     public let isVisible: Bool?
     public let isAppHidden: Bool?
     public let isScratchpad: Bool?
+    public let scratchpadIndex: Int?
     public let hiddenReason: IPCHiddenReason?
 
     public init(
@@ -2388,6 +2397,7 @@ public struct IPCWindowQuerySnapshot: Codable, Equatable, Sendable {
         isVisible: Bool? = nil,
         isAppHidden: Bool? = nil,
         isScratchpad: Bool? = nil,
+        scratchpadIndex: Int? = nil,
         hiddenReason: IPCHiddenReason? = nil
     ) {
         self.id = id
@@ -2404,6 +2414,7 @@ public struct IPCWindowQuerySnapshot: Codable, Equatable, Sendable {
         self.isVisible = isVisible
         self.isAppHidden = isAppHidden
         self.isScratchpad = isScratchpad
+        self.scratchpadIndex = scratchpadIndex
         self.hiddenReason = hiddenReason
     }
 }

@@ -153,8 +153,11 @@ enum StateReducer {
         case let .layoutOperationPerformed(_, operation, _):
             plan.notes = ["layout_op=\(operation.summary)"]
 
-        case let .scratchpadChanged(token, _):
-            plan.notes = ["scratchpad=\(token != nil)"]
+        case let .scratchpadMembershipChanged(_, index, _):
+            plan.notes = ["scratchpad_membership=\(index.map(String.init(describing:)) ?? "none")"]
+
+        case let .scratchpadRevealChanged(index, _):
+            plan.notes = ["scratchpad_reveal=\(index.map(String.init(describing:)) ?? "none")"]
 
         case let .visibleWorkspacesChanged(sessions, _):
             plan.notes = ["visible_workspaces=\(sessions.count)"]

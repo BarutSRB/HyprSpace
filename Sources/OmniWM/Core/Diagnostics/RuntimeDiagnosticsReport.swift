@@ -94,7 +94,8 @@ enum RuntimeDiagnosticsReport {
         let destination = switch payload.destination {
         case .window:
             "window"
-        case .scratchpad:
+        case .scratchpad,
+             .scratchpadWindow:
             "scratchpad"
         }
         return "id:\(intent.id),win:\(payload.token.windowId),workspace:\(payload.workspaceId.uuidString),destination:\(destination)"

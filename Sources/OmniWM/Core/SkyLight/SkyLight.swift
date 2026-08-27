@@ -5,8 +5,9 @@ import CoreGraphics
 import Foundation
 
 enum SkyLightWindowOrder: Int32 {
-    case above = 0
     case below = -1
+    case out = 0
+    case above = 1
 }
 
 enum DisplaySpacesMode: Equatable, Sendable {
@@ -1164,7 +1165,7 @@ final class SkyLight {
 
     func transactionHide(_ wid: UInt32) {
         withTransaction { transaction in
-            transactionOrderWindow(transaction, wid, 0, 0)
+            transactionOrderWindow(transaction, wid, SkyLightWindowOrder.out.rawValue, 0)
         }
     }
 }

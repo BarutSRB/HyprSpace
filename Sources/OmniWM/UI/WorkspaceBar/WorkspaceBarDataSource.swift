@@ -37,7 +37,7 @@ enum WorkspaceBarDataSource {
                 focusedToken: focusedToken,
                 settings: settings
             ),
-            scratchpad: scratchpadItem(
+            scratchpads: scratchpadItems(
                 options: options,
                 workspaceManager: workspaceManager,
                 appInfoCache: appInfoCache,
@@ -153,41 +153,46 @@ enum WorkspaceBarDataSource {
         )
     }
 
-    private static func scratchpadItem(
+    private static func scratchpadItems(
         options: WorkspaceBarProjectionOptions,
         workspaceManager: WorkspaceManager,
         appInfoCache: AppInfoCache,
         iconResolver: WorkspaceBarIconResolver,
         focusedToken: WindowToken?,
         settings: SettingsStore
-    ) -> WorkspaceBarScratchpadItem? {
-        guard let scratchpadToken = workspaceManager.scratchpadToken(),
-              let entry = workspaceManager.entry(for: scratchpadToken),
-              !isExcluded(entry, options: options, appInfoCache: appInfoCache),
-              let window = createWindowItems(
-                  entries: [entry],
-                  deduplicate: false,
-                  useLayoutOrder: false,
-                  appInfoCache: appInfoCache,
-                  iconResolver: iconResolver,
-                  focusedToken: focusedToken,
-                  hiddenAppPIDs: workspaceManager.hiddenAppPIDs,
-                  workspaceManager: workspaceManager
-              ).first
-        else {
-            return nil
-        }
+    ) -> [WorkspaceBarScratchpadItem] {
+        workspaceManager.occupiedScratchpadIndices().compactMap { index in
+            let entries = workspaceManager.scratchpadMembers(in: index).compactMap { token in
+                workspaceManager.entry(for: token).flatMap {
+                    isExcluded($0, options: options, appInfoCache: appInfoCache) ? nil : $0
+                }
+            }
+            guard !entries.isEmpty else { return nil }
 
-        let descriptor = workspaceManager.descriptor(for: entry.workspaceId)
-        let rawWorkspaceName = descriptor?.name ?? ""
-        return WorkspaceBarScratchpadItem(
-            window: window,
-            isVisible: workspaceManager.hiddenState(for: scratchpadToken) == nil
-                && !workspaceManager.isAppHidden(pid: entry.pid),
-            workspaceId: entry.workspaceId,
-            workspaceName: settings.displayName(for: rawWorkspaceName),
-            rawWorkspaceName: rawWorkspaceName
-        )
+            let windows = createWindowItems(
+                entries: entries,
+                deduplicate: true,
+                useLayoutOrder: false,
+                appInfoCache: appInfoCache,
+                iconResolver: iconResolver,
+                focusedToken: focusedToken,
+                hiddenAppPIDs: workspaceManager.hiddenAppPIDs,
+                workspaceManager: workspaceManager
+            )
+            guard !windows.isEmpty else { return nil }
+            let isRevealed = workspaceManager.revealedScratchpadIndex() == index
+
+            return WorkspaceBarScratchpadItem(
+                index: index.rawValue,
+                label: settings.scratchpadLabel(for: index.rawValue),
+                windows: windows,
+                isVisible: isRevealed && entries.contains {
+                    workspaceManager.hiddenState(for: $0.token) == nil
+                        && !workspaceManager.isAppHidden(pid: $0.pid)
+                },
+                isRevealed: isRevealed
+            )
+        }
     }
 
     private static func isExcluded(

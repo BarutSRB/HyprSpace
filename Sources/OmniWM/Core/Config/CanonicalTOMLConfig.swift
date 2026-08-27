@@ -19,6 +19,7 @@ struct CanonicalTOMLConfig: Codable, Equatable {
     var hiddenBar: HiddenBar
     var clipboard: Clipboard
     var quakeTerminal: QuakeTerminal
+    var scratchpads: Scratchpads
     var appearance: Appearance
     var hotkeys: [HotkeyBinding]
     var workspaces: [WorkspaceConfiguration]
@@ -49,6 +50,10 @@ struct CanonicalTOMLConfig: Codable, Equatable {
         var followsWindowToMonitor: Bool
         var crossesMonitorAtEdge: Bool
         var moveCrossesMonitorAtEdge: Bool
+    }
+
+    struct Scratchpads: Codable, Equatable {
+        var labels: [String: String]
     }
 
     struct MouseWarp: Codable, Equatable {
@@ -261,6 +266,7 @@ extension CanonicalTOMLConfig {
         hiddenBar = try container.decode(HiddenBar.self, forKey: .hiddenBar)
         clipboard = try container.decode(Clipboard.self, forKey: .clipboard)
         quakeTerminal = try container.decode(QuakeTerminal.self, forKey: .quakeTerminal)
+        scratchpads = try container.decode(Scratchpads.self, forKey: .scratchpads)
         appearance = try container.decode(Appearance.self, forKey: .appearance)
         let persistedHotkeys = try container.decode([PersistedHotkeyBinding].self, forKey: .hotkeys)
         hotkeys = try HotkeyBindingRegistry.resolve(persistedHotkeys)
@@ -416,6 +422,7 @@ extension CanonicalTOMLConfig {
             backgroundBlurRadius: export.quakeTerminalBackgroundBlurRadius,
             monitorMode: export.quakeTerminalMonitorMode
         )
+        scratchpads = Scratchpads(labels: export.scratchpadLabels)
         appearance = Appearance(mode: export.appearanceMode)
         hotkeys = export.hotkeyBindings
         workspaces = export.workspaceConfigurations
@@ -484,6 +491,7 @@ extension CanonicalTOMLConfig {
             workspaceBarHideEmptyWorkspaces: workspaceBar.hideEmptyWorkspaces,
             workspaceBarExcludedBundleIDs: workspaceBar.excludedBundleIDs,
             workspaceBarIconOverrides: workspaceBar.iconOverrides,
+            scratchpadLabels: scratchpads.labels,
             workspaceBarReserveLayoutSpace: workspaceBar.reserveLayoutSpace,
             workspaceBarRevealModifier: workspaceBar.revealModifier,
             workspaceBarRevealHoldMilliseconds: workspaceBar.revealHoldMilliseconds,

@@ -56,7 +56,8 @@ final class WorldStore {
     private(set) var invariantViolationCounts: [String: Int] = [:]
     private(set) var focus = FocusSessionSnapshot()
     private(set) var viewports: [WorkspaceDescriptor.ID: ViewportState] = [:]
-    private(set) var scratchpadToken: WindowToken?
+    private(set) var scratchpadMembers: [ScratchpadIndex: [WindowToken]] = [:]
+    private(set) var revealedScratchpad: ScratchpadIndex?
     private(set) var hiddenAppPIDs: Set<pid_t> = []
     private var appVisibilityGenerationByPID: [pid_t: UInt64] = [:]
     private(set) var monitorSessions: [Monitor.ID: MonitorSession] = [:]
@@ -265,6 +266,7 @@ final class WorldStore {
             )
             _ = niriEngine?.rekeyWindow(from: from, to: to, in: workspaceId)
             _ = dwindleEngine?.rekeyWindow(from: from, to: to, in: workspaceId)
+            rekeyScratchpadMember(from: from, to: to)
             refreshProjectionExclusions(in: [workspaceId])
 
         case let .windowRemoved(token, _, _):
@@ -349,9 +351,13 @@ final class WorldStore {
             guard phase == .beforePlan else { return }
             model.setManagedReplacementMetadata(metadata, for: token)
 
-        case let .scratchpadChanged(token, _):
+        case let .scratchpadMembershipChanged(token, index, _):
             guard phase == .beforePlan else { return }
-            scratchpadToken = token
+            applyScratchpadMembership(token, to: index)
+
+        case let .scratchpadRevealChanged(index, _):
+            guard phase == .beforePlan else { return }
+            revealedScratchpad = index.flatMap { scratchpadMembers[$0] == nil ? nil : $0 }
 
         case let .visibleWorkspacesChanged(sessions, _):
             guard phase == .beforePlan else { return }
@@ -391,6 +397,28 @@ final class WorldStore {
 
     private func assertInCommit(_ operation: StaticString) {
         assert(commitDepth > 0, "\(operation) must run inside WorldStore.commit")
+    }
+
+    private func applyScratchpadMembership(_ token: WindowToken, to index: ScratchpadIndex?) {
+        for (slot, members) in scratchpadMembers where members.contains(token) {
+            guard slot != index else { return }
+            let remaining = members.filter { $0 != token }
+            scratchpadMembers[slot] = remaining.isEmpty ? nil : remaining
+        }
+        if let index {
+            scratchpadMembers[index, default: []].append(token)
+        }
+        if let revealed = revealedScratchpad, scratchpadMembers[revealed] == nil {
+            revealedScratchpad = nil
+        }
+    }
+
+    private func rekeyScratchpadMember(from oldToken: WindowToken, to newToken: WindowToken) {
+        guard oldToken != newToken else { return }
+        for (slot, members) in scratchpadMembers {
+            guard let position = members.firstIndex(of: oldToken) else { continue }
+            scratchpadMembers[slot]?[position] = newToken
+        }
     }
 
     private func refreshProjectionExclusions(
@@ -449,7 +477,8 @@ private extension WMEvent {
              .niriPlacementsResolved,
              .nonManagedFocusChanged,
              .nonManagedFocusTargetChanged,
-             .scratchpadChanged,
+             .scratchpadMembershipChanged,
+             .scratchpadRevealChanged,
              .selectionChanged,
              .spaceTopologyChanged,
              .suppressedFocusChanged,
@@ -576,6 +605,10 @@ extension WorldStore {
 
     func isAppHidden(pid: pid_t) -> Bool {
         hiddenAppPIDs.contains(pid)
+    }
+
+    func scratchpadIndex(for token: WindowToken) -> ScratchpadIndex? {
+        scratchpadMembers.first { $0.value.contains(token) }?.key
     }
 
     func appVisibilityGeneration(for pid: pid_t) -> UInt64 {

@@ -22,8 +22,29 @@ final class IPCProtocolEnvelopeTests: XCTestCase {
         """.utf8)
     }
 
-    func testCurrentProtocolVersionIsTwelve() {
-        XCTAssertEqual(OmniWMIPCProtocol.version, 12)
+    func testCurrentProtocolVersionIsThirteen() {
+        XCTAssertEqual(OmniWMIPCProtocol.version, 13)
+    }
+
+    func testScratchpadCommandDecodesLiteralScratchpadIndexField() throws {
+        let data = Data(#"{"name":"scratchpad-assign","arguments":{"scratchpadIndex":4}}"#.utf8)
+
+        XCTAssertEqual(
+            try JSONDecoder().decode(IPCCommandRequest.self, from: data),
+            .scratchpadAssign(index: 4)
+        )
+    }
+
+    func testScratchpadCommandEncodesLiteralScratchpadIndexField() throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+
+        let data = try encoder.encode(IPCCommandRequest.scratchpadToggle(index: 10))
+
+        XCTAssertEqual(
+            String(decoding: data, as: UTF8.self),
+            #"{"arguments":{"scratchpadIndex":10},"name":"scratchpad-toggle"}"#
+        )
     }
 
     func testV11FullscreenOuterGapDisplayFieldIsAdditiveOnWire() throws {

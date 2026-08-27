@@ -266,7 +266,7 @@ final class DurableParkTests: XCTestCase {
             reason: .scratchpad
         )
         let visibleFrame = CGRect(x: 100, y: 16, width: 800, height: 600)
-        controller.workspaceManager.setScratchpadToken(token)
+        controller.workspaceManager.setScratchpadMembership(token, to: 1)
         controller.workspaceManager.setHiddenState(hiddenState, for: token)
         let entry = try XCTUnwrap(controller.workspaceManager.entry(for: token))
         let transactionId = try XCTUnwrap(

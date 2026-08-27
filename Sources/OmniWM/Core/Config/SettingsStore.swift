@@ -298,6 +298,12 @@ final class SettingsStore {
         didSet { scheduleSave() }
     }
 
+    private(set) var scratchpadLabels = SettingsStore.normalizedScratchpadLabels(
+        SettingsStore.defaultExport.scratchpadLabels
+    ) {
+        didSet { scheduleSave() }
+    }
+
     var workspaceBarReserveLayoutSpace = SettingsStore.defaultExport.workspaceBarReserveLayoutSpace {
         didSet { scheduleSave() }
     }
@@ -786,6 +792,7 @@ final class SettingsStore {
                 workspaceBarExcludedBundleIDs
             ),
             workspaceBarIconOverrides: workspaceBarIconOverrides,
+            scratchpadLabels: scratchpadLabels,
             workspaceBarReserveLayoutSpace: workspaceBarReserveLayoutSpace,
             workspaceBarRevealModifier: workspaceBarRevealModifier.rawValue,
             workspaceBarRevealHoldMilliseconds: workspaceBarRevealHoldMilliseconds,
@@ -940,6 +947,7 @@ final class SettingsStore {
         workspaceBarIconOverrides = SettingsStore.normalizedWorkspaceBarIconOverrides(
             export.workspaceBarIconOverrides
         )
+        scratchpadLabels = SettingsStore.normalizedScratchpadLabels(export.scratchpadLabels)
         workspaceBarReserveLayoutSpace = export.workspaceBarReserveLayoutSpace
         workspaceBarRevealModifier = WorkspaceBarRevealModifier(rawValue: export.workspaceBarRevealModifier) ?? .off
         workspaceBarRevealHoldMilliseconds = SettingsStore.validatedWorkspaceBarRevealHoldMilliseconds(
@@ -1401,6 +1409,23 @@ final class SettingsStore {
             let order = lhs.caseInsensitiveCompare(rhs)
             return order == .orderedSame ? lhs < rhs : order == .orderedAscending
         }
+    }
+
+    static func normalizedScratchpadLabels(_ labels: [String: String]) -> [String: String] {
+        labels.reduce(into: [:]) { normalized, entry in
+            guard let index = Int(entry.key.trimmingCharacters(in: .whitespacesAndNewlines)),
+                  IPCScratchpadSlots.range.contains(index)
+            else {
+                return
+            }
+            let label = entry.value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !label.isEmpty else { return }
+            normalized[String(index)] = label
+        }
+    }
+
+    func scratchpadLabel(for index: Int) -> String? {
+        scratchpadLabels[String(index)]
     }
 
     static func normalizedWorkspaceBarIconOverrides(_ overrides: [String: String]) -> [String: String] {

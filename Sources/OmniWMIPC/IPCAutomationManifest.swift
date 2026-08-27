@@ -50,6 +50,7 @@ public enum IPCCommandArgumentKind: String, Codable, CaseIterable, Equatable, Se
     case workspaceNumber = "workspace-number"
     case columnIndex = "column-index"
     case windowIndex = "window-index"
+    case scratchpadIndex = "scratchpad-index"
     case layout
     case resizeAxis = "resize-axis"
     case resizeOperation = "resize-operation"
@@ -61,7 +62,8 @@ public enum IPCCommandArgumentKind: String, Codable, CaseIterable, Equatable, Se
             "<left|right|up|down>"
         case .workspaceNumber,
              .columnIndex,
-             .windowIndex:
+             .windowIndex,
+             .scratchpadIndex:
             "<number>"
         case .layout:
             "<default|niri|dwindle>"
@@ -287,6 +289,10 @@ public enum IPCAutomationManifest {
         kind: .windowIndex,
         summary: "One-based window index within the focused column."
     )
+    private static let scratchpadIndexArgument = IPCCommandArgumentDescriptor(
+        kind: .scratchpadIndex,
+        summary: "Scratchpad slot from 1 to 10."
+    )
     private static let layoutArgument = IPCCommandArgumentDescriptor(
         kind: .layout,
         summary: "Workspace layout selection."
@@ -335,6 +341,7 @@ public enum IPCAutomationManifest {
         "is-visible",
         "is-app-hidden",
         "is-scratchpad",
+        "scratchpad-index",
         "hidden-reason"
     ]
 
@@ -404,7 +411,7 @@ public enum IPCAutomationManifest {
                     summary: "Only include windows on visible workspaces that are neither hidden nor owned by a hidden app."
                 ),
                 .init(name: .floating, summary: "Only include floating managed windows."),
-                .init(name: .scratchpad, summary: "Only include the scratchpad window."),
+                .init(name: .scratchpad, summary: "Only include windows assigned to a scratchpad."),
                 .init(name: .app, summary: "Filter by application display name."),
                 .init(name: .bundleId, summary: "Filter by application bundle identifier.")
             ],
@@ -871,9 +878,15 @@ public enum IPCAutomationManifest {
         command(
             ["scratchpad", "assign"],
             name: .scratchpadAssign,
-            summary: "Assign the focused managed window to the scratchpad."
+            summary: "Assign the focused managed window to a scratchpad, or remove it when already there.",
+            arguments: [scratchpadIndexArgument]
         ),
-        command(["scratchpad", "toggle"], name: .scratchpadToggle, summary: "Show or hide the scratchpad window."),
+        command(
+            ["scratchpad", "toggle"],
+            name: .scratchpadToggle,
+            summary: "Show or hide a scratchpad's windows.",
+            arguments: [scratchpadIndexArgument]
+        ),
         command(["open-menu-anywhere"], name: .openMenuAnywhere, summary: "Open the menu surface anywhere."),
         command(
             ["toggle-workspace-bar"],

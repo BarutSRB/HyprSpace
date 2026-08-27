@@ -280,7 +280,7 @@ enum CLIRenderer {
                 window.mode?.rawValue ?? "-",
                 boolDescription(window.isFocused),
                 boolDescription(window.isVisible),
-                boolDescription(window.isScratchpad)
+                window.scratchpadIndex.map(String.init) ?? boolDescription(window.isScratchpad)
             ]
         }
 

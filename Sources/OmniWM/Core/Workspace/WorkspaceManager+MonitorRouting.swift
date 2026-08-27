@@ -108,14 +108,13 @@ extension WorkspaceManager {
         to targetMonitor: Monitor
     ) -> [WindowToken: FloatingState] {
         let entries = entries(in: workspaceId)
-        let scratchpadToken = scratchpadToken()
         var states: [WindowToken: FloatingState] = [:]
         states.reserveCapacity(entries.count)
 
         for entry in entries {
             guard entry.mode == .floating,
                   entry.layoutReason == .standard,
-                  entry.token != scratchpadToken,
+                  !isScratchpadToken(entry.token),
                   let existingState = entry.floatingState,
                   let frame = resolvedFloatingFrame(for: entry.token, preferredMonitor: targetMonitor)
             else {

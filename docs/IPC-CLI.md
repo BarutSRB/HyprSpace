@@ -171,7 +171,7 @@ Turning **Enable IPC** on starts the server immediately and creates the Unix soc
 
 ## IPC Protocol
 
-**Protocol version:** 12
+**Protocol version:** 13
 
 The client and server versions must match exactly. A mismatched client can still call `version`, but every other remote request returns `protocol_mismatch`; there is no cross-version compatibility path.
 
@@ -396,8 +396,8 @@ Workspace IDs are positive numeric strings. Direct hotkeys stay limited to `1-9`
 | `command toggle-focused-window-floating` | — | shared | Toggle focused window between tiled and floating |
 | `command raise-all-floating-windows` | — | shared | Raise all visible floating windows |
 | `command rescue-offscreen-windows` | — | shared | Clamp tracked floating windows back onto their visible monitors |
-| `command scratchpad assign` | — | shared | Assign the focused window to the scratchpad |
-| `command scratchpad toggle` | — | shared | Show or hide the scratchpad window |
+| `command scratchpad assign <number>` | — | shared | Assign the focused window to scratchpad 1-10, or remove it when already there |
+| `command scratchpad toggle <number>` | — | shared | Show or hide the windows in scratchpad 1-10 |
 
 ### UI Toggles
 
@@ -493,7 +493,7 @@ Selectors filter query results. Value selectors take an argument; boolean select
 | `--focused` | Only the focused item |
 | `--visible` | Only visible items; windows also require a visible workspace, no window hidden state, and an app that is not hidden |
 | `--floating` | Only floating windows |
-| `--scratchpad` | Only the scratchpad window |
+| `--scratchpad` | Only windows assigned to a scratchpad |
 | `--current` | Only the current/interaction item |
 | `--main` | Only the main display |
 
@@ -503,7 +503,7 @@ Use `--fields` with a comma-separated list to limit returned fields.
 
 Field tokens are part of the CLI contract. Returned JSON still uses the payload schema's field names, so the selected token may not be byte-for-byte identical to the JSON key. For example, `window-counts` selects the workspace payload's `counts` field.
 
-**Window fields:** `id`, `pid`, `workspace`, `display`, `app`, `title`, `frame`, `mode`, `layout-reason`, `manual-override`, `is-focused`, `is-visible`, `is-app-hidden`, `is-scratchpad`, `hidden-reason`
+**Window fields:** `id`, `pid`, `workspace`, `display`, `app`, `title`, `frame`, `mode`, `layout-reason`, `manual-override`, `is-focused`, `is-visible`, `is-app-hidden`, `is-scratchpad`, `scratchpad-index`, `hidden-reason`
 
 For windows, `is-visible` is true only when the workspace is visible, the window has no `hidden-reason`, and its macOS application is not hidden. `is-app-hidden` exposes the PID-scoped macOS hide state independently of `layout-reason` and `hidden-reason`; selecting `is-app-hidden` returns the JSON field `isAppHidden`.
 
@@ -846,7 +846,7 @@ Completions are context-aware: query names, selectors, field names, command path
 
 ```json
 {
-  "version": 12,
+  "version": 13,
   "id": "<uuid>",
   "kind": "<ping|version|command|capture|query|rule|workspace|window|subscribe>",
   "authorizationToken": "<token>",
@@ -964,7 +964,7 @@ Workspace requests use this flat wire shape. For `move-to-monitor`, `force` is o
 
 ```json
 {
-  "version": 12,
+  "version": 13,
   "id": "<request-id>",
   "ok": true,
   "kind": "<ping|version|command|capture|query|rule|workspace|window|subscribe>",
@@ -981,7 +981,7 @@ Authorization, protocol, validation, and routing failures keep the originating r
 
 ```json
 {
-  "version": 12,
+  "version": 13,
   "id": "<request-id>",
   "ok": false,
   "kind": "query",
@@ -998,7 +998,7 @@ Events are sent on subscription connections after the initial response.
 
 ```json
 {
-  "version": 12,
+  "version": 13,
   "id": "<event-id>",
   "kind": "event",
   "channel": "focus",

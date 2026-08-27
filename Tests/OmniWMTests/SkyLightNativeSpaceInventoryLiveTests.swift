@@ -7,6 +7,24 @@ import XCTest
 
 @MainActor
 final class SkyLightNativeSpaceInventoryLiveTests: XCTestCase {
+    func testLiveAboveOrdersWindowBackIn() async throws {
+        try requireLiveTestsEnabled()
+        let sky = SkyLight.shared
+        let wid = sky.createBorderWindow(frame: CGRect(x: -9000, y: -9000, width: 10, height: 10))
+        guard wid != 0 else {
+            throw XCTSkip("Unable to create an owned SkyLight test window")
+        }
+        defer { sky.releaseBorderWindow(wid) }
+
+        sky.transactionHide(wid)
+        let orderedOut = await observedOrderedState(of: wid, matching: false)
+        XCTAssertEqual(orderedOut, false)
+
+        sky.orderWindow(wid, relativeTo: 0, order: .above)
+        let orderedIn = await observedOrderedState(of: wid, matching: true)
+        XCTAssertEqual(orderedIn, true)
+    }
+
     func testLiveTransactionMoveIsObservedThroughWindowServerBounds() async throws {
         try requireLiveTestsEnabled()
         let sky = SkyLight.shared
@@ -156,6 +174,22 @@ final class SkyLightNativeSpaceInventoryLiveTests: XCTestCase {
                abs(bounds.origin.y - origin.y) < 2
             {
                 return bounds
+            }
+            do {
+                try await Task.sleep(for: .milliseconds(5))
+            } catch {
+                return nil
+            }
+        } while clock.now < deadline
+        return nil
+    }
+
+    private func observedOrderedState(of wid: UInt32, matching expected: Bool) async -> Bool? {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .milliseconds(250))
+        repeat {
+            if let orderedIn = SkyLight.shared.isWindowOrderedIn(wid), orderedIn == expected {
+                return orderedIn
             }
             do {
                 try await Task.sleep(for: .milliseconds(5))

@@ -347,7 +347,8 @@ Some apps (Ghostty, browsers) destroy and recreate windows during internal opera
     private(set) var seq: UInt64 = 0               // monotonic mutation counter
     private(set) var focus = FocusSessionSnapshot()
     private(set) var viewports: [WorkspaceDescriptor.ID: ViewportState] = [:]
-    private(set) var scratchpadToken: WindowToken?
+    private(set) var scratchpadMembers: [ScratchpadIndex: [WindowToken]]
+    private(set) var revealedScratchpad: ScratchpadIndex?
     private(set) var hiddenAppPIDs: Set<pid_t> = []
     private var appVisibilityGenerationByPID: [pid_t: UInt64] = [:]
     private(set) var monitorSessions: [Monitor.ID: MonitorSession] = [:]
@@ -420,7 +421,7 @@ The reconciler is *not* called from inside `WorldStore.commit`; it reads current
 
 When OmniWM activates an app or focuses a window, macOS emits an AX focus-changed event — an *echo* of our own action. Without bookkeeping, the system can't tell that echo apart from the user genuinely clicking another window. The Intent subsystem (`Core/Intent/`) solves this.
 
-- **`IntentLedger`** is a `@MainActor` ring buffer (capacity 256) of `Intent` records. `IntentKind` has seven cases: `activateApp`, `appTerminationFocusRecovery`, `appRevealFocus`, `focusPolicyLease`, `focusWindow`, `replacementFocus`, `sameAppCloseProbe`. `appRevealFocus` carries the exact window-handle identity, app-visibility generation, focus watermark and fingerprint, plus a normal-window or scratchpad destination so unhide completion cannot focus stale state. `appTerminationFocusRecovery` correlates a focused floating app's termination with macOS's fallback activation long enough to restore the workspace's retained tiled focus without accepting a transient fallback application. Each record carries the global intake `seq` at issue time, a lifecycle `phase` (`pending`/`confirmed`/`superseded`/`expired`/`cancelled`), and retry state.
+- **`IntentLedger`** is a `@MainActor` ring buffer (capacity 256) of `Intent` records. `IntentKind` has seven cases: `activateApp`, `appTerminationFocusRecovery`, `appRevealFocus`, `focusPolicyLease`, `focusWindow`, `replacementFocus`, `sameAppCloseProbe`. `appRevealFocus` carries the exact window-handle identity, a pending PID-to-visibility-generation map, focus watermark and fingerprint, plus a normal-window, scratchpad-slot, or exact scratchpad-member destination so unhide completion cannot focus stale state. `appTerminationFocusRecovery` correlates a focused floating app's termination with macOS's fallback activation long enough to restore the workspace's retained tiled focus without accepting a transient fallback application. Each record carries the global intake `seq` at issue time, a lifecycle `phase` (`pending`/`confirmed`/`superseded`/`expired`/`cancelled`), and retry state.
 - **`classifyFocusObservation(token:)`** returns an `EchoClassification`: `.echoOf(intent)` when an open intent targets the token, `.lateEcho(intent)` when a recently-retired intent (within a 1-second window) matches, otherwise `.external`. The consumer is `AXEventHandler`, which treats `.echoOf`/`.lateEcho` as confirmation of our pending request and only processes `.external` as a genuine user focus change.
 - **`DeadlineWheel`** is a main-actor timing wheel keyed by `IntentID`: it arms a single `Task` that sleeps until the nearest deadline, then posts `.intentExpired(intentId:)` back into `EventIntake` (it does not fire callbacks). `AXEventHandler.handleIntentExpired` decides what to do — e.g. a still-active `focusWindow` intent drives a focus *retry* rather than expiring. Activation-settle deadlines are 100ms; an `appRevealFocus` intent expires after 2 seconds; app-termination recovery uses a one-turn verification followed by a bounded 600ms fallback barrier. The `DeadlineWheel` serves focus/activation/lease/reveal/recovery intents only; AX frame-write retries are a separate mechanism (see [4.9](#49-accessibility-layer)).
 - **`FactResolver`** gathers the one fact that can't be read on the main actor cheaply: the focused window of an activating app. It reads `kAXFocusedWindow` (+ fullscreen flag) off-main on the app's AX thread, then re-enters the pipeline via `EventIntake.post(.activationFactsResolved(...))`.
@@ -499,7 +500,8 @@ WorkspaceManager
     ├── focus: FocusSessionSnapshot             focused token, pending managed focus, …
     ├── viewports: [WorkspaceID: ViewportState] Niri scroll/selection per workspace
     ├── monitorSessions: [MonitorID: MonitorSession]   visible workspace per monitor
-    ├── scratchpadToken: WindowToken?
+    ├── scratchpadMembers: [ScratchpadIndex: [WindowToken]]
+    ├── revealedScratchpad: ScratchpadIndex?
     ├── hiddenAppPIDs + visibility generations    PID-scoped macOS app visibility
     ├── spaceTopology: SpaceTopology
     └── niriEngine / dwindleEngine  (private)   layout trees, mutation-gated
@@ -652,7 +654,7 @@ Focus-only switching between key windows inside one application requires a stage
 
 **Hotkeys** (`Sources/OmniWM/Core/Input/`)
 
-`ActionCatalog` is the source of truth for action metadata and shortcut assignability. `buildSpecs()` materializes **153** `ActionSpec`s (99 standalone actions + 6 loop templates × 9), each with a title, search keywords, category, layout compatibility, default binding, and visibility. `HotkeyBinding`/`HotkeyBindingRegistry` persist exactly one binding per spec that is not `.unassignable`. `HotkeyBindingRegistry.resolve` matches the persisted list against the current defaults and rejects unknown, missing, or duplicate action IDs rather than repairing the file; each accepted trigger is still normalized through `canonicalizeTrigger`. Unassignable specs are never persisted but remain available to non-hotkey command surfaces such as IPC.
+`ActionCatalog` is the source of truth for action metadata and shortcut assignability. `buildSpecs()` materializes **171** `ActionSpec`s (117 standalone actions + 6 loop templates × 9), each with a title, search keywords, category, layout compatibility, default binding, and visibility. `HotkeyBinding`/`HotkeyBindingRegistry` persist exactly one binding per spec that is not `.unassignable`. `HotkeyBindingRegistry.resolve` matches the persisted list against the current defaults and rejects unknown, missing, or duplicate action IDs rather than repairing the file; each accepted trigger is still normalized through `canonicalizeTrigger`. Unassignable specs are never persisted but remain available to non-hotkey command surfaces such as IPC.
 
 `HotkeyCenter` (`Hotkeys.swift`) installs one Carbon `InstallEventHandler` and registers each binding via `RegisterEventHotKey`, plus a virtual-hyper synthesis path. On a press it emits a `HotkeyInvocation` through `onCommand`; the invocation carries the semantic `HotkeyCommand` and optional `PhysicalHotkeyTrigger` metadata (`keyCode`, modifiers, and repeat state). `WMController` wires it to `eventIntake.enqueue(.hotkeyInvocation(invocation))`, so physical commands enter the same ordered intake pipeline as everything else (falling back to `CommandHandler.handleHotkeyInvocation` only if intake is closed).
 
@@ -829,7 +831,7 @@ The per-frame **display link** is owned by `LayoutRefreshController` (not by `An
 | **Workspace Bar** | `UI/WorkspaceBar/WorkspaceBarManager.swift` | Per-monitor workspace bars — now **driven by `SurfaceReconciler`** via `apply([DesiredBarSurface])`, not self-polling. |
 | **Hidden Bar** | `UI/HiddenBar/HiddenBarController.swift` | Per-app menu-bar concealment coordinated through an isolated assessment-mode assertion, AX item discovery and icon capture, and a hidden-items panel. Unbundled launches use a separate fallback app icon. |
 | **Status Bar** | `UI/StatusBar/StatusBarController.swift` | Menu-bar icon, settings access, manual update checks. |
-| **Scratchpad** | `Core/Workspace/WorkspaceManager.swift` | Single transient window (`scratchpadToken` on `WorldStore`); show/hide coordinated by `WMController`. |
+| **Scratchpad** | `Core/Workspace/WorkspaceManager.swift` | Ten slots of floating windows (`scratchpadMembers` / `revealedScratchpad` on `WorldStore`); at most one slot revealed, show/hide coordinated by `WMController`. |
 | **Monitors** | `Core/Monitor/` | Display detection (`Monitor.current()`), UUID-first durable identity (`OutputId`), and `MonitorRestoreAssignments` (re-maps saved per-monitor workspaces by unique display UUID, then uses runtime ID/name only for UUID-less displays before geometry/name best-match). Duplicate live UUID claims fail closed to session-only runtime identity. Orientation reported over IPC is the **effective** orientation (`settings.effectiveOrientation` — override or auto). |
 | **Sleep / Lock** | `Core/Sleep/`, `Core/LockScreen/` | `SleepPreventionManager` (IOPM assertion), `LockScreenObserver` (DistributedNotificationCenter lock/unlock). |
 | **Release Updater** | `App/UpdateCoordinator.swift` | Polls the latest GitHub release once per day, supports manual checks, shows a release-notes popup. |
@@ -1051,7 +1053,7 @@ Long-standing names that a returning contributor may search for, and what replac
 | Removed / renamed | Now |
 |-------------------|-----|
 | `RuntimeStore` / `RuntimeStore.transact` | `WorldStore.commit` (`Core/World/`), entered via `WorkspaceManager.recordReconcileEvent` |
-| `SessionState` (single type) | Split into `FocusSessionSnapshot`, `MonitorSession`, `viewports`, `scratchpadToken` on `WorldStore` |
+| `SessionState` (single type) | Split into `FocusSessionSnapshot`, `MonitorSession`, `viewports`, `scratchpadMembers` on `WorldStore` |
 | `WindowModel.Entry` (nested struct) | `WindowState` (top-level value type) |
 | `BorderManager` / `FocusBorderController` / `BorderCoordinator` | Derived surface: `SurfaceReconciler` → `BorderSurfaceApplier` → `BorderWindow` |
 | `FocusBridgeCoordinator` | Managed focus split across `WMController`, `AXEventHandler`, `WorkspaceManager`, `IntentLedger` |

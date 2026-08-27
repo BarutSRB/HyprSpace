@@ -199,14 +199,14 @@ final class AppRevealFocusTests: XCTestCase {
             token: firstToken,
             workspaceId: UUID(),
             handleIdentity: ObjectIdentifier(WindowHandle(id: firstToken)),
-            appVisibilityGeneration: 2,
+            pendingApps: [firstToken.pid: 2],
             focusFingerprint: emptyFocusFingerprint()
         )
         let second = ledger.beginAppRevealFocus(
             token: secondToken,
             workspaceId: UUID(),
             handleIdentity: ObjectIdentifier(WindowHandle(id: secondToken)),
-            appVisibilityGeneration: 4,
+            pendingApps: [secondToken.pid: 4],
             focusFingerprint: emptyFocusFingerprint()
         )
 
@@ -214,6 +214,206 @@ final class AppRevealFocusTests: XCTestCase {
         XCTAssertEqual(ledger.intent(id: second.id)?.phase, .pending)
         XCTAssertNil(ledger.openAppRevealFocusIntent(pid: firstToken.pid))
         XCTAssertEqual(ledger.openAppRevealFocusIntent(pid: secondToken.pid)?.intent.id, second.id)
+    }
+
+    func testAggregateRevealDrainsEveryHiddenApplicationBeforeConfirmation() throws {
+        let ledger = IntentLedger()
+        let firstToken = WindowToken(pid: 91_020, windowId: 91_120)
+        let secondPID: pid_t = 91_021
+        let intent = ledger.beginAppRevealFocus(
+            token: firstToken,
+            workspaceId: UUID(),
+            handleIdentity: ObjectIdentifier(WindowHandle(id: firstToken)),
+            pendingApps: [firstToken.pid: 2, secondPID: 8],
+            focusFingerprint: emptyFocusFingerprint()
+        )
+
+        XCTAssertEqual(
+            ledger.drainAppRevealFocus(
+                intentId: intent.id,
+                pid: firstToken.pid,
+                appVisibilityGeneration: 3
+            ),
+            .awaitingApps
+        )
+        XCTAssertNil(ledger.openAppRevealFocusIntent(pid: firstToken.pid))
+        XCTAssertEqual(ledger.openAppRevealFocusIntent(pid: secondPID)?.intent.id, intent.id)
+        let pendingIntent = try XCTUnwrap(ledger.intent(id: intent.id))
+        guard case let .appRevealFocus(pendingPayload) = pendingIntent.kind else {
+            return XCTFail("Expected app reveal payload")
+        }
+        XCTAssertEqual(
+            pendingPayload.coordinatedAppGenerations,
+            [firstToken.pid: 2, secondPID: 8]
+        )
+        XCTAssertEqual(pendingPayload.pendingAppPIDs, [secondPID])
+        XCTAssertNil(ledger.confirmAppRevealFocus(intentId: intent.id))
+        XCTAssertEqual(ledger.intent(id: intent.id)?.phase, .pending)
+
+        XCTAssertEqual(
+            ledger.drainAppRevealFocus(
+                intentId: intent.id,
+                pid: secondPID,
+                appVisibilityGeneration: 9
+            ),
+            .ready
+        )
+        XCTAssertNotNil(ledger.confirmAppRevealFocus(intentId: intent.id))
+        XCTAssertEqual(ledger.intent(id: intent.id)?.phase, .confirmed)
+    }
+
+    func testAggregateRevealExpiryRemovesEveryPendingApplicationLookup() {
+        let ledger = IntentLedger()
+        let token = WindowToken(pid: 91_025, windowId: 91_125)
+        let secondPID: pid_t = 91_026
+        let intent = ledger.beginAppRevealFocus(
+            token: token,
+            workspaceId: UUID(),
+            handleIdentity: ObjectIdentifier(WindowHandle(id: token)),
+            pendingApps: [token.pid: 2, secondPID: 4],
+            focusFingerprint: emptyFocusFingerprint()
+        )
+
+        XCTAssertNotNil(ledger.markExpired(id: intent.id))
+
+        XCTAssertEqual(ledger.intent(id: intent.id)?.phase, .expired)
+        XCTAssertNil(ledger.openAppRevealFocusIntent(pid: token.pid))
+        XCTAssertNil(ledger.openAppRevealFocusIntent(pid: secondPID))
+    }
+
+    func testScratchpadSelectionRequestsEveryHiddenMemberApplication() throws {
+        let fixture = try makeFixture(pid: 91_022, windowId: 91_122)
+        let secondPID: pid_t = 91_023
+        let secondToken = fixture.controller.workspaceManager.addWindow(
+            AXWindowRef(
+                element: AXUIElementCreateApplication(secondPID),
+                windowId: 91_123
+            ),
+            pid: secondPID,
+            windowId: 91_123,
+            to: fixture.workspaceId
+        )
+        XCTAssertTrue(fixture.controller.workspaceManager.setScratchpadMembership(fixture.token, to: 1))
+        XCTAssertTrue(fixture.controller.workspaceManager.setScratchpadMembership(secondToken, to: 1))
+        fixture.controller.workspaceManager.setAppHidden(true, pid: fixture.token.pid, source: .service)
+        fixture.controller.workspaceManager.setAppHidden(true, pid: secondPID, source: .service)
+        var requestedPIDs: [pid_t] = []
+        let handler = makeHandler(controller: fixture.controller) { pid in
+            requestedPIDs.append(pid)
+            return true
+        }
+
+        XCTAssertTrue(handler.navigateToExplicitlySelectedWindow(handle: fixture.handle))
+
+        XCTAssertEqual(requestedPIDs, [fixture.token.pid, secondPID])
+        let open = try XCTUnwrap(
+            fixture.controller.intentLedger.openAppRevealFocusIntent(pid: fixture.token.pid)
+        )
+        XCTAssertEqual(open.payload.destination, .scratchpadWindow(index: 1, monitorId: nil))
+        XCTAssertEqual(
+            open.payload.coordinatedAppGenerations,
+            [
+                fixture.token.pid: fixture.controller.workspaceManager.appVisibilityGeneration(
+                    for: fixture.token.pid
+                ),
+                secondPID: fixture.controller.workspaceManager.appVisibilityGeneration(for: secondPID)
+            ]
+        )
+        XCTAssertEqual(
+            fixture.controller.intentLedger.openAppRevealFocusIntent(pid: secondPID)?.intent.id,
+            open.intent.id
+        )
+    }
+
+    func testAggregateRevealCompletesOnlyAfterEveryApplicationUnhides() async throws {
+        let fixture = try makeFixture(pid: 91_027, windowId: 91_127)
+        let secondPID: pid_t = 91_028
+        let secondToken = fixture.controller.workspaceManager.addWindow(
+            AXWindowRef(
+                element: AXUIElementCreateApplication(secondPID),
+                windowId: 91_128
+            ),
+            pid: secondPID,
+            windowId: 91_128,
+            to: fixture.workspaceId
+        )
+        XCTAssertTrue(fixture.controller.workspaceManager.setScratchpadMembership(fixture.token, to: 1))
+        XCTAssertTrue(fixture.controller.workspaceManager.setScratchpadMembership(secondToken, to: 1))
+        let hiddenState = HiddenState(
+            proportionalPosition: .zero,
+            referenceMonitorId: fixture.monitor.id,
+            reason: .scratchpad
+        )
+        fixture.controller.workspaceManager.setHiddenState(hiddenState, for: fixture.token)
+        fixture.controller.workspaceManager.setHiddenState(hiddenState, for: secondToken)
+        fixture.controller.workspaceManager.setAppHidden(true, pid: fixture.token.pid, source: .service)
+        fixture.controller.workspaceManager.setAppHidden(true, pid: secondPID, source: .service)
+        let handler = makeHandler(controller: fixture.controller) { _ in true }
+        XCTAssertTrue(handler.navigateToExplicitlySelectedWindow(handle: fixture.handle))
+        let intentId = try XCTUnwrap(
+            fixture.controller.intentLedger.openAppRevealFocusIntent(pid: fixture.token.pid)?.intent.id
+        )
+
+        fixture.controller.axEventHandler.handleAppUnhidden(pid: fixture.token.pid, source: .service)
+        await WindowAdmissionTestSupport.drainLayoutRefreshes(fixture.controller)
+
+        XCTAssertEqual(fixture.controller.intentLedger.intent(id: intentId)?.phase, .pending)
+        XCTAssertNil(fixture.controller.intentLedger.openAppRevealFocusIntent(pid: fixture.token.pid))
+        XCTAssertEqual(
+            fixture.controller.intentLedger.openAppRevealFocusIntent(pid: secondPID)?.intent.id,
+            intentId
+        )
+
+        fixture.controller.axEventHandler.handleAppUnhidden(pid: secondPID, source: .service)
+        await WindowAdmissionTestSupport.drainLayoutRefreshes(fixture.controller)
+
+        XCTAssertEqual(fixture.controller.intentLedger.intent(id: intentId)?.phase, .confirmed)
+        XCTAssertNil(fixture.controller.intentLedger.openAppRevealFocusIntent(pid: secondPID))
+    }
+
+    func testAggregateRevealRejectsDrainedApplicationWithNewVisibilityCycle() async throws {
+        let fixture = try makeFixture(pid: 91_030, windowId: 91_130)
+        let secondPID: pid_t = 91_031
+        let secondToken = fixture.controller.workspaceManager.addWindow(
+            AXWindowRef(
+                element: AXUIElementCreateApplication(secondPID),
+                windowId: 91_131
+            ),
+            pid: secondPID,
+            windowId: 91_131,
+            to: fixture.workspaceId
+        )
+        XCTAssertTrue(fixture.controller.workspaceManager.setScratchpadMembership(fixture.token, to: 1))
+        XCTAssertTrue(fixture.controller.workspaceManager.setScratchpadMembership(secondToken, to: 1))
+        let hiddenState = HiddenState(
+            proportionalPosition: .zero,
+            referenceMonitorId: fixture.monitor.id,
+            reason: .scratchpad
+        )
+        fixture.controller.workspaceManager.setHiddenState(hiddenState, for: fixture.token)
+        fixture.controller.workspaceManager.setHiddenState(hiddenState, for: secondToken)
+        fixture.controller.workspaceManager.setAppHidden(true, pid: fixture.token.pid, source: .service)
+        fixture.controller.workspaceManager.setAppHidden(true, pid: secondPID, source: .service)
+        let handler = makeHandler(controller: fixture.controller) { _ in true }
+        AppVisibilityTrace.shared.beginCapture()
+        defer { AppVisibilityTrace.shared.endCapture() }
+        XCTAssertTrue(handler.navigateToExplicitlySelectedWindow(handle: fixture.handle))
+        let intentId = try XCTUnwrap(
+            fixture.controller.intentLedger.openAppRevealFocusIntent(pid: fixture.token.pid)?.intent.id
+        )
+
+        fixture.controller.axEventHandler.handleAppUnhidden(pid: fixture.token.pid, source: .service)
+        await WindowAdmissionTestSupport.drainLayoutRefreshes(fixture.controller)
+        XCTAssertNil(fixture.controller.intentLedger.openAppRevealFocusIntent(pid: fixture.token.pid))
+        fixture.controller.workspaceManager.setAppHidden(true, pid: fixture.token.pid, source: .service)
+        fixture.controller.workspaceManager.setAppHidden(false, pid: fixture.token.pid, source: .service)
+
+        fixture.controller.axEventHandler.handleAppUnhidden(pid: secondPID, source: .service)
+        await WindowAdmissionTestSupport.drainLayoutRefreshes(fixture.controller)
+
+        XCTAssertEqual(fixture.controller.intentLedger.intent(id: intentId)?.phase, .cancelled)
+        XCTAssertNil(fixture.controller.intentLedger.activeManagedRequest)
+        XCTAssertTrue(AppVisibilityTrace.shared.dump().contains("reason=visibility_generation_changed"))
     }
 
     func testExternalFocusFingerprintChangeRejectsRevealContinuation() throws {
@@ -310,7 +510,7 @@ final class AppRevealFocusTests: XCTestCase {
             token: oldToken,
             workspaceId: UUID(),
             handleIdentity: ObjectIdentifier(handle),
-            appVisibilityGeneration: 8,
+            pendingApps: [oldToken.pid: 8],
             focusFingerprint: fingerprint
         )
 
@@ -335,7 +535,7 @@ final class AppRevealFocusTests: XCTestCase {
             token: oldToken,
             workspaceId: UUID(),
             handleIdentity: ObjectIdentifier(handle),
-            appVisibilityGeneration: 10,
+            pendingApps: [oldToken.pid: 10],
             focusFingerprint: emptyFocusFingerprint()
         )
         ledger.rekeyManagedRequest(
@@ -413,7 +613,7 @@ final class AppRevealFocusTests: XCTestCase {
     func testHiddenScratchpadSelectionDefersScratchpadMutationUntilUnhide() throws {
         let fixture = try makeFixture(pid: 91_012, windowId: 91_112)
         let handler = makeHandler(controller: fixture.controller) { _ in true }
-        XCTAssertTrue(fixture.controller.workspaceManager.setScratchpadToken(fixture.token))
+        XCTAssertTrue(fixture.controller.workspaceManager.setScratchpadMembership(fixture.token, to: 1))
         let hiddenState = HiddenState(
             proportionalPosition: .zero,
             referenceMonitorId: fixture.monitor.id,
@@ -429,6 +629,7 @@ final class AppRevealFocusTests: XCTestCase {
         XCTAssertTrue(
             handler.revealScratchpadFromBar(
                 handle: fixture.handle,
+                index: 1,
                 monitorId: fixture.monitor.id
             )
         )
@@ -436,7 +637,7 @@ final class AppRevealFocusTests: XCTestCase {
         let open = try XCTUnwrap(
             fixture.controller.intentLedger.openAppRevealFocusIntent(pid: fixture.token.pid)
         )
-        XCTAssertEqual(open.payload.destination, .scratchpad(monitorId: fixture.monitor.id))
+        XCTAssertEqual(open.payload.destination, .scratchpad(index: 1, monitorId: fixture.monitor.id))
         XCTAssertEqual(fixture.controller.workspaceManager.hiddenState(for: fixture.token), hiddenState)
         XCTAssertTrue(fixture.controller.workspaceManager.isAppHidden(pid: fixture.token.pid))
     }
@@ -444,7 +645,7 @@ final class AppRevealFocusTests: XCTestCase {
     func testCommandPaletteSelectionUsesScratchpadRevealDestination() throws {
         let fixture = try makeFixture(pid: 91_014, windowId: 91_114)
         let handler = makeHandler(controller: fixture.controller) { _ in true }
-        XCTAssertTrue(fixture.controller.workspaceManager.setScratchpadToken(fixture.token))
+        XCTAssertTrue(fixture.controller.workspaceManager.setScratchpadMembership(fixture.token, to: 1))
         let hiddenState = HiddenState(
             proportionalPosition: .zero,
             referenceMonitorId: fixture.monitor.id,
@@ -462,13 +663,51 @@ final class AppRevealFocusTests: XCTestCase {
         let open = try XCTUnwrap(
             fixture.controller.intentLedger.openAppRevealFocusIntent(pid: fixture.token.pid)
         )
-        XCTAssertEqual(open.payload.destination, .scratchpad(monitorId: nil))
+        XCTAssertEqual(open.payload.destination, .scratchpadWindow(index: 1, monitorId: nil))
         XCTAssertEqual(fixture.controller.workspaceManager.hiddenState(for: fixture.token), hiddenState)
+    }
+
+    func testDeferredScratchpadSelectionFallsBackWhenMembershipChanges() throws {
+        let fixture = try makeFixture(pid: 91_024, windowId: 91_124)
+        let handler = makeHandler(controller: fixture.controller) { _ in true }
+        XCTAssertTrue(fixture.controller.workspaceManager.setScratchpadMembership(fixture.token, to: 1))
+        fixture.controller.workspaceManager.setAppHidden(
+            true,
+            pid: fixture.token.pid,
+            source: .service
+        )
+        XCTAssertTrue(handler.navigateToExplicitlySelectedWindow(handle: fixture.handle))
+        let intentId = try XCTUnwrap(
+            fixture.controller.intentLedger.openAppRevealFocusIntent(pid: fixture.token.pid)?.intent.id
+        )
+
+        XCTAssertTrue(fixture.controller.workspaceManager.setScratchpadMembership(fixture.token, to: nil))
+        fixture.controller.workspaceManager.setAppHidden(
+            false,
+            pid: fixture.token.pid,
+            source: .service
+        )
+
+        XCTAssertTrue(handler.completeAppRevealFocus(intentId: intentId))
+        XCTAssertEqual(fixture.controller.intentLedger.intent(id: intentId)?.phase, .confirmed)
+        XCTAssertNil(fixture.controller.workspaceManager.revealedScratchpadIndex())
+    }
+
+    func testVisibleScratchpadSelectionFocusesWithoutTogglingSlotOff() throws {
+        let fixture = try makeFixture(pid: 91_029, windowId: 91_129)
+        let handler = makeHandler(controller: fixture.controller) { _ in true }
+        XCTAssertTrue(fixture.controller.workspaceManager.setScratchpadMembership(fixture.token, to: 1))
+        fixture.controller.workspaceManager.setRevealedScratchpad(1)
+
+        XCTAssertTrue(handler.navigateToExplicitlySelectedWindow(handle: fixture.handle))
+
+        XCTAssertEqual(fixture.controller.workspaceManager.revealedScratchpadIndex(), 1)
+        XCTAssertNil(fixture.controller.workspaceManager.hiddenState(for: fixture.token))
     }
 
     func testScratchpadCommandDoesNotClearStateForMacOSHiddenApp() throws {
         let fixture = try makeFixture(pid: 91_013, windowId: 91_113)
-        XCTAssertTrue(fixture.controller.workspaceManager.setScratchpadToken(fixture.token))
+        XCTAssertTrue(fixture.controller.workspaceManager.setScratchpadMembership(fixture.token, to: 1))
         let hiddenState = HiddenState(
             proportionalPosition: .zero,
             referenceMonitorId: fixture.monitor.id,
@@ -481,7 +720,7 @@ final class AppRevealFocusTests: XCTestCase {
             source: .service
         )
 
-        XCTAssertEqual(fixture.controller.toggleScratchpadWindow(), .notFound)
+        XCTAssertEqual(fixture.controller.toggleScratchpad(1), .notFound)
         XCTAssertEqual(fixture.controller.workspaceManager.hiddenState(for: fixture.token), hiddenState)
     }
 

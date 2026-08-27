@@ -2124,7 +2124,7 @@ final class RuntimeArchitectureTests: XCTestCase {
             ),
             for: missingToken
         )
-        XCTAssertFalse(manager.setScratchpadToken(missingToken))
+        XCTAssertFalse(manager.setScratchpadMembership(missingToken, to: 1))
 
         XCTAssertTrue(
             manager.isSeqEpochCurrent(before, domains: [.workspace, .layout, .focus, .fullscreen])
@@ -3795,7 +3795,7 @@ final class RuntimeArchitectureTests: XCTestCase {
             referenceMonitorId: nil,
             reason: .scratchpad
         )
-        controller.workspaceManager.setScratchpadToken(token)
+        controller.workspaceManager.setScratchpadMembership(token, to: 1)
         controller.workspaceManager.setHiddenState(hiddenState, for: token)
         controller.reassignManagedWindow(token, to: destinationWorkspaceId)
 
@@ -3854,7 +3854,7 @@ final class RuntimeArchitectureTests: XCTestCase {
         )
         var didRun = false
 
-        controller.workspaceManager.setScratchpadToken(token)
+        controller.workspaceManager.setScratchpadMembership(token, to: 1)
         controller.workspaceManager.setHiddenState(hiddenState, for: token)
         let entry = try XCTUnwrap(controller.workspaceManager.entry(for: token))
         let transactionId = try XCTUnwrap(
@@ -3908,7 +3908,7 @@ final class RuntimeArchitectureTests: XCTestCase {
         )
         var didRun = false
 
-        controller.workspaceManager.setScratchpadToken(token)
+        controller.workspaceManager.setScratchpadMembership(token, to: 1)
         controller.workspaceManager.setHiddenState(hiddenState, for: token)
         let entry = try XCTUnwrap(controller.workspaceManager.entry(for: token))
         let transactionId = try XCTUnwrap(

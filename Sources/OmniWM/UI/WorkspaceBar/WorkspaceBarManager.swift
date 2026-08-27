@@ -97,6 +97,11 @@ final class WorkspaceBarManager {
         let secondaryShowsSystemStatsButton: Bool
     }
 
+    struct ScratchpadCompactionContext: Equatable {
+        let availableWidth: CGFloat
+        let slice: WorkspaceBarIslandSlice
+    }
+
     final class MonitorBarInstance {
         let monitorId: Monitor.ID
         let measurementView: NSHostingView<WorkspaceBarMeasurementView>
@@ -108,6 +113,9 @@ final class WorkspaceBarManager {
         var measuredWidths: [WorkspaceBarMeasurementKey: CGFloat] = [:]
         var statsAnchor: CGPoint?
         var screenDisplayId: CGDirectDisplayID?
+        var uncompactedSnapshot: WorkspaceBarSnapshot?
+        var scratchpadCompactionContext: ScratchpadCompactionContext?
+        var compactedScratchpads: [WorkspaceBarScratchpadItem]?
 
         init(
             monitor: Monitor,
@@ -205,13 +213,20 @@ final class WorkspaceBarManager {
             model: model,
             screenDisplayId: screen?.displayId
         )
+        let preparedSnapshot = scratchpadCompactedSnapshot(
+            snapshot,
+            monitor: monitor,
+            resolved: resolved,
+            instance: instance
+        )
+        model.snapshot = preparedSnapshot
         barsByMonitor[monitor.id] = instance
 
         applyCurrentAppearance(to: instance)
         updateBarFrameAndPosition(
             for: monitor,
             resolved: resolved,
-            snapshot: snapshot,
+            snapshot: preparedSnapshot,
             instance: instance
         )
         surfaceCoordinator.register(
@@ -248,8 +263,14 @@ final class WorkspaceBarManager {
         instance.secondary?.panel.targetScreen = screen
 
         let resolved = settings.resolvedBarSettings(for: monitor)
-        if instance.model.snapshot != snapshot {
-            instance.model.snapshot = snapshot
+        let preparedSnapshot = scratchpadCompactedSnapshot(
+            snapshot,
+            monitor: monitor,
+            resolved: resolved,
+            instance: instance
+        )
+        if instance.model.snapshot != preparedSnapshot {
+            instance.model.snapshot = preparedSnapshot
             instance.measuredWidths = [:]
         }
         applyCurrentAppearance(to: instance)
@@ -260,7 +281,7 @@ final class WorkspaceBarManager {
         updateBarFrameAndPosition(
             for: monitor,
             resolved: resolved,
-            snapshot: snapshot,
+            snapshot: preparedSnapshot,
             instance: instance
         )
         return true
@@ -319,8 +340,9 @@ final class WorkspaceBarManager {
             onFocusWindow: { [weak controller] handle in
                 controller?.focusWindowFromBar(handle: handle)
             },
-            onActivateScratchpad: { [weak controller] in
-                controller?.activateScratchpadFromBar(on: monitorId)
+            onActivateScratchpad: { [weak controller] index in
+                guard let index = ScratchpadIndex(index) else { return }
+                controller?.activateScratchpadFromBar(index: index, on: monitorId)
             },
             onToggleSystemStats: { [weak controller] in
                 controller?.toggleSystemStatsFromBar(on: monitorId)
@@ -468,7 +490,7 @@ final class WorkspaceBarManager {
             return nil
         }
         let hasSecondaryContent = !WorkspaceBarIslandSlice.secondary.items(in: snapshot).isEmpty
-            || WorkspaceBarIslandSlice.secondary.scratchpad(in: snapshot) != nil
+            || !WorkspaceBarIslandSlice.secondary.scratchpads(in: snapshot).isEmpty
         let activeShowsSystemStatsButton = snapshot.showSystemStatsButton && !hasSecondaryContent
         let secondaryShowsSystemStatsButton = snapshot.showSystemStatsButton && hasSecondaryContent
         guard let layout = geometry.splitFrame(
@@ -586,6 +608,77 @@ final class WorkspaceBarManager {
         let width = instance.measurementView.fittingSize.width
         instance.measuredWidths[key] = width
         return width
+    }
+
+    private func scratchpadCompactedSnapshot(
+        _ snapshot: WorkspaceBarSnapshot,
+        monitor: Monitor,
+        resolved: ResolvedBarSettings,
+        instance: MonitorBarInstance
+    ) -> WorkspaceBarSnapshot {
+        guard !snapshot.scratchpads.isEmpty else {
+            instance.uncompactedSnapshot = snapshot
+            instance.scratchpadCompactionContext = nil
+            instance.compactedScratchpads = nil
+            return snapshot
+        }
+
+        let geometry = WorkspaceBarGeometry.resolve(monitor: monitor, resolved: resolved, isVisible: true)
+        let splitAvailableWidths = geometry.splitAvailableWidths(monitor: monitor, resolved: resolved)
+        let usesSplitLayout = resolved.notchMode.isSplit
+            && snapshot.items.contains(where: \.isFocused)
+            && splitAvailableWidths != nil
+        let slice: WorkspaceBarIslandSlice = usesSplitLayout ? .secondary : .all
+        let availableWidth = if usesSplitLayout {
+            splitAvailableWidths?.secondary ?? monitor.frame.width
+        } else {
+            monitor.frame.width
+        }
+        let context = ScratchpadCompactionContext(
+            availableWidth: availableWidth,
+            slice: slice
+        )
+        if instance.uncompactedSnapshot == snapshot,
+           instance.scratchpadCompactionContext == context,
+           let compactedScratchpads = instance.compactedScratchpads
+        {
+            return snapshot.replacingScratchpads(compactedScratchpads)
+        }
+        instance.uncompactedSnapshot = snapshot
+        instance.scratchpadCompactionContext = context
+        let showsSystemStatsButton = snapshot.showSystemStatsButton
+        let baseSnapshot = snapshot.replacingScratchpads([])
+        let baseWidth = uncachedMeasuredWidth(
+            for: baseSnapshot,
+            slice: slice,
+            showsSystemStatsButton: showsSystemStatsButton,
+            instance: instance
+        )
+        let hasAdjacentContent = !slice.items(in: baseSnapshot).isEmpty || showsSystemStatsButton
+        let scratchpads = WorkspaceBarScratchpadLayout.compactedItems(
+            snapshot.scratchpads,
+            availableWidth: availableWidth,
+            baseWidth: baseWidth,
+            barHeight: snapshot.barHeight,
+            hasAdjacentContent: hasAdjacentContent
+        )
+        instance.compactedScratchpads = scratchpads
+        return snapshot.replacingScratchpads(scratchpads)
+    }
+
+    private func uncachedMeasuredWidth(
+        for snapshot: WorkspaceBarSnapshot,
+        slice: WorkspaceBarIslandSlice,
+        showsSystemStatsButton: Bool,
+        instance: MonitorBarInstance
+    ) -> CGFloat {
+        instance.measurementView.rootView = WorkspaceBarMeasurementView(
+            snapshot: snapshot,
+            slice: slice,
+            showsSystemStatsButton: showsSystemStatsButton
+        )
+        instance.measurementView.layoutSubtreeIfNeeded()
+        return instance.measurementView.fittingSize.width
     }
 
     private func applyCurrentAppearance(to instance: MonitorBarInstance) {

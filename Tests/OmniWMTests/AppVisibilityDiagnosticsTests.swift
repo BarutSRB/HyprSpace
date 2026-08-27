@@ -35,7 +35,9 @@ final class AppVisibilityDiagnosticsTests: XCTestCase {
             token: token,
             workspaceId: workspaceId,
             handleIdentity: ObjectIdentifier(handle),
-            appVisibilityGeneration: controller.workspaceManager.appVisibilityGeneration(for: token.pid),
+            pendingApps: [
+                token.pid: controller.workspaceManager.appVisibilityGeneration(for: token.pid)
+            ],
             focusFingerprint: AppRevealFocusFingerprint(
                 focusedToken: nil,
                 pendingFocusedToken: nil,
@@ -45,7 +47,7 @@ final class AppVisibilityDiagnosticsTests: XCTestCase {
                 interactionMonitorId: nil,
                 activeWorkspaceIdsByMonitor: [:]
             ),
-            destination: .scratchpad(monitorId: nil)
+            destination: .scratchpad(index: 1, monitorId: nil)
         )
         defer {
             controller.axManager.setMacOSAppHidden(
