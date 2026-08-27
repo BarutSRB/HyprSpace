@@ -404,7 +404,7 @@
 - Real quake/sticky terminal using ghostty's libghostty
 - macOS native tab support
 - IPC/CLI
-- Scrathpad/Sticky windows for any app
+- Scratchpads/sticky windows for any app
 - Niri Overview
 - Unified command palette for windows and app menus
 - App menu anywhere
@@ -413,7 +413,7 @@
 - Hide/unhide status bar icons (Similar to Ice Bar)
 - Keep awake (Similar to Caffeine)
 - Interactive workspace/app icon bar
-- A lot more features not show in the video.
+- Many more features not shown in the video.
 
 ## Known Limitations
 
@@ -423,7 +423,7 @@
 
 OmniWM is built for high responsiveness and smooth, crisp animations.
 
-- **Private APIs** - OmniWM leverages Apple's private APIs where ever technically possible in order to reduce latency and improve window management responsiveness.
+- **Private APIs** - OmniWM leverages Apple's private APIs wherever technically possible in order to reduce latency and improve window management responsiveness.
 - **Refresh rate aware animations** - OmniWM targets true display refresh pacing (for example 60/120/144Hz) for animations.
 - **No SIP disable required** - OmniWM does not require System Integrity Protection (SIP) to be disabled and never will.
 - **Always notarized official releases** - Official OmniWM release builds are developer signed and notarized by Apple and will stay that way.
@@ -477,7 +477,7 @@ and `overlays.additions`. After either installation, complete the macOS setup in
 
 ### GitHub Releases
 
-1. Download the latest `OmniWM.zip` from [Releases](https://github.com/BarutSRB/OmniWM/releases)
+1. Download the latest `OmniWM-v<version>.zip` app archive from [Releases](https://github.com/BarutSRB/OmniWM/releases)
 2. Extract and move `OmniWM.app` to `/Applications`
 3. In System Settings > Desktop & Dock > Mission Control, turn **ON** `Displays have separate Spaces`
 4. Log out of macOS and log back in for that change to take effect unless you had it on already
@@ -519,13 +519,13 @@ For setup, installation options, commands, queries, rules, subscriptions, and se
 2. In System Settings > Desktop & Dock > Mission Control, turn **ON** `Displays have separate Spaces`
 3. Log out of macOS and log back in for that change to take effect unless you had it on already
 4. Grant Accessibility and Input Monitoring in the launch permissions window
-5. Windows will automatically tile in columns
+5. Windows will automatically tile in orientation-aware Niri containers: monitors using horizontal orientation show columns that scroll left and right, while vertical orientation shows rows that scroll up and down
 6. Keep one macOS Space per display and navigate with OmniWM workspaces; extra native Spaces are tolerated (their windows are left to macOS, not tiled)
-7. Use the default shortcuts in `Keyboard Shortcuts` to navigate between windows
+7. Use the defaults in [Keyboard Shortcuts](#keyboard-shortcuts) to navigate, and customize them in `Settings > Hotkeys`
 8. Click the menu bar icon to access Settings, including `Settings > General > Updates`
 9. Enable `Start at Login` under `Settings > General > Startup` to launch OmniWM automatically when you log in
 10. Use `Check for Updates...` from the status bar menu whenever you want to run a manual update check
-11. In case you freak out and don't see all your status bar icons, relax, OmniWM hides the menu-bar icons you selected in `Settings > Hidden Bar`. Right-click OmniWM's status bar icon to open the Hidden Icons Bar and click any icon to use it.
+11. On macOS 27+, if you enable Hidden Bar and selected menu-bar icons disappear, right-click or Option-click OmniWM's menu-bar icon to open the Hidden Icons Bar and click any icon to use it.
 
 
 ## User Guide
@@ -535,7 +535,7 @@ For setup, installation options, commands, queries, rules, subscriptions, and se
 OmniWM uses two display maps for different jobs:
 
 1. Open **System Settings > Displays > Arrange**. Put the physically largest or widest display at the bottom. Place the next smaller display above and to its right so its bottom-left corner touches the lower display's top-right corner. Continue the same staircase for every additional display. This macOS map is a technical arrangement used for actual window placement; it does not need to look like your desk.
-2. Open **OmniWM Settings > Monitors** and arrange the OmniWM routing map to match where the displays really sit on your desk. Keep every display connected by a left, right, up, or down edge; diagonal-only displays cannot exchange directional focus, window moves, or mouse warp.
+2. Open **OmniWM Settings > Monitors** and arrange the OmniWM routing map to match where the displays really sit on your desk. Tiles can be separated by empty grid cells, but every display must remain connected through a chain of shared rows or columns. A diagonal-only tile is disconnected and cannot exchange directional focus, window moves, or mouse warp.
 3. Leave **Mouse Warp** turned on for the recommended experience. It lets the pointer cross between displays according to the real-desk OmniWM map even though macOS uses the staircase.
 
 The setup assistant opens automatically when OmniWM first sees multiple displays. To review or redo it later, choose **Run Monitor Setup…** in **Settings > Monitors**. The assistant's **Show Numbers on Screens** action helps match each physical display to its tile.
@@ -544,7 +544,7 @@ The setup assistant opens automatically when OmniWM first sees multiple displays
 
 OmniWM offers two layout engines that you can switch between per workspace:
 
-**Niri (Scrolling Columns)** - Windows arranged in vertical columns that scroll horizontally. Each column can have multiple stacked windows or be "tabbed" (multiple windows, one visible at a time). Best for wide monitors with many windows.
+**Niri (Orientation-Aware Scrolling Containers)** - On monitors using horizontal orientation, windows form vertical columns that scroll left and right; in vertical orientation, they form horizontal rows that scroll up and down. Each container can hold multiple windows or be "tabbed" (multiple windows, one visible at a time).
 
 **Hyprland Dwindle (BSP)** - Binary space partition layout that recursively divides screen space. Each new window splits the space in half, and a tile can group multiple windows as tabs. Best for traditional tiling with predictable layouts.
 
@@ -559,13 +559,15 @@ Layout legend:
 - `Niri` works only when the active workspace uses the Niri layout.
 - `Dwindle` works only when the active workspace uses the Dwindle layout.
 
+Settings hides advanced actions from the shortcut list by default. Turn on `Include Advanced Commands` in Settings > Hotkeys to see and bind them; the tables below include both standard and advanced actions.
+
 #### Workspace
 
 | Action | Default Shortcut | Layout |
 |--------|------------------|--------|
 | Switch to Workspace 1-9 | `Option + 1-9` | `Shared` |
 | Move Window to Workspace 1-9 | `Option + Shift + 1-9` | `Shared` |
-| Switch to Previous Workspace (Back and Forth) | `Control + Option + Tab` | `Shared` |
+| Switch to Last Active Workspace (Back and Forth) | `Control + Option + Tab` | `Shared` |
 | Switch to Next Workspace | `Unassigned` | `Shared` |
 | Switch to Previous Workspace (Sequential) | `Unassigned` | `Shared` |
 | Move Window to Workspace Up | `Control + Option + Shift + Up Arrow` | `Shared` |
@@ -580,18 +582,22 @@ Layout legend:
 |--------|------------------|--------|
 | Focus Left / Right / Up / Down | `Option + Arrow Keys` | `Shared` |
 | Focus Down or Top / Up or Bottom | `Unassigned` | `Shared` |
-| Focus Previous Window | `Option + Tab` | `Niri` |
+| Focus Top Window / Bottom Window | `Unassigned` | `Niri` |
+| Focus Window or Workspace Down / Up | `Unassigned` | `Niri` |
+| Focus Previous Window | `Option + Tab` | `Shared` |
 | Traverse Backward | `Unassigned` | `Niri` |
 | Traverse Forward | `Unassigned` | `Niri` |
 | Focus First Column | `Option + Home` | `Niri` |
 | Focus Last Column | `Option + End` | `Niri` |
 | Focus Column 1-9 | `Control + Option + 1-9` | `Niri` |
+| Focus Window 1-9 in Column | `Unassigned` | `Niri` |
 | Toggle Command Palette | `Control + Option + Space` | `Shared` |
 | Open Menu Anywhere | `Control + Option + M` | `Shared` |
 | Toggle Workspace Bar | `Unassigned` | `Shared` |
 | Toggle Hidden Icons Bar | `Unassigned` | `Shared` |
 | Toggle Quake Terminal | `` Option + ` `` | `Shared` |
 | Toggle Overview | `Option + Shift + O` | `Shared` |
+| Toggle System Stats | `Unassigned` | `Shared` |
 
 #### Move Window
 
@@ -599,6 +605,8 @@ Layout legend:
 |--------|------------------|--------|
 | Move Left / Right / Up / Down | `Option + Shift + Arrow Keys` | `Shared` |
 | Reorder Window Up / Down | `Unassigned` | `Shared` |
+| Move Window Down or to Workspace Down / Up or to Workspace Up | `Unassigned` | `Niri` |
+| Consume Window into Column / Expel Window from Column | `Unassigned` | `Niri` |
 
 #### Monitor
 
@@ -632,6 +640,7 @@ The window-to-monitor actions send the focused window directly to the current wo
 | Preselect Left / Right / Up / Down | `Unassigned` | `Dwindle` |
 | Clear Preselection | `Unassigned` | `Dwindle` |
 | Raise All Floating Windows | `Option + Shift + R` | `Shared` |
+| Rescue Off-Screen Floating Windows | `Unassigned` | `Shared` |
 | Toggle Focused Window Floating | `Unassigned` | `Shared` |
 | Assign Focused Window to Scratchpad 1-10 | `Unassigned` | `Shared` |
 | Toggle Scratchpad 1-10 | `Unassigned` | `Shared` |
@@ -645,8 +654,21 @@ The window-to-monitor actions send the focused window directly to the current wo
 | Move Container Up / Down | `Unassigned` | `Dwindle` |
 | Toggle Column Tabbed | `Option + T` | `Niri` |
 | Toggle Container Full Primary Span | `Option + Shift + F` | `Niri` |
+| Expand Container to Available Primary Span | `Control + Option + F` | `Niri` |
+| Move Column to First / Last | `Control + Option + Home / End` | `Niri` |
+| Move Column to Index 1-9 | `Unassigned` | `Niri` |
+| Set Container Primary Span -10% / +10% | `Option + -` / `Option + =` | `Niri` |
+| Set Window Secondary Span -10% / +10% | `Option + Shift + -` / `Option + Shift + =` | `Niri` |
+| Set Window Primary Span -10% / +10% | `Unassigned` | `Niri` |
+| Reset Window Secondary Span | `Control + Option + R` | `Niri` |
+| Cycle Window Primary Span Forward / Backward | `Unassigned` | `Niri` |
+| Cycle Window Secondary Span Forward / Backward | `Unassigned` | `Niri` |
+| Center Column | `Unassigned` | `Niri` |
+| Center Visible Columns | `Unassigned` | `Niri` |
 
-The daily `Focus` and `Move` shortcuts adapt to the active layout. In Niri, `Move Left / Right` expels the focused window from a multi-window column or consumes a single-window column into its neighbor, while `Move Up / Down` reorders within the column.
+`Consume or Expel Window Left / Right` exist as automation-only actions. They are reachable from `omniwmctl` but never appear in Settings > Hotkeys, because they intentionally cannot be bound to a shortcut.
+
+The daily `Focus` and `Move` shortcuts adapt to the active layout and Niri orientation. In horizontal Niri orientation, `Move Left / Right` consumes or expels across columns while `Move Up / Down` reorders within a column. Vertical orientation rotates those roles: `Move Up / Down` consumes or expels across rows while `Move Left / Right` reorders within a row.
 
 #### Dwindle Groups
 
@@ -738,9 +760,10 @@ See all windows at once with thumbnails:
 A visual indicator showing your workspaces:
 - Displays open apps per workspace
 - Click to switch workspaces or jump to that app
-- If dedupe option is on click the app icon to get a popup with list of all its windows to jump to
+- When `Deduplicate App Icons` is enabled, multiple windows from one app share an icon; click a grouped icon to open their window list, while a single-window icon focuses that window directly
 - Marks macOS-hidden windows with an eye-slash badge; selecting a hidden window unhides its app and focuses that exact window
 - Configure position, height, and appearance in Settings
+- Optionally show a System Stats button that opens a CPU, memory, GPU, disk, and uptime popup. `Toggle System Stats` and `omniwmctl command toggle-system-stats` drive the same popup, and both do nothing unless a monitor currently shows that workspace-bar button
 - Optionally hide the bar on a monitor while that monitor shows a macOS native fullscreen window, and bring it back on exit (`Hide in Native Fullscreen`); reserved tiled layout space is left untouched so windows do not shuffle around the fullscreen session
 - Exclude individual apps or choose alternate app icons across all monitors in Settings
 
@@ -768,15 +791,20 @@ Conceal selected menu-bar icons and reach them from a panel:
 - **Workspaces** - Create named workspaces in Settings to organize by project or context (You can use emojis 🥳)
 - **App Rules** - Exclude problematic apps from tiling or assign them to specific workspaces
 - **Mouse** - On the Niri desktop, hold the configured mouse-move modifier and drag to swap tiled windows; add `Shift` to insert into a column. The modifier defaults to `Option` and can be changed or disabled in **Settings → Mouse & Trackpad**. In Overview, `Option + drag` targets a workspace, window position, or Niri column gap
-- **Mouse Resize** - Hold `Option` and right-drag a tiled window to resize (Niri)
-- **Scroll Gestures (Mouse)** - Hold `Option + Shift + Mouse Scroll Wheel` (default, configurable) and scroll through columns horizontally
-- **Trackpad Gestures** - Use horizontal gestures with 2/3/4 fingers (configurable); direction can be inverted (local hardware validation is limited)
+- **Mouse Resize** - Hold the configured right-mouse resize modifier (`Option` by default) and right-drag a tiled window to resize it in either layout
+- **Scroll Gestures (Mouse)** - Hold `Option + Shift + Mouse Scroll Wheel` (default, configurable) to scroll along the active Niri primary axis: left/right in horizontal orientation or up/down in vertical orientation
+- **Trackpad Gestures** - Use 2/3/4-finger gestures (configurable) along the active Niri primary axis; direction can be inverted (local hardware validation is limited)
 - **Workspace Swipe (Trackpad)** - Opt-in in Settings → Mouse & Trackpad: swipe with a configurable finger count (2/3/4) and axis (horizontal/vertical) to switch to the next/previous workspace on the monitor under the cursor, one switch per swipe; sharing the column-scroll finger count locks the axis to vertical. For vertical swipes with three or four fingers, first turn off Mission Control in  → System Settings → Trackpad → More Gestures so macOS does not intercept the gesture.
 
 ## Configuration
 
 Access settings by clicking OmniWM's status bar icon and selecting **Settings** or **App Rules**.
 Mouse and gesture settings live in Settings under **Mouse & Trackpad**.
+
+**Settings > General** also carries a **System-wide Window Corners** control (macOS 26.4+). It writes the system-wide
+preference, so it changes standard Mac app windows everywhere — including windows OmniWM does not manage — and apps
+that draw their own window chrome may ignore it. Affected apps must be fully quit and reopened before the new radius
+applies.
 
 OmniWM stores its editable config at `${XDG_CONFIG_HOME:-$HOME/.config}/omniwm/settings.toml`; that file is the canonical settings source and is live-reloaded when saved from an editor.
 
@@ -816,9 +844,10 @@ Scratchpad membership lasts for the lifetime of the OmniWM process; only the lab
 
 ## App Rules
 
-Configure per-application behavior in Settings > App Rules:
+Open **App Rules** from OmniWM's status-bar menu to configure window-matching behavior. Rules can match by bundle ID,
+app-name substring, title substring or regex, and AX role/subrole. More-specific matches win; ties follow list order.
 
-- **Always Float** - Force specific apps to always float (e.g., calculators, preferences windows)
+- **Layout (Automatic / Tile / Float)** - Leave classification automatic, or force matching windows to tile or float
 - **Assign to Workspace** - Use a valid workspace assignment as the initial default whenever the matching app currently has no tracked windows. Additional windows open on the workspace active when creation began. Automatic rule reevaluation leaves managed windows in place, while explicit rule application can move them. Readmission, structural replacements, tracked transient children, and unique persisted boot-restore matches preserve their existing placement continuity.
 - **Initial Container Primary Span (Niri)** - Start matching resizable windows at 5–100% when they create or claim a new container; the container remains freely resizable afterward
 - **Minimum Size** - Prevent the layout engine from sizing windows below a threshold
@@ -840,7 +869,12 @@ initialContainerPrimarySpan = 0.5
 Requirements:
 - SwiftPM with Swift 6.4+
 - macOS 26.0+
-- Ghostty's arm64 archive (build Ghostty and copy it to `Frameworks/GhosttyKit.xcframework/macos-arm64/libghostty-internal-fat.a`)
+- A complete GhosttyKit xcframework at `Frameworks/GhosttyKit.xcframework`. Download the latest
+  `GhosttyKit.xcframework-v<version>.zip` asset from [Releases](https://github.com/BarutSRB/OmniWM/releases) and extract
+  it into `Frameworks/`, or replace the complete bundle with one you build from Ghostty.
+- The build preflight verifies the internal arm64 archive at the path pinned in `Scripts/build-metadata.env` (currently
+  `Frameworks/GhosttyKit.xcframework/macos-arm64/libghostty-internal.a`) is arm64-only and matches the pinned SHA-256.
+  If you rebuild GhosttyKit, replace the complete xcframework and update the metadata pin.
 
 Use the bundled Debug launch for day-to-day development:
 
@@ -848,7 +882,7 @@ Use the bundled Debug launch for day-to-day development:
 make run
 ```
 
-`make run` builds, packages, development-signs, and opens `dist/OmniWM.app` through LaunchServices. This is the canonical development launch because it gives OmniWM its normal app identity. OmniWM uses its native status bar item while Hidden Bar concealment is inactive. While concealment is active, it uses a separate fallback icon next to the workspace bar because macOS can conceal the app-owned status item with the other restricted items. This behavior applies to both bundled and raw `swift run OmniWM` launches and is not specific to Debug builds.
+`make run` builds, packages, development-signs, and opens `dist/OmniWM.app` through LaunchServices. This is the canonical development launch because it gives OmniWM its normal app identity. OmniWM uses its native status bar item while Hidden Bar concealment is inactive. While concealment is active, it uses a separate fallback icon beside a visible workspace bar, or near the display's top center when no workspace bar is visible, because macOS can conceal the app-owned status item with the other restricted items. This behavior applies to both bundled and raw `swift run OmniWM` launches and is not specific to Debug builds.
 
 ## Community Integrations
 
@@ -869,7 +903,7 @@ If you find OmniWM useful, consider supporting development:
 
 ## Reporting Bugs
 
-The best way to report a bug is from inside OmniWM: open the status-bar menu and choose **Report a Bug…**. It records an optional diagnostics trace, creates and reveals a diagnostics bundle for you to attach, and opens a pre-filled GitHub issue — OmniWM never sees your GitHub login.
+The best way to report a bug is from inside OmniWM: open the status-bar menu and choose **Report a Bug…**. That opens the in-app report form, where recording or attaching trace and crash evidence is optional. On submit, OmniWM prepares one fresh diagnostic `.log` (with any evidence you selected appended), reveals it in Finder for you to attach, and opens a pre-filled GitHub issue — OmniWM never sees your GitHub login. Review the `.log` before attaching it to a public issue: it can include settings, app and window titles, and title-based rule matchers.
 
 Prefer the web? The [GitHub issue form](https://github.com/BarutSRB/OmniWM/issues/new/choose) works too; please include your OmniWM and macOS versions there.
 

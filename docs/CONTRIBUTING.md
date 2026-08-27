@@ -14,6 +14,7 @@ This page stays short on purpose so the actual project rules only have one sourc
 - Review the [Architecture Guide](ARCHITECTURE.md) if your change touches core internals, layout behavior, or app structure.
 - Review the [IPC & CLI Reference](IPC-CLI.md) if your change affects automation, commands, queries, or scripting.
 - For the user-facing overview, installation notes, and screenshots, see the [README](https://github.com/BarutSRB/OmniWM/blob/main/README.md).
+- Before opening a pull request, run the checks the canonical guide asks for — `make verify` (format-check + lint + build), plus `swift test` where it applies. That guide also covers the pinned SwiftFormat/SwiftLint versions and the GhosttyKit prerequisite.
 
 ## Project Direction at a Glance
 

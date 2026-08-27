@@ -54,7 +54,6 @@ This document covers the OmniWM automation surface. For the docs hub, see [Docum
 - [Error Codes](#error-codes)
 - [Output Formats](#output-formats)
 - [Environment Variables](#environment-variables)
-- [Aliases](#aliases)
 
 ---
 
@@ -73,7 +72,7 @@ OmniWM's IPC system is split across three Swift modules:
 ┌────────────────────────────┴─────────────────────────────────────────────┐
 │  OmniWMIPC (shared library)                                              │
 │  IPCModels, IPCWire, IPCSocketPath, IPCAutomationManifest                │
-│  IPCRuleValidator                                                        │
+│  IPCRuleValidator, ScratchpadSlots, WorkspaceAddressing                  │
 │  No dependencies                                                         │
 └────────────────────────────┬─────────────────────────────────────────────┘
                              │
@@ -280,7 +279,7 @@ omniwmctl command <command-path> [arguments...]
 | `command focus-window up-or-bottom` | — | shared | Focus the previous window in the active Niri column or Dwindle group, wrapping locally |
 | `command focus-window-or-workspace-down` | — | niri | Focus down using the active Niri orientation; if no target exists, switch without wrapping to the workspace below |
 | `command focus-window-or-workspace-up` | — | niri | Focus up using the active Niri orientation; if no target exists, switch without wrapping to the workspace above |
-| `command focus previous` | — | niri | Focus the previously focused window |
+| `command focus previous` | — | shared | Focus the previously focused window |
 | `command focus down-or-left` | — | niri | Traverse backward through the active Niri workspace |
 | `command focus up-or-right` | — | niri | Traverse forward through the active Niri workspace |
 | `command focus-column` | `<number>` | niri | Focus a Niri column by one-based index |
@@ -629,7 +628,9 @@ When supplied, bundle IDs must match the pattern: `^[a-zA-Z0-9]+([.-][a-zA-Z0-9]
 at least one identifier — a bundle ID, app-name substring, or title (substring/regex). The bundle ID is
 the app's *runtime* identifier (`NSRunningApplication.bundleIdentifier`); apps without one (e.g. ad-hoc
 or wrapper apps) are matched by app name and/or title. AX role/subrole refine an existing match but cannot
-identify a rule on their own.
+identify a rule on their own. Title substring and title regex are mutually exclusive, and a supplied regex
+must compile. Every rule also needs at least one effect: a layout other than `auto`, a workspace assignment,
+an initial container primary span, or a minimum width or height. Minimum sizes must be positive and finite.
 
 `initialContainerPrimarySpan` is stored and returned over IPC as a proportion. `omniwmctl query rules` renders
 it as a percentage in human-readable table or text output. It applies only when a matching resizable window
@@ -696,7 +697,7 @@ to its valid assigned workspace.
 # Float all Finder windows
 omniwmctl rule add --bundle-id com.apple.finder --layout float
 
-# Tile Safari's first currently tracked window on workspace 2
+# Tile Safari's first newly admitted window on workspace 2 when Safari has no tracked windows
 omniwmctl rule add --bundle-id com.apple.Safari --layout tile --assign-to-workspace 2
 
 # Start new Kitty containers at 50% of the primary axis in Niri
@@ -729,7 +730,8 @@ Initial snapshots are best-effort seed state, not a strict ordering barrier. If 
 
 Subscription channels are coalesced state streams, not a lossless event log. Slow consumers may only observe the newest buffered update for a channel.
 
-Workspace bar and layout refresh work is only produced when the UI or IPC currently has active consumers.
+Workspace-bar and IPC projection work is only produced when the UI or IPC currently has active consumers;
+core window relayout is not consumer-gated.
 
 ### Channels
 
@@ -1079,17 +1081,3 @@ ow_…  5678   Safari    GitHub        web        Built-in  tiling   no       ye
 | `OMNIWM_EVENT_CHANNEL` | (watch child) Subscription channel name |
 | `OMNIWM_EVENT_KIND` | (watch child) Event result kind |
 | `OMNIWM_EVENT_ID` | (watch child) Event ID |
-
----
-
-## Aliases
-
-The CLI accepts these aliases transparently:
-
-| Alias | Resolves to |
-|-------|-------------|
-| `query monitors` | `query displays` |
-| `query --monitor` | `query --display` |
-| `command focus-monitor previous` | `command focus-monitor prev` |
-| `command switch-workspace previous` | `command switch-workspace prev` |
-| `command switch-workspace back` | `command switch-workspace back-and-forth` |

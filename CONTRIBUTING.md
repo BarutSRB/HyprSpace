@@ -31,9 +31,37 @@ Bug fixes, documentation improvements, performance work, focused cleanups, featu
 - Add screenshots, recordings, or CLI examples when they help explain the change.
 - Update documentation when behavior, workflows, or interfaces change.
 
+## Building and Verifying
+
+OmniWM builds with Swift Package Manager on macOS 26+ (Apple Silicon) and needs Swift 6.4 or newer. The Quake
+Terminal links against a complete local GhosttyKit xcframework that is not in git. Download the latest
+`GhosttyKit.xcframework-v<version>.zip` asset from [Releases](https://github.com/BarutSRB/OmniWM/releases), then extract
+it into `Frameworks/` so the final path is `Frameworks/GhosttyKit.xcframework`. `Scripts/ghostty-preflight.sh` verifies
+the internal arm64 archive at the path pinned in `Scripts/build-metadata.env` (currently
+`Frameworks/GhosttyKit.xcframework/macos-arm64/libghostty-internal.a`) is arm64-only and matches the pinned SHA-256.
+If you rebuild GhosttyKit, replace the complete xcframework and update the metadata pin.
+
+```bash
+make build     # Ghostty preflight + arm64 debug build
+make run       # Package, development-sign, and launch dist/OmniWM.app
+swift test     # Default test suite (environment-dependent live tests are opt-in)
+make verify    # format-check + lint + build — run this before opening a pull request
+```
+
+`make format` and `make lint` pin exact tool versions (SwiftFormat 0.62.1, SwiftLint 0.65.1) and fail on any other
+version, so install those exact versions. SwiftFormat's `fileHeader` rule also enforces the two-line SPDX/GPL-2.0
+header that every Swift source and test file under `Sources/` and `Tests/` must start with — never strip or reword
+it. (`Package.swift` is the exception; its `swift-tools-version` directive stays on line one.)
+
 ## Trace Files
 
 Include a trace file when possible, especially with bug reports. It records OmniWM activity and state around the problem. Open **Settings → Troubleshooting**, click **Start Recording**, reproduce the bug, then click **Stop & Save Recording** and attach the saved `.log` file.
+
+**Report a Bug…** in the status-bar menu opens the in-app report form instead. Recording or selecting trace and crash evidence there is optional; on submit OmniWM prepares one fresh diagnostic `.log` with whatever you selected, reveals it for attaching, and opens a pre-filled GitHub issue.
+
+Before attaching a diagnostic, review the `.log`: it can contain OmniWM settings, application and window titles, and title-based App Rule matchers.
+
+Captures can also be scripted once IPC is enabled: `omniwmctl capture start trace`, `omniwmctl capture stop`, and `omniwmctl capture status`.
 
 ## Basic Workflow
 
