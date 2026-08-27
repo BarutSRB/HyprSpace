@@ -475,8 +475,7 @@ public enum IPCAutomationManifest {
         command(
             ["focus", "previous"],
             name: .focusPrevious,
-            summary: "Focus the previously focused window.",
-            layoutCompatibility: .niri
+            summary: "Focus the previously focused window."
         ),
         command(
             ["focus", "down-or-left"],
