@@ -169,6 +169,23 @@
       <sub>@Cy6erBr4in</sub>
     </td>
     <td align="center" valign="top">
+      <a href="https://github.com/SSWConsulting">
+        <img src="https://avatars.githubusercontent.com/u/7947936?v=4" width="72" alt="SSW Consulting">
+      </a>
+      <br>
+      <a href="https://github.com/SSWConsulting"><strong>SSW Consulting</strong></a>
+      <br>
+      <sub>━━━━━━━━</sub>
+      <br>
+      <a href="https://github.com/wicksipedia" title="Matt Wicks">
+        <img src="https://github.com/wicksipedia.png?size=96" width="72" alt="Matt Wicks">
+      </a>
+      <br>
+      <a href="https://github.com/wicksipedia"><strong>Matt Wicks</strong></a>
+      <br>
+      <sub>@wicksipedia</sub>
+    </td>
+    <td align="center" valign="top">
       <a href="https://www.vhf.com">
         <img src="https://www.google.com/s2/favicons?domain=www.vhf.com&sz=96" width="72" alt="vhf">
       </a>
@@ -337,6 +354,9 @@
       </a>
       <a href="https://github.com/zucram" title="Marcus Harlid Davin">
         <img src="https://github.com/zucram.png?size=96" width="72" alt="Marcus Harlid Davin">
+      </a>
+      <a href="https://github.com/wicksipedia" title="Matt Wicks">
+        <img src="https://github.com/wicksipedia.png?size=96" width="72" alt="Matt Wicks">
       </a>
       <a href="https://github.com/mkdir700" title="mkdir700">
         <img src="https://github.com/mkdir700.png?size=96" width="72" alt="mkdir700">

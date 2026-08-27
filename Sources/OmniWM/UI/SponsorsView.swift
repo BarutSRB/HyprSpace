@@ -10,6 +10,21 @@ struct Sponsor: Identifiable {
     let githubUsername: String?
     let imageName: String?
     let imageExtension: String?
+    let creditMessage: String?
+
+    init(
+        name: String,
+        githubUsername: String?,
+        imageName: String?,
+        imageExtension: String?,
+        creditMessage: String? = nil
+    ) {
+        self.name = name
+        self.githubUsername = githubUsername
+        self.imageName = imageName
+        self.imageExtension = imageExtension
+        self.creditMessage = creditMessage
+    }
 }
 
 private let sponsors: [Sponsor] = [
@@ -33,7 +48,14 @@ private let sponsors: [Sponsor] = [
     Sponsor(name: "Nader Akoury", githubUsername: "dojoteef", imageName: "dojoteef", imageExtension: "jpg"),
     Sponsor(name: "Earl Gresh", githubUsername: "earl-gresh", imageName: "earl-gresh", imageExtension: "jpg"),
     Sponsor(name: "Carson Full", githubUsername: "CarsonF", imageName: "carsonf", imageExtension: "jpg"),
-    Sponsor(name: "ryoppippi", githubUsername: "ryoppippi", imageName: "ryoppippi", imageExtension: "jpg")
+    Sponsor(name: "ryoppippi", githubUsername: "ryoppippi", imageName: "ryoppippi", imageExtension: "jpg"),
+    Sponsor(
+        name: "Private Sponsor",
+        githubUsername: nil,
+        imageName: nil,
+        imageExtension: nil,
+        creditMessage: "Contact Barut for public credit"
+    )
 ]
 
 private func rankLabel(for index: Int) -> String {
@@ -275,6 +297,7 @@ struct SupporterScroll: View {
                     githubUsername: sponsor.githubUsername,
                     imageName: sponsor.imageName,
                     imageExtension: sponsor.imageExtension,
+                    creditMessage: sponsor.creditMessage,
                     tier: .standard,
                     rankLabel: rankLabel(for: index)
                 )
@@ -605,6 +628,7 @@ struct SponsorCardView: View {
     let githubUsername: String?
     let imageName: String?
     let imageExtension: String?
+    let creditMessage: String?
     let tier: SponsorTier
     let rankLabel: String
 
@@ -690,6 +714,18 @@ struct SponsorCardView: View {
                 Text("@\(githubUsername)")
                     .font(.system(size: 13))
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .allowsTightening(true)
+            }
+            .foregroundStyle(.secondary)
+        } else if let creditMessage {
+            HStack(spacing: 4) {
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 11))
+                Text(creditMessage)
+                    .font(.system(size: 12))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
                     .minimumScaleFactor(0.8)
                     .allowsTightening(true)
             }
