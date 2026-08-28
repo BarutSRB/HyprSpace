@@ -30,6 +30,15 @@ ingress:
         authority: omniwm.app
         scheme: https
         redirect_code: 308
+    - match:
+        authority:
+          exact: ${STARTER_DOMAIN}
+        path:
+          prefix: /
+      redirect:
+        authority: omniwm.app
+        scheme: https
+        redirect_code: 308
     - component:
         name: website
       match:
