@@ -69,7 +69,7 @@ final class SettingsFilePersistenceTests: XCTestCase {
     }
 
     @MainActor
-    func testDanglingSymlinkSaveAndLoadPreserveLinkWithoutCreatingTarget() throws {
+    func testDanglingSettingsSymlinkBlocksUntilRestartAfterTargetAppears() throws {
         let fixture = try makeFixture()
         defer { fixture.remove() }
 
@@ -78,13 +78,38 @@ final class SettingsFilePersistenceTests: XCTestCase {
         try FileManager.default.createSymbolicLink(at: linkURL, withDestinationURL: targetURL)
 
         let persistence = makePersistence(in: fixture)
-        assertPOSIXError(.ENOENT) {
-            try persistence.saveImmediately(SettingsExport.defaults())
+        let outcome = persistence.loadOutcome()
+        guard let notice = outcome.notice, case let .persistenceWriteBlocked(reason) = notice else {
+            return XCTFail("Expected dangling symlink to block settings writes")
         }
-        XCTAssertEqual(makePersistence(in: fixture).load(), SettingsExport.defaults())
+        XCTAssertEqual(
+            reason,
+            "The settings symlink at \(linkURL.path) points to a missing file; "
+                + "create its target or replace the symlink, then restart OmniWM."
+        )
+        XCTAssertEqual(outcome.export, SettingsExport.defaults())
+        XCTAssertTrue(persistence.settingsWritesBlocked)
+
+        var appeared = SettingsExport.defaults()
+        appeared.gapSize = 37
+        let appearedData = try SettingsTOMLCodec.encode(appeared)
+        try appearedData.write(to: targetURL)
+        XCTAssertThrowsError(try persistence.saveImmediately(.defaults())) { error in
+            guard let persistenceError = error as? SettingsFilePersistenceError,
+                  case .writesBlocked = persistenceError
+            else {
+                return XCTFail("Expected writesBlocked, got \(error)")
+            }
+        }
+        XCTAssertEqual(try Data(contentsOf: targetURL), appearedData)
+
+        let restarted = makePersistence(in: fixture)
+        let restartedOutcome = restarted.loadOutcome()
+        XCTAssertEqual(restartedOutcome.export, appeared)
+        XCTAssertNil(restartedOutcome.notice)
+        XCTAssertFalse(restarted.settingsWritesBlocked)
 
         try assertSymlink(at: linkURL, destination: targetURL.path)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: targetURL.path))
     }
 
     @MainActor
@@ -171,15 +196,24 @@ final class SettingsFilePersistenceTests: XCTestCase {
         let invalidData = Data("[general\nexternal-edit".utf8)
         try invalidData.write(to: settingsURL(in: fixture), options: .atomic)
 
-        XCTAssertNil(persistence.reloadIfChanged())
+        let rejected = try XCTUnwrap(persistence.reloadOutcomeIfChanged())
+        guard let rejectedNotice = rejected.notice, case let .invalidExternal(rejectedReason) = rejectedNotice else {
+            return XCTFail("Expected invalid external-edit notice")
+        }
+        XCTAssertNil(rejected.export)
         XCTAssertEqual(try Data(contentsOf: settingsURL(in: fixture)), invalidData)
         XCTAssertFalse(FileManager.default.fileExists(atPath: corruptURL(in: fixture).path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: corruptURL(in: fixture, index: 1).path))
 
         var desired = loaded
         desired.gapSize = 29
-        try persistence.saveImmediately(desired)
+        let saveNotice = try XCTUnwrap(persistence.saveImmediately(desired))
+        guard case let .recoveredInvalid(backupURL, recoveredReason) = saveNotice else {
+            return XCTFail("Expected recovered-invalid save notice")
+        }
 
+        XCTAssertEqual(backupURL, corruptURL(in: fixture))
+        XCTAssertEqual(recoveredReason, rejectedReason)
         XCTAssertEqual(try Data(contentsOf: corruptURL(in: fixture)), invalidData)
         XCTAssertEqual(try SettingsTOMLCodec.decode(Data(contentsOf: settingsURL(in: fixture))), desired)
     }
@@ -294,7 +328,7 @@ final class SettingsFilePersistenceTests: XCTestCase {
     }
 
     @MainActor
-    func testThirdDistinctInvalidFileFailsClosedAndCanRetryAfterSlotClears() throws {
+    func testThirdDistinctInvalidFileFailsClosedUntilRestartAfterSlotClears() throws {
         let fixture = try makeFixture()
         defer { fixture.remove() }
 
@@ -310,10 +344,23 @@ final class SettingsFilePersistenceTests: XCTestCase {
         XCTAssertThrowsError(try persistence.saveImmediately(desired)) { error in
             XCTAssertEqual(error as? SettingsFilePersistenceError, .corruptBackupSlotsExhausted)
         }
+        XCTAssertTrue(persistence.settingsWritesBlocked)
         XCTAssertEqual(try Data(contentsOf: settingsURL(in: fixture)), thirdInvalidData)
 
         try FileManager.default.removeItem(at: corruptURL(in: fixture, index: 1))
-        try persistence.saveImmediately(desired)
+        XCTAssertThrowsError(try persistence.saveImmediately(desired)) { error in
+            guard let persistenceError = error as? SettingsFilePersistenceError,
+                  case .writesBlocked = persistenceError
+            else {
+                return XCTFail("Expected writesBlocked, got \(error)")
+            }
+        }
+        let restarted = makePersistence(in: fixture)
+        let restartedOutcome = restarted.loadOutcome()
+        guard let notice = restartedOutcome.notice, case .recoveredInvalid = notice else {
+            return XCTFail("Expected startup recovery after restart")
+        }
+        try restarted.saveImmediately(desired)
 
         XCTAssertEqual(try Data(contentsOf: corruptURL(in: fixture, index: 1)), thirdInvalidData)
         XCTAssertEqual(try SettingsTOMLCodec.decode(Data(contentsOf: settingsURL(in: fixture))), desired)

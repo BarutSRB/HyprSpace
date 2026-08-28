@@ -4,6 +4,7 @@
 import Foundation
 
 struct CanonicalTOMLConfig: Codable, Equatable {
+    var schemaVersion: Int
     var general: General
     var focus: Focus
     var mouseWarp: MouseWarp
@@ -250,6 +251,7 @@ extension CanonicalTOMLConfig {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
 
+        schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
         general = try container.decode(General.self, forKey: .general)
         KeySymbolMapper.setHyperKeyModifiers(general.hyperKeyModifiers)
         focus = try container.decode(Focus.self, forKey: .focus)
@@ -286,6 +288,7 @@ extension CanonicalTOMLConfig {
 
 extension CanonicalTOMLConfig {
     init(export: SettingsExport) {
+        schemaVersion = SettingsTOMLCodec.currentSchemaVersion
         general = General(
             hotkeysEnabled: export.hotkeysEnabled,
             systemHyperTrigger: export.systemHyperTrigger,

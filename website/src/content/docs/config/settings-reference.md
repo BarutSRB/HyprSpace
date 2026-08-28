@@ -8,7 +8,7 @@ sidebar:
 Complete reference for `settings.toml`, in the file's canonical order. The authoritative schema is [`CanonicalTOMLConfig.swift`](https://github.com/BarutSRB/OmniWM/blob/main/Sources/OmniWM/Core/Config/CanonicalTOMLConfig.swift); defaults come from [`SettingsExport.swift`](https://github.com/BarutSRB/OmniWM/blob/main/Sources/OmniWM/Core/Config/SettingsExport.swift) and [`BuiltInSettingsDefaults.swift`](https://github.com/BarutSRB/OmniWM/blob/main/Sources/OmniWM/Core/Config/BuiltInSettingsDefaults.swift).
 
 :::caution
-The schema is strict — a missing required key invalidates the whole file, and `hotkeys` must list every assignable action exactly once. Edit values in place; see [Configuration](/config/configuration/).
+The current schema is strict — a missing required key in a version 1 file invalidates the whole file, and `hotkeys` must list every assignable action exactly once. Edit values in place; see [Configuration](/config/configuration/).
 :::
 
 **Conventions**
@@ -17,6 +17,20 @@ The schema is strict — a missing required key invalidates the whole file, and 
 - **Colors** are tables with `red`, `green`, `blue`, `alpha` floats in `0.0`–`1.0`.
 - **`singleWindowFit`** values are strings: `"fill"`, a custom size `"WIDTHxHEIGHT"` (e.g. `"1920x1080"`), or — Niri only — `"container_primary_span"`.
 - Values listed as enums accept exactly the raw strings shown.
+
+## File schema
+
+| Key | Type | Default | Description |
+| --- | --- | --- | --- |
+| `schemaVersion` | integer | `1` | Version of the complete `settings.toml` schema. This top-level key appears before the first table. |
+
+The canonical file declares:
+
+```toml
+schemaVersion = 1
+```
+
+An absent version identifies a legacy version 0 file. OmniWM guarantees automatic migration for settings emitted by v0.6.1 through v0.6.3 before strict validation; older schema-less files are attempted but may use normal invalid-file recovery if retired structures cannot validate. A successful upgrade creates an exact write-once `settings.toml.pre-v1` or `settings.toml.pre-v1.1` backup, then rewrites canonical TOML; this can reorder keys and removes comments, while preserving unrecognized keys when their owner can be matched safely. Files declaring a newer unsupported version remain untouched and configuration writes are blocked. See [Automatic version upgrades](/config/configuration/#automatic-version-upgrades) for the migration rules and recovery behavior.
 
 ## general
 

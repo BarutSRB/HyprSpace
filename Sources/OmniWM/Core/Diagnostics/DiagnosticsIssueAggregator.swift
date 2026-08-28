@@ -37,7 +37,10 @@ enum DiagnosticsIssueAggregator {
             spacesMode: controller.displaySpacesMode
         ))
 
-        issues.append(contentsOf: SettingsConfigDiagnostics.issues())
+        issues.append(contentsOf: SettingsConfigDiagnostics.issues(
+            directoryURL: controller.settings.settingsFileURL.deletingLastPathComponent(),
+            notice: controller.settings.configNotice
+        ))
 
         return issues
     }

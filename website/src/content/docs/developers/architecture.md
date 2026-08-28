@@ -185,7 +185,11 @@ snapshot are outside scope.
    `XDG_STATE_HOME` overrides, falling back to `~/.config/omniwm` and `~/.local/state/omniwm`.
 2. **`RuntimeStateStore`** — JSON store for non-settings runtime state (`runtime-state.json`).
 3. **`SettingsStore`** — `@MainActor @Observable`, loaded from `settings.toml` in the resolved config directory.
-   `UserDefaults` is not used for settings; TOML is the single source of truth.
+   `UserDefaults` is not used for settings; TOML is the single source of truth. `SettingsTOMLCodec` first reads the
+   raw TOML tree, version-gates and upgrades it, then strictly decodes the current canonical schema. A successful
+   legacy upgrade is backed up and atomically rewritten; an unsupported future version remains untouched and blocks
+   settings writes. Structured configuration notices cover startup, live reload, and save-time races through one
+   `SettingsStore` transition path, so diagnostics update only when the notice actually changes.
 4. **`HiddenBarController`** — per-app menu-bar concealment (assessment-mode assertion, hidden-icons panel).
 5. **`WMController`** — central coordinator (see [4.1](#41-wmcontroller--the-coordinator)); passed the clipboard-history directory.
 6. **`AppCLIManager`** and **`UpdateCoordinator`** — CLI exposure plus GitHub release polling/popup.

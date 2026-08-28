@@ -30,7 +30,9 @@ final class SettingsStore {
 
     var onIPCEnabledChanged: (@MainActor (Bool) -> Void)?
     var onExternalSettingsReloaded: (@MainActor () -> Void)?
+    var onConfigNoticeChanged: (@MainActor () -> Void)?
     var onTrackpadGestureAvailabilityChanged: (@MainActor (Bool) -> Void)?
+    private(set) var configNotice: SettingsConfigNotice?
 
     var hotkeysEnabled = SettingsStore.defaultExport.hotkeysEnabled {
         didSet { scheduleSave() }
@@ -710,9 +712,14 @@ final class SettingsStore {
         isApplyingRuntimeState = false
         syncQuakeTerminalCustomFrameToRuntimeState()
 
-        applyExport(persistence.load())
-        persistence.setExternalChangeHandler { [weak self] export in
-            self?.handleExternalReload(export)
+        let outcome = persistence.loadOutcome()
+        transitionConfigNotice(to: outcome.notice)
+        applyExport(outcome.export ?? SettingsExport.defaults())
+        persistence.setExternalChangeHandler { [weak self] outcome in
+            self?.handleExternalReload(outcome)
+        }
+        persistence.setSaveNoticeHandler { [weak self] notice in
+            self?.transitionConfigNotice(to: notice)
         }
     }
 
@@ -720,9 +727,15 @@ final class SettingsStore {
         persistence.fileURL
     }
 
+    var settingsWritesBlocked: Bool {
+        persistence.settingsWritesBlocked
+    }
+
     func ensureSettingsFileAvailable() throws {
         guard !FileManager.default.fileExists(atPath: settingsFileURL.path) else { return }
-        try persistence.saveImmediately(toExport())
+        if let notice = try persistence.saveImmediately(toExport()) {
+            transitionConfigNotice(to: notice)
+        }
     }
 
     func flushNow() {
@@ -1038,9 +1051,17 @@ final class SettingsStore {
         }
     }
 
-    private func handleExternalReload(_ export: SettingsExport) {
+    private func handleExternalReload(_ outcome: SettingsFileLoadOutcome) {
+        transitionConfigNotice(to: outcome.notice)
+        guard let export = outcome.export else { return }
         applyExport(export)
         onExternalSettingsReloaded?()
+    }
+
+    private func transitionConfigNotice(to notice: SettingsConfigNotice?) {
+        guard notice != configNotice else { return }
+        configNotice = notice
+        onConfigNoticeChanged?()
     }
 
     private func scheduleSave() {

@@ -38,9 +38,19 @@ struct DiagnosticsIssue: Identifiable, Equatable {
         )
         case unknownConfigKeys(keyPaths: [String])
         case settingsFileCorrupt
+        case settingsMigrated(report: SettingsMigrationReport, backupURL: URL)
+        case settingsRecovered(reason: String, backupURL: URL)
+        case settingsPersistenceBlocked(reason: String, backupURL: URL?)
+        case settingsInvalidExternal(reason: String)
     }
 
     let kind: Kind
+    let configFileURL: URL?
+
+    init(kind: Kind, configFileURL: URL? = nil) {
+        self.kind = kind
+        self.configFileURL = configFileURL
+    }
 
     var id: String {
         switch kind {
@@ -52,19 +62,28 @@ struct DiagnosticsIssue: Identifiable, Equatable {
         case let .horizontalDisplayArrangement(_, _, first, second): "displayArrangement:\(first):\(second)"
         case .unknownConfigKeys: "unknown-config-keys"
         case .settingsFileCorrupt: "settings-corrupt"
+        case .settingsMigrated: "settings-migrated"
+        case .settingsRecovered: "settings-recovered"
+        case .settingsPersistenceBlocked: "settings-persistence-blocked"
+        case .settingsInvalidExternal: "settings-invalid-external"
         }
     }
 
     var severity: DiagnosticsIssueSeverity {
         switch kind {
-        case .accessibilityNotGranted: .critical
+        case .accessibilityNotGranted,
+             .settingsPersistenceBlocked:
+            .critical
         case .hotkeyRegistration,
              .hotkeyCoFireAdvisory,
              .hotkeySidedHyper,
              .fixedDock,
              .horizontalDisplayArrangement,
              .unknownConfigKeys,
-             .settingsFileCorrupt:
+             .settingsFileCorrupt,
+             .settingsMigrated,
+             .settingsRecovered,
+             .settingsInvalidExternal:
             .warning
         }
     }
@@ -79,6 +98,10 @@ struct DiagnosticsIssue: Identifiable, Equatable {
         case .horizontalDisplayArrangement: "Unsupported vertical display overlap detected"
         case .unknownConfigKeys: "Unrecognized settings keys"
         case .settingsFileCorrupt: "Settings recovery file available"
+        case .settingsMigrated: "Settings upgraded"
+        case .settingsRecovered: "Invalid settings recovered"
+        case .settingsPersistenceBlocked: "Settings writes blocked"
+        case .settingsInvalidExternal: "External settings edit rejected"
         }
     }
 
@@ -110,6 +133,17 @@ struct DiagnosticsIssue: Identifiable, Equatable {
         case .settingsFileCorrupt:
             "OmniWM preserved settings data it could not parse as settings.toml.corrupt "
                 + "or settings.toml.corrupt.1."
+        case let .settingsMigrated(report, backupURL):
+            "OmniWM upgraded \(configPath) from schema version \(report.fromVersion) to \(report.toVersion). "
+                + "The exact original bytes were preserved at \(backupURL.path). "
+                + report.messages.joined(separator: " ")
+        case let .settingsRecovered(reason, backupURL):
+            "OmniWM could not decode \(configPath): \(reason) The exact rejected bytes were preserved at \(backupURL.path)."
+        case let .settingsPersistenceBlocked(reason, backupURL):
+            "OmniWM left \(configPath) untouched and blocked configuration writes: \(reason)"
+                + (backupURL.map { " The exact original bytes are at \($0.path)." } ?? "")
+        case let .settingsInvalidExternal(reason):
+            "OmniWM left the active settings unchanged because \(configPath) could not be decoded: \(reason)"
         }
     }
 
@@ -133,10 +167,19 @@ struct DiagnosticsIssue: Identifiable, Equatable {
         case .horizontalDisplayArrangement:
             "Arrange displays vertically or diagonally in System Settings → Displays so frames do not overlap."
         case .unknownConfigKeys:
-            "Remove or fix the keys in ~/.config/omniwm/settings.toml."
+            "Remove or fix the keys in \(configPath)."
         case .settingsFileCorrupt:
-            "Inspect settings.toml.corrupt and settings.toml.corrupt.1 in ~/.config/omniwm if present, "
+            "Inspect \(configDirectoryPath)/settings.toml.corrupt and "
+                + "\(configDirectoryPath)/settings.toml.corrupt.1 if present, "
                 + "then delete the recovery files to dismiss this notice."
+        case let .settingsMigrated(_, backupURL):
+            "Verify the upgraded settings, then keep the backup or delete \(backupURL.path) to dismiss this notice."
+        case let .settingsRecovered(_, backupURL):
+            "Compare \(backupURL.path) with \(configPath), restore valid values, and then remove the recovery file."
+        case .settingsPersistenceBlocked:
+            "Resolve the reported schema or backup problem at \(configPath), then reload or restart OmniWM."
+        case .settingsInvalidExternal:
+            "Correct the reported value at \(configPath). OmniWM will apply the file after it decodes successfully."
         }
     }
 
@@ -153,7 +196,11 @@ struct DiagnosticsIssue: Identifiable, Equatable {
             "x-apple.systempreferences:com.apple.preference.keyboard"
         case .hotkeySidedHyper,
              .unknownConfigKeys,
-             .settingsFileCorrupt:
+             .settingsFileCorrupt,
+             .settingsMigrated,
+             .settingsRecovered,
+             .settingsPersistenceBlocked,
+             .settingsInvalidExternal:
             nil
         }
     }
@@ -161,10 +208,22 @@ struct DiagnosticsIssue: Identifiable, Equatable {
     var revealsConfigFolder: Bool {
         switch kind {
         case .unknownConfigKeys,
-             .settingsFileCorrupt:
+             .settingsFileCorrupt,
+             .settingsMigrated,
+             .settingsRecovered,
+             .settingsPersistenceBlocked,
+             .settingsInvalidExternal:
             true
         default:
             false
         }
+    }
+
+    private var configPath: String {
+        (configFileURL ?? SettingsFilePersistence.fileURL).path
+    }
+
+    private var configDirectoryPath: String {
+        (configFileURL ?? SettingsFilePersistence.fileURL).deletingLastPathComponent().path
     }
 }

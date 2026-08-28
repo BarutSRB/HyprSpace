@@ -189,6 +189,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let controller else { return }
             controller.applyPersistedSettings(settings)
         }
+        settings.onConfigNoticeChanged = { [weak controller] in
+            controller?.refreshDiagnosticsIssues()
+        }
         statusBarController?.setup()
         do {
             try setIPCEnabled(settings.ipcEnabled, controller: controller)

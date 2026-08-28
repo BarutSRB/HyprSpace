@@ -4,19 +4,14 @@
 import Foundation
 import TOML
 
-enum SettingsTOMLCodecError: Error, Equatable, LocalizedError {
-    case cannotSafelyPreservePreviousData
-
-    var errorDescription: String? {
-        switch self {
-        case .cannotSafelyPreservePreviousData:
-            "The existing settings data could not be parsed and preserved safely."
-        }
-    }
-}
-
 // Only file in OmniWM that imports TOML — keep this boundary so swift-toml stays swappable.
 enum SettingsTOMLCodec {
+    static let currentSchemaVersion = 1
+
+    private struct PersistedHotkeyArray: Decodable {
+        let hotkeys: [PersistedHotkeyBinding]
+    }
+
     static func encode(_ export: SettingsExport) throws -> Data {
         try encodeCanonical(export)
     }
@@ -32,6 +27,11 @@ enum SettingsTOMLCodec {
         do {
             oldRawTree = try decoder.decode([String: TOMLNode].self, from: previous)
             oldExport = try decode(previous)
+        } catch let error as SettingsTOMLCodecError {
+            if case .unsupportedSchemaVersion = error {
+                throw error
+            }
+            throw SettingsTOMLCodecError.cannotSafelyPreservePreviousData
         } catch {
             throw SettingsTOMLCodecError.cannotSafelyPreservePreviousData
         }
@@ -40,7 +40,7 @@ enum SettingsTOMLCodec {
             from: encodeCanonical(oldExport)
         )
 
-        let merged = TOMLNode.mergeUnknownKeys(
+        let merged = try TOMLNode.mergeUnknownKeys(
             base: newCanonicalTree,
             oldRaw: oldRawTree,
             oldSchemaKnown: oldSchemaKnownTree
@@ -60,10 +60,38 @@ enum SettingsTOMLCodec {
     }
 
     static func decode(_ data: Data) throws -> SettingsExport {
+        try decodeForLoad(data).export
+    }
+
+    static func decodeForLoad(_ data: Data) throws -> SettingsTOMLDecodeResult {
         let activeHyperKeyModifiers = HyperKeyModifiers(carbonMask: KeySymbolMapper.hyperModifiers) ?? .default
         defer { KeySymbolMapper.setHyperKeyModifiers(activeHyperKeyModifiers) }
-        let canonical = try TOMLDecoder().decode(CanonicalTOMLConfig.self, from: data)
-        return canonical.toSettingsExport()
+
+        let decoder = TOMLDecoder()
+        var raw = try decoder.decode([String: TOMLNode].self, from: data)
+        let version = try schemaVersion(in: raw)
+        guard version <= currentSchemaVersion else {
+            throw SettingsTOMLCodecError.unsupportedSchemaVersion(
+                found: version,
+                supported: currentSchemaVersion
+            )
+        }
+
+        if version == currentSchemaVersion {
+            let canonical = try decoder.decode(CanonicalTOMLConfig.self, from: data)
+            return SettingsTOMLDecodeResult(export: canonical.toSettingsExport(), migration: nil, migratedData: nil)
+        }
+
+        let report = try migrateVersionZero(&raw)
+        let encoder = TOMLEncoder()
+        encoder.outputFormatting = [.sortedKeys, .prettyPrinted]
+        let migratedData = try encoder.encode(raw)
+        let canonical = try decoder.decode(CanonicalTOMLConfig.self, from: migratedData)
+        return SettingsTOMLDecodeResult(
+            export: canonical.toSettingsExport(),
+            migration: report,
+            migratedData: migratedData
+        )
     }
 
     static func unknownKeyPaths(in data: Data) -> [String] {
@@ -77,9 +105,194 @@ enum SettingsTOMLCodec {
             return []
         }
     }
+
+    private static func schemaVersion(in raw: [String: TOMLNode]) throws -> Int {
+        guard let node = raw["schemaVersion"] else { return 0 }
+        guard case let .integer(rawVersion) = node,
+              rawVersion >= 0,
+              let version = Int(exactly: rawVersion)
+        else {
+            throw SettingsTOMLCodecError.invalidSchemaVersion
+        }
+        return version
+    }
+
+    private static func migrateVersionZero(_ raw: inout [String: TOMLNode]) throws -> SettingsMigrationReport {
+        var defaultedPaths: [String] = []
+        if addMissingValue(
+            in: &raw,
+            table: "focus",
+            key: "raiseOnMouseFocus",
+            value: .boolean(true)
+        ) {
+            defaultedPaths.append("focus.raiseOnMouseFocus")
+        }
+        if addMissingValue(
+            in: &raw,
+            table: "gaps",
+            key: "fullscreenUsesOuterGaps",
+            value: .boolean(false)
+        ) {
+            defaultedPaths.append("gaps.fullscreenUsesOuterGaps")
+        }
+        if addMissingValue(
+            in: &raw,
+            table: "workspaceBar",
+            key: "hideInNativeFullscreen",
+            value: .boolean(false)
+        ) {
+            defaultedPaths.append("workspaceBar.hideInNativeFullscreen")
+        }
+        if raw["scratchpads"] == nil {
+            raw["scratchpads"] = .table(["labels": .table([:])])
+            defaultedPaths.append("scratchpads.labels")
+        } else if addMissingValue(
+            in: &raw,
+            table: "scratchpads",
+            key: "labels",
+            value: .table([:])
+        ) {
+            defaultedPaths.append("scratchpads.labels")
+        }
+
+        stampMissingAppRuleIDs(in: &raw)
+        let hotkeyResult = try migrateVersionZeroHotkeys(in: &raw)
+        raw["schemaVersion"] = .integer(Int64(currentSchemaVersion))
+        return SettingsMigrationReport(
+            fromVersion: 0,
+            toVersion: currentSchemaVersion,
+            defaultedPaths: defaultedPaths,
+            addedHotkeyIDs: hotkeyResult.addedIDs,
+            mappedHotkeys: hotkeyResult.mapped,
+            retiredHotkeys: hotkeyResult.retired
+        )
+    }
+
+    private static func addMissingValue(
+        in raw: inout [String: TOMLNode],
+        table tableKey: String,
+        key: String,
+        value: TOMLNode
+    ) -> Bool {
+        guard case .table(var table) = raw[tableKey], table[key] == nil else { return false }
+        table[key] = value
+        raw[tableKey] = .table(table)
+        return true
+    }
+
+    private static func stampMissingAppRuleIDs(in raw: inout [String: TOMLNode]) {
+        guard case let .array(entries) = raw["appRules"] else { return }
+        raw["appRules"] = .array(entries.map { entry in
+            guard case .table(var table) = entry, table["id"] == nil else { return entry }
+            table["id"] = .string(UUID().uuidString)
+            return .table(table)
+        })
+    }
+
+    private static func migrateVersionZeroHotkeys(
+        in raw: inout [String: TOMLNode]
+    ) throws -> SettingsHotkeyMigrationResult {
+        guard case let .array(entries) = raw["hotkeys"] else {
+            return SettingsHotkeyMigrationResult(addedIDs: [], mapped: [], retired: [])
+        }
+
+        let decoder = TOMLDecoder()
+        let validationData = try TOMLEncoder().encode(["hotkeys": TOMLNode.array(entries)])
+        _ = try decoder.decode(PersistedHotkeyArray.self, from: validationData)
+        let defaultsTree = try decoder.decode(
+            [String: TOMLNode].self,
+            from: encodeCanonical(.defaults())
+        )
+        guard case let .array(defaultEntries) = defaultsTree["hotkeys"] else {
+            throw SettingsTOMLCodecError.migrationInvariant("Canonical hotkey defaults could not be encoded.")
+        }
+
+        let mappings = [
+            "assignFocusedWindowToScratchpad": "assignFocusedWindowToScratchpad.1",
+            "toggleScratchpadWindow": "toggleScratchpad.1"
+        ]
+        let addedHotkeyIDs = Set(ScratchpadIndex.range.flatMap { index in
+            ["toggleScratchpad.\(index)", "assignFocusedWindowToScratchpad.\(index)"]
+        })
+        let retirements = [
+            "consumeOrExpelWindowLeft": ["consumeWindowIntoColumn", "expelWindowFromColumn"],
+            "consumeOrExpelWindowRight": ["consumeWindowIntoColumn", "expelWindowFromColumn"]
+        ]
+        let explicitCurrentIDs = Set(entries.compactMap(hotkeyID))
+        var migrated = migrateLegacyHotkeyEntries(
+            entries,
+            explicitCurrentIDs: explicitCurrentIDs,
+            mappings: mappings,
+            retirements: retirements
+        )
+        let addedIDs = appendMissingHotkeyDefaults(
+            defaultEntries,
+            eligibleIDs: addedHotkeyIDs,
+            to: &migrated.entries
+        )
+        raw["hotkeys"] = .array(migrated.entries)
+        return SettingsHotkeyMigrationResult(
+            addedIDs: addedIDs,
+            mapped: migrated.mapped,
+            retired: migrated.retired
+        )
+    }
+
+    private static func migrateLegacyHotkeyEntries(
+        _ entries: [TOMLNode],
+        explicitCurrentIDs: Set<String>,
+        mappings: [String: String],
+        retirements: [String: [String]]
+    ) -> SettingsHotkeyMigrationAccumulator {
+        var result = SettingsHotkeyMigrationAccumulator(entries: [], mapped: [], retired: [])
+        for entry in entries {
+            guard let id = hotkeyID(entry) else {
+                result.entries.append(entry)
+                continue
+            }
+            if let suggestedIDs = retirements[id] {
+                result.retired.append(SettingsRetiredHotkey(id: id, suggestedIDs: suggestedIDs))
+                continue
+            }
+            guard let currentID = mappings[id] else {
+                result.entries.append(entry)
+                continue
+            }
+            let keepCurrent = explicitCurrentIDs.contains(currentID)
+            result.mapped.append(SettingsHotkeyMapping(
+                previousID: id,
+                currentID: currentID,
+                keptExplicitCurrentBinding: keepCurrent
+            ))
+            guard !keepCurrent, case .table(var table) = entry else { continue }
+            table["id"] = .string(currentID)
+            result.entries.append(.table(table))
+        }
+        return result
+    }
+
+    private static func appendMissingHotkeyDefaults(
+        _ defaults: [TOMLNode],
+        eligibleIDs: Set<String>,
+        to entries: inout [TOMLNode]
+    ) -> [String] {
+        let presentIDs = Set(entries.compactMap(hotkeyID))
+        var addedIDs: [String] = []
+        for entry in defaults {
+            guard let id = hotkeyID(entry), eligibleIDs.contains(id), !presentIDs.contains(id) else { continue }
+            entries.append(entry)
+            addedIDs.append(id)
+        }
+        return addedIDs
+    }
+
+    private static func hotkeyID(_ node: TOMLNode) -> String? {
+        guard case let .table(table) = node, case let .string(id) = table["id"] else { return nil }
+        return id
+    }
 }
 
-private enum TOMLNode: Codable, Equatable {
+enum TOMLNode: Codable, Equatable {
     case string(String)
     case integer(Int64)
     case float(Double)
@@ -175,91 +388,5 @@ private enum TOMLNode: Codable, Equatable {
                 try container.encode(value, forKey: DynamicCodingKey(key))
             }
         }
-    }
-
-    static func mergeUnknownKeys(
-        base: [String: TOMLNode],
-        oldRaw: [String: TOMLNode],
-        oldSchemaKnown: [String: TOMLNode]
-    ) -> [String: TOMLNode] {
-        var merged = base
-        preserveUnknownKeys(from: oldRaw, known: oldSchemaKnown, into: &merged)
-        return merged
-    }
-
-    static func unknownKeyPaths(
-        raw: [String: TOMLNode],
-        known: [String: TOMLNode],
-        prefix: String
-    ) -> [String] {
-        var result: [String] = []
-        for (key, rawValue) in raw {
-            let path = prefix.isEmpty ? key : "\(prefix).\(key)"
-            guard let knownValue = known[key] else {
-                result.append(path)
-                continue
-            }
-            if case let .table(rawTable) = rawValue, case let .table(knownTable) = knownValue {
-                result.append(contentsOf: unknownKeyPaths(raw: rawTable, known: knownTable, prefix: path))
-            } else if case let .array(rawArray) = rawValue, case let .array(knownArray) = knownValue {
-                for (index, rawElement) in rawArray.enumerated() {
-                    guard case let .table(rawTable) = rawElement,
-                          index < knownArray.count,
-                          case let .table(knownTable) = knownArray[index]
-                    else { continue }
-                    result.append(contentsOf: unknownKeyPaths(
-                        raw: rawTable,
-                        known: knownTable,
-                        prefix: "\(path)[\(index)]"
-                    ))
-                }
-            }
-        }
-        return result
-    }
-
-    private static func preserveUnknownKeys(
-        from oldRaw: [String: TOMLNode],
-        known oldSchemaKnown: [String: TOMLNode],
-        into merged: inout [String: TOMLNode]
-    ) {
-        for (key, oldValue) in oldRaw {
-            guard let knownValue = oldSchemaKnown[key] else {
-                if merged[key] == nil {
-                    merged[key] = oldValue
-                }
-                continue
-            }
-
-            guard case .table(let oldTable) = oldValue,
-                  case .table(let knownTable) = knownValue,
-                  case .table(var mergedTable) = merged[key]
-            else {
-                continue
-            }
-
-            preserveUnknownKeys(from: oldTable, known: knownTable, into: &mergedTable)
-            merged[key] = .table(mergedTable)
-        }
-    }
-}
-
-private struct DynamicCodingKey: CodingKey {
-    let stringValue: String
-    let intValue: Int?
-
-    init(_ stringValue: String) {
-        self.stringValue = stringValue
-        intValue = nil
-    }
-
-    init?(stringValue: String) {
-        self.stringValue = stringValue
-        intValue = nil
-    }
-
-    init?(intValue: Int) {
-        stringValue = String(intValue)
-        self.intValue = intValue
     }
 }
