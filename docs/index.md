@@ -6,17 +6,12 @@ title: OmniWM Documentation
 
 OmniWM is a tiling window manager for macOS with scrolling columns, BSP tiling, a Ghostty-powered quake terminal, a unified command palette, and IPC/CLI automation.
 
-This site is the documentation hub for architecture notes and technical reference material. For the repository overview and screenshots, see the [project README](https://github.com/BarutSRB/OmniWM/blob/main/README.md).
+The documentation now lives at [omniwm.app](https://omniwm.app) — user guides, feature docs, the configuration reference, the CLI & IPC reference, and the architecture guide, all searchable and community-editable from the `website/` directory of this repository.
 
 ## Start Here
 
-- [Architecture Guide](ARCHITECTURE.md)
-- [IPC & CLI Reference](IPC-CLI.md)
-- [Contribution Guide](CONTRIBUTING.md)
+- [Quick Start](https://omniwm.app/guides/quick-start/)
+- [Architecture Guide](https://omniwm.app/developers/architecture/)
+- [CLI & IPC Reference](https://omniwm.app/reference/cli/overview/)
+- [Contributing](https://omniwm.app/developers/contributing/)
 - [Latest Releases](https://github.com/BarutSRB/OmniWM/releases)
-
-## What Lives Where
-
-- Use this docs site for contributor-oriented and technical reference documentation.
-- Use the repository [README](https://github.com/BarutSRB/OmniWM/blob/main/README.md) for installation, screenshots, quick start, and end-user feature overview.
-- Use the [Contribution Guide](CONTRIBUTING.md) for contribution workflow, project direction, and a link to the canonical root guide.

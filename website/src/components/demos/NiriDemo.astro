@@ -1,0 +1,201 @@
+---
+import MockDesktop from './MockDesktop.astro';
+import MockWindow from './MockWindow.astro';
+import Keycap from './Keycap.astro';
+---
+
+<div class="demo" data-demo="niri">
+  <MockDesktop label="Animated mockup of the Niri layout: swapping stacked windows, cycling column width, and fluid two-axis mouse resizing">
+    <div class="strip">
+      <div class="col col-stack">
+        <MockWindow class="nw-zed" title="Zed" variant="editor" />
+        <MockWindow class="nw-notes" title="Notes" variant="notes" />
+      </div>
+      <div class="col col-term">
+        <MockWindow class="nw-ghost" title="Ghostty" variant="terminal" />
+      </div>
+      <div class="col col-web">
+        <MockWindow class="nw-safari" title="Safari" variant="browser" />
+      </div>
+    </div>
+    <span class="cursor"></span>
+  </MockDesktop>
+  <div class="keys">
+    <Keycap id="nk-move" keys={['⌥', '⇧', '↓']} label="Swap down" />
+    <Keycap id="nk-size" keys={['⌥', '.']} label="Cycle width" />
+    <Keycap id="nk-mouse" keys={['⌥', 'right-drag']} label="Fluid resize" />
+    <Keycap id="nk-focus" keys={['⌥', '→']} label="Focus right" />
+  </div>
+  <p class="caption">Swap, cycle, or free-resize on both axes at once — the strip re-flows live.</p>
+</div>
+
+<style is:global>
+  [data-demo='niri'] {
+    .strip {
+      position: absolute;
+      inset: 8cqh auto 3.5cqh 3cqw;
+      display: flex;
+      gap: 2cqw;
+      transform: translateX(var(--pan, 0cqw));
+      transition: transform 550ms var(--ease-settle);
+    }
+
+    .col {
+      position: relative;
+      flex: 0 0 auto;
+      height: 100%;
+    }
+
+    .col-stack {
+      width: 44cqw;
+      transition: width 550ms var(--ease-settle);
+    }
+
+    .col-term {
+      width: 34cqw;
+    }
+
+    .col-web {
+      width: 44cqw;
+    }
+
+    .col-term .mock-win,
+    .col-web .mock-win {
+      position: absolute;
+      inset: 0;
+    }
+
+    .mock-win {
+      transition: box-shadow var(--dur-ui) var(--ease-ui);
+    }
+
+    .nw-zed {
+      top: 0;
+      left: 0;
+      right: 0;
+      height: calc(50% - 1cqw);
+      transition:
+        top 560ms var(--ease-settle),
+        height 600ms var(--ease-settle),
+        box-shadow var(--dur-ui) var(--ease-ui);
+    }
+
+    .nw-notes {
+      top: calc(50% + 1cqw);
+      left: 0;
+      right: 0;
+      height: calc(50% - 1cqw);
+      transition:
+        top 560ms var(--ease-settle),
+        height 600ms var(--ease-settle),
+        box-shadow var(--dur-ui) var(--ease-ui);
+    }
+
+    &.swapped .nw-zed {
+      top: calc(50% + 1cqw);
+    }
+
+    &.swapped .nw-notes {
+      top: 0;
+    }
+
+    &.w23 .col-stack {
+      width: 58.6cqw;
+    }
+
+    &.swapped.split6535 .nw-notes {
+      height: calc(65% - 1cqw);
+    }
+
+    &.swapped.split6535 .nw-zed {
+      top: calc(65% + 1cqw);
+      height: calc(35% - 1cqw);
+    }
+
+    &.pinch .col-stack {
+      width: 47cqw;
+    }
+
+    .cursor {
+      position: absolute;
+      left: 34cqw;
+      top: 92cqh;
+      width: 2.4cqw;
+      aspect-ratio: 1;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.9);
+      border: 1px solid rgba(0, 0, 0, 0.4);
+      opacity: 0;
+      z-index: 8;
+      transition:
+        transform 620ms var(--ease-hand),
+        opacity var(--dur-ui) var(--ease-ui),
+        box-shadow var(--dur-ui) var(--ease-ui);
+    }
+
+    .cursor.c-show {
+      opacity: 1;
+    }
+
+    .cursor.drag-ring {
+      box-shadow: 0 0 0 3px var(--demo-swap);
+    }
+
+    .cursor.c-div {
+      transform: translate(0, -36cqh);
+    }
+
+    .cursor.c-div.c-drag1 {
+      transform: translate(0, -27cqh);
+    }
+
+    .cursor.c-div.c-drag1.c-drag2 {
+      transform: translate(-11cqw, -27cqh);
+    }
+  }
+</style>
+
+<script>
+  import { mountDemo } from '../../scripts/demo-timeline.js';
+
+  for (const root of document.querySelectorAll("[data-demo='niri']")) {
+    mountDemo(root, {
+      cycle: 15000,
+      finalAt: 5600,
+      cues: [
+        { at: 0, sel: '.nw-zed', add: 'is-focused' },
+        { at: 900, sel: "[data-key-id='nk-move']", add: 'is-pressed' },
+        { at: 1000, add: 'swapped' },
+        { at: 1150, sel: "[data-key-id='nk-move']", remove: 'is-pressed' },
+        { at: 2600, sel: "[data-key-id='nk-size']", add: 'is-pressed' },
+        { at: 2700, add: 'w23' },
+        { at: 2850, sel: "[data-key-id='nk-size']", remove: 'is-pressed' },
+        { at: 4100, sel: '.cursor', add: ['c-show', 'c-div'] },
+        { at: 4500, sel: '.cursor', add: 'drag-ring' },
+        { at: 4500, sel: "[data-key-id='nk-mouse']", add: 'is-pressed' },
+        { at: 4700, add: 'split6535' },
+        { at: 4700, sel: '.cursor', add: 'c-drag1' },
+        { at: 5150, add: 'pinch' },
+        { at: 5150, sel: '.cursor', add: 'c-drag2' },
+        { at: 6100, sel: '.cursor', remove: 'drag-ring' },
+        { at: 6100, sel: "[data-key-id='nk-mouse']", remove: 'is-pressed' },
+        { at: 6500, sel: '.cursor', remove: 'c-show' },
+        { at: 7600, sel: "[data-key-id='nk-focus']", add: 'is-pressed' },
+        { at: 7700, sel: '.nw-zed', remove: 'is-focused' },
+        { at: 7700, sel: '.nw-ghost', add: 'is-focused' },
+        { at: 7850, sel: "[data-key-id='nk-focus']", remove: 'is-pressed' },
+        { at: 8700, sel: "[data-key-id='nk-focus']", add: 'is-pressed' },
+        { at: 8800, sel: '.nw-ghost', remove: 'is-focused' },
+        { at: 8800, sel: '.nw-safari', add: 'is-focused' },
+        { at: 8800, sel: '.strip', vars: { '--pan': '-34cqw' } },
+        { at: 8950, sel: "[data-key-id='nk-focus']", remove: 'is-pressed' },
+        { at: 10600, remove: 'split6535' },
+        { at: 11000, remove: ['pinch', 'w23'] },
+        { at: 11400, remove: 'swapped' },
+        { at: 11400, sel: '.nw-safari', remove: 'is-focused' },
+        { at: 11500, sel: '.strip', vars: { '--pan': '0cqw' } },
+        { at: 11600, sel: '.nw-zed', add: 'is-focused' },
+      ],
+    });
+  }
+</script>

@@ -1,0 +1,211 @@
+---
+import MockDesktop from './MockDesktop.astro';
+import MockWindow from './MockWindow.astro';
+import Keycap from './Keycap.astro';
+---
+
+<div class="demo" data-demo="gestures">
+  <MockDesktop
+    label="Animated mockup of trackpad gestures scrolling the Niri strip: a two-finger swipe snaps to a column, a flick glides with momentum and rubber-bands at the edge, and a three-finger swipe switches workspaces"
+  >
+    <div class="strip">
+      <div class="col c-1"><MockWindow title="Zed" variant="editor" /></div>
+      <div class="col c-2"><MockWindow title="Ghostty" variant="terminal" /></div>
+      <div class="col c-3"><MockWindow title="Safari" variant="browser" /></div>
+      <div class="col c-4"><MockWindow title="Notes" variant="notes" /></div>
+      <div class="col c-5"><MockWindow title="Music" variant="plain" /></div>
+    </div>
+    <MockWindow class="ws2f" title="Figma" variant="plain" />
+    <div class="pad">
+      <span class="f f1"></span>
+      <span class="f f2"></span>
+      <span class="f f3"></span>
+    </div>
+  </MockDesktop>
+  <div class="keys">
+    <Keycap id="gk-2" keys={['2-finger swipe']} label="Snap to columns" />
+    <Keycap id="gk-fl" keys={['2-finger flick']} label="Momentum" />
+    <Keycap id="gk-ws" keys={['3-finger swipe']} label="Workspace swipe" />
+  </div>
+  <p class="caption">Swipe to snap, flick to glide with rubber-band edges — and three fingers flip the workspace.</p>
+</div>
+
+<style is:global>
+  [data-demo='gestures'] {
+    .strip {
+      position: absolute;
+      inset: 8cqh auto 14cqh 3cqw;
+      display: flex;
+      gap: 2cqw;
+      transform: translate(var(--pan, 0cqw), 0);
+      transition:
+        transform 550ms var(--ease-settle),
+        opacity 420ms var(--ease-settle);
+    }
+
+    &.track .strip {
+      transition-duration: 620ms;
+      transition-timing-function: var(--ease-smooth);
+    }
+
+    &.glide .strip {
+      transition-duration: 1300ms;
+      transition-timing-function: var(--ease-smooth);
+    }
+
+    &.sw2 .strip {
+      opacity: 0;
+      transform: translate(var(--pan, 0cqw), 2cqh);
+    }
+
+    .col {
+      position: relative;
+      flex: 0 0 auto;
+      height: 100%;
+    }
+
+    .col .mock-win {
+      position: absolute;
+      inset: 0;
+    }
+
+    .c-1 {
+      width: 40cqw;
+    }
+
+    .c-2 {
+      width: 30cqw;
+    }
+
+    .c-3 {
+      width: 44cqw;
+    }
+
+    .c-4 {
+      width: 34cqw;
+    }
+
+    .c-5 {
+      width: 30cqw;
+    }
+
+    .ws2f {
+      left: 3cqw;
+      top: 8cqh;
+      width: 90cqw;
+      height: 78cqh;
+      opacity: 0;
+      transform: translateY(2cqh);
+      transition:
+        opacity 420ms var(--ease-settle),
+        transform 420ms var(--ease-settle);
+    }
+
+    &.sw2 .ws2f {
+      opacity: 1;
+      transform: none;
+    }
+
+    .pad {
+      position: absolute;
+      left: 50%;
+      bottom: 2.5cqh;
+      transform: translateX(-50%);
+      width: 16cqw;
+      aspect-ratio: 10 / 7;
+      border-radius: 1.6cqw;
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      background: rgba(20, 20, 28, 0.55);
+      -webkit-backdrop-filter: blur(8px);
+      backdrop-filter: blur(8px);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+      z-index: 8;
+    }
+
+    .f {
+      position: absolute;
+      width: clamp(5px, 1.8cqw, 12px);
+      aspect-ratio: 1;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.85);
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+      opacity: 0;
+      transition:
+        opacity var(--dur-ui) var(--ease-ui),
+        transform 620ms var(--ease-hand);
+    }
+
+    .f1 {
+      left: 30%;
+      top: 38%;
+    }
+
+    .f2 {
+      left: 50%;
+      top: 38%;
+    }
+
+    .f3 {
+      left: 70%;
+      top: 38%;
+    }
+
+    .f.f-show {
+      opacity: 1;
+    }
+
+    .f.drag1 {
+      transform: translateX(-4cqw);
+    }
+
+    .f.flick {
+      transform: translateX(-6cqw);
+      transition-duration: 240ms;
+      transition-timing-function: var(--ease-cubic);
+    }
+
+    .f.dragv {
+      transform: translateY(3cqh);
+    }
+  }
+</style>
+
+<script>
+  import { mountDemo } from '../../scripts/demo-timeline.js';
+
+  for (const root of document.querySelectorAll("[data-demo='gestures']")) {
+    mountDemo(root, {
+      cycle: 14000,
+      finalAt: 3000,
+      cues: [
+        { at: 600, sel: '.f1, .f2', add: 'f-show' },
+        { at: 900, sel: "[data-key-id='gk-2']", add: 'is-pressed' },
+        { at: 900, sel: '.f1, .f2', add: 'drag1' },
+        { at: 900, add: 'track' },
+        { at: 900, sel: '.strip', vars: { '--pan': '-26cqw' } },
+        { at: 1550, remove: 'track' },
+        { at: 1550, sel: '.strip', vars: { '--pan': '-42cqw' } },
+        { at: 1550, sel: "[data-key-id='gk-2']", remove: 'is-pressed' },
+        { at: 3400, sel: '.f1, .f2', remove: 'drag1' },
+        { at: 4300, sel: "[data-key-id='gk-fl']", add: 'is-pressed' },
+        { at: 4300, sel: '.f1, .f2', add: 'flick' },
+        { at: 4300, add: 'glide' },
+        { at: 4300, sel: '.strip', vars: { '--pan': '-90cqw' } },
+        { at: 4550, sel: "[data-key-id='gk-fl']", remove: 'is-pressed' },
+        { at: 4550, sel: '.f1, .f2', remove: 'flick' },
+        { at: 4900, sel: '.f1, .f2', remove: 'f-show' },
+        { at: 5700, remove: 'glide' },
+        { at: 5700, sel: '.strip', vars: { '--pan': '-84cqw' } },
+        { at: 7300, sel: '.f1, .f2, .f3', add: 'f-show' },
+        { at: 7800, sel: "[data-key-id='gk-ws']", add: 'is-pressed' },
+        { at: 7800, sel: '.f1, .f2, .f3', add: 'dragv' },
+        { at: 7950, add: 'sw2' },
+        { at: 8050, sel: "[data-key-id='gk-ws']", remove: 'is-pressed' },
+        { at: 8600, sel: '.f1, .f2, .f3', remove: ['f-show', 'dragv'] },
+        { at: 10600, remove: 'sw2' },
+        { at: 10900, add: 'glide' },
+        { at: 11000, sel: '.strip', vars: { '--pan': '0cqw' } },
+      ],
+    });
+  }
+</script>

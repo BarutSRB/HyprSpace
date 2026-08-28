@@ -1,0 +1,146 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-ui);
+  background: var(--page-bg);
+  color: var(--page-fg);
+  -webkit-font-smoothing: antialiased;
+  line-height: 1.6;
+}
+
+a {
+  color: var(--page-link);
+}
+
+:focus-visible {
+  outline: 2px solid var(--page-accent);
+  outline-offset: 2px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.container {
+  width: min(1080px, 92vw);
+  margin-inline: auto;
+}
+
+.section {
+  padding: 72px 0;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 640px;
+}
+
+.section-head {
+  max-width: 640px;
+  margin: 0 auto 40px;
+  text-align: center;
+}
+
+.section-head h2 {
+  font-size: clamp(26px, 4vw, 36px);
+  line-height: 1.15;
+  margin: 0 0 12px;
+  letter-spacing: -0.01em;
+}
+
+.section-head p {
+  color: var(--page-muted);
+  margin: 0;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 22px;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: none;
+  border: 1px solid transparent;
+  transition:
+    background var(--dur-ui) var(--ease-ui),
+    border-color var(--dur-ui) var(--ease-ui),
+    transform var(--dur-ui) var(--ease-ui);
+}
+
+.btn:hover {
+  transform: translateY(-1px);
+}
+
+.btn-primary {
+  background: var(--page-accent);
+  color: #fff8f2;
+}
+
+.btn-primary:hover {
+  background: var(--page-accent-strong);
+}
+
+:root[data-theme='dark'] .btn-primary {
+  color: #1c120d;
+}
+
+:root[data-theme='dark'] .btn-primary:hover {
+  background: var(--page-accent);
+  filter: brightness(1.1);
+}
+
+.btn-ghost {
+  border-color: var(--page-frame-border);
+  color: var(--page-fg);
+  background: var(--page-surface);
+}
+
+.btn-ghost:hover {
+  border-color: var(--page-accent);
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+.demo {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.demo .keys {
+  display: flex;
+  gap: 20px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.demo .caption {
+  text-align: center;
+  color: var(--page-muted);
+  font-size: 14px;
+  margin: 0;
+}
+
+.demo.is-resetting,
+.demo.is-resetting * {
+  transition: none !important;
+}
+
+.demo.is-live[data-demo] .mock-win,
+.demo.is-live .strip,
+.demo.is-live .mover,
+.demo.is-live .cursor {
+  will-change: transform;
+}

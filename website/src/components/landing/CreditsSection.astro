@@ -1,0 +1,174 @@
+---
+import { employers } from '../../data/employers';
+import { education } from '../../data/education';
+import { contributors } from '../../data/contributors';
+---
+
+<section class="section credits" id="credits">
+  <div class="container">
+    <div class="section-head">
+      <h2>Built by a community</h2>
+      <p>Thank you to everyone who contributed to OmniWM. Your ideas and code made a real difference.</p>
+    </div>
+
+    <h3 class="group-title">Contributors by employer</h3>
+    <div class="org-grid">
+      {
+        employers.map((org) => (
+          <div class="org-card">
+            <a class="org" href={org.url}>
+              <img src={org.logo} alt={org.name} width="56" height="56" loading="lazy" />
+              <b>{org.name}</b>
+            </a>
+            <span class="rule" />
+            <a class="person" href={`https://github.com/${org.handle}`}>
+              <img src={`https://github.com/${org.handle}.png?size=96`} alt={org.contributor} width="40" height="40" loading="lazy" />
+              <span>
+                {org.contributor}
+                <i>@{org.handle}</i>
+              </span>
+            </a>
+          </div>
+        ))
+      }
+    </div>
+
+    <h3 class="group-title">Contributors by education</h3>
+    <div class="org-grid edu">
+      {
+        education.map((org) => (
+          <div class="org-card">
+            <a class="org" href={org.url}>
+              <img src={org.logo} alt={org.name} width="56" height="56" loading="lazy" />
+              <b>{org.name}</b>
+            </a>
+            <span class="rule" />
+            <a class="person" href={`https://github.com/${org.handle}`}>
+              <img src={`https://github.com/${org.handle}.png?size=96`} alt={org.contributor} width="40" height="40" loading="lazy" />
+              <span>
+                {org.contributor}
+                <i>@{org.handle}</i>
+              </span>
+            </a>
+          </div>
+        ))
+      }
+    </div>
+
+    <h3 class="group-title">All contributors</h3>
+    <div class="wall">
+      {
+        contributors.map((person) => (
+          <a href={`https://github.com/${person.handle}`} title={person.name}>
+            <img src={`https://github.com/${person.handle}.png?size=96`} alt={person.name} width="56" height="56" loading="lazy" />
+          </a>
+        ))
+      }
+    </div>
+  </div>
+</section>
+
+<style>
+  .group-title {
+    text-align: center;
+    font-size: 15px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--page-muted);
+    margin: 44px 0 20px;
+  }
+
+  .org-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 12px;
+  }
+
+  .org-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    padding: 20px 16px;
+    border-radius: 12px;
+    border: 1px solid var(--page-frame-border);
+    background: var(--page-surface);
+    text-align: center;
+  }
+
+  .org,
+  .person {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    text-decoration: none;
+    color: var(--page-fg);
+  }
+
+  .org img {
+    border-radius: 12px;
+    object-fit: contain;
+    background: #fff;
+    padding: 4px;
+  }
+
+  .org b {
+    font-size: 14.5px;
+  }
+
+  .rule {
+    width: 48px;
+    height: 1px;
+    background: var(--page-frame-border);
+  }
+
+  .person {
+    flex-direction: row;
+    gap: 10px;
+  }
+
+  .person img {
+    border-radius: 50%;
+  }
+
+  .person span {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    font-size: 13.5px;
+    font-weight: 600;
+    line-height: 1.3;
+  }
+
+  .person i {
+    font-style: normal;
+    font-weight: 400;
+    color: var(--page-muted);
+    font-size: 12.5px;
+  }
+
+  .person:hover span,
+  .org:hover b {
+    color: var(--page-accent);
+  }
+
+  .wall {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: center;
+    max-width: 760px;
+    margin: 0 auto;
+  }
+
+  .wall img {
+    border-radius: 50%;
+    display: block;
+    transition: transform var(--dur-ui) var(--ease-ui);
+  }
+
+  .wall a:hover img {
+    transform: scale(1.12);
+  }
+</style>

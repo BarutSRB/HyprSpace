@@ -1,0 +1,63 @@
+---
+interface Props {
+  keys: string[];
+  id?: string;
+  label?: string;
+}
+
+const { keys, id, label } = Astro.props;
+---
+
+<span class="keycap" data-key-id={id}>
+  {keys.map((key, index) => [index > 0 && <span class="plus">+</span>, <kbd>{key}</kbd>])}
+  <slot />
+  {label && <span class="key-label">{label}</span>}
+</span>
+
+<style is:global>
+  .keycap {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+
+    kbd {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 28px;
+      height: 28px;
+      padding: 0 7px;
+      border: 1px solid var(--page-key-border);
+      border-bottom-width: 2px;
+      border-radius: var(--r-key);
+      background: var(--page-key-bg);
+      color: var(--page-key-fg);
+      font-family: var(--font-ui);
+      font-size: 13px;
+      transition:
+        transform var(--dur-ui) var(--ease-ui),
+        background var(--dur-ui) var(--ease-ui),
+        border-color var(--dur-ui) var(--ease-ui),
+        color var(--dur-ui) var(--ease-ui);
+    }
+
+    &.is-pressed kbd {
+      transform: translateY(1px);
+      border-bottom-width: 1px;
+      background: var(--page-accent-soft);
+      border-color: var(--page-accent);
+      color: var(--page-accent);
+    }
+
+    .plus {
+      color: var(--page-muted);
+      font-size: 12px;
+    }
+
+    .key-label {
+      margin-left: 4px;
+      color: var(--page-muted);
+      font-size: 13px;
+    }
+  }
+</style>

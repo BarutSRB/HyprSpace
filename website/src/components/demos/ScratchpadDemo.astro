@@ -1,0 +1,318 @@
+---
+import MockDesktop from './MockDesktop.astro';
+import MockWindow from './MockWindow.astro';
+import Keycap from './Keycap.astro';
+---
+
+<div class="demo" data-demo="scratchpads">
+  <MockDesktop label="Animated mockup of a scratchpad widget layer floating above the tiled desktop and following a workspace switch">
+    <div class="bar">
+      <span class="chip ch-1">1</span>
+      <span class="chip ch-2">2</span>
+      <span class="pill"><i class="tray"></i>widgets</span>
+    </div>
+    <MockWindow class="w1 bg-a" title="Zed" variant="editor" />
+    <MockWindow class="w1 bg-b" title="Safari" variant="browser" />
+    <MockWindow class="w2 bg-c" title="Figma" variant="plain" />
+    <div class="widget calc">
+      <span class="wt">Calculator</span>
+      <span class="calc-display">128.5</span>
+      <span class="pad">
+        <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+      </span>
+    </div>
+    <div class="widget note">
+      <span class="nline nl-1"></span>
+      <span class="nline nl-2"></span>
+      <span class="nline nl-3"></span>
+    </div>
+    <div class="widget player">
+      <span class="wt">Now Playing</span>
+      <span class="ptrack"><i></i></span>
+      <span class="pplay">▶</span>
+    </div>
+    <span class="sliver"></span>
+  </MockDesktop>
+  <div class="keys">
+    <Keycap id="sp1" keys={['⌥', '1']} label="Toggle widgets" />
+    <Keycap id="sp2" keys={['⌥', '2']} label="Switch workspace" />
+  </div>
+  <p class="caption">A sticky floating layer above your tiles — toggled with one key, following you across workspaces.</p>
+</div>
+
+<style is:global>
+  [data-demo='scratchpads'] {
+    .bar {
+      position: absolute;
+      top: max(6.5cqh, 18px);
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      gap: 0.8cqw;
+      padding: 0.8cqh 1cqw;
+      border-radius: var(--r-bar);
+      background: rgba(28, 28, 36, 0.72);
+      -webkit-backdrop-filter: blur(10px);
+      backdrop-filter: blur(10px);
+      border: 0.5px solid rgba(255, 255, 255, 0.18);
+      z-index: 7;
+      font-family: var(--font-mono);
+      font-size: clamp(6px, 1.6cqw, 11px);
+      color: rgba(255, 255, 255, 0.75);
+    }
+
+    .chip {
+      padding: 0.4cqh 0.9cqw;
+      border-radius: 6px;
+      border: 1px solid transparent;
+      transition:
+        border-color var(--dur-ui) var(--ease-ui),
+        background var(--dur-ui) var(--ease-ui),
+        color var(--dur-ui) var(--ease-ui);
+    }
+
+    .ch-1 {
+      border-color: var(--demo-accent);
+      background: rgba(255, 255, 255, 0.1);
+      color: #fff;
+    }
+
+    &.sw2 .ch-1 {
+      border-color: transparent;
+      background: transparent;
+      color: rgba(255, 255, 255, 0.75);
+    }
+
+    &.sw2 .ch-2 {
+      border-color: var(--demo-accent);
+      background: rgba(255, 255, 255, 0.1);
+      color: #fff;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5cqw;
+      padding: 0.4cqh 1cqw;
+      border-radius: var(--r-pill);
+      border: 0.8px solid rgba(255, 255, 255, 0.22);
+      background: rgba(255, 255, 255, 0.08);
+      transition:
+        border-color 150ms var(--ease-ui),
+        background 150ms var(--ease-ui),
+        color 150ms var(--ease-ui),
+        transform 150ms var(--ease-ui);
+    }
+
+    .pill.is-on {
+      border: 1.2px solid var(--demo-accent);
+      background: rgba(22, 255, 250, 0.18);
+      color: #fff;
+      transform: scale(1.04);
+    }
+
+    .tray {
+      width: 1.6cqw;
+      height: 1.2cqw;
+      border-radius: 2px 2px 3px 3px;
+      background: rgba(255, 255, 255, 0.55);
+      display: inline-block;
+    }
+
+    .mock-win {
+      opacity: 0.8;
+      transition:
+        opacity 420ms var(--ease-settle),
+        transform 420ms var(--ease-settle);
+    }
+
+    .bg-a {
+      left: 4cqw;
+      top: 16cqh;
+      width: 54cqw;
+      height: 76cqh;
+    }
+
+    .bg-b {
+      left: 60cqw;
+      top: 16cqh;
+      width: 36cqw;
+      height: 76cqh;
+    }
+
+    .w2 {
+      opacity: 0;
+      transform: translateY(2cqh);
+    }
+
+    .bg-c {
+      left: 4cqw;
+      top: 16cqh;
+      width: 92cqw;
+      height: 76cqh;
+    }
+
+    &.sw2 .w1 {
+      opacity: 0;
+      transform: translateY(2cqh);
+    }
+
+    &.sw2 .w2 {
+      opacity: 0.8;
+      transform: none;
+    }
+
+    .widget {
+      position: absolute;
+      z-index: 6;
+      border-radius: 10px;
+      background: rgba(30, 30, 38, 0.92);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      box-shadow: var(--shadow-panel);
+      font-family: var(--font-ui);
+      color: rgba(255, 255, 255, 0.8);
+      display: flex;
+      flex-direction: column;
+      padding: 1.4cqh 1.2cqw;
+      gap: 1cqh;
+      transition: transform 560ms var(--ease-pop);
+    }
+
+    .wt {
+      font-size: clamp(5px, 1.2cqw, 9px);
+      color: rgba(255, 255, 255, 0.5);
+    }
+
+    .calc {
+      left: 56cqw;
+      top: 14cqh;
+      width: 17cqw;
+      height: 34cqh;
+      transform: translateX(48cqw);
+    }
+
+    .calc-display {
+      font-family: var(--font-mono);
+      font-size: clamp(8px, 2.2cqw, 15px);
+      text-align: right;
+    }
+
+    .pad {
+      flex: 1;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.7cqw;
+    }
+
+    .pad i {
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.12);
+    }
+
+    .note {
+      left: 76cqw;
+      top: 38cqh;
+      width: 20cqw;
+      height: 22cqh;
+      background: rgba(64, 54, 26, 0.95);
+      border-color: rgba(254, 188, 46, 0.35);
+      transform: translateX(46cqw);
+      transition: transform 560ms var(--ease-pop) 80ms;
+      gap: 1.4cqh;
+      padding-top: 2.2cqh;
+    }
+
+    .nline {
+      height: 1cqh;
+      border-radius: 99px;
+      background: rgba(254, 188, 46, 0.4);
+    }
+
+    .nl-1 {
+      width: 80%;
+    }
+
+    .nl-2 {
+      width: 62%;
+    }
+
+    .nl-3 {
+      width: 71%;
+    }
+
+    .player {
+      left: 62cqw;
+      top: 66cqh;
+      width: 30cqw;
+      height: 20cqh;
+      transform: translateX(64cqw);
+      transition: transform 560ms var(--ease-pop) 160ms;
+      justify-content: center;
+    }
+
+    .ptrack {
+      height: 1.2cqh;
+      border-radius: 99px;
+      background: rgba(255, 255, 255, 0.15);
+      overflow: hidden;
+    }
+
+    .ptrack i {
+      display: block;
+      width: 42%;
+      height: 100%;
+      background: var(--demo-accent);
+      opacity: 0.8;
+    }
+
+    .pplay {
+      font-size: clamp(8px, 2cqw, 14px);
+      color: rgba(255, 255, 255, 0.85);
+    }
+
+    &.on .widget {
+      transform: none;
+    }
+
+    .sliver {
+      position: absolute;
+      right: 0;
+      top: 26cqh;
+      width: 2px;
+      height: 46cqh;
+      background: var(--demo-accent);
+      opacity: 0.6;
+      transition: opacity 240ms var(--ease-ui);
+    }
+
+    &.on .sliver {
+      opacity: 0;
+    }
+  }
+</style>
+
+<script>
+  import { mountDemo } from '../../scripts/demo-timeline.js';
+
+  for (const root of document.querySelectorAll("[data-demo='scratchpads']")) {
+    mountDemo(root, {
+      cycle: 12500,
+      finalAt: 5600,
+      cues: [
+        { at: 900, sel: "[data-key-id='sp1']", add: 'is-pressed' },
+        { at: 1000, add: 'on' },
+        { at: 1000, sel: '.pill', add: 'is-on' },
+        { at: 1150, sel: "[data-key-id='sp1']", remove: 'is-pressed' },
+        { at: 3400, sel: "[data-key-id='sp2']", add: 'is-pressed' },
+        { at: 3500, add: 'sw2' },
+        { at: 3650, sel: "[data-key-id='sp2']", remove: 'is-pressed' },
+        { at: 7600, sel: "[data-key-id='sp1']", add: 'is-pressed' },
+        { at: 7700, remove: 'on' },
+        { at: 7700, sel: '.pill', remove: 'is-on' },
+        { at: 7850, sel: "[data-key-id='sp1']", remove: 'is-pressed' },
+        { at: 10000, remove: 'sw2' },
+      ],
+    });
+  }
+</script>

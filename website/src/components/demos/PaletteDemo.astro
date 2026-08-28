@@ -1,0 +1,325 @@
+---
+import MockDesktop from './MockDesktop.astro';
+import MockWindow from './MockWindow.astro';
+import Keycap from './Keycap.astro';
+---
+
+<div class="demo" data-demo="palette">
+  <MockDesktop label="Animated mockup of the command palette jumping to a window on another workspace, then summoning one beside it">
+    <MockWindow class="pw-zed" title="Zed" variant="editor" />
+    <MockWindow class="pw-saf" title="Safari" variant="browser" />
+    <MockWindow class="pw-fig" title="Figma" variant="plain" />
+    <div class="palette">
+      <div class="modes">
+        <span class="mode active">Windows <b>⌘1</b></span>
+        <span class="mode">Menu <b>⌘2</b></span>
+        <span class="mode">Clipboard <b>⌘3</b></span>
+      </div>
+      <div class="psearch">
+        <span class="mag"></span>
+        <span class="pcaret"></span>
+      </div>
+      <div class="pstatus">⏎ jumps to the window · ⇧⏎ summons it next to you</div>
+      <div class="prows">
+        <div class="prow pr-1">
+          <span class="picon pi-safari"></span>
+          <span class="ptxt"><span class="pt">GitHub</span><span class="ps">Safari · workspace 2</span></span>
+        </div>
+        <div class="prow pr-2">
+          <span class="picon pi-figma"></span>
+          <span class="ptxt"><span class="pt">Design board</span><span class="ps">Figma · workspace 3</span></span>
+        </div>
+        <div class="prow pr-3">
+          <span class="picon pi-slack"></span>
+          <span class="ptxt"><span class="pt">#general</span><span class="ps">Slack · workspace 3</span></span>
+        </div>
+        <div class="prow pr-4">
+          <span class="picon pi-spotify"></span>
+          <span class="ptxt"><span class="pt">Playing</span><span class="ps">Spotify · workspace 1</span></span>
+        </div>
+      </div>
+    </div>
+  </MockDesktop>
+  <div class="keys">
+    <Keycap id="pk" keys={['⌃', '⌥', 'Space']} label="Palette" />
+    <Keycap id="ek" keys={['⏎']} label="Jump" />
+    <Keycap id="sk" keys={['⇧', '⏎']} label="Summon" />
+  </div>
+  <p class="caption">Jump to any window on any workspace — or summon it to your side instead.</p>
+</div>
+
+<style is:global>
+  [data-demo='palette'] {
+    .pw-zed {
+      left: 4%;
+      top: 12%;
+      width: 60%;
+      height: 76%;
+      transition:
+        opacity 420ms var(--ease-settle),
+        transform 420ms var(--ease-settle),
+        box-shadow var(--dur-ui) var(--ease-ui);
+    }
+
+    .pw-saf {
+      left: 4%;
+      top: 12%;
+      width: 56%;
+      height: 76%;
+      opacity: 0;
+      transform: translateY(2cqh);
+      transition:
+        opacity 420ms var(--ease-settle),
+        transform 420ms var(--ease-settle),
+        box-shadow var(--dur-ui) var(--ease-ui);
+    }
+
+    &.ws2 .pw-zed {
+      opacity: 0;
+      transform: translateY(2cqh);
+    }
+
+    &.ws2 .pw-saf {
+      opacity: 1;
+      transform: none;
+    }
+
+    .pw-fig {
+      left: 62%;
+      top: 12%;
+      width: 34%;
+      height: 76%;
+      transform: translateX(42cqw);
+      opacity: 0;
+      transition:
+        transform 560ms var(--ease-pop),
+        opacity 300ms var(--ease-ui),
+        box-shadow var(--dur-ui) var(--ease-ui);
+    }
+
+    &.summoned .pw-fig {
+      transform: none;
+      opacity: 1;
+    }
+
+    .palette {
+      position: absolute;
+      left: 50%;
+      top: 46%;
+      width: 62%;
+      aspect-ratio: 620 / 430;
+      transform: translate(-50%, -50%) scale(0.98);
+      opacity: 0;
+      display: flex;
+      flex-direction: column;
+      padding: 2.4cqw;
+      gap: 1.2cqw;
+      border-radius: var(--r-panel);
+      background: var(--demo-glass);
+      -webkit-backdrop-filter: saturate(1.4) blur(24px);
+      backdrop-filter: saturate(1.4) blur(24px);
+      box-shadow: var(--shadow-panel);
+      transition:
+        opacity 160ms var(--ease-ui),
+        transform 160ms var(--ease-ui);
+      z-index: 5;
+      font-family: var(--font-ui);
+    }
+
+    &.open .palette {
+      opacity: 1;
+      transform: translate(-50%, -50%) scale(1);
+    }
+
+    &.away .palette {
+      opacity: 0;
+      transform: translate(-50%, -50%) scale(0.98);
+    }
+
+    .modes {
+      display: flex;
+      gap: 2px;
+      align-self: flex-start;
+      background: rgba(56, 56, 56, 0.92);
+      border-radius: var(--r-pill);
+      padding: 2px;
+      font-size: clamp(6px, 1.5cqw, 11px);
+      color: rgba(255, 255, 255, 0.75);
+    }
+
+    .mode {
+      padding: 0.45em 1em;
+      border-radius: var(--r-pill);
+      white-space: nowrap;
+    }
+
+    .mode b {
+      font-weight: 600;
+      opacity: 0.6;
+      margin-left: 0.35em;
+    }
+
+    .mode.active {
+      background: var(--demo-bronze);
+      color: #fff;
+    }
+
+    .psearch {
+      display: flex;
+      align-items: center;
+      font-size: clamp(9px, 2.4cqw, 17px);
+      color: var(--demo-term-fg);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+      padding-bottom: 0.8cqw;
+    }
+
+    .mag {
+      width: 0.85em;
+      height: 0.85em;
+      border: 1.5px solid rgba(255, 255, 255, 0.45);
+      border-radius: 50%;
+      position: relative;
+      margin-right: 0.6em;
+      flex: 0 0 auto;
+    }
+
+    .mag::after {
+      content: '';
+      position: absolute;
+      width: 1.5px;
+      height: 0.4em;
+      background: rgba(255, 255, 255, 0.45);
+      transform: rotate(-45deg);
+      right: -0.12em;
+      bottom: -0.28em;
+    }
+
+    .pcaret {
+      width: 1.5px;
+      height: 1em;
+      background: var(--demo-term-fg);
+      opacity: 0;
+      margin-left: 2px;
+    }
+
+    &.open .pcaret {
+      opacity: 0.8;
+    }
+
+    .pstatus {
+      font-size: clamp(6px, 1.4cqw, 10.5px);
+      color: rgba(255, 255, 255, 0.5);
+    }
+
+    .prows {
+      position: relative;
+      flex: 1;
+    }
+
+    .prow {
+      position: absolute;
+      inset: 0 0 auto 0;
+      height: 21%;
+      display: flex;
+      align-items: center;
+      gap: 1.6cqw;
+      padding: 0 1.2cqw;
+      border-radius: 8px;
+      transform: translateY(calc(var(--row) * 115%));
+      transition: background var(--dur-ui) var(--ease-ui);
+      font-size: clamp(6px, 1.6cqw, 11px);
+      color: rgba(255, 255, 255, 0.9);
+    }
+
+    .pr-1 {
+      --row: 0;
+    }
+
+    .pr-2 {
+      --row: 1;
+    }
+
+    .pr-3 {
+      --row: 2;
+    }
+
+    .pr-4 {
+      --row: 3;
+    }
+
+    &.sel1 .pr-1,
+    &.sel2 .pr-2 {
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .picon {
+      width: 2.6em;
+      height: 2.6em;
+      border-radius: 26%;
+      flex: 0 0 auto;
+    }
+
+    .pi-figma {
+      background: linear-gradient(135deg, #a259ff 0 45%, #f24e1e 45% 70%, #0acf83 70%);
+    }
+
+    .pi-safari {
+      background: radial-gradient(circle at 50% 50%, #4ba8f5 0 62%, #1c6fd1 62%);
+    }
+
+    .pi-slack {
+      background: conic-gradient(#e01e5a 0 25%, #36c5f0 0 50%, #2eb67d 0 75%, #ecb22e 0);
+    }
+
+    .pi-spotify {
+      background: radial-gradient(circle, #1db954 0 70%, #14833b 70%);
+    }
+
+    .ptxt {
+      display: flex;
+      flex-direction: column;
+      gap: 0.2em;
+      flex: 1;
+      min-width: 0;
+    }
+
+    .ps {
+      font-size: 0.85em;
+      color: rgba(255, 255, 255, 0.5);
+    }
+  }
+</style>
+
+<script>
+  import { mountDemo } from '../../scripts/demo-timeline.js';
+
+  for (const root of document.querySelectorAll("[data-demo='palette']")) {
+    mountDemo(root, {
+      cycle: 12000,
+      finalAt: 5400,
+      cues: [
+        { at: 0, sel: '.pw-zed', add: 'is-focused' },
+        { at: 700, sel: "[data-key-id='pk']", add: 'is-pressed' },
+        { at: 800, add: 'open' },
+        { at: 950, sel: "[data-key-id='pk']", remove: 'is-pressed' },
+        { at: 1600, add: 'sel1' },
+        { at: 2400, sel: "[data-key-id='ek']", add: 'is-pressed' },
+        { at: 2500, add: ['away', 'ws2'] },
+        { at: 2500, sel: '.pw-zed', remove: 'is-focused' },
+        { at: 2650, sel: "[data-key-id='ek']", remove: 'is-pressed' },
+        { at: 2900, sel: '.pw-saf', add: 'is-focused' },
+        { at: 4400, sel: "[data-key-id='pk']", add: 'is-pressed' },
+        { at: 4500, remove: ['away', 'sel1'] },
+        { at: 4650, sel: "[data-key-id='pk']", remove: 'is-pressed' },
+        { at: 5300, add: 'sel2' },
+        { at: 6100, sel: "[data-key-id='sk']", add: 'is-pressed' },
+        { at: 6200, add: ['away', 'summoned'] },
+        { at: 6200, sel: '.pw-saf', remove: 'is-focused' },
+        { at: 6350, sel: "[data-key-id='sk']", remove: 'is-pressed' },
+        { at: 6550, sel: '.pw-fig', add: 'is-focused' },
+        { at: 9900, sel: '.pw-fig', remove: 'is-focused' },
+        { at: 10000, remove: ['ws2', 'summoned'] },
+      ],
+    });
+  }
+</script>

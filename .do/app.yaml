@@ -1,0 +1,17 @@
+name: omniwm-website
+region: fra
+static_sites:
+  - name: website
+    github:
+      repo: BarutSRB/OmniWM
+      branch: main
+      deploy_on_push: true
+    source_dir: website
+    build_command: npm ci && npm run build
+    output_dir: dist
+    error_document: 404.html
+domains:
+  - domain: omniwm.app
+    type: PRIMARY
+  - domain: www.omniwm.app
+    type: ALIAS

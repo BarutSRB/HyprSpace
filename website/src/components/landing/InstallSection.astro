@@ -1,0 +1,94 @@
+---
+import { version } from '../../data/site';
+---
+
+<section class="section install" id="install">
+  <div class="container">
+    <div class="section-head">
+      <h2>Install</h2>
+      <p>macOS 26+ (Tahoe) on Apple Silicon.</p>
+    </div>
+    <div class="methods">
+      <div class="method">
+        <h3>Homebrew</h3>
+        <pre class="mono" role="region" tabindex="0" aria-label="Homebrew install commands">brew tap BarutSRB/tap
+brew install omniwm</pre>
+        <p>Upgrades arrive with <span class="mono">brew upgrade omniwm</span>.</p>
+      </div>
+      <div class="method">
+        <h3>Nix</h3>
+        <p>Three community packages are available — a NUR package, a standalone flake with a Home Manager module, and a dotfiles example.</p>
+        <p><a href="/guides/install/#nix">Pick the one that fits your setup →</a></p>
+      </div>
+      <div class="method">
+        <h3>Direct download</h3>
+        <p>
+          Grab <span class="mono">OmniWM-v{version}.zip</span> from GitHub Releases, unzip, and
+          drop <span class="mono">OmniWM.app</span> into <span class="mono">/Applications</span>.
+        </p>
+        <p><a href="https://github.com/BarutSRB/OmniWM/releases/latest">Download the latest release ↗</a></p>
+      </div>
+    </div>
+    <div class="perms">
+      <b>First launch checklist:</b> turn <i>Displays have separate Spaces</i> ON (then log out and back in), and
+      grant <i>Accessibility</i> + <i>Input Monitoring</i>. <i>Screen Recording</i> is optional — it powers
+      Overview thumbnails. Full steps in the <a href="/guides/install/">installation guide</a>.
+    </div>
+  </div>
+</section>
+
+<style>
+  .methods {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 14px;
+  }
+
+  .method {
+    padding: 22px;
+    border-radius: 12px;
+    border: 1px solid var(--page-frame-border);
+    background: var(--page-surface);
+  }
+
+  .method h3 {
+    margin: 0 0 12px;
+    font-size: 17px;
+  }
+
+  .method p {
+    margin: 10px 0 0;
+    color: var(--page-muted);
+    font-size: 14px;
+    line-height: 1.55;
+  }
+
+  .method pre {
+    margin: 0;
+    padding: 12px 14px;
+    border-radius: 8px;
+    background: var(--demo-term-bg);
+    color: var(--demo-term-fg);
+    font-size: 13px;
+    overflow-x: auto;
+  }
+
+  .method a {
+    font-weight: 600;
+    text-decoration: none;
+  }
+
+  .method a:hover {
+    text-decoration: underline;
+  }
+
+  .perms {
+    margin-top: 20px;
+    padding: 16px 20px;
+    border-radius: 12px;
+    border: 1px solid var(--page-accent);
+    background: var(--page-accent-soft);
+    font-size: 14px;
+    line-height: 1.6;
+  }
+</style>

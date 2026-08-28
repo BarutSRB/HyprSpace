@@ -1,0 +1,121 @@
+---
+import { toggleTiles, extraFeatures } from '../../data/features';
+---
+
+<section class="section more">
+  <div class="container">
+    <div class="section-head">
+      <h2>And a whole control panel more</h2>
+      <p>One-click toggles live in the menu bar — each with a live animated preview explaining what it does.</p>
+    </div>
+    <div class="tiles">
+      {
+        toggleTiles.map((tile) => (
+          <div class:list={['tile', { on: tile.defaultOn }]}>
+            <span class="dot" />
+            <span class="tile-name">{tile.name} {tile.requires && <span class="tile-req">{tile.requires}</span>}</span>
+            <span class="tile-detail">{tile.detail}</span>
+          </div>
+        ))
+      }
+    </div>
+    <div class="extras">
+      {
+        extraFeatures.map((extra) =>
+          extra.href ? (
+            <a class="chip" href={extra.href}>
+              <b>{extra.name}</b> {extra.detail}
+            </a>
+          ) : (
+            <span class="chip">
+              <b>{extra.name}</b> {extra.detail}
+            </span>
+          )
+        )
+      }
+    </div>
+  </div>
+</section>
+
+<style>
+  .tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 12px;
+  }
+
+  .tile {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    column-gap: 8px;
+    row-gap: 2px;
+    align-items: center;
+    padding: 14px 16px;
+    border-radius: 12px;
+    border: 1px solid var(--page-frame-border);
+    background: var(--page-surface);
+  }
+
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--page-frame-border);
+  }
+
+  .tile.on .dot {
+    background: var(--page-accent);
+  }
+
+  .tile-name {
+    font-weight: 650;
+    font-size: 14.5px;
+  }
+
+  .tile-req {
+    margin-left: 6px;
+    padding: 1px 7px;
+    border-radius: var(--r-pill);
+    border: 1px solid var(--page-frame-border);
+    color: var(--page-muted);
+    font-size: 10.5px;
+    font-weight: 550;
+    white-space: nowrap;
+    vertical-align: 1px;
+  }
+
+  .tile-detail {
+    grid-column: 2;
+    color: var(--page-muted);
+    font-size: 13px;
+    line-height: 1.4;
+  }
+
+  .extras {
+    margin-top: 22px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: center;
+  }
+
+  .chip {
+    padding: 8px 14px;
+    border-radius: var(--r-pill);
+    border: 1px solid var(--page-frame-border);
+    background: var(--page-surface);
+    color: var(--page-muted);
+    font-size: 13.5px;
+    text-decoration: none;
+  }
+
+  .chip b {
+    color: var(--page-fg);
+    font-weight: 650;
+    margin-right: 4px;
+  }
+
+  a.chip:hover {
+    border-color: var(--page-accent);
+  }
+</style>

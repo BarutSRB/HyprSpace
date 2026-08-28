@@ -1,0 +1,442 @@
+---
+import MockDesktop from './MockDesktop.astro';
+import MockWindow from './MockWindow.astro';
+import Keycap from './Keycap.astro';
+---
+
+<div class="demo" data-demo="hiddenbar">
+  <MockDesktop
+    label="Animated mockup of Hidden Bar: ticked apps vanish from the menu bar, then a right-click drops their live icons in a panel below the workspace bar"
+  >
+    <span class="gset" slot="menubar-right">
+      <span class="g h h-1 i-slack"></span>
+      <span class="g h h-2 i-drop"></span>
+      <span class="g h h-3 i-key"></span>
+      <span class="g h h-4 i-cam"></span>
+      <span class="g i-omni"></span>
+      <span class="g i-wifi"></span>
+      <span class="g g-batt i-batt"></span>
+      <span class="gt">84%</span>
+      <span class="gt">9:41</span>
+    </span>
+    <div class="isl">
+      <span class="chip ch-on">1</span>
+      <span class="chip">2</span>
+      <span class="chip">3</span>
+    </div>
+    <MockWindow class="bg-a" title="Zed" variant="editor" />
+    <MockWindow class="bg-b" title="Safari" variant="browser" />
+    <div class="sheet">
+      <span class="sh-t">Hidden Bar</span>
+      <span class="cr cr-1"><i class="box"></i><i class="ic i-slack"></i>Slack</span>
+      <span class="cr cr-2"><i class="box"></i><i class="ic i-drop"></i>Dropbox</span>
+      <span class="cr cr-3"><i class="box"></i><i class="ic i-key"></i>1Password</span>
+      <span class="cr cr-4"><i class="box"></i><i class="ic i-cam"></i>Camera</span>
+    </div>
+    <div class="panel">
+      <span class="cell cell-1"><i class="i-slack"></i></span>
+      <span class="cell"><i class="i-drop"></i></span>
+      <span class="cell"><i class="i-key"></i></span>
+      <span class="cell"><i class="i-cam"></i></span>
+    </div>
+    <div class="menu">
+      <span class="hm-r">Open Slack</span>
+      <span class="hm-r">Snooze notifications</span>
+      <span class="hm-sep"></span>
+      <span class="hm-r">Quit Slack</span>
+    </div>
+    <span class="cursor"></span>
+  </MockDesktop>
+  <div class="keys">
+    <Keycap id="hb-r" keys={['right-click']} label="Reveal hidden icons" />
+    <Keycap id="hb-esc" keys={['Esc']} label="Dismiss" />
+  </div>
+  <p class="caption">Tick the apps to hide — the bar goes quiet, and a right-click brings the icons down to you.</p>
+</div>
+
+<style is:global>
+  [data-demo='hiddenbar'] {
+    .gset {
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .g {
+      flex: 0 0 auto;
+      width: clamp(7px, 2.4cqw, 14px);
+      aspect-ratio: 1;
+      margin-left: clamp(3px, 0.9cqw, 6px);
+      transition:
+        width 420ms var(--ease-settle),
+        margin-left 420ms var(--ease-settle),
+        opacity 260ms var(--ease-ui),
+        transform 260ms var(--ease-ui);
+    }
+
+    .g-batt {
+      width: clamp(9px, 2.8cqw, 17px);
+      aspect-ratio: 2 / 1;
+    }
+
+    .gt {
+      margin-left: clamp(3px, 0.9cqw, 6px);
+      white-space: nowrap;
+    }
+
+    &.hidden .h {
+      width: 0;
+      margin-left: 0;
+      opacity: 0;
+      transform: scale(0.6);
+    }
+
+    &.hidden .h-2 {
+      transition-delay: 70ms;
+    }
+
+    &.hidden .h-3 {
+      transition-delay: 140ms;
+    }
+
+    &.hidden .h-4 {
+      transition-delay: 210ms;
+    }
+
+    .i-slack {
+      border-radius: 28%;
+      background: conic-gradient(from 45deg, #36c5f0 0 25%, #2eb67d 0 50%, #ecb22e 0 75%, #e01e5a 0 100%);
+    }
+
+    .i-drop {
+      border-radius: 50%;
+      background: #0061fe;
+    }
+
+    .i-key {
+      border-radius: 28%;
+      background: #0572ec;
+      position: relative;
+    }
+
+    .i-key::after {
+      content: '';
+      position: absolute;
+      inset: 28%;
+      border-radius: 50%;
+      border: 1px solid #fff;
+    }
+
+    .i-cam {
+      border-radius: 50%;
+      background: #2eb67d;
+    }
+
+    .i-omni {
+      border-radius: 3px;
+      border: 1px solid rgba(255, 255, 255, 0.8);
+      background:
+        linear-gradient(rgba(255, 255, 255, 0.8), rgba(255, 255, 255, 0.8)) 50% 50% / 1px 66% no-repeat,
+        linear-gradient(rgba(255, 255, 255, 0.8), rgba(255, 255, 255, 0.8)) 50% 50% / 66% 1px no-repeat;
+    }
+
+    .i-wifi {
+      background: rgba(255, 255, 255, 0.7);
+      clip-path: polygon(50% 100%, 0 0, 100% 0);
+    }
+
+    .i-batt {
+      border: 1px solid rgba(255, 255, 255, 0.6);
+      border-radius: 2px;
+      position: relative;
+    }
+
+    .i-batt::before {
+      content: '';
+      position: absolute;
+      inset: 1px auto 1px 1px;
+      width: 78%;
+      border-radius: 1px;
+      background: rgba(255, 255, 255, 0.8);
+    }
+
+    .i-batt::after {
+      content: '';
+      position: absolute;
+      left: 100%;
+      top: 30%;
+      width: 1.5px;
+      height: 40%;
+      background: rgba(255, 255, 255, 0.6);
+    }
+
+    .isl {
+      position: absolute;
+      top: max(6.5cqh, 18px);
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      gap: 0.8cqw;
+      padding: 0.8cqh 1cqw;
+      border-radius: var(--r-bar);
+      background: rgba(28, 28, 36, 0.72);
+      -webkit-backdrop-filter: blur(10px);
+      backdrop-filter: blur(10px);
+      border: 0.5px solid rgba(255, 255, 255, 0.18);
+      z-index: 7;
+      font-family: var(--font-mono);
+      font-size: clamp(6px, 1.6cqw, 11px);
+      color: rgba(255, 255, 255, 0.75);
+    }
+
+    .chip {
+      padding: 0.4cqh 0.9cqw;
+      border-radius: 6px;
+      border: 1px solid transparent;
+    }
+
+    .ch-on {
+      border-color: var(--demo-accent);
+      background: rgba(255, 255, 255, 0.1);
+      color: #fff;
+    }
+
+    .mock-win {
+      opacity: 0.55;
+    }
+
+    .bg-a {
+      left: 4cqw;
+      top: 16cqh;
+      width: 44cqw;
+      height: 74cqh;
+    }
+
+    .bg-b {
+      left: 51cqw;
+      top: 18cqh;
+      width: 45cqw;
+      height: 70cqh;
+    }
+
+    .sheet {
+      position: absolute;
+      left: 50%;
+      top: 42cqh;
+      width: 30cqw;
+      transform: translate(-50%, -50%) scale(0.98);
+      opacity: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.4cqh;
+      padding: 1.2cqh 1.4cqw;
+      border-radius: var(--r-panel);
+      background: var(--demo-glass);
+      -webkit-backdrop-filter: blur(10px);
+      backdrop-filter: blur(10px);
+      border: 0.5px solid rgba(255, 255, 255, 0.18);
+      box-shadow: var(--shadow-panel);
+      z-index: 6;
+      font-size: clamp(6px, 1.5cqw, 11px);
+      color: rgba(255, 255, 255, 0.85);
+      transition:
+        opacity 160ms var(--ease-ui),
+        transform 160ms var(--ease-ui);
+    }
+
+    &.sheet-in .sheet {
+      opacity: 1;
+      transform: translate(-50%, -50%) scale(1);
+    }
+
+    .sh-t {
+      color: rgba(255, 255, 255, 0.5);
+      font-size: clamp(5px, 1.3cqw, 10px);
+      margin-bottom: 0.4cqh;
+    }
+
+    .cr {
+      display: flex;
+      align-items: center;
+      gap: 0.8cqw;
+      padding: 0.4cqh 0;
+    }
+
+    .box {
+      width: clamp(6px, 1.4cqw, 10px);
+      aspect-ratio: 1;
+      border: 1px solid rgba(255, 255, 255, 0.4);
+      border-radius: 2px;
+      transition:
+        background var(--dur-ui) var(--ease-ui),
+        border-color var(--dur-ui) var(--ease-ui);
+    }
+
+    .cr.is-on .box {
+      background: var(--demo-accent);
+      border-color: var(--demo-accent);
+    }
+
+    .ic {
+      width: clamp(6px, 1.5cqw, 11px);
+      aspect-ratio: 1;
+    }
+
+    .panel {
+      position: absolute;
+      left: 50%;
+      top: calc(max(6.5cqh, 18px) + 5.5cqh);
+      display: flex;
+      gap: 0.8cqw;
+      padding: 0.8cqh 0.8cqw;
+      border-radius: 8px;
+      background: var(--demo-glass);
+      -webkit-backdrop-filter: blur(10px);
+      backdrop-filter: blur(10px);
+      border: 0.5px solid rgba(255, 255, 255, 0.18);
+      box-shadow: var(--shadow-panel);
+      z-index: 8;
+      opacity: 0;
+      transform: translate(-50%, -2.5cqh) scale(0.96);
+      transition:
+        transform 560ms var(--ease-pop),
+        opacity 260ms var(--ease-ui);
+    }
+
+    &.reveal .panel {
+      opacity: 1;
+      transform: translate(-50%, 0) scale(1);
+    }
+
+    .cell {
+      width: clamp(12px, 3.2cqw, 22px);
+      aspect-ratio: 1;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.1);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background var(--dur-ui) var(--ease-ui);
+    }
+
+    .cell i {
+      display: block;
+      width: 62%;
+      aspect-ratio: 1;
+    }
+
+    &.menu-open .cell-1 {
+      background: rgba(255, 255, 255, 0.18);
+    }
+
+    .menu {
+      position: absolute;
+      left: 38cqw;
+      top: calc(max(6.5cqh, 18px) + 12cqh);
+      width: 15cqw;
+      display: flex;
+      flex-direction: column;
+      padding: 0.5cqh 0;
+      border-radius: 8px;
+      background: rgba(40, 40, 48, 0.95);
+      -webkit-backdrop-filter: blur(10px);
+      backdrop-filter: blur(10px);
+      border: 0.5px solid rgba(255, 255, 255, 0.18);
+      box-shadow: var(--shadow-panel);
+      z-index: 9;
+      opacity: 0;
+      transform: translateY(-1cqh);
+      transition:
+        opacity 160ms var(--ease-ui),
+        transform 160ms var(--ease-ui);
+      font-size: clamp(5px, 1.3cqw, 10px);
+      color: rgba(255, 255, 255, 0.9);
+    }
+
+    &.menu-open .menu {
+      opacity: 1;
+      transform: none;
+    }
+
+    .hm-r {
+      padding: 0.5cqh 1.1cqw;
+      white-space: nowrap;
+    }
+
+    .hm-sep {
+      height: 1px;
+      margin: 0.3cqh 0;
+      background: rgba(255, 255, 255, 0.15);
+    }
+
+    .cursor {
+      position: absolute;
+      left: 68cqw;
+      top: 55cqh;
+      width: 2.4cqw;
+      aspect-ratio: 1;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.9);
+      border: 1px solid rgba(0, 0, 0, 0.4);
+      opacity: 0;
+      z-index: 10;
+      transition:
+        transform 620ms var(--ease-hand),
+        opacity var(--dur-ui) var(--ease-ui),
+        box-shadow var(--dur-ui) var(--ease-ui);
+    }
+
+    .cursor.c-show {
+      opacity: 1;
+    }
+
+    .cursor.drag-ring {
+      box-shadow: 0 0 0 3px var(--demo-swap);
+    }
+
+    .cursor.c-omni {
+      transform: translate(14cqw, -52.5cqh);
+    }
+
+    .cursor.c-omni.c-cell {
+      transform: translate(-24cqw, -41cqh);
+    }
+  }
+</style>
+
+<script>
+  import { mountDemo } from '../../scripts/demo-timeline.js';
+
+  for (const root of document.querySelectorAll("[data-demo='hiddenbar']")) {
+    mountDemo(root, {
+      cycle: 13000,
+      finalAt: 5800,
+      cues: [
+        { at: 600, add: 'sheet-in' },
+        { at: 1150, sel: '.cr-1', add: 'is-on' },
+        { at: 1450, sel: '.cr-2', add: 'is-on' },
+        { at: 1750, sel: '.cr-3', add: 'is-on' },
+        { at: 2050, sel: '.cr-4', add: 'is-on' },
+        { at: 2600, add: 'hidden' },
+        { at: 3300, remove: 'sheet-in' },
+        { at: 3800, sel: '.cursor', add: 'c-show' },
+        { at: 4300, sel: '.cursor', add: 'c-omni' },
+        { at: 5100, sel: '.cursor', add: 'drag-ring' },
+        { at: 5100, sel: "[data-key-id='hb-r']", add: 'is-pressed' },
+        { at: 5200, add: 'reveal' },
+        { at: 5350, sel: "[data-key-id='hb-r']", remove: 'is-pressed' },
+        { at: 5450, sel: '.cursor', remove: 'drag-ring' },
+        { at: 6300, sel: '.cursor', add: 'c-cell' },
+        { at: 7000, sel: '.cursor', add: 'drag-ring' },
+        { at: 7100, add: 'menu-open' },
+        { at: 7250, sel: '.cursor', remove: 'drag-ring' },
+        { at: 8600, sel: "[data-key-id='hb-esc']", add: 'is-pressed' },
+        { at: 8700, remove: 'menu-open' },
+        { at: 8750, sel: "[data-key-id='hb-esc']", remove: 'is-pressed' },
+        { at: 9300, remove: 'reveal' },
+        { at: 9400, sel: '.cursor', remove: 'c-show' },
+        { at: 10600, remove: 'hidden' },
+      ],
+    });
+  }
+</script>

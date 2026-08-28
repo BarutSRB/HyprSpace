@@ -1,0 +1,80 @@
+---
+const lines = [
+  ['omniwmctl query windows --workspace 1', ''],
+  ['omniwmctl command focus right', ''],
+  ['omniwmctl command scratchpad toggle 2', ''],
+  [
+    'omniwmctl subscribe focus',
+    '{"channel":"focus","id":"9F2C…","kind":"event","ok":true,"result":{"kind":"focused-window","payload":{"window":{"id":"ow_h3k…","title":"Ghostty"}}},"status":"success","version":13}',
+  ],
+];
+---
+
+<section class="section cli">
+  <div class="container">
+    <div class="section-head">
+      <h2>Script every move</h2>
+      <p>
+        The bundled <span class="mono">omniwmctl</span> speaks NDJSON over a local socket — query state, drive windows
+        and workspaces, and subscribe to live events from scripts, Raycast, or anything else.
+      </p>
+    </div>
+    <div class="term mono" role="region" tabindex="0" aria-label="omniwmctl example commands">
+      {
+        lines.map(([cmd, out]) => (
+          <>
+            <div class="line">
+              <span class="prompt">❯</span> {cmd}
+            </div>
+            {out && <div class="out">{out}</div>}
+          </>
+        ))
+      }
+    </div>
+    <p class="cli-link"><a href="/reference/cli/overview/">Read the CLI &amp; IPC reference →</a></p>
+  </div>
+</section>
+
+<style>
+  .term {
+    max-width: 720px;
+    margin: 0 auto;
+    background: var(--demo-term-bg);
+    border: 1px solid var(--page-frame-border);
+    border-radius: 12px;
+    padding: 22px 26px;
+    font-size: 14px;
+    color: var(--demo-term-fg);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow-x: auto;
+  }
+
+  .prompt {
+    color: var(--demo-term-green);
+  }
+
+  .out {
+    color: rgba(230, 230, 235, 0.55);
+    overflow-wrap: anywhere;
+  }
+
+  .line {
+    white-space: nowrap;
+  }
+
+  .cli-link {
+    text-align: center;
+    margin: 22px 0 0;
+  }
+
+  .cli-link a {
+    font-weight: 600;
+    text-decoration: none;
+  }
+
+  .cli-link a:hover {
+    text-decoration: underline;
+  }
+</style>

@@ -2,6 +2,7 @@
 # Visual formatting only. SwiftLint owns diagnostics and semantic style.
 
 --swiftversion 6.4
+--exclude website
 --indent 4
 --maxwidth 120
 --wraparguments before-first

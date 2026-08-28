@@ -1,0 +1,57 @@
+---
+import LandingLayout from '../components/landing/LandingLayout.astro';
+import Hero from '../components/landing/Hero.astro';
+import FeatureSection from '../components/landing/FeatureSection.astro';
+import CliPanel from '../components/landing/CliPanel.astro';
+import Testimonials from '../components/landing/Testimonials.astro';
+import MoreGrid from '../components/landing/MoreGrid.astro';
+import TrustSection from '../components/landing/TrustSection.astro';
+import InstallSection from '../components/landing/InstallSection.astro';
+import CreditsSection from '../components/landing/CreditsSection.astro';
+import SponsorsSection from '../components/landing/SponsorsSection.astro';
+import Footer from '../components/landing/Footer.astro';
+import NiriDemo from '../components/demos/NiriDemo.astro';
+import DwindleDemo from '../components/demos/DwindleDemo.astro';
+import QuakeDemo from '../components/demos/QuakeDemo.astro';
+import PaletteDemo from '../components/demos/PaletteDemo.astro';
+import OverviewDemo from '../components/demos/OverviewDemo.astro';
+import WorkspaceBarDemo from '../components/demos/WorkspaceBarDemo.astro';
+import MoveEdgeDemo from '../components/demos/MoveEdgeDemo.astro';
+import ScratchpadDemo from '../components/demos/ScratchpadDemo.astro';
+import GesturesDemo from '../components/demos/GesturesDemo.astro';
+import MenuAnywhereDemo from '../components/demos/MenuAnywhereDemo.astro';
+import SystemStatsDemo from '../components/demos/SystemStatsDemo.astro';
+import HiddenBarDemo from '../components/demos/HiddenBarDemo.astro';
+import { features } from '../data/features';
+
+const byId = Object.fromEntries(features.map((feature) => [feature.id, feature]));
+---
+
+<LandingLayout
+  title="OmniWM — macOS tiling window manager, Niri & Hyprland style"
+  description="Free, open-source tiling window manager for macOS — Niri scrolling columns, Hyprland tiling, quake terminal, command palette, CLI. A yabai & AeroSpace alternative."
+>
+  <Hero />
+  <div id="features">
+    <FeatureSection feature={byId.niri}><NiriDemo /></FeatureSection>
+    <FeatureSection feature={byId.dwindle} flip><DwindleDemo /></FeatureSection>
+    <FeatureSection feature={byId.overview}><OverviewDemo /></FeatureSection>
+    <FeatureSection feature={byId.palette} flip><PaletteDemo /></FeatureSection>
+    <FeatureSection feature={byId.quake}><QuakeDemo /></FeatureSection>
+    <FeatureSection feature={byId.gestures} flip><GesturesDemo /></FeatureSection>
+    <FeatureSection feature={byId.workspacebar}><WorkspaceBarDemo /></FeatureSection>
+    <FeatureSection feature={byId.scratchpads} flip><ScratchpadDemo /></FeatureSection>
+    <FeatureSection feature={byId.menuanywhere}><MenuAnywhereDemo /></FeatureSection>
+    <FeatureSection feature={byId.hiddenbar} flip><HiddenBarDemo /></FeatureSection>
+    <FeatureSection feature={byId.stats}><SystemStatsDemo /></FeatureSection>
+    <FeatureSection feature={byId.moveedge} flip><MoveEdgeDemo /></FeatureSection>
+  </div>
+  <CliPanel />
+  <Testimonials />
+  <MoreGrid />
+  <TrustSection />
+  <InstallSection />
+  <CreditsSection />
+  <SponsorsSection />
+  <Footer />
+</LandingLayout>

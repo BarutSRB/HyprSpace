@@ -1,0 +1,96 @@
+---
+import { sponsors } from '../../data/sponsors';
+---
+
+<section class="section sponsors" id="sponsors">
+  <div class="container">
+    <div class="section-head">
+      <h2>Omni sponsors</h2>
+      <p>Thank you to our amazing supporters! Ranks reflect sponsorship order, not donation amounts.</p>
+    </div>
+    <div class="grid">
+      {
+        sponsors.map((sponsor, index) => {
+          const Card = sponsor.handle ? 'a' : 'div';
+          return (
+            <Card class="s-card" href={sponsor.handle ? `https://github.com/${sponsor.handle}` : undefined}>
+              {sponsor.avatar ? (
+                <img src={sponsor.avatar} alt={sponsor.name} width="56" height="56" loading="lazy" />
+              ) : (
+                <span class="ph">{sponsor.name.charAt(0)}</span>
+              )}
+              <b>{sponsor.name}</b>
+              <i>{sponsor.note ?? `#${index + 1}`}</i>
+            </Card>
+          );
+        })
+      }
+    </div>
+    <div class="ctas">
+      <a class="btn btn-primary" href="https://github.com/sponsors/BarutSRB">Become a sponsor</a>
+      <a class="btn btn-ghost" href="https://paypal.me/beacon2024">Support via PayPal</a>
+    </div>
+  </div>
+</section>
+
+<style>
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 12px;
+  }
+
+  .s-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 18px 12px;
+    border-radius: 12px;
+    border: 1px solid var(--page-frame-border);
+    background: var(--page-surface);
+    text-align: center;
+    text-decoration: none;
+    color: var(--page-fg);
+  }
+
+  a.s-card:hover {
+    border-color: var(--page-accent);
+  }
+
+  .s-card img,
+  .ph {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+  }
+
+  .ph {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--page-accent-soft);
+    color: var(--page-accent);
+    font-weight: 700;
+    font-size: 22px;
+  }
+
+  .s-card b {
+    font-size: 13.5px;
+    line-height: 1.25;
+  }
+
+  .s-card i {
+    font-style: normal;
+    color: var(--page-muted);
+    font-size: 12px;
+  }
+
+  .ctas {
+    display: flex;
+    gap: 14px;
+    justify-content: center;
+    margin-top: 30px;
+    flex-wrap: wrap;
+  }
+</style>

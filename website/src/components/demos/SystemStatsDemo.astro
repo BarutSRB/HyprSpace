@@ -1,0 +1,483 @@
+---
+import MockDesktop from './MockDesktop.astro';
+import MockWindow from './MockWindow.astro';
+import Keycap from './Keycap.astro';
+---
+
+<div class="demo" data-demo="stats">
+  <MockDesktop
+    label="Animated mockup of the System Stats popup opening from the workspace-bar island with live CPU, GPU, memory, and disk meters, then toggled closed from the CLI"
+  >
+    <div class="isl">
+      <span class="chip ch-on">1</span>
+      <span class="chip">2</span>
+      <span class="chip">3</span>
+      <span class="sep"></span>
+      <span class="gauge"><i class="dial"></i></span>
+    </div>
+    <MockWindow class="bg-a" title="Zed" variant="editor" />
+    <div class="pop">
+      <div class="ph">
+        <span class="ph-l">
+          <span class="ph-name">MacBook Pro</span>
+          <span class="ph-chip">Apple M4 Pro</span>
+        </span>
+        <span class="ph-up mono">3d 2h 41m</span>
+      </div>
+      <div class="pgrid">
+        <div class="tile">
+          <span class="trow">
+            <span class="tt"><i class="td-cpu"></i>CPU</span>
+            <span class="tv tv-cpu"><span class="v1">34%</span><span class="v2">61%</span></span>
+          </span>
+          <span class="tds">Total processor</span>
+          <span class="meter m-cpu"><i></i></span>
+        </div>
+        <div class="tile">
+          <span class="trow">
+            <span class="tt"><i class="td-gpu"></i>GPU</span>
+            <span class="tv tv-gpu"><span class="v1">22%</span><span class="v2">31%</span></span>
+          </span>
+          <span class="tds">Device utilization</span>
+          <span class="meter m-gpu"><i></i></span>
+        </div>
+        <div class="tile">
+          <span class="trow">
+            <span class="tt"><i class="td-mem"></i>Memory</span>
+            <span class="tv">62%</span>
+          </span>
+          <span class="tds">24.1 GB / 36 GB</span>
+          <span class="meter m-mem"><i></i></span>
+        </div>
+        <div class="tile">
+          <span class="trow">
+            <span class="tt"><i class="td-disk"></i>Disk</span>
+            <span class="tv">71%</span>
+          </span>
+          <span class="tds">702 GB used · 291 GB free</span>
+          <span class="meter m-disk"><i></i></span>
+        </div>
+      </div>
+      <div class="pf">
+        <span>Mac16,7</span>
+        <span>macOS 26.1 · 3456×2234 @ 120 Hz</span>
+      </div>
+    </div>
+    <MockWindow class="term-w" title="Ghostty" variant="terminal">
+      <div class="qline"><span class="qp">❯</span><span class="qtyped">omniwmctl command toggle-system-stats</span></div>
+      <div class="qout">ok</div>
+    </MockWindow>
+    <span class="cursor"></span>
+  </MockDesktop>
+  <div class="keys">
+    <Keycap id="st-open" keys={['click']} label="Stats button" />
+    <Keycap id="st-cli" keys={['⏎']} label="From the CLI" />
+  </div>
+  <p class="caption">CPU, memory, GPU, disk, and uptime — one gauge on the island, one popup below it, hotkey- and CLI-driven.</p>
+</div>
+
+<style is:global>
+  [data-demo='stats'] {
+    .mb-right {
+      display: none;
+    }
+
+    .isl {
+      position: absolute;
+      top: max(6.5cqh, 18px);
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      gap: 0.8cqw;
+      padding: 0.8cqh 1cqw;
+      border-radius: var(--r-bar);
+      background: rgba(28, 28, 36, 0.72);
+      -webkit-backdrop-filter: blur(10px);
+      backdrop-filter: blur(10px);
+      border: 0.5px solid rgba(255, 255, 255, 0.18);
+      z-index: 7;
+      font-family: var(--font-mono);
+      font-size: clamp(6px, 1.6cqw, 11px);
+      color: rgba(255, 255, 255, 0.75);
+    }
+
+    .chip {
+      padding: 0.4cqh 0.9cqw;
+      border-radius: 6px;
+      border: 1px solid transparent;
+    }
+
+    .ch-on {
+      border-color: var(--demo-accent);
+      background: rgba(255, 255, 255, 0.1);
+      color: #fff;
+    }
+
+    .sep {
+      width: 1px;
+      align-self: stretch;
+      margin: 0.3cqh 0.2cqw;
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    .gauge {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0.35cqh 0.5cqw;
+      border-radius: 6px;
+      border: 0.8px solid rgba(255, 255, 255, 0.22);
+      background: rgba(255, 255, 255, 0.08);
+      transition:
+        border-color var(--dur-ui) var(--ease-ui),
+        background var(--dur-ui) var(--ease-ui);
+    }
+
+    .gauge.is-hot {
+      border-color: var(--demo-accent);
+      background: rgba(22, 255, 250, 0.18);
+    }
+
+    .dial {
+      display: block;
+      width: clamp(6px, 1.6cqw, 10px);
+      aspect-ratio: 1;
+      border-radius: 50%;
+      border: 1px solid rgba(255, 255, 255, 0.75);
+      position: relative;
+    }
+
+    .dial::after {
+      content: '';
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 1px;
+      height: 42%;
+      background: rgba(255, 255, 255, 0.85);
+      transform-origin: top center;
+      transform: rotate(-135deg);
+    }
+
+    .mock-win {
+      opacity: 0.6;
+    }
+
+    .bg-a {
+      left: 51cqw;
+      top: 16cqh;
+      width: 45cqw;
+      height: 76cqh;
+    }
+
+    .term-w {
+      left: 4cqw;
+      top: 58cqh;
+      width: 44cqw;
+      height: 34cqh;
+      opacity: 1;
+      transition: box-shadow var(--dur-ui) var(--ease-ui);
+    }
+
+    .qline {
+      display: flex;
+      gap: 0.6em;
+      white-space: nowrap;
+      font-size: clamp(5px, 1.45cqw, 10px);
+    }
+
+    .qp {
+      color: var(--demo-term-green);
+    }
+
+    .qtyped {
+      clip-path: inset(0 100% 0 0);
+      transition: clip-path 300ms var(--ease-ui);
+    }
+
+    &.t1 .qtyped {
+      clip-path: inset(0);
+      transition: clip-path 900ms steps(12);
+    }
+
+    .qout {
+      opacity: 0;
+      color: rgba(230, 230, 235, 0.6);
+      font-size: clamp(5px, 1.45cqw, 10px);
+      transition: opacity var(--dur-ui) var(--ease-ui);
+    }
+
+    &.o1 .qout {
+      opacity: 1;
+    }
+
+    .pop {
+      position: absolute;
+      left: 55cqw;
+      top: calc(max(6.5cqh, 18px) + 5.5cqh);
+      width: 34cqw;
+      display: flex;
+      flex-direction: column;
+      gap: 0.9cqh;
+      padding: 1.2cqh 1.2cqw;
+      border-radius: var(--r-panel);
+      background: var(--demo-glass);
+      -webkit-backdrop-filter: blur(10px);
+      backdrop-filter: blur(10px);
+      border: 0.5px solid rgba(255, 255, 255, 0.18);
+      box-shadow: var(--shadow-panel);
+      z-index: 6;
+      color: rgba(255, 255, 255, 0.9);
+      opacity: 0;
+      transform: translateX(-50%) translateY(-2cqh) scale(0.92);
+      transform-origin: 50% 0;
+      transition:
+        transform 560ms var(--ease-pop),
+        opacity 260ms var(--ease-ui);
+    }
+
+    &.open .pop {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0) scale(1);
+    }
+
+    .ph {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+    }
+
+    .ph-l {
+      display: flex;
+      flex-direction: column;
+      gap: 0.2cqh;
+    }
+
+    .ph-name {
+      font-weight: 600;
+      font-size: clamp(7px, 1.7cqw, 12px);
+    }
+
+    .ph-chip,
+    .ph-up {
+      color: rgba(255, 255, 255, 0.5);
+      font-size: clamp(5px, 1.2cqw, 9px);
+    }
+
+    .pgrid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.8cqh 0.8cqw;
+    }
+
+    .tile {
+      display: flex;
+      flex-direction: column;
+      gap: 0.45cqh;
+      padding: 0.8cqh 0.9cqw;
+      border-radius: 8px;
+      border: 0.75px solid rgba(255, 255, 255, 0.14);
+      background: rgba(255, 255, 255, 0.07);
+    }
+
+    .trow {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .tt {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5cqw;
+      color: rgba(255, 255, 255, 0.6);
+      font-size: clamp(5px, 1.3cqw, 10px);
+    }
+
+    .tt i {
+      width: clamp(4px, 1cqw, 7px);
+      aspect-ratio: 1;
+      border-radius: 50%;
+      display: inline-block;
+    }
+
+    .td-cpu {
+      background: var(--demo-drop);
+    }
+
+    .td-gpu {
+      background: #a06df7;
+    }
+
+    .td-mem {
+      background: var(--demo-term-green);
+    }
+
+    .td-disk {
+      background: #ff9f0a;
+    }
+
+    .tv {
+      position: relative;
+      font-weight: 600;
+      font-size: clamp(7px, 1.8cqw, 13px);
+    }
+
+    .tv .v2 {
+      position: absolute;
+      right: 0;
+      top: 0;
+      opacity: 0;
+    }
+
+    .tv .v1,
+    .tv .v2 {
+      transition: opacity var(--dur-ui) var(--ease-ui);
+    }
+
+    &.tick .tv-cpu .v1,
+    &.tick .tv-gpu .v1 {
+      opacity: 0;
+    }
+
+    &.tick .tv-cpu .v2,
+    &.tick .tv-gpu .v2 {
+      opacity: 1;
+    }
+
+    .tds {
+      color: rgba(255, 255, 255, 0.45);
+      font-size: clamp(5px, 1.2cqw, 9px);
+      white-space: nowrap;
+      overflow: hidden;
+    }
+
+    .meter {
+      height: clamp(3px, 0.9cqh, 6px);
+      border-radius: 99px;
+      background: rgba(255, 255, 255, 0.12);
+      overflow: hidden;
+    }
+
+    .meter i {
+      display: block;
+      height: 100%;
+      width: 0;
+      border-radius: inherit;
+      transition: width 700ms var(--ease-settle);
+    }
+
+    .m-cpu i {
+      background: var(--demo-drop);
+      transition-delay: 200ms;
+    }
+
+    .m-gpu i {
+      background: #a06df7;
+      transition-delay: 280ms;
+    }
+
+    .m-mem i {
+      background: var(--demo-term-green);
+      transition-delay: 360ms;
+    }
+
+    .m-disk i {
+      background: #ff9f0a;
+      transition-delay: 440ms;
+    }
+
+    &.open .m-cpu i {
+      width: 34%;
+    }
+
+    &.open .m-gpu i {
+      width: 22%;
+    }
+
+    &.open .m-mem i {
+      width: 62%;
+    }
+
+    &.open .m-disk i {
+      width: 71%;
+    }
+
+    &.tick .m-cpu i {
+      width: 61%;
+    }
+
+    &.tick .m-gpu i {
+      width: 31%;
+    }
+
+    .pf {
+      display: flex;
+      justify-content: space-between;
+      color: rgba(255, 255, 255, 0.4);
+      font-size: clamp(5px, 1.1cqw, 9px);
+    }
+
+    .cursor {
+      position: absolute;
+      left: 62cqw;
+      top: 45cqh;
+      width: 2.4cqw;
+      aspect-ratio: 1;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.9);
+      border: 1px solid rgba(0, 0, 0, 0.4);
+      opacity: 0;
+      z-index: 10;
+      transition:
+        transform 620ms var(--ease-hand),
+        opacity var(--dur-ui) var(--ease-ui),
+        box-shadow var(--dur-ui) var(--ease-ui);
+    }
+
+    .cursor.c-show {
+      opacity: 1;
+    }
+
+    .cursor.drag-ring {
+      box-shadow: 0 0 0 3px var(--demo-swap);
+    }
+
+    .cursor.c-gauge {
+      transform: translate(-6cqw, -37.5cqh);
+    }
+  }
+</style>
+
+<script>
+  import { mountDemo } from '../../scripts/demo-timeline.js';
+
+  for (const root of document.querySelectorAll("[data-demo='stats']")) {
+    mountDemo(root, {
+      cycle: 12500,
+      finalAt: 4200,
+      cues: [
+        { at: 700, sel: '.cursor', add: 'c-show' },
+        { at: 900, sel: '.cursor', add: 'c-gauge' },
+        { at: 1700, sel: '.cursor', add: 'drag-ring' },
+        { at: 1700, sel: '.gauge', add: 'is-hot' },
+        { at: 1700, sel: "[data-key-id='st-open']", add: 'is-pressed' },
+        { at: 1800, add: 'open' },
+        { at: 1950, sel: "[data-key-id='st-open']", remove: 'is-pressed' },
+        { at: 2050, sel: '.cursor', remove: 'drag-ring' },
+        { at: 2100, sel: '.gauge', remove: 'is-hot' },
+        { at: 2600, sel: '.cursor', remove: 'c-show' },
+        { at: 4700, add: 'tick' },
+        { at: 6400, sel: '.term-w', add: 'is-focused' },
+        { at: 6500, add: 't1' },
+        { at: 7600, sel: "[data-key-id='st-cli']", add: 'is-pressed' },
+        { at: 7700, remove: 'open' },
+        { at: 7750, sel: "[data-key-id='st-cli']", remove: 'is-pressed' },
+        { at: 7800, add: 'o1' },
+        { at: 10200, remove: ['t1', 'o1', 'tick'] },
+        { at: 10200, sel: '.term-w', remove: 'is-focused' },
+      ],
+    });
+  }
+</script>

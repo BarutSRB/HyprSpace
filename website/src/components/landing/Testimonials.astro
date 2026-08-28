@@ -1,0 +1,92 @@
+---
+import { testimonials } from '../../data/testimonials';
+---
+
+<section class="section voices">
+  <div class="container">
+    <div class="section-head">
+      <h2>What switchers say</h2>
+      <p>Coming from yabai, AeroSpace, Rectangle, or Amethyst? So were they — real words from real users, every quote linking to its GitHub source.</p>
+    </div>
+    <div class="quotes">
+      {
+        testimonials.map((entry) => (
+          <figure class="quote-card">
+            <blockquote>{entry.quote}</blockquote>
+            <figcaption>
+              <a href={`https://github.com/${entry.handle}`}>@{entry.handle}</a>
+              <a class="src" href={entry.url}>via GitHub ↗</a>
+            </figcaption>
+          </figure>
+        ))
+      }
+    </div>
+  </div>
+</section>
+
+<style>
+  .quotes {
+    columns: 3;
+    column-gap: 14px;
+  }
+
+  @media (max-width: 900px) {
+    .quotes {
+      columns: 2;
+    }
+  }
+
+  @media (max-width: 600px) {
+    .quotes {
+      columns: 1;
+    }
+  }
+
+  .quote-card {
+    break-inside: avoid;
+    margin: 0 0 14px;
+    padding: 20px 22px;
+    border-radius: 12px;
+    border: 1px solid var(--page-frame-border);
+    background: var(--page-surface);
+  }
+
+  blockquote {
+    margin: 0 0 12px;
+    font-size: 15px;
+    line-height: 1.55;
+  }
+
+  blockquote::before {
+    content: '“';
+    color: var(--page-accent);
+    font-weight: 700;
+  }
+
+  blockquote::after {
+    content: '”';
+    color: var(--page-accent);
+    font-weight: 700;
+  }
+
+  figcaption {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 13px;
+  }
+
+  figcaption a {
+    text-decoration: none;
+    font-weight: 600;
+  }
+
+  figcaption a:hover {
+    text-decoration: underline;
+  }
+
+  .src {
+    color: var(--page-muted);
+    font-weight: 400;
+  }
+</style>

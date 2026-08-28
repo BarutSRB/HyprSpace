@@ -1,0 +1,268 @@
+---
+import Keycap from './Keycap.astro';
+---
+
+<div class="demo" data-demo="moveedge">
+  <div
+    class="stage"
+    role="img"
+    aria-label="Animated mockup of a window travelling across four displays arranged as one canvas, layouts adapting on each"
+  >
+    <div class="disp d-tl"><span class="mbar"></span></div>
+    <div class="disp d-tr"><span class="mbar"></span></div>
+    <div class="disp d-bl"><span class="mbar"></span></div>
+    <div class="disp d-br"><span class="mbar"></span></div>
+    <span class="res zed"><b></b>Zed</span>
+    <span class="res saf"><b></b>Safari</span>
+    <span class="res mus"><b></b>Music</span>
+    <span class="res not"><b></b>Notes</span>
+    <span class="res mover"><b></b>Ghostty</span>
+  </div>
+  <div class="keys">
+    <Keycap id="mk" keys={['⌥', '⇧']}>
+      <span class="plus">+</span>
+      <span class="arr">
+        <kbd class="a a-1">→</kbd><kbd class="a a-2">↓</kbd><kbd class="a a-3">←</kbd><kbd class="a a-4">↑</kbd>
+      </span>
+      <span class="key-label">Move window</span>
+    </Keycap>
+  </div>
+  <p class="caption">Four displays, one canvas — Move carries the window across every bezel and each layout makes room.</p>
+</div>
+
+<style is:global>
+  [data-demo='moveedge'] {
+    .stage {
+      container-type: size;
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16 / 10;
+      border: 1px solid var(--page-frame-border);
+      border-radius: var(--r-frame);
+      background:
+        radial-gradient(80% 60% at 50% 0%, rgba(166, 81, 54, 0.06), transparent),
+        var(--demo-backdrop);
+      overflow: hidden;
+    }
+
+    .disp {
+      position: absolute;
+      width: 45cqw;
+      height: 40cqh;
+      border-radius: 8px;
+      border: 1.5px solid rgba(255, 255, 255, 0.22);
+      background: var(--demo-wallpaper);
+      overflow: hidden;
+    }
+
+    .d-tl {
+      left: 2.5cqw;
+      top: 7cqh;
+    }
+
+    .d-tr {
+      left: 52.5cqw;
+      top: 7cqh;
+    }
+
+    .d-bl {
+      left: 2.5cqw;
+      top: 52cqh;
+    }
+
+    .d-br {
+      left: 52.5cqw;
+      top: 52cqh;
+    }
+
+    .mbar {
+      position: absolute;
+      inset: 0 0 auto 0;
+      height: 3cqh;
+      background: rgba(16, 16, 24, 0.55);
+    }
+
+    .res {
+      position: absolute;
+      border-radius: 5px;
+      background: var(--demo-win-bg);
+      border: 1px solid var(--demo-win-border);
+      overflow: hidden;
+      font-family: var(--font-ui);
+      font-size: clamp(4px, 1.1cqw, 8px);
+      color: rgba(255, 255, 255, 0.45);
+      padding: 3.2cqh 0 0 0.8cqw;
+      height: 32cqh;
+      transition: width 500ms var(--ease-settle);
+      z-index: 2;
+    }
+
+    .res b {
+      position: absolute;
+      inset: 0 0 auto 0;
+      height: 2.6cqh;
+      background: var(--demo-win-bar);
+    }
+
+    .zed {
+      left: 4cqw;
+      top: 11.5cqh;
+      width: 19.5cqw;
+    }
+
+    .saf {
+      left: 54cqw;
+      top: 11.5cqh;
+      width: 42cqw;
+    }
+
+    .mus {
+      left: 54cqw;
+      top: 56.5cqh;
+      width: 42cqw;
+    }
+
+    .not {
+      left: 4cqw;
+      top: 56.5cqh;
+      width: 42cqw;
+    }
+
+    .mover {
+      left: 25.5cqw;
+      top: 11.5cqh;
+      width: 20cqw;
+      background: rgba(22, 255, 250, 0.1);
+      border: 2px solid var(--demo-accent);
+      box-shadow: 0 0 12px var(--demo-accent-glow);
+      color: rgba(255, 255, 255, 0.7);
+      transition: transform 900ms var(--ease-smooth);
+      z-index: 3;
+    }
+
+    &.leg1 .zed {
+      width: 41.5cqw;
+    }
+
+    &.leg1 .saf {
+      width: 19.5cqw;
+    }
+
+    &.leg2 .saf {
+      width: 42cqw;
+    }
+
+    &.leg2 .mus {
+      width: 19.5cqw;
+    }
+
+    &.leg3 .mus {
+      width: 42cqw;
+    }
+
+    &.leg3 .not {
+      width: 19.5cqw;
+    }
+
+    &.leg4 .not {
+      width: 42cqw;
+    }
+
+    &.leg4 .zed {
+      width: 19.5cqw;
+    }
+
+    &.leg1 .mover {
+      transform: translate(50cqw, 0);
+    }
+
+    &.leg2 .mover {
+      transform: translate(50cqw, 45cqh);
+    }
+
+    &.leg3 .mover {
+      transform: translate(0cqw, 45cqh);
+    }
+
+    &.leg4 .mover {
+      transform: translate(0cqw, 0cqh);
+    }
+
+    .arr {
+      position: relative;
+      width: 28px;
+      height: 28px;
+      display: inline-block;
+    }
+
+    .a {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      transition: opacity 200ms var(--ease-ui);
+    }
+
+    .a-1 {
+      opacity: 1;
+    }
+
+    &.leg1 .a-1,
+    &.leg2 .a-1,
+    &.leg3 .a-1 {
+      opacity: 0;
+    }
+
+    &.leg1 .a-2 {
+      opacity: 1;
+    }
+
+    &.leg2 .a-2 {
+      opacity: 0;
+    }
+
+    &.leg2 .a-3 {
+      opacity: 1;
+    }
+
+    &.leg3 .a-3 {
+      opacity: 0;
+    }
+
+    &.leg3 .a-4 {
+      opacity: 1;
+    }
+
+    &.leg4 .a-4 {
+      opacity: 0;
+    }
+
+    &.leg4 .a-1 {
+      opacity: 1;
+    }
+  }
+</style>
+
+<script>
+  import { mountDemo } from '../../scripts/demo-timeline.js';
+
+  for (const root of document.querySelectorAll("[data-demo='moveedge']")) {
+    mountDemo(root, {
+      cycle: 10200,
+      finalAt: 2200,
+      cues: [
+        { at: 900, sel: "[data-key-id='mk']", add: 'is-pressed' },
+        { at: 1000, add: 'leg1' },
+        { at: 1250, sel: "[data-key-id='mk']", remove: 'is-pressed' },
+        { at: 3200, sel: "[data-key-id='mk']", add: 'is-pressed' },
+        { at: 3300, add: 'leg2' },
+        { at: 3550, sel: "[data-key-id='mk']", remove: 'is-pressed' },
+        { at: 5500, sel: "[data-key-id='mk']", add: 'is-pressed' },
+        { at: 5600, add: 'leg3' },
+        { at: 5850, sel: "[data-key-id='mk']", remove: 'is-pressed' },
+        { at: 7800, sel: "[data-key-id='mk']", add: 'is-pressed' },
+        { at: 7900, add: 'leg4' },
+        { at: 8150, sel: "[data-key-id='mk']", remove: 'is-pressed' },
+      ],
+    });
+  }
+</script>

@@ -1,0 +1,96 @@
+---
+import type { Feature } from '../../data/features';
+
+interface Props {
+  feature: Feature;
+  flip?: boolean;
+}
+
+const { feature, flip = false } = Astro.props;
+---
+
+<section class:list={['feature', { flip }]} id={feature.id}>
+  <div class="container feature-inner">
+    <div class="copy">
+      <p class="kicker">{feature.kicker}</p>
+      <h3>{feature.title}</h3>
+      <p class="blurb">{feature.blurb}</p>
+      <a class="more" href={feature.kbHref} aria-label={`Learn more about ${feature.title}`}>Learn more →</a>
+    </div>
+    <div class="demo-col">
+      <slot />
+    </div>
+  </div>
+</section>
+
+<style>
+  .feature {
+    padding: 56px 0;
+    content-visibility: auto;
+    contain-intrinsic-size: auto 560px;
+  }
+
+  .feature-inner {
+    display: grid;
+    grid-template-columns: minmax(260px, 5fr) 7fr;
+    gap: clamp(28px, 5vw, 64px);
+    align-items: center;
+  }
+
+  .flip .feature-inner {
+    grid-template-columns: 7fr minmax(260px, 5fr);
+  }
+
+  .flip .copy {
+    order: 2;
+  }
+
+  .flip .demo-col {
+    order: 1;
+  }
+
+  .kicker {
+    color: var(--page-accent);
+    font-weight: 650;
+    font-size: 13.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin: 0 0 10px;
+  }
+
+  h3 {
+    font-size: clamp(24px, 3.2vw, 32px);
+    line-height: 1.15;
+    letter-spacing: -0.01em;
+    margin: 0 0 14px;
+  }
+
+  .blurb {
+    color: var(--page-muted);
+    margin: 0 0 16px;
+  }
+
+  .more {
+    font-weight: 600;
+    text-decoration: none;
+  }
+
+  .more:hover {
+    text-decoration: underline;
+  }
+
+  @media (max-width: 860px) {
+    .feature-inner,
+    .flip .feature-inner {
+      grid-template-columns: 1fr;
+    }
+
+    .flip .copy {
+      order: 0;
+    }
+
+    .flip .demo-col {
+      order: 1;
+    }
+  }
+</style>

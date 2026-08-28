@@ -1,0 +1,216 @@
+---
+import MockDesktop from './MockDesktop.astro';
+import MockWindow from './MockWindow.astro';
+import Keycap from './Keycap.astro';
+---
+
+<div class="demo" data-demo="dwindle">
+  <MockDesktop label="Animated mockup of the Hyprland-style dwindle layout: six windows spiral in, one goes fullscreen and back">
+    <MockWindow class="dw dw-1" title="Zed" variant="editor" />
+    <MockWindow class="dw dw-2" title="Safari" variant="browser" />
+    <MockWindow class="dw dw-3" title="Ghostty" variant="terminal" />
+    <MockWindow class="dw dw-4" title="Notes" variant="notes" />
+    <MockWindow class="dw dw-5" title="Music" variant="plain" />
+    <MockWindow class="dw dw-6" title="Slack" variant="plain" />
+  </MockDesktop>
+  <div class="keys"><Keycap id="dk" keys={['⌥', '⏎']} label="Fullscreen" /></div>
+  <p class="caption">Each window bisects the focused tile — ⌥⏎ takes any tile fullscreen and back.</p>
+</div>
+
+<style is:global>
+  [data-demo='dwindle'] {
+    .dw {
+      opacity: 0;
+      transform: scale(0.96);
+      transition:
+        left 400ms var(--ease-cubic),
+        top 400ms var(--ease-cubic),
+        width 400ms var(--ease-cubic),
+        height 400ms var(--ease-cubic),
+        opacity 400ms var(--ease-cubic),
+        transform 400ms var(--ease-cubic),
+        box-shadow var(--dur-ui) var(--ease-ui);
+    }
+
+    .dw-1 {
+      left: 2.5%;
+      top: 8%;
+      width: 95%;
+      height: 88%;
+    }
+
+    &.s1 .dw-1 {
+      opacity: 1;
+      transform: none;
+    }
+
+    &.s2 .dw-1 {
+      width: 46.75%;
+    }
+
+    .dw-2 {
+      left: 50.75%;
+      top: 8%;
+      width: 46.75%;
+      height: 88%;
+    }
+
+    &.s2 .dw-2 {
+      opacity: 1;
+      transform: none;
+    }
+
+    &.s3 .dw-2 {
+      height: 43%;
+    }
+
+    .dw-3 {
+      left: 50.75%;
+      top: 53%;
+      width: 46.75%;
+      height: 43%;
+      z-index: 2;
+    }
+
+    &.s3 .dw-3 {
+      opacity: 1;
+      transform: none;
+    }
+
+    &.s4 .dw-3 {
+      width: 22.875%;
+    }
+
+    .dw-4 {
+      left: 74.625%;
+      top: 53%;
+      width: 22.875%;
+      height: 43%;
+    }
+
+    &.s4 .dw-4 {
+      opacity: 1;
+      transform: none;
+    }
+
+    &.s5 .dw-1 {
+      height: 43%;
+    }
+
+    .dw-5 {
+      left: 2.5%;
+      top: 53%;
+      width: 46.75%;
+      height: 43%;
+    }
+
+    &.s5 .dw-5 {
+      opacity: 1;
+      transform: none;
+    }
+
+    &.s6 .dw-5 {
+      width: 22.875%;
+    }
+
+    .dw-6 {
+      left: 26.375%;
+      top: 53%;
+      width: 22.875%;
+      height: 43%;
+    }
+
+    &.s6 .dw-6 {
+      opacity: 1;
+      transform: none;
+    }
+
+    &.fs .dw-3 {
+      left: 2.5%;
+      top: 8%;
+      width: 95%;
+      height: 88%;
+      transition:
+        left 520ms var(--ease-settle),
+        top 520ms var(--ease-settle),
+        width 520ms var(--ease-settle),
+        height 520ms var(--ease-settle),
+        box-shadow var(--dur-ui) var(--ease-ui);
+    }
+
+    &.unfs .dw-3 {
+      transition:
+        left 520ms var(--ease-settle),
+        top 520ms var(--ease-settle),
+        width 520ms var(--ease-settle),
+        height 520ms var(--ease-settle),
+        box-shadow var(--dur-ui) var(--ease-ui);
+    }
+
+    &.out .dw {
+      opacity: 0;
+      transform: scale(0.96);
+    }
+
+    &.out .dw-2 {
+      transition-delay: 50ms;
+    }
+
+    &.out .dw-3 {
+      transition-delay: 100ms;
+    }
+
+    &.out .dw-4 {
+      transition-delay: 150ms;
+    }
+
+    &.out .dw-5 {
+      transition-delay: 200ms;
+    }
+
+    &.out .dw-6 {
+      transition-delay: 250ms;
+    }
+  }
+</style>
+
+<script>
+  import { mountDemo } from '../../scripts/demo-timeline.js';
+
+  for (const root of document.querySelectorAll("[data-demo='dwindle']")) {
+    mountDemo(root, {
+      cycle: 12500,
+      finalAt: 6600,
+      cues: [
+        { at: 500, add: 's1' },
+        { at: 500, sel: '.dw-1', add: 'is-focused' },
+        { at: 1300, add: 's2' },
+        { at: 1300, sel: '.dw-1', remove: 'is-focused' },
+        { at: 1300, sel: '.dw-2', add: 'is-focused' },
+        { at: 2100, add: 's3' },
+        { at: 2100, sel: '.dw-2', remove: 'is-focused' },
+        { at: 2100, sel: '.dw-3', add: 'is-focused' },
+        { at: 2900, add: 's4' },
+        { at: 2900, sel: '.dw-3', remove: 'is-focused' },
+        { at: 2900, sel: '.dw-4', add: 'is-focused' },
+        { at: 3700, add: 's5' },
+        { at: 3700, sel: '.dw-4', remove: 'is-focused' },
+        { at: 3700, sel: '.dw-5', add: 'is-focused' },
+        { at: 4500, add: 's6' },
+        { at: 4500, sel: '.dw-5', remove: 'is-focused' },
+        { at: 4500, sel: '.dw-6', add: 'is-focused' },
+        { at: 5500, sel: '.dw-6', remove: 'is-focused' },
+        { at: 5500, sel: '.dw-3', add: 'is-focused' },
+        { at: 5900, sel: "[data-key-id='dk']", add: 'is-pressed' },
+        { at: 6000, add: 'fs' },
+        { at: 6150, sel: "[data-key-id='dk']", remove: 'is-pressed' },
+        { at: 8200, sel: "[data-key-id='dk']", add: 'is-pressed' },
+        { at: 8300, remove: 'fs' },
+        { at: 8300, add: 'unfs' },
+        { at: 8450, sel: "[data-key-id='dk']", remove: 'is-pressed' },
+        { at: 10200, add: 'out' },
+        { at: 10200, sel: '.dw-3', remove: 'is-focused' },
+      ],
+    });
+  }
+</script>

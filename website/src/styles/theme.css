@@ -1,0 +1,21 @@
+:root {
+  --sl-color-accent-low: #f3ded6;
+  --sl-color-accent: #a65136;
+  --sl-color-accent-high: #763424;
+  --sl-color-bg: #f8f4ec;
+  --sl-color-bg-nav: #f8f4ec;
+  --sl-color-bg-sidebar: #f4efe5;
+}
+
+:root[data-theme='dark'] {
+  --sl-color-accent-low: #3a1f16;
+  --sl-color-accent: #c76a4b;
+  --sl-color-accent-high: #e8b3a0;
+  --sl-color-bg: #141210;
+  --sl-color-bg-nav: #171412;
+  --sl-color-bg-sidebar: #171412;
+}
+
+:root[data-theme='dark'] .site-title img {
+  filter: brightness(0) invert(1) sepia(0.06) saturate(0.8);
+}

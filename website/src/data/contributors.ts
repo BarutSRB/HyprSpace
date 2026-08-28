@@ -1,0 +1,39 @@
+export interface Contributor {
+  name: string;
+  handle: string;
+}
+
+export const contributors: Contributor[] = [
+  { name: 'Adelin Berard', handle: 'adelin-b' },
+  { name: 'Aisling', handle: 'aislingheart' },
+  { name: 'Albert Ilagan', handle: 'albertilagan' },
+  { name: 'Aleksei Gurianov', handle: 'Guria' },
+  { name: 'Alexander Dergachev', handle: 'Cy6erBr4in' },
+  { name: 'Ayaan Sandhu', handle: 'gloomy-breaker' },
+  { name: 'Balazs Hevesi', handle: 'balazshevesi' },
+  { name: 'Brian Smyth', handle: 'bps' },
+  { name: 'chen259456754', handle: 'chen259456754' },
+  { name: 'Cristian Álvarez Belaustegui', handle: 'crbelaus' },
+  { name: 'Filippo Zaffoni', handle: 'nekonora' },
+  { name: 'Henry Perschk', handle: 'henry-p' },
+  { name: 'Jan Hesters', handle: 'janhesters' },
+  { name: 'Janek Thomaschewski', handle: 'jthomaschewski' },
+  { name: 'Jose Cardama', handle: 'jcardama' },
+  { name: 'Lukas Gerlinski', handle: 'lgerlinski' },
+  { name: 'Marcus Harlid Davin', handle: 'zucram' },
+  { name: 'Matt Wicks', handle: 'wicksipedia' },
+  { name: 'mkdir700', handle: 'mkdir700' },
+  { name: 'mm', handle: 'zwo-bot' },
+  { name: 'muhammadkh', handle: 'MuhammadKh' },
+  { name: 'Naoki Ikeguchi', handle: 'siketyan' },
+  { name: 'Nawat Suangburanakul', handle: 'holmns' },
+  { name: 'Ngo Quoc Viet', handle: 'NgoQuocViet2001' },
+  { name: 'Panuphong Burakitphachai', handle: 't1dotdev' },
+  { name: 'Rich Hanes', handle: 'georgebastille' },
+  { name: 'rPio', handle: '1Pio' },
+  { name: 'Ryan Hecht', handle: 'RyanHecht' },
+  { name: 'Williamufo', handle: 'chenhaozhenss' },
+  { name: 'Yang-Yiming', handle: 'Yang-Yiming' },
+  { name: 'Yuri Chukhlib', handle: 'YuriNachos' },
+  { name: 'Zicochaos', handle: 'zicochaos' },
+];

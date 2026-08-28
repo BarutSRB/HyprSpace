@@ -1,0 +1,225 @@
+---
+import markSvg from '../../assets/brand/omniwm-mark.svg';
+import { version } from '../../data/site';
+---
+
+<section class="hero">
+  <div class="container hero-inner">
+    <img class="mark" src={markSvg.src} alt="" width="96" height="96" />
+    <h1>
+      Do what you love
+      <span class="tick" aria-label="easier, faster, better">
+        <span class="tw tw-1">easier.</span>
+        <span class="tw tw-2">faster.</span>
+        <span class="tw tw-3">better.</span>
+      </span>
+    </h1>
+    <p class="sub">
+      OmniWM brings the <b>Hyprland and Niri experience to macOS</b> — scrolling columns, BSP tiling, a built-in
+      Ghostty quake terminal, a unified command palette, and full IPC/CLI automation, with display-synced animations
+      that feel native because they are.
+    </p>
+    <div class="brew mono">
+      <span>brew tap BarutSRB/tap && brew install omniwm</span>
+      <button class="copy" type="button" aria-label="Copy install command">⧉</button>
+      <span class="copy-status visually-hidden" role="status"></span>
+    </div>
+    <div class="ctas">
+      <a class="btn btn-primary" href="/guides/quick-start/">Get started</a>
+      <a class="btn btn-ghost" href="https://youtu.be/WcHjGkuD2Fc">Watch the demo ↗</a>
+    </div>
+    <p class="badges">v{version} · macOS 26+ (Tahoe) · Apple Silicon · GPL-2.0 · Free forever</p>
+  </div>
+</section>
+
+<style>
+  .hero {
+    position: relative;
+    padding: 84px 0 64px;
+    text-align: center;
+    background: radial-gradient(60% 42% at 50% 0%, var(--page-accent-soft), transparent);
+  }
+
+  .hero-inner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 22px;
+  }
+
+  .mark {
+    width: 96px;
+    height: 96px;
+    animation: rise 700ms var(--ease-settle) both;
+  }
+
+  :root[data-theme='dark'] .mark {
+    filter: brightness(0) invert(1) sepia(0.06) saturate(0.8);
+  }
+
+  h1 {
+    font-size: clamp(34px, 6vw, 58px);
+    line-height: 1.08;
+    letter-spacing: -0.02em;
+    margin: 0;
+    animation: rise 700ms var(--ease-settle) 150ms both;
+  }
+
+  .tick {
+    position: relative;
+    display: block;
+    height: 1.15em;
+    overflow: hidden;
+    color: var(--page-accent);
+  }
+
+  .tw {
+    position: absolute;
+    inset: 0;
+    font-weight: 650;
+    transform: translateY(1.1em);
+    opacity: 0;
+    animation: tickword 7.8s var(--ease-hand) infinite;
+  }
+
+  .tw-1 {
+    animation-delay: 400ms;
+  }
+
+  .tw-2 {
+    animation-delay: 3000ms;
+  }
+
+  .tw-3 {
+    animation-delay: 5600ms;
+  }
+
+  @keyframes tickword {
+    0% {
+      transform: translateY(1.1em);
+      opacity: 0;
+    }
+
+    3.2% {
+      transform: translateY(0);
+      opacity: 1;
+    }
+
+    33.3% {
+      transform: translateY(0);
+      opacity: 1;
+    }
+
+    36.5% {
+      transform: translateY(-1.1em);
+      opacity: 0;
+    }
+
+    100% {
+      transform: translateY(1.1em);
+      opacity: 0;
+    }
+  }
+
+  @keyframes rise {
+    from {
+      transform: translateY(10px);
+      opacity: 0;
+    }
+
+    to {
+      transform: none;
+      opacity: 1;
+    }
+  }
+
+  .sub {
+    max-width: 560px;
+    color: var(--page-muted);
+    margin: 0;
+    animation: rise 700ms var(--ease-settle) 300ms both;
+  }
+
+  .brew {
+    display: inline-flex;
+    align-items: center;
+    gap: 14px;
+    padding: 10px 18px;
+    border-radius: 10px;
+    border: 1px solid var(--page-frame-border);
+    background: var(--page-surface);
+    font-size: 14px;
+    animation: rise 700ms var(--ease-settle) 400ms both;
+  }
+
+  .copy {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 24px;
+    min-height: 24px;
+    border: 0;
+    background: none;
+    color: var(--page-accent);
+    cursor: pointer;
+    font-size: 15px;
+    padding: 0;
+  }
+
+  .copy.copied::after {
+    content: ' ✓';
+  }
+
+  .ctas {
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+    justify-content: center;
+    animation: rise 700ms var(--ease-settle) 500ms both;
+  }
+
+  .badges {
+    color: var(--page-muted);
+    font-size: 13.5px;
+    margin: 0;
+    animation: rise 700ms var(--ease-settle) 600ms both;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .mark,
+    h1,
+    .sub,
+    .brew,
+    .ctas,
+    .badges {
+      animation: none;
+    }
+
+    .tw {
+      animation: none;
+    }
+
+    .tw-3 {
+      transform: none;
+      opacity: 1;
+    }
+  }
+</style>
+
+<script>
+  const button = document.querySelector('.brew .copy');
+  const status = document.querySelector('.brew .copy-status');
+  button?.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText('brew tap BarutSRB/tap && brew install omniwm');
+      button.classList.add('copied');
+      if (status) status.textContent = 'Copied';
+    } catch {
+      if (status) status.textContent = 'Copy failed';
+    }
+    setTimeout(() => {
+      button.classList.remove('copied');
+      if (status) status.textContent = '';
+    }, 1600);
+  });
+</script>

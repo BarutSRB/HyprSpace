@@ -1,0 +1,79 @@
+:root {
+  --demo-accent: #16fffa;
+  --demo-accent-glow: rgba(22, 255, 250, 0.35);
+  --demo-backdrop: #0d0d14;
+  --demo-blue: #007aff;
+  --demo-bronze: #7d5433;
+  --demo-drop: #33ccff;
+  --demo-swap: rgba(0, 120, 255, 0.25);
+  --demo-card: #26262e;
+  --demo-card-border: rgba(77, 77, 89, 0.5);
+  --demo-card-hover: #6699ff;
+  --demo-card-selected: #4dcc66;
+  --demo-ws-label: #4db3ff;
+  --demo-dim: rgba(26, 26, 31, 0.7);
+  --demo-win-bg: #1e1e24;
+  --demo-win-bar: #2a2a32;
+  --demo-win-border: rgba(255, 255, 255, 0.08);
+  --demo-term-bg: #101016;
+  --demo-term-green: #4dcc66;
+  --demo-term-fg: #e6e6eb;
+  --demo-glass: rgba(22, 22, 28, 0.72);
+  --demo-wallpaper: linear-gradient(135deg, #1a1d2e 0%, #16182b 45%, #0f1120 100%);
+  --demo-traffic-r: #ff5f57;
+  --demo-traffic-y: #febc2e;
+  --demo-traffic-g: #28c840;
+
+  --page-bg: #f8f4ec;
+  --page-surface: #fffdf8;
+  --page-fg: #2b1a14;
+  --page-muted: rgba(43, 26, 20, 0.62);
+  --page-accent: #a65136;
+  --page-accent-strong: #763424;
+  --page-accent-soft: rgba(166, 81, 54, 0.12);
+  --page-link: #9c4b32;
+  --page-frame-border: rgba(118, 52, 36, 0.14);
+  --page-key-bg: linear-gradient(#fffdf8, #efe9dd);
+  --page-key-border: #d8cfc0;
+  --page-key-fg: #4a2e22;
+
+  --r-frame: 16px;
+  --r-win: 10px;
+  --r-panel: 14px;
+  --r-bar: 8px;
+  --r-key: 6px;
+  --r-pill: 999px;
+
+  --shadow-win: 0 12px 32px rgba(0, 0, 0, 0.45);
+  --shadow-panel: 0 24px 64px rgba(0, 0, 0, 0.55);
+
+  --font-ui: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', monospace;
+
+  --ease-settle: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-settle: 400ms;
+  --ease-cubic: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-cubic: 350ms;
+  --ease-ui: cubic-bezier(0.4, 0, 0.6, 1);
+  --dur-ui: 120ms;
+  --ease-quake-in: cubic-bezier(0.42, 0, 1, 1);
+  --dur-quake: 200ms;
+  --ease-smooth: cubic-bezier(0.333, 0, 0.667, 1);
+  --ease-hand: cubic-bezier(0.5, 0, 0.5, 1);
+  --ease-pop: cubic-bezier(0.32, 1.24, 0.4, 1);
+}
+
+:root[data-theme='dark'] {
+  --page-bg: #141210;
+  --page-surface: #1c1815;
+  --page-fg: #efe9e0;
+  --page-muted: rgba(239, 233, 224, 0.62);
+  --page-accent: #c76a4b;
+  --page-accent-strong: #e8b3a0;
+  --page-accent-soft: rgba(199, 106, 75, 0.16);
+  --page-link: #cd7659;
+  --page-frame-border: rgba(239, 233, 224, 0.12);
+  --page-key-bg: linear-gradient(#2a2521, #1e1a17);
+  --page-key-border: #3d352f;
+  --page-key-fg: #e8ddd0;
+}

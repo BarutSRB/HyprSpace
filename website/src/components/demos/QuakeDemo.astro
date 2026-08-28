@@ -1,0 +1,288 @@
+---
+import MockDesktop from './MockDesktop.astro';
+import MockWindow from './MockWindow.astro';
+import Keycap from './Keycap.astro';
+---
+
+<div class="demo" data-demo="quake">
+  <MockDesktop label="Animated mockup of the quake terminal staying pinned while the workspace switches beneath it">
+    <MockWindow class="ws1 bg-a" title="Zed" variant="editor" />
+    <MockWindow class="ws1 bg-b" title="Safari" variant="browser" />
+    <MockWindow class="ws2 bg-c" title="Figma" variant="plain" />
+    <MockWindow class="ws2 bg-d" title="Slack" variant="notes" />
+    <div class="quake">
+      <div class="qtabs">
+        <span class="qtab active">zsh 1</span>
+        <span class="qtab">zsh 2</span>
+        <span class="qtab plus">+</span>
+      </div>
+      <div class="qsplit">
+        <div class="pane pane-l">
+          <div class="qline">
+            <span class="qprompt">❯</span>
+            <span class="qtyped qt-1">npm run dev</span>
+          </div>
+          <div class="qout qo-1">
+            <span class="qdim">➜ ready in 240 ms</span>
+            <span class="qdim">➜ local: localhost:4321</span>
+          </div>
+        </div>
+        <div class="qdivider"></div>
+        <div class="pane pane-r">
+          <div class="qline">
+            <span class="qprompt">❯</span>
+            <span class="qtyped qt-2">git status</span>
+          </div>
+          <div class="qout qo-2">
+            <span class="qdim">On branch main</span>
+            <span class="qdim">nothing to commit</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </MockDesktop>
+  <div class="keys">
+    <Keycap id="qk" keys={['⌥', '`']} label="Toggle" />
+    <Keycap id="dk" keys={['⌘', 'D']} label="Split pane" />
+    <Keycap id="wk" keys={['⌥', '2']} label="Switch workspace" />
+  </div>
+  <p class="caption">A real Ghostty terminal that floats above every workspace — the desktop changes beneath, it doesn’t move.</p>
+</div>
+
+<style is:global>
+  [data-demo='quake'] {
+    .ws1,
+    .ws2 {
+      opacity: 0.75;
+      transition:
+        opacity 560ms var(--ease-settle),
+        transform 560ms var(--ease-settle);
+    }
+
+    .bg-a {
+      left: 4%;
+      top: 10%;
+      width: 44%;
+      height: 74%;
+    }
+
+    .bg-b {
+      left: 51%;
+      top: 14%;
+      width: 45%;
+      height: 66%;
+    }
+
+    .ws2 {
+      opacity: 0;
+      transform: translateX(24cqw);
+    }
+
+    .bg-c {
+      left: 4%;
+      top: 12%;
+      width: 58%;
+      height: 72%;
+    }
+
+    .bg-d {
+      left: 64%;
+      top: 16%;
+      width: 32%;
+      height: 62%;
+    }
+
+    &.sw2 .ws1 {
+      opacity: 0;
+      transform: translateX(-24cqw);
+    }
+
+    &.sw2 .ws2 {
+      opacity: 0.75;
+      transform: none;
+    }
+
+    .quake {
+      position: absolute;
+      left: 16%;
+      top: max(4.5%, 16px);
+      width: 68%;
+      height: 58%;
+      display: flex;
+      flex-direction: column;
+      border-radius: 0 0 var(--r-win) var(--r-win);
+      overflow: hidden;
+      background: var(--demo-glass);
+      -webkit-backdrop-filter: blur(10px);
+      backdrop-filter: blur(10px);
+      box-shadow: var(--shadow-panel);
+      transform: translateY(-110%);
+      opacity: 0;
+      transition:
+        transform 240ms ease-out,
+        opacity 240ms ease-out;
+      z-index: 5;
+    }
+
+    &.open .quake {
+      transform: translateY(0);
+      opacity: 1;
+      transition:
+        transform 240ms var(--ease-quake-in),
+        opacity 240ms var(--ease-quake-in);
+    }
+
+    .qtabs {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: stretch;
+      gap: 1px;
+      height: 11%;
+      max-height: 26px;
+      background: rgba(26, 26, 26, 0.95);
+      padding: 3px 3px 0;
+      font-size: clamp(6px, 1.5cqw, 10px);
+      color: rgba(255, 255, 255, 0.75);
+    }
+
+    .qtab {
+      display: flex;
+      align-items: center;
+      padding: 0 1.6em;
+      border-radius: 4px 4px 0 0;
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    .qtab.active {
+      background: rgba(255, 255, 255, 0.14);
+    }
+
+    .qtab.plus {
+      background: rgba(255, 255, 255, 0.1);
+      padding: 0 0.9em;
+    }
+
+    .qsplit {
+      flex: 1;
+      display: flex;
+      min-height: 0;
+    }
+
+    .pane {
+      padding: 2.5% 3%;
+      font-family: var(--font-mono);
+      font-size: clamp(7px, 1.7cqw, 12px);
+      color: var(--demo-term-fg);
+      display: flex;
+      flex-direction: column;
+      gap: 0.6em;
+      overflow: hidden;
+      min-width: 0;
+    }
+
+    .pane-l {
+      flex: 1 1 100%;
+      transition: flex-basis 320ms var(--ease-cubic);
+    }
+
+    .qdivider {
+      flex: 0 0 0px;
+      background: rgba(255, 255, 255, 0.14);
+      opacity: 0;
+      transition: opacity 200ms var(--ease-ui);
+    }
+
+    .pane-r {
+      flex: 0 1 0%;
+      opacity: 0;
+      padding-inline: 0;
+      transition:
+        flex-basis 320ms var(--ease-cubic),
+        opacity 260ms var(--ease-ui) 120ms,
+        padding 320ms var(--ease-cubic);
+    }
+
+    &.split .pane-l {
+      flex-basis: 50%;
+    }
+
+    &.split .qdivider {
+      flex-basis: 1px;
+      opacity: 1;
+    }
+
+    &.split .pane-r {
+      flex-basis: 50%;
+      opacity: 1;
+      padding-inline: 3%;
+    }
+
+    .qprompt {
+      color: var(--demo-term-green);
+    }
+
+    .qline {
+      display: flex;
+      gap: 0.6em;
+      white-space: nowrap;
+    }
+
+    .qtyped {
+      clip-path: inset(0 100% 0 0);
+    }
+
+    &.t1 .qt-1,
+    &.t2 .qt-2 {
+      clip-path: inset(0 0 0 0);
+      transition: clip-path 900ms steps(12);
+    }
+
+    .qout {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5em;
+      opacity: 0;
+      transition: opacity var(--dur-ui) var(--ease-ui);
+      white-space: nowrap;
+    }
+
+    &.o1 .qo-1,
+    &.o2 .qo-2 {
+      opacity: 1;
+    }
+
+    .qdim {
+      color: rgba(230, 230, 235, 0.6);
+    }
+  }
+</style>
+
+<script>
+  import { mountDemo } from '../../scripts/demo-timeline.js';
+
+  for (const root of document.querySelectorAll("[data-demo='quake']")) {
+    mountDemo(root, {
+      cycle: 10200,
+      finalAt: 6400,
+      cues: [
+        { at: 800, sel: "[data-key-id='qk']", add: 'is-pressed' },
+        { at: 900, add: 'open' },
+        { at: 1050, sel: "[data-key-id='qk']", remove: 'is-pressed' },
+        { at: 1300, add: 't1' },
+        { at: 2300, add: 'o1' },
+        { at: 3100, sel: "[data-key-id='dk']", add: 'is-pressed' },
+        { at: 3200, add: 'split' },
+        { at: 3450, sel: "[data-key-id='dk']", remove: 'is-pressed' },
+        { at: 3700, add: 't2' },
+        { at: 4700, add: 'o2' },
+        { at: 5700, sel: "[data-key-id='wk']", add: 'is-pressed' },
+        { at: 5800, add: 'sw2' },
+        { at: 5950, sel: "[data-key-id='wk']", remove: 'is-pressed' },
+        { at: 7600, sel: "[data-key-id='qk']", add: 'is-pressed' },
+        { at: 7700, remove: ['open', 't1', 'o1', 'split', 't2', 'o2'] },
+        { at: 7850, sel: "[data-key-id='qk']", remove: 'is-pressed' },
+        { at: 8400, remove: 'sw2' },
+      ],
+    });
+  }
+</script>

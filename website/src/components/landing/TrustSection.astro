@@ -1,0 +1,70 @@
+---
+const pillars = [
+  {
+    title: 'Low-latency by design',
+    detail: 'Uses Apple private APIs where possible for direct, low-latency window management.',
+  },
+  {
+    title: 'Refresh-rate-aware',
+    detail: 'Animations pace themselves to your display — 60, 120, or 144 Hz.',
+  },
+  {
+    title: 'SIP stays on',
+    detail: 'Never requires disabling System Integrity Protection — and never will.',
+  },
+  {
+    title: 'Signed & notarized',
+    detail: 'Every official release is Developer-ID signed and Apple-notarized.',
+  },
+  {
+    title: 'Forever free',
+    detail: 'No subscriptions, paywalls, trials, or usage caps. GPL-2.0, source available.',
+  },
+];
+---
+
+<section class="section trust">
+  <div class="container">
+    <div class="section-head">
+      <h2>Performance &amp; trust</h2>
+      <p>Built for people who came from Linux tiling and refuse to compromise.</p>
+    </div>
+    <div class="pillars">
+      {
+        pillars.map((pillar) => (
+          <div class="pillar">
+            <h3>{pillar.title}</h3>
+            <p>{pillar.detail}</p>
+          </div>
+        ))
+      }
+    </div>
+  </div>
+</section>
+
+<style>
+  .pillars {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 14px;
+  }
+
+  .pillar {
+    padding: 20px;
+    border-radius: 12px;
+    border: 1px solid var(--page-frame-border);
+    background: var(--page-surface);
+  }
+
+  .pillar h3 {
+    margin: 0 0 8px;
+    font-size: 15.5px;
+  }
+
+  .pillar p {
+    margin: 0;
+    color: var(--page-muted);
+    font-size: 13.5px;
+    line-height: 1.5;
+  }
+</style>

@@ -1,0 +1,70 @@
+---
+---
+
+<footer class="footer">
+  <div class="container cols">
+    <div class="col">
+      <b>OmniWM</b>
+      <p>A tiling window manager for macOS. GPL-2.0-only · Copyright © 2026 BarutSRB.</p>
+    </div>
+    <div class="col">
+      <b>Project</b>
+      <a href="https://github.com/BarutSRB/OmniWM">GitHub</a>
+      <a href="https://github.com/BarutSRB/OmniWM/releases">Releases</a>
+      <a href="/guides/quick-start/">Documentation</a>
+      <a href="https://github.com/BarutSRB/OmniWM/blob/main/CONTRIBUTING.md">Contributing</a>
+    </div>
+    <div class="col">
+      <b>Community</b>
+      <a href="https://github.com/imprisonedmind/omni-cast">OmniCast for Raycast</a>
+      <a href="https://github.com/nick-s5/omniwm-computer-use">OmniWM Computer Use</a>
+      <a href="https://github.com/BarutSRB/OmniWM/issues">Report a bug</a>
+      <a href="https://github.com/sponsors/BarutSRB">Sponsor</a>
+    </div>
+  </div>
+</footer>
+
+<style>
+  .footer {
+    border-top: 1px solid var(--page-frame-border);
+    padding: 48px 0 64px;
+    font-size: 14px;
+  }
+
+  .cols {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr;
+    gap: 32px;
+  }
+
+  .col {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: flex-start;
+  }
+
+  .col b {
+    margin-bottom: 4px;
+  }
+
+  .col p {
+    margin: 0;
+    color: var(--page-muted);
+  }
+
+  .col a {
+    color: var(--page-muted);
+    text-decoration: none;
+  }
+
+  .col a:hover {
+    color: var(--page-accent);
+  }
+
+  @media (max-width: 640px) {
+    .cols {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

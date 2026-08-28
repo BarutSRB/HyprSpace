@@ -1,0 +1,309 @@
+---
+import MockDesktop from './MockDesktop.astro';
+import MockWindow from './MockWindow.astro';
+import Keycap from './Keycap.astro';
+---
+
+<div class="demo" data-demo="workspacebar">
+  <MockDesktop label="Animated mockup of the workspace bar split around the notch, active workspace always docked on its left" notch>
+    <div class="isl isl-l">
+      <span class="achip ac-1"><i class="dot d-blue"></i>1</span>
+      <span class="achip ac-2"><i class="dot d-purple"></i>2</span>
+      <span class="achip ac-3"><i class="dot d-green"></i>3</span>
+    </div>
+    <div class="isl isl-r">
+      <span class="rchip rc-1">1</span>
+      <span class="rchip rc-h">❤️</span>
+      <span class="rchip rc-2">2</span>
+      <span class="rchip rc-3">3</span>
+      <span class="rchip rc-r">🚀</span>
+      <span class="pill"><i class="tray"></i>widgets</span>
+    </div>
+    <MockWindow class="w1 wa" title="Zed" variant="editor" />
+    <MockWindow class="w1 wb" title="Safari" variant="browser" />
+    <MockWindow class="wsx w2x wc" title="Figma" variant="plain" />
+    <MockWindow class="wsx w2x wd" title="Slack" variant="notes" />
+    <MockWindow class="wsx w3x we" title="Music" variant="plain" />
+  </MockDesktop>
+  <div class="keys">
+    <Keycap id="bk1" keys={['⌥', '1']} label="Workspace 1" />
+    <Keycap id="bk2" keys={['⌥', '2']} label="Workspace 2" />
+    <Keycap id="bk3" keys={['⌥', '3']} label="Workspace 3" />
+  </div>
+  <p class="caption">Split around the notch, pixel-perfect — the active workspace always docks on its left.</p>
+</div>
+
+<style is:global>
+  [data-demo='workspacebar'] {
+    .notch {
+      opacity: 1;
+    }
+
+    .mb-right {
+      display: none;
+    }
+
+    .isl {
+      position: absolute;
+      top: 0;
+      height: 4.5%;
+      min-height: 16px;
+      line-height: 1;
+      display: flex;
+      align-items: center;
+      border-radius: var(--r-bar);
+      background: rgba(28, 28, 36, 0.72);
+      -webkit-backdrop-filter: blur(10px);
+      backdrop-filter: blur(10px);
+      border: 0.5px solid rgba(255, 255, 255, 0.18);
+      z-index: 5;
+      font-family: var(--font-mono);
+      font-size: clamp(6px, 1.6cqw, 11px);
+      color: rgba(255, 255, 255, 0.75);
+    }
+
+    .isl-l {
+      right: 60.5cqw;
+      width: 10cqw;
+      justify-content: center;
+    }
+
+    .isl-r {
+      left: 60.5cqw;
+      width: 36cqw;
+      padding-left: 1cqw;
+    }
+
+    .achip {
+      position: absolute;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5cqw;
+      padding: 0.4cqh 0.9cqw;
+      border-radius: 6px;
+      border: 1px solid var(--demo-accent);
+      background: rgba(255, 255, 255, 0.1);
+      color: #fff;
+      opacity: 0;
+      transform: scale(0.9);
+      transition:
+        opacity 260ms var(--ease-ui),
+        transform 320ms var(--ease-pop);
+    }
+
+    .ac-1 {
+      opacity: 1;
+      transform: none;
+    }
+
+    &.w2 .ac-1,
+    &.w3 .ac-1 {
+      opacity: 0;
+      transform: scale(0.9);
+    }
+
+    &.w2 .ac-2,
+    &.w3 .ac-3 {
+      opacity: 1;
+      transform: none;
+    }
+
+    .rchip {
+      position: absolute;
+      left: 1cqw;
+      width: 5cqw;
+      display: inline-flex;
+      justify-content: center;
+      padding: 0.4cqh 0;
+      border-radius: 6px;
+      transform: translateX(var(--slot, 0cqw));
+      opacity: 1;
+      transition:
+        transform 420ms var(--ease-settle),
+        opacity 220ms var(--ease-ui);
+    }
+
+    .rc-1 {
+      --slot: 0cqw;
+      opacity: 0;
+    }
+
+    .rc-h {
+      --slot: 0cqw;
+    }
+
+    .rc-2 {
+      --slot: 5.5cqw;
+    }
+
+    .rc-3 {
+      --slot: 11cqw;
+    }
+
+    .rc-r {
+      --slot: 16.5cqw;
+    }
+
+    &.w2 .rc-1 {
+      opacity: 1;
+    }
+
+    &.w2 .rc-h {
+      --slot: 5.5cqw;
+    }
+
+    &.w2 .rc-2 {
+      opacity: 0;
+      --slot: 11cqw;
+    }
+
+    &.w2 .rc-3 {
+      --slot: 11cqw;
+    }
+
+    &.w3 .rc-1 {
+      opacity: 1;
+    }
+
+    &.w3 .rc-h {
+      --slot: 5.5cqw;
+    }
+
+    &.w3 .rc-2 {
+      --slot: 11cqw;
+    }
+
+    &.w3 .rc-3 {
+      opacity: 0;
+      --slot: 16.5cqw;
+    }
+
+    &.w3 .rc-r {
+      --slot: 16.5cqw;
+    }
+
+    .pill {
+      position: absolute;
+      left: 23.5cqw;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5cqw;
+      padding: 0.4cqh 1cqw;
+      border-radius: var(--r-pill);
+      border: 0.8px solid rgba(255, 255, 255, 0.22);
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .tray {
+      width: 1.6cqw;
+      height: 1.2cqw;
+      border-radius: 2px 2px 3px 3px;
+      background: rgba(255, 255, 255, 0.55);
+      display: inline-block;
+    }
+
+    .dot {
+      width: 1.5cqw;
+      aspect-ratio: 1;
+      border-radius: 28%;
+      display: inline-block;
+    }
+
+    .d-blue {
+      background: #4ba8f5;
+    }
+
+    .d-purple {
+      background: #a06df7;
+    }
+
+    .d-green {
+      background: #2eb67d;
+    }
+
+    .mock-win {
+      transition:
+        opacity 420ms var(--ease-settle),
+        transform 420ms var(--ease-settle);
+    }
+
+    .wa {
+      left: 4cqw;
+      top: 16cqh;
+      width: 45cqw;
+      height: 74cqh;
+    }
+
+    .wb {
+      left: 51cqw;
+      top: 16cqh;
+      width: 45cqw;
+      height: 74cqh;
+    }
+
+    .wsx {
+      opacity: 0;
+      transform: translateY(2cqh);
+    }
+
+    .wc {
+      left: 4cqw;
+      top: 16cqh;
+      width: 60cqw;
+      height: 74cqh;
+    }
+
+    .wd {
+      left: 66cqw;
+      top: 16cqh;
+      width: 30cqw;
+      height: 74cqh;
+    }
+
+    .we {
+      left: 14cqw;
+      top: 18cqh;
+      width: 72cqw;
+      height: 70cqh;
+    }
+
+    &.w2 .w1,
+    &.w3 .w1 {
+      opacity: 0;
+      transform: translateY(2cqh);
+    }
+
+    &.w2 .w2x {
+      opacity: 1;
+      transform: none;
+    }
+
+    &.w3 .w3x {
+      opacity: 1;
+      transform: none;
+    }
+  }
+</style>
+
+<script>
+  import { mountDemo } from '../../scripts/demo-timeline.js';
+
+  for (const root of document.querySelectorAll("[data-demo='workspacebar']")) {
+    mountDemo(root, {
+      cycle: 12500,
+      finalAt: 3200,
+      cues: [
+        { at: 1200, sel: "[data-key-id='bk2']", add: 'is-pressed' },
+        { at: 1300, add: 'w2' },
+        { at: 1450, sel: "[data-key-id='bk2']", remove: 'is-pressed' },
+        { at: 4800, sel: "[data-key-id='bk3']", add: 'is-pressed' },
+        { at: 4900, remove: 'w2' },
+        { at: 4900, add: 'w3' },
+        { at: 5050, sel: "[data-key-id='bk3']", remove: 'is-pressed' },
+        { at: 8400, sel: "[data-key-id='bk1']", add: 'is-pressed' },
+        { at: 8500, remove: 'w3' },
+        { at: 8650, sel: "[data-key-id='bk1']", remove: 'is-pressed' },
+      ],
+    });
+  }
+</script>

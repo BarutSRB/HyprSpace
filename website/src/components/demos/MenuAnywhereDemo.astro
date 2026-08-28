@@ -1,0 +1,239 @@
+---
+import MockDesktop from './MockDesktop.astro';
+import MockWindow from './MockWindow.astro';
+import Keycap from './Keycap.astro';
+---
+
+<div class="demo" data-demo="menuanywhere">
+  <MockDesktop
+    label="Animated mockup of Menu Anywhere popping the frontmost app's real menu bar as a floating menu at the cursor, submenus and shortcuts included"
+  >
+    <MockWindow class="pw-zed" title="Zed" variant="editor" />
+    <MockWindow class="pw-notes" title="Notes" variant="notes" />
+    <div class="menu">
+      <span class="mr mr-app">Zed</span>
+      <span class="mr mr-file">File <i class="ch">▸</i></span>
+      <span class="mr mr-edit">Edit <i class="ch">▸</i></span>
+      <span class="mr">Selection <i class="ch">▸</i></span>
+      <span class="mr mr-view">View <i class="ch">▸</i></span>
+      <span class="mr">Window <i class="ch">▸</i></span>
+      <span class="mr">Help</span>
+      <div class="sub">
+        <span class="sr sm-1">Command Palette <i class="sc">⇧⌘P</i></span>
+        <span class="sr">Zoom In <i class="sc">⌘+</i></span>
+        <span class="sr">Zoom Out <i class="sc">⌘−</i></span>
+        <span class="sr">Toggle Terminal <i class="sc">⌃`</i></span>
+      </div>
+    </div>
+    <span class="cursor"></span>
+  </MockDesktop>
+  <div class="keys">
+    <Keycap id="ma-k" keys={['⌃', '⌥', 'M']} label="Menu Anywhere" />
+    <Keycap id="ma-n" keys={['↓']} label="Navigate" />
+    <Keycap id="ma-e" keys={['⏎']} label="Run item" />
+  </div>
+  <p class="caption">The frontmost app's real menus pop at your cursor — no trip to the top of the screen.</p>
+</div>
+
+<style is:global>
+  [data-demo='menuanywhere'] {
+    .pw-zed {
+      left: 5cqw;
+      top: 14cqh;
+      width: 60cqw;
+      height: 78cqh;
+      transition: box-shadow var(--dur-ui) var(--ease-ui);
+    }
+
+    .pw-notes {
+      left: 67cqw;
+      top: 18cqh;
+      width: 29cqw;
+      height: 70cqh;
+      opacity: 0.7;
+    }
+
+    .menu {
+      position: absolute;
+      left: 53cqw;
+      top: 59cqh;
+      width: 16cqw;
+      display: flex;
+      flex-direction: column;
+      padding: 0.5cqh 0;
+      border-radius: 8px;
+      background: rgba(40, 40, 48, 0.95);
+      -webkit-backdrop-filter: blur(10px);
+      backdrop-filter: blur(10px);
+      border: 0.5px solid rgba(255, 255, 255, 0.18);
+      box-shadow: var(--shadow-panel);
+      z-index: 9;
+      opacity: 0;
+      transform: scale(0.97);
+      transform-origin: 0 0;
+      transition:
+        opacity 160ms var(--ease-ui),
+        transform 160ms var(--ease-ui);
+      font-size: clamp(6px, 1.5cqw, 11px);
+      color: rgba(255, 255, 255, 0.9);
+    }
+
+    &.open .menu {
+      opacity: 1;
+      transform: scale(1);
+    }
+
+    &.p2 .menu {
+      left: 21cqw;
+      top: 48cqh;
+    }
+
+    .mr {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.5cqh 1.2cqw;
+      white-space: nowrap;
+      transition:
+        background var(--dur-ui) var(--ease-ui),
+        color var(--dur-ui) var(--ease-ui);
+    }
+
+    .mr-app {
+      font-weight: 600;
+    }
+
+    .ch {
+      color: rgba(255, 255, 255, 0.45);
+      font-style: normal;
+    }
+
+    .mr.is-hl {
+      background: var(--demo-blue);
+      color: #fff;
+    }
+
+    .mr.is-hl .ch {
+      color: rgba(255, 255, 255, 0.8);
+    }
+
+    .sub {
+      position: absolute;
+      left: calc(100% - 0.4cqw);
+      bottom: 10%;
+      width: 19cqw;
+      display: flex;
+      flex-direction: column;
+      padding: 0.5cqh 0;
+      border-radius: 8px;
+      background: rgba(40, 40, 48, 0.95);
+      border: 0.5px solid rgba(255, 255, 255, 0.18);
+      box-shadow: var(--shadow-panel);
+      opacity: 0;
+      transform: translateX(-0.6cqw);
+      transition:
+        opacity 160ms var(--ease-ui),
+        transform 160ms var(--ease-ui);
+      font-size: clamp(6px, 1.4cqw, 10px);
+    }
+
+    &.sub-open .sub {
+      opacity: 1;
+      transform: none;
+    }
+
+    .sr {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1cqw;
+      padding: 0.5cqh 1.2cqw;
+      white-space: nowrap;
+      transition:
+        background var(--dur-ui) var(--ease-ui),
+        color var(--dur-ui) var(--ease-ui);
+    }
+
+    .sc {
+      color: rgba(255, 255, 255, 0.45);
+      font-style: normal;
+      font-family: var(--font-mono);
+    }
+
+    .sr.is-hl {
+      background: var(--demo-blue);
+      color: #fff;
+    }
+
+    .sr.is-hl .sc {
+      color: rgba(255, 255, 255, 0.8);
+    }
+
+    .cursor {
+      position: absolute;
+      left: 52cqw;
+      top: 58cqh;
+      width: 2.4cqw;
+      aspect-ratio: 1;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.9);
+      border: 1px solid rgba(0, 0, 0, 0.4);
+      opacity: 0;
+      z-index: 10;
+      transition:
+        transform 620ms var(--ease-hand),
+        opacity var(--dur-ui) var(--ease-ui);
+    }
+
+    .cursor.c-show {
+      opacity: 1;
+    }
+
+    .cursor.c-p2 {
+      transform: translate(-32cqw, -12cqh);
+    }
+  }
+</style>
+
+<script>
+  import { mountDemo } from '../../scripts/demo-timeline.js';
+
+  for (const root of document.querySelectorAll("[data-demo='menuanywhere']")) {
+    mountDemo(root, {
+      cycle: 11500,
+      finalAt: 4600,
+      cues: [
+        { at: 0, sel: '.pw-zed', add: 'is-focused' },
+        { at: 400, sel: '.cursor', add: 'c-show' },
+        { at: 1000, sel: "[data-key-id='ma-k']", add: 'is-pressed' },
+        { at: 1100, add: 'open' },
+        { at: 1250, sel: "[data-key-id='ma-k']", remove: 'is-pressed' },
+        { at: 1900, sel: "[data-key-id='ma-n']", add: 'is-pressed' },
+        { at: 1900, sel: '.mr-file', add: 'is-hl' },
+        { at: 2050, sel: "[data-key-id='ma-n']", remove: 'is-pressed' },
+        { at: 2350, sel: "[data-key-id='ma-n']", add: 'is-pressed' },
+        { at: 2350, sel: '.mr-file', remove: 'is-hl' },
+        { at: 2350, sel: '.mr-edit', add: 'is-hl' },
+        { at: 2500, sel: "[data-key-id='ma-n']", remove: 'is-pressed' },
+        { at: 2800, sel: "[data-key-id='ma-n']", add: 'is-pressed' },
+        { at: 2800, sel: '.mr-edit', remove: 'is-hl' },
+        { at: 2800, sel: '.mr-view', add: 'is-hl' },
+        { at: 2950, sel: "[data-key-id='ma-n']", remove: 'is-pressed' },
+        { at: 3400, add: 'sub-open' },
+        { at: 4100, sel: '.sm-1', add: 'is-hl' },
+        { at: 5600, sel: "[data-key-id='ma-e']", add: 'is-pressed' },
+        { at: 5700, remove: ['open', 'sub-open'] },
+        { at: 5700, sel: '.mr-view', remove: 'is-hl' },
+        { at: 5700, sel: '.sm-1', remove: 'is-hl' },
+        { at: 5850, sel: "[data-key-id='ma-e']", remove: 'is-pressed' },
+        { at: 6800, sel: '.cursor', add: 'c-p2' },
+        { at: 7900, sel: "[data-key-id='ma-k']", add: 'is-pressed' },
+        { at: 8000, add: ['p2', 'open'] },
+        { at: 8150, sel: "[data-key-id='ma-k']", remove: 'is-pressed' },
+        { at: 9500, remove: 'open' },
+        { at: 9800, sel: '.cursor', remove: 'c-p2' },
+        { at: 10500, sel: '.cursor', remove: 'c-show' },
+      ],
+    });
+  }
+</script>

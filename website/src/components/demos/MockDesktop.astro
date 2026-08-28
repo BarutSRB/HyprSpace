@@ -1,0 +1,91 @@
+---
+interface Props {
+  label: string;
+  aspect?: string;
+  menuBar?: boolean;
+  notch?: boolean;
+}
+
+const { label, aspect = '16 / 10', menuBar = true, notch = false } = Astro.props;
+---
+
+<div class="frame" role="img" aria-label={label} style={`aspect-ratio: ${aspect}`}>
+  <div class="desktop">
+    {
+      menuBar && (
+        <div class="menubar">
+          <span class="mb-left">
+            <span class="mb-app">OmniWM</span>
+            <span>File</span>
+            <span>Edit</span>
+            <span>View</span>
+          </span>
+          <span class="mb-right"><slot name="menubar-right">9:41</slot></span>
+        </div>
+      )
+    }
+    {notch && <div class="notch" />}
+    <slot />
+  </div>
+</div>
+
+<style>
+  .frame {
+    container-type: size;
+    border: 1px solid var(--page-frame-border);
+    border-radius: var(--r-frame);
+    overflow: hidden;
+    width: 100%;
+    box-shadow: 0 2px 24px rgba(60, 30, 20, 0.08);
+  }
+
+  .desktop {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    background: var(--demo-wallpaper);
+    font-family: var(--font-ui);
+  }
+
+  .menubar {
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 4.5%;
+    min-height: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 2.2%;
+    background: rgba(16, 16, 24, 0.55);
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
+    font-size: clamp(6px, 1.6cqw, 11px);
+    color: rgba(255, 255, 255, 0.55);
+    z-index: 3;
+  }
+
+  .mb-left {
+    display: flex;
+    gap: 1.6em;
+  }
+
+  .mb-app {
+    color: rgba(255, 255, 255, 0.85);
+    font-weight: 600;
+  }
+
+  .notch {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 18%;
+    height: 4.5%;
+    min-height: 16px;
+    background: #000;
+    border-radius: 0 0 6px 6px;
+    z-index: 4;
+    opacity: 0;
+    transition: opacity 250ms var(--ease-ui);
+  }
+</style>

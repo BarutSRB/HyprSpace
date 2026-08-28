@@ -1,0 +1,318 @@
+---
+import MockDesktop from './MockDesktop.astro';
+import MockWindow from './MockWindow.astro';
+import Keycap from './Keycap.astro';
+---
+
+<div class="demo" data-demo="overview">
+  <MockDesktop label="Animated mockup of Overview: all workspaces at once, zooming, and moving windows between workspaces from the keyboard">
+    <div class="backdrop"></div>
+    <div class="fly">
+      <MockWindow class="ov ov-zed" title="Zed" variant="editor" />
+      <MockWindow class="ov ov-safari" title="Safari" variant="browser" />
+      <MockWindow class="ov ov-notes" title="Notes" variant="notes" />
+      <MockWindow class="ov ov-ghost" title="Ghostty" variant="terminal" />
+    </div>
+    <div class="ovl">
+      <div class="search"><span class="mag"></span></div>
+      <div class="wslabel l1">1 — code</div>
+      <div class="wslabel l2">2 — web</div>
+      <div class="wslabel l3">3 — media</div>
+      <div class="card card-discord">Discord</div>
+      <div class="card card-figma">Figma</div>
+      <div class="card card-music">Music</div>
+    </div>
+  </MockDesktop>
+  <div class="keys">
+    <Keycap id="ov-k" keys={['⌥', '⇧', 'O']} label="Overview" />
+    <Keycap id="ov-z" keys={['⌥', '⇧', 'scroll']} label="Zoom" />
+    <Keycap id="ov-m" keys={['⌥', '⇧', '2']} label="To workspace 2" />
+    <Keycap id="ov-c" keys={['⌥', '⇧', '←']} label="Merge into column" />
+    <Keycap id="ov-e" keys={['⏎']} label="Focus" />
+  </div>
+  <p class="caption">Every workspace at once — zoom, move, and merge windows without leaving the keyboard.</p>
+</div>
+
+<style is:global>
+  [data-demo='overview'] {
+    .backdrop {
+      position: absolute;
+      inset: 0;
+      background: var(--demo-backdrop);
+      opacity: 0;
+      transition: opacity 560ms var(--ease-settle);
+      z-index: 4;
+    }
+
+    .fly {
+      position: absolute;
+      inset: 0;
+      z-index: 5;
+      transition: transform 500ms var(--ease-settle);
+      transform-origin: 50% 45%;
+    }
+
+    .ov {
+      transform-origin: top left;
+      transition:
+        transform 560ms var(--ease-settle),
+        height 560ms var(--ease-settle),
+        opacity 300ms var(--ease-ui),
+        box-shadow var(--dur-ui) var(--ease-ui);
+    }
+
+    .is-selected {
+      box-shadow:
+        0 0 0 2px var(--demo-card-selected),
+        var(--shadow-win);
+    }
+
+    .ov-zed {
+      left: 3cqw;
+      top: 8cqh;
+      width: 40cqw;
+      height: 88.5cqh;
+    }
+
+    .ov-safari {
+      left: 45cqw;
+      top: 8cqh;
+      width: 38cqw;
+      height: 43cqh;
+    }
+
+    .ov-notes {
+      left: 45cqw;
+      top: 53.5cqh;
+      width: 38cqw;
+      height: 43cqh;
+    }
+
+    .ov-ghost {
+      left: 85cqw;
+      top: 8cqh;
+      width: 30cqw;
+      height: 88.5cqh;
+    }
+
+    &.open .ov-zed {
+      transform: translate(17cqw, 11cqh) scale(0.4, 0.294);
+    }
+
+    &.open .ov-safari {
+      transform: translate(-7cqw, 11cqh) scale(0.421, 0.291);
+    }
+
+    &.open .ov-notes {
+      transform: translate(-7cqw, -21cqh) scale(0.421, 0.291);
+    }
+
+    &.open .ov-ghost {
+      transform: translate(-29cqw, 11cqh) scale(0.533, 0.294);
+    }
+
+    &.zoom .fly,
+    &.zoom .ovl {
+      transform: scale(1.12);
+    }
+
+    &.ws2hop .ov-notes {
+      transform: translate(15cqw, 1.5cqh) scale(0.395, 0.302);
+      z-index: 7;
+    }
+
+    &.open.ws2hop .ov-safari {
+      transform: translate(-7cqw, 11cqh) scale(0.421, 0.605);
+    }
+
+    &.ws2hop .card-discord,
+    &.ws2hop .card-figma {
+      transform: translateX(-4cqw);
+    }
+
+    &.consumed .card-discord,
+    &.consumed .card-figma {
+      transform: none;
+    }
+
+    &.consumed .card-figma {
+      height: 6cqh;
+    }
+
+    &.consumed .ov-notes {
+      transform: translate(1cqw, 8.5cqh) scale(0.395, 0.14);
+      z-index: 7;
+    }
+
+    &.landed .ov-zed,
+    &.landed .ov-ghost {
+      transform: none;
+    }
+
+    &.landed .ov-safari {
+      transform: none;
+      height: 88.5cqh;
+    }
+
+    &.landed .ov-notes {
+      opacity: 0;
+    }
+
+    .ovl {
+      position: absolute;
+      inset: 0;
+      z-index: 6;
+      pointer-events: none;
+      font-family: var(--font-ui);
+      transition: transform 500ms var(--ease-settle);
+      transform-origin: 50% 45%;
+    }
+
+    .search,
+    .wslabel,
+    .card {
+      opacity: 0;
+      transition:
+        opacity 250ms var(--ease-ui) 200ms,
+        transform 650ms var(--ease-settle),
+        height 560ms var(--ease-settle);
+    }
+
+    &.open .search,
+    &.open .wslabel,
+    &.open .card {
+      opacity: 1;
+    }
+
+    .search {
+      position: absolute;
+      left: 25cqw;
+      top: 5.5cqh;
+      width: 50cqw;
+      height: 6.5cqh;
+      display: flex;
+      align-items: center;
+      padding: 0 2cqw;
+      border-radius: var(--r-pill);
+      background: rgba(31, 31, 38, 0.95);
+      border: 1px solid #40404d;
+    }
+
+    .mag {
+      width: 1.4cqw;
+      height: 1.4cqw;
+      border: 1.5px solid rgba(255, 255, 255, 0.45);
+      border-radius: 50%;
+      position: relative;
+    }
+
+    .mag::after {
+      content: '';
+      position: absolute;
+      width: 1.5px;
+      height: 0.7cqw;
+      background: rgba(255, 255, 255, 0.45);
+      transform: rotate(-45deg);
+      right: -0.25cqw;
+      bottom: -0.5cqw;
+    }
+
+    .wslabel {
+      position: absolute;
+      font-size: clamp(6px, 1.7cqw, 12px);
+      font-weight: 600;
+      color: #999;
+    }
+
+    .l1 {
+      left: 8cqw;
+      top: 15.5cqh;
+      color: var(--demo-ws-label);
+    }
+
+    .l2 {
+      left: 8cqw;
+      top: 50cqh;
+    }
+
+    .l3 {
+      left: 8cqw;
+      top: 72.5cqh;
+    }
+
+    .card {
+      position: absolute;
+      display: flex;
+      align-items: flex-end;
+      padding: 0.6em;
+      border-radius: 8px;
+      background: var(--demo-card);
+      border: 1px solid var(--demo-card-border);
+      color: rgba(255, 255, 255, 0.6);
+      font-size: clamp(5px, 1.3cqw, 10px);
+      overflow: hidden;
+    }
+
+    .card-discord {
+      left: 26cqw;
+      top: 55cqh;
+      width: 15cqw;
+      height: 13cqh;
+    }
+
+    .card-figma {
+      left: 46cqw;
+      top: 55cqh;
+      width: 15cqw;
+      height: 13cqh;
+    }
+
+    .card-music {
+      left: 38cqw;
+      top: 77.5cqh;
+      width: 15cqw;
+      height: 12cqh;
+    }
+  }
+</style>
+
+<script>
+  import { mountDemo } from '../../scripts/demo-timeline.js';
+
+  for (const root of document.querySelectorAll("[data-demo='overview']")) {
+    mountDemo(root, {
+      cycle: 15500,
+      finalAt: 8200,
+      cues: [
+        { at: 0, sel: '.ov-zed', add: 'is-focused' },
+        { at: 800, sel: "[data-key-id='ov-k']", add: 'is-pressed' },
+        { at: 900, add: 'open' },
+        { at: 900, sel: '.ov-zed', remove: 'is-focused' },
+        { at: 900, sel: '.ov-zed', add: 'is-selected' },
+        { at: 1050, sel: "[data-key-id='ov-k']", remove: 'is-pressed' },
+        { at: 2300, sel: "[data-key-id='ov-z']", add: 'is-pressed' },
+        { at: 2300, add: 'zoom' },
+        { at: 2550, sel: "[data-key-id='ov-z']", remove: 'is-pressed' },
+        { at: 3100, remove: 'zoom' },
+        { at: 4100, sel: '.ov-zed', remove: 'is-selected' },
+        { at: 4100, sel: '.ov-safari', add: 'is-selected' },
+        { at: 4700, sel: '.ov-safari', remove: 'is-selected' },
+        { at: 4700, sel: '.ov-notes', add: 'is-selected' },
+        { at: 5600, sel: "[data-key-id='ov-m']", add: 'is-pressed' },
+        { at: 5700, add: 'ws2hop' },
+        { at: 5850, sel: "[data-key-id='ov-m']", remove: 'is-pressed' },
+        { at: 7100, sel: "[data-key-id='ov-c']", add: 'is-pressed' },
+        { at: 7200, add: 'consumed' },
+        { at: 7350, sel: "[data-key-id='ov-c']", remove: 'is-pressed' },
+        { at: 9300, sel: '.ov-notes', remove: 'is-selected' },
+        { at: 9300, sel: '.ov-safari', add: 'is-selected' },
+        { at: 10100, sel: "[data-key-id='ov-e']", add: 'is-pressed' },
+        { at: 10200, remove: 'open' },
+        { at: 10200, add: 'landed' },
+        { at: 10200, sel: '.ov-safari', remove: 'is-selected' },
+        { at: 10350, sel: "[data-key-id='ov-e']", remove: 'is-pressed' },
+        { at: 10800, sel: '.ov-safari', add: 'is-focused' },
+      ],
+    });
+  }
+</script>
