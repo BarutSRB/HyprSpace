@@ -1,3 +1,9 @@
+<p align="center">
+  <a href="https://omniwm.app">
+    <img src=".github/social-preview.png" alt="OmniWM — Do what you love easier, faster, better." width="100%">
+  </a>
+</p>
+
 ## Demo Video
 
 [![Watch the demo](https://img.youtube.com/vi/WcHjGkuD2Fc/maxresdefault.jpg)](https://youtu.be/WcHjGkuD2Fc)
