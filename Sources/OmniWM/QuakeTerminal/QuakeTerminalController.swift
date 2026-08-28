@@ -155,43 +155,54 @@ final class QuakeTerminalController: NSObject, NSWindowDelegate, QuakeTerminalTa
                 return false
             }
         }
-        runtimeConfig.read_clipboard_cb = { userdata, location, state in
-            guard let userdata, let state else { return false }
-            return MainActor.assumeIsolated { () -> Bool in
+        runtimeConfig.read_clipboard_cb = { userdata, location, state, mimes, mimesLength, list in
+            guard let userdata else { return GHOSTTY_CLIPBOARD_READ_UNSUPPORTED }
+            return MainActor.assumeIsolated {
                 let context = Unmanaged<GhosttySurfaceCallbackContext>.fromOpaque(userdata).takeUnretainedValue()
-                guard let controller = context.controller, let view = context.view else { return false }
-                return controller.readClipboard(for: view, location: location, state: state)
+                guard let controller = context.controller, let view = context.view else {
+                    return GHOSTTY_CLIPBOARD_READ_UNSUPPORTED
+                }
+                return controller.readClipboard(
+                    for: view,
+                    location: location,
+                    state: state,
+                    mimes: mimes,
+                    mimesLength: mimesLength,
+                    list: list
+                )
             }
         }
-        runtimeConfig.confirm_read_clipboard_cb = { userdata, contents, state, kind in
+        runtimeConfig.confirm_read_clipboard_cb = { userdata, confirmation, state, kind in
             guard let userdata else { return }
-            let text = contents.map { String(cString: $0) } ?? ""
             MainActor.assumeIsolated {
                 let context = Unmanaged<GhosttySurfaceCallbackContext>.fromOpaque(userdata).takeUnretainedValue()
-                guard let controller = context.controller, let view = context.view else { return }
-                controller.promptForProtectedClipboardRead(on: view, contents: text, state: state, kind: kind)
+                guard let view = context.view, let surface = view.ghosttySurface else { return }
+                guard let controller = context.controller,
+                      let confirmation,
+                      let promptKind = ClipboardPromptKind(kind)
+                else {
+                    ghostty_surface_deny_clipboard_request(surface, state)
+                    return
+                }
+                controller.promptForProtectedClipboardRead(
+                    on: view,
+                    payload: GhosttyClipboardPayload(confirmation.pointee),
+                    state: state,
+                    kind: promptKind
+                )
             }
         }
         runtimeConfig.write_clipboard_cb = { userdata, location, content, len, confirm in
             guard let userdata, let content, len > 0 else { return }
-            var plainText: String?
-            for i in 0 ..< len {
-                guard let mimePtr = content[i].mime,
-                      let dataPtr = content[i].data else { continue }
-                let mime = String(cString: mimePtr)
-                if mime == "text/plain" {
-                    plainText = String(cString: dataPtr)
-                    break
-                }
-            }
-            guard let text = plainText else { return }
+            let contents = (0 ..< len).compactMap { GhosttyClipboardContent(content[$0]) }
+            guard !contents.isEmpty else { return }
             MainActor.assumeIsolated {
                 let context = Unmanaged<GhosttySurfaceCallbackContext>.fromOpaque(userdata).takeUnretainedValue()
                 guard let controller = context.controller, let view = context.view else { return }
                 if confirm {
-                    controller.promptForProtectedClipboardWrite(on: view, location: location, text: text)
+                    controller.promptForProtectedClipboardWrite(on: view, location: location, contents: contents)
                 } else {
-                    controller.writeClipboard(location: location, text: text)
+                    controller.writeClipboard(location: location, contents: contents)
                 }
             }
         }
@@ -930,75 +941,120 @@ final class QuakeTerminalController: NSObject, NSWindowDelegate, QuakeTerminalTa
     private func readClipboard(
         for view: GhosttySurfaceView,
         location: ghostty_clipboard_e,
-        state: UnsafeMutableRawPointer
-    ) -> Bool {
-        guard let surface = view.ghosttySurface else { return false }
-        let pasteboard = location == GHOSTTY_CLIPBOARD_SELECTION ? NSPasteboard(name: .find) : NSPasteboard.general
-        guard let text = pasteboard.string(forType: .string), !text.isEmpty else { return false }
-        text.withCString { ptr in
-            ghostty_surface_complete_clipboard_request(surface, ptr, state, false)
+        state: UnsafeMutableRawPointer?,
+        mimes: UnsafePointer<UnsafePointer<CChar>?>?,
+        mimesLength: Int,
+        list: Bool
+    ) -> ghostty_clipboard_read_result_e {
+        guard let surface = view.ghosttySurface,
+              let pasteboard = NSPasteboard.ghostty(location)
+        else {
+            return GHOSTTY_CLIPBOARD_READ_UNSUPPORTED
         }
-        return true
+
+        var contents: [GhosttyClipboardContent] = []
+        var seen: Set<String> = []
+        if let mimes {
+            for index in 0 ..< mimesLength {
+                guard let mimePointer = mimes[index] else { continue }
+                let mime = String(cString: mimePointer)
+                guard seen.insert(mime).inserted,
+                      let data = pasteboard.ghosttyData(forMIME: mime) else { continue }
+                contents.append(GhosttyClipboardContent(mime: mime, data: data))
+            }
+        }
+
+        let available = list ? pasteboard.ghosttyAvailableMIMEs() : []
+        guard !contents.isEmpty || list else { return GHOSTTY_CLIPBOARD_READ_UNAVAILABLE }
+        GhosttyClipboardPayload(contents: contents, available: available)
+            .complete(on: surface, state: state, confirmed: false)
+        return GHOSTTY_CLIPBOARD_READ_STARTED
     }
 
     private func promptForProtectedClipboardRead(
         on view: GhosttySurfaceView,
-        contents: String,
+        payload: GhosttyClipboardPayload,
         state: UnsafeMutableRawPointer?,
-        kind: ghostty_clipboard_request_e
+        kind: ClipboardPromptKind
     ) {
-        let request = GhosttyProtectedClipboardRequest(contents: contents, state: state)
+        let request = GhosttyProtectedClipboardRequest(payload: payload, state: state)
         view.registerProtectedClipboardRequest(request)
-        presentClipboardPrompt(for: view, kind: kind, contents: contents) { [weak view] allowed in
-            view?.resolveProtectedClipboardRequest(request, allowing: allowed)
+        presentClipboardPrompt(
+            for: view,
+            kind: kind,
+            contents: payload.preview,
+            programName: payload.programName,
+            canRemember: payload.canRemember,
+            previewImage: payload.previewImage
+        ) { [weak view] allowed, remember in
+            view?.resolveProtectedClipboardRequest(request, allowing: allowed, remember: remember)
         }
     }
 
-    private func writeClipboard(location: ghostty_clipboard_e, text: String) {
-        let pasteboard = location == GHOSTTY_CLIPBOARD_SELECTION ? NSPasteboard(name: .find) : NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
+    private func writeClipboard(location: ghostty_clipboard_e, contents: [GhosttyClipboardContent]) {
+        NSPasteboard.ghostty(location)?.replaceGhosttyContents(contents)
     }
 
     private func promptForProtectedClipboardWrite(
         on view: GhosttySurfaceView,
         location: ghostty_clipboard_e,
-        text: String
+        contents: [GhosttyClipboardContent]
     ) {
+        guard let text = contents.first(where: { $0.mime == "text/plain" })?.string else { return }
         presentClipboardPrompt(
             for: view,
-            kind: GHOSTTY_CLIPBOARD_REQUEST_OSC_52_WRITE,
+            kind: .write,
             contents: text
-        ) { [weak self] allowed in
+        ) { [weak self] allowed, _ in
             guard allowed else { return }
             self?.writeClipboard(location: location, text: text)
         }
     }
 
-    enum ClipboardPromptKind {
+    private func writeClipboard(location: ghostty_clipboard_e, text: String) {
+        guard let pasteboard = NSPasteboard.ghostty(location) else { return }
+        pasteboard.declareTypes([.string], owner: nil)
+        pasteboard.setString(text, forType: .string)
+    }
+
+    enum ClipboardPromptKind: Equatable {
         case read
         case write
         case unsafePaste
 
-        init(_ request: ghostty_clipboard_request_e) {
+        init?(_ request: ghostty_clipboard_request_e) {
             switch request {
-            case GHOSTTY_CLIPBOARD_REQUEST_OSC_52_READ:
+            case GHOSTTY_CLIPBOARD_REQUEST_OSC_52_READ,
+                 GHOSTTY_CLIPBOARD_REQUEST_KITTY_READ:
                 self = .read
-            case GHOSTTY_CLIPBOARD_REQUEST_OSC_52_WRITE:
+            case GHOSTTY_CLIPBOARD_REQUEST_OSC_52_WRITE,
+                 GHOSTTY_CLIPBOARD_REQUEST_KITTY_WRITE:
                 self = .write
-            default:
+            case GHOSTTY_CLIPBOARD_REQUEST_PASTE:
                 self = .unsafePaste
+            default:
+                return nil
             }
         }
     }
 
     private func presentClipboardPrompt(
         for view: GhosttySurfaceView,
-        kind: ghostty_clipboard_request_e,
+        kind: ClipboardPromptKind,
         contents: String,
-        resolve: @escaping @MainActor (Bool) -> Void
+        programName: String? = nil,
+        canRemember: Bool = false,
+        previewImage: NSImage? = nil,
+        resolve: @escaping @MainActor (Bool, Bool) -> Void
     ) {
-        let alert = Self.protectedClipboardAlert(kind: ClipboardPromptKind(kind), contents: contents)
+        let alert = Self.protectedClipboardAlert(
+            kind: kind,
+            contents: contents,
+            programName: programName,
+            canRemember: canRemember,
+            previewImage: previewImage
+        )
+        let rememberButton = alert.accessoryView as? NSButton
         clipboardPrompts.request(
             origin: view,
             isOriginAttached: { [weak self, weak view] in
@@ -1020,7 +1076,9 @@ final class QuakeTerminalController: NSObject, NSWindowDelegate, QuakeTerminalTa
                 guard let sheetParent = alert.window.sheetParent else { return }
                 sheetParent.endSheet(alert.window, returnCode: .cancel)
             },
-            resolve: resolve
+            resolve: { allowed in
+                resolve(allowed, allowed && rememberButton?.state == .on)
+            }
         )
     }
 
@@ -1033,16 +1091,23 @@ final class QuakeTerminalController: NSObject, NSWindowDelegate, QuakeTerminalTa
         clipboardPrompts.cancelPrompt(for: view)
     }
 
-    static func protectedClipboardAlert(kind: ClipboardPromptKind, contents: String) -> NSAlert {
+    static func protectedClipboardAlert(
+        kind: ClipboardPromptKind,
+        contents: String,
+        programName: String? = nil,
+        canRemember: Bool = false,
+        previewImage: NSImage? = nil
+    ) -> NSAlert {
         let alert = NSAlert()
         alert.alertStyle = .warning
+        let requester = programName.map { "\"\($0)\"" } ?? "A terminal application"
         switch kind {
         case .read:
             alert.messageText = "Allow Clipboard Read?"
-            alert.informativeText = "A terminal application wants to read the contents of the clipboard."
+            alert.informativeText = "\(requester) wants to read the contents of the clipboard."
         case .write:
             alert.messageText = "Allow Clipboard Write?"
-            alert.informativeText = "A terminal application wants to replace the contents of the clipboard."
+            alert.informativeText = "\(requester) wants to replace the contents of the clipboard."
         case .unsafePaste:
             alert.messageText = "Allow Potentially Unsafe Paste?"
             alert.informativeText = "The text being pasted contains characters that may run commands in the terminal."
@@ -1051,6 +1116,16 @@ final class QuakeTerminalController: NSObject, NSWindowDelegate, QuakeTerminalTa
         let preview = protectedClipboardPreview(contents)
         if !preview.isEmpty {
             alert.informativeText += "\n\n" + preview
+        }
+        if let previewImage {
+            alert.icon = previewImage
+        }
+        if canRemember {
+            alert.accessoryView = NSButton(
+                checkboxWithTitle: "Remember this choice for the session",
+                target: nil,
+                action: nil
+            )
         }
         alert.addButton(withTitle: "Deny")
         alert.addButton(withTitle: "Allow")

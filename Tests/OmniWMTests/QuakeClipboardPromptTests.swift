@@ -3,6 +3,7 @@
 
 import AppKit
 import Foundation
+import GhosttyKit
 @testable import OmniWM
 import XCTest
 
@@ -205,6 +206,85 @@ final class QuakeClipboardPromptTests: XCTestCase {
         XCTAssertTrue(secondPresented)
         XCTAssertTrue(coordinator.hasActivePrompt)
         XCTAssertEqual(secondResolutions, [])
+    }
+
+    func testClipboardContentUsesExplicitLength() {
+        let bytes: [UInt8] = [65, 0, 66]
+        let content = bytes.withUnsafeBytes { buffer in
+            "text/plain".withCString { mime in
+                GhosttyClipboardContent(ghostty_clipboard_content_s(
+                    mime: mime,
+                    data: buffer.baseAddress?.assumingMemoryBound(to: CChar.self),
+                    len: buffer.count
+                ))
+            }
+        }
+
+        XCTAssertEqual(content?.mime, "text/plain")
+        XCTAssertEqual(content?.data, Data(bytes))
+        XCTAssertEqual(content?.string?.utf8.map(\.self), bytes)
+    }
+
+    func testClipboardPayloadPreviewPrefersTextAndSummarizesBinaryContent() {
+        let text = GhosttyClipboardPayload(
+            contents: [GhosttyClipboardContent(mime: "text/plain", data: Data("hello".utf8))],
+            available: ["text/plain"]
+        )
+        let binary = GhosttyClipboardPayload(
+            contents: [GhosttyClipboardContent(mime: "image/png", data: Data([0, 1, 2]))],
+            available: ["image/png"]
+        )
+
+        XCTAssertEqual(text.preview, "hello")
+        XCTAssertEqual(binary.preview, "image/png (3 bytes)")
+    }
+
+    func testClipboardPayloadPreservesInvalidUTF8AsBinaryContent() {
+        let content = GhosttyClipboardContent(mime: "text/plain", data: Data([0xFF, 0xFE]))
+        let payload = GhosttyClipboardPayload(contents: [content], available: ["text/plain"])
+
+        XCTAssertNil(content.string)
+        XCTAssertEqual(payload.preview, "text/plain (2 bytes)")
+        XCTAssertEqual(payload.contents.first?.data, Data([0xFF, 0xFE]))
+    }
+
+    func testKittyClipboardRequestsUseReadAndWritePrompts() {
+        XCTAssertEqual(
+            QuakeTerminalController.ClipboardPromptKind(GHOSTTY_CLIPBOARD_REQUEST_KITTY_READ),
+            .read
+        )
+        XCTAssertEqual(
+            QuakeTerminalController.ClipboardPromptKind(GHOSTTY_CLIPBOARD_REQUEST_KITTY_WRITE),
+            .write
+        )
+        XCTAssertNil(QuakeTerminalController.ClipboardPromptKind(GHOSTTY_CLIPBOARD_REQUEST_LIST))
+
+        let read = QuakeTerminalController.protectedClipboardAlert(
+            kind: .read,
+            contents: "payload"
+        )
+        let write = QuakeTerminalController.protectedClipboardAlert(
+            kind: .write,
+            contents: "payload"
+        )
+
+        XCTAssertEqual(read.messageText, "Allow Clipboard Read?")
+        XCTAssertEqual(write.messageText, "Allow Clipboard Write?")
+    }
+
+    func testClipboardPromptUsesProgramNameAndRememberOption() {
+        let alert = QuakeTerminalController.protectedClipboardAlert(
+            kind: .read,
+            contents: "payload",
+            programName: "remote-shell",
+            canRemember: true
+        )
+
+        XCTAssertTrue(alert.informativeText.contains("\"remote-shell\""))
+        XCTAssertEqual(
+            (alert.accessoryView as? NSButton)?.title,
+            "Remember this choice for the session"
+        )
     }
 
     func testClipboardPromptDefaultsToDeny() {

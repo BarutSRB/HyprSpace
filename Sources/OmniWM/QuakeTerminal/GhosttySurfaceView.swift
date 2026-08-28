@@ -53,20 +53,21 @@ final class GhosttySurfaceCallbackContext {
 
 @MainActor
 final class GhosttyProtectedClipboardRequest {
-    let contents: String
+    let payload: GhosttyClipboardPayload
     private var state: UnsafeMutableRawPointer?
 
-    init(contents: String, state: UnsafeMutableRawPointer?) {
-        self.contents = contents
+    init(payload: GhosttyClipboardPayload, state: UnsafeMutableRawPointer?) {
+        self.payload = payload
         self.state = state
     }
 
-    func complete(on surface: ghostty_surface_t, allowing allowed: Bool) {
+    func complete(on surface: ghostty_surface_t, allowing allowed: Bool, remember: Bool = false) {
         guard let state else { return }
         self.state = nil
-        let reply = allowed ? contents : ""
-        reply.withCString { ptr in
-            ghostty_surface_complete_clipboard_request(surface, ptr, state, true)
+        if allowed {
+            payload.complete(on: surface, state: state, confirmed: true, remember: remember)
+        } else {
+            ghostty_surface_deny_clipboard_request(surface, state)
         }
     }
 }
@@ -301,10 +302,14 @@ final class GhosttySurfaceView: NSView, @preconcurrency NSTextInputClient {
         pendingProtectedClipboardRequests.append(request)
     }
 
-    func resolveProtectedClipboardRequest(_ request: GhosttyProtectedClipboardRequest, allowing allowed: Bool) {
+    func resolveProtectedClipboardRequest(
+        _ request: GhosttyProtectedClipboardRequest,
+        allowing allowed: Bool,
+        remember: Bool = false
+    ) {
         pendingProtectedClipboardRequests.removeAll { $0 === request }
         guard let surface = ghosttySurface else { return }
-        request.complete(on: surface, allowing: allowed)
+        request.complete(on: surface, allowing: allowed, remember: remember)
     }
 
     private func denyPendingProtectedClipboardRequests(on surface: ghostty_surface_t) {
