@@ -1,0 +1,35 @@
+name: Website
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - website/**
+      - .do/app.yaml
+      - .github/workflows/website.yml
+  pull_request:
+    paths:
+      - website/**
+      - .do/app.yaml
+      - .github/workflows/website.yml
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.15.0
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - run: npm ci
+      - run: npm run check
+      - run: npm run build

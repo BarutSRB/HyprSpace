@@ -12,7 +12,7 @@ npm run preview   # serve the built site
 npm run check     # type-check content and components
 ```
 
-Node 22.12+ required.
+Node 24 LTS required.
 
 ## Adding or editing a knowledge-base page
 
@@ -60,4 +60,4 @@ Everything in `public/` named `favicon*`, `apple-touch-icon.png`, `safari-pinned
 
 ## Deployment
 
-The site deploys to DigitalOcean App Platform as a static site — see `.do/app.yaml` at the repository root (Source Directory `website`, build `npm ci && npm run build`, output `dist`, error document `404.html`, domains `omniwm.app` + `www` alias). Bootstrap a fresh app with `doctl apps create --spec .do/app.yaml`; after creation the App Platform control panel is the source of truth, with the spec kept in sync as documentation. Pushing to `main` redeploys.
+The site deploys to DigitalOcean App Platform as a static site — see `.do/app.yaml` at the repository root (Source Directory `website`, Node 24, build script `npm run build`, output `dist`, error document `404.html`, domains `omniwm.app` + `www` alias). Bootstrap a fresh app with `doctl apps create --spec .do/app.yaml --wait`. The tracked app spec is the source of truth; validate it before updates and sync back any deliberate control-panel changes. DigitalOcean's native GitHub integration redeploys the site after every push to `main`.
