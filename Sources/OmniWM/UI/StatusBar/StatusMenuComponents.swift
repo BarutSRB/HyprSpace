@@ -11,14 +11,10 @@ struct MenuHeader: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            ZStack {
-                Circle()
-                    .fill(Color(red: 0.3, green: 0.4, blue: 0.8).opacity(0.2))
-                    .frame(width: 36, height: 36)
-                Image(systemName: "square.grid.2x2")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(Color(nsColor: .labelColor))
-            }
+            Image(nsImage: OmniWMBrandMark.statusItemImage(pointSize: 28))
+                .renderingMode(.template)
+                .foregroundStyle(Color(nsColor: .labelColor))
+                .frame(width: 36, height: 36)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text("OmniWM")

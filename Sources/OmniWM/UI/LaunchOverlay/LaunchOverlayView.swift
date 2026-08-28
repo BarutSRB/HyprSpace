@@ -84,7 +84,7 @@ struct LaunchOverlayLayout {
         let totalWidth: CGFloat
     }
 
-    let wordmarkRect: CGRect
+    let lockupRect: CGRect
     let taglineRect: CGRect
     let prefixRect: CGRect
     let tickerRect: CGRect
@@ -92,13 +92,13 @@ struct LaunchOverlayLayout {
     let fontSize: CGFloat
 
     init(bounds: CGRect) {
-        let wordmarkWidth = min(bounds.width * 0.45, 600)
-        let wordmarkHeight = wordmarkWidth / OmniWMBrandMark.omniWordmarkAspect
-        wordmarkRect = CGRect(
-            x: bounds.midX - wordmarkWidth / 2,
-            y: bounds.midY - wordmarkHeight / 2,
-            width: wordmarkWidth,
-            height: wordmarkHeight
+        let lockupWidth = min(bounds.width * 0.45, 600)
+        let lockupHeight = lockupWidth / OmniWMBrandMark.launchLockupAspect
+        lockupRect = CGRect(
+            x: bounds.midX - lockupWidth / 2,
+            y: bounds.midY - lockupHeight / 2,
+            width: lockupWidth,
+            height: lockupHeight
         )
 
         let availableWidth = bounds.width * 0.8
@@ -113,7 +113,7 @@ struct LaunchOverlayLayout {
         let taglineX = bounds.midX - metrics.totalWidth / 2
         let taglineY = max(
             bounds.minY + 24,
-            wordmarkRect.minY - max(18, resolvedFontSize * 0.75) - metrics.lineHeight
+            lockupRect.minY - max(18, resolvedFontSize * 0.75) - metrics.lineHeight
         )
         prefixRect = CGRect(
             x: taglineX,
@@ -213,7 +213,7 @@ final class LaunchOverlayView: NSView {
     static let totalDuration = LaunchTextChoreography.totalDuration
 
     private let scale: CGFloat
-    private let wordmark = CAShapeLayer()
+    private let lockup = CALayer()
     private let writeMask = CAShapeLayer()
     private let prefix = CATextLayer()
     private let ticker = CALayer()
@@ -236,34 +236,33 @@ final class LaunchOverlayView: NSView {
         guard let host = layer else { return }
         host.contentsScale = scale
         let layout = LaunchOverlayLayout(bounds: bounds)
-        configureWordmark(wordRect: layout.wordmarkRect)
+        configureLockup(frame: layout.lockupRect)
         configurePrefix(frame: layout.prefixRect, fontSize: layout.fontSize)
         configureTicker(layout: layout)
-        for sublayer in [wordmark, prefix, ticker] as [CALayer] {
+        for sublayer in [lockup, prefix, ticker] as [CALayer] {
             sublayer.contentsScale = scale
             host.addSublayer(sublayer)
         }
     }
 
-    private func configureWordmark(wordRect: CGRect) {
-        wordmark.frame = wordRect
-        wordmark.path = OmniWMBrandMark.omniWordmarkPath(in: wordmark.bounds)
-        wordmark.fillColor = NSColor.white.cgColor
-        wordmark.strokeColor = NSColor.clear.cgColor
-        applyTextShadow(to: wordmark)
+    private func configureLockup(frame: CGRect) {
+        lockup.frame = frame
+        lockup.contents = OmniWMBrandMark.launchLockupImage
+        lockup.contentsGravity = .resizeAspect
+        applyTextShadow(to: lockup)
 
         let line = CGMutablePath()
-        line.move(to: CGPoint(x: wordmark.bounds.minX, y: wordmark.bounds.midY))
-        line.addLine(to: CGPoint(x: wordmark.bounds.maxX, y: wordmark.bounds.midY))
-        writeMask.frame = wordmark.bounds
+        line.move(to: CGPoint(x: lockup.bounds.minX, y: lockup.bounds.midY))
+        line.addLine(to: CGPoint(x: lockup.bounds.maxX, y: lockup.bounds.midY))
+        writeMask.frame = lockup.bounds
         writeMask.path = line
         writeMask.fillColor = NSColor.clear.cgColor
         writeMask.strokeColor = NSColor.white.cgColor
-        writeMask.lineWidth = wordmark.bounds.height * 1.5
+        writeMask.lineWidth = lockup.bounds.height * 1.5
         writeMask.lineCap = .round
         writeMask.strokeEnd = 0
         writeMask.contentsScale = scale
-        wordmark.mask = writeMask
+        lockup.mask = writeMask
     }
 
     private func configurePrefix(frame: CGRect, fontSize: CGFloat) {
@@ -381,7 +380,7 @@ final class LaunchOverlayView: NSView {
 
     func teardown() {
         layer?.removeAllAnimations()
-        wordmark.removeAllAnimations()
+        lockup.removeAllAnimations()
         writeMask.removeAllAnimations()
         prefix.removeAllAnimations()
         ticker.removeAllAnimations()

@@ -14,16 +14,36 @@ final class LaunchOverlayTests: XCTestCase {
         XCTAssertEqual(completions, 1)
     }
 
-    func testWordmarkPathIsNonEmpty() {
-        let rect = CGRect(x: 0, y: 0, width: 300, height: 100)
-        XCTAssertFalse(OmniWMBrandMark.omniWordmarkPath(in: rect).isEmpty)
-        XCTAssertGreaterThan(OmniWMBrandMark.omniWordmarkAspect, 0)
+    func testLaunchLockupImageIsNonEmpty() {
+        let image = OmniWMBrandMark.launchLockupImage
+        XCTAssertTrue(image.isValid)
+        XCTAssertFalse(image.isTemplate)
+        XCTAssertFalse(image.representations.isEmpty)
+        XCTAssertTrue(image.representations.contains { $0 is NSPDFImageRep })
+        XCTAssertGreaterThan(image.size.width, 0)
+        XCTAssertGreaterThan(image.size.height, 0)
+        XCTAssertGreaterThan(OmniWMBrandMark.launchLockupAspect, 0)
+        XCTAssertEqual(
+            OmniWMBrandMark.launchLockupAspect,
+            image.size.width / image.size.height,
+            accuracy: 0.001
+        )
     }
 
-    func testStatusItemImageIsUntinted() {
-        let image = OmniWMBrandMark.statusItemImage(pointSize: 18)
-        XCTAssertFalse(image.isTemplate)
-        XCTAssertGreaterThan(image.size.width, 0)
+    func testStatusItemImageIsAdaptiveTemplateCopy() {
+        let first = OmniWMBrandMark.statusItemImage(pointSize: 18)
+        let second = OmniWMBrandMark.statusItemImage(pointSize: 18)
+        let compact = OmniWMBrandMark.statusItemImage(pointSize: 14)
+        XCTAssertTrue(first.isTemplate)
+        XCTAssertTrue(second.isTemplate)
+        XCTAssertTrue(compact.isTemplate)
+        XCTAssertTrue(first.representations.contains { $0 is NSPDFImageRep })
+        XCTAssertTrue(second.representations.contains { $0 is NSPDFImageRep })
+        XCTAssertTrue(compact.representations.contains { $0 is NSPDFImageRep })
+        XCTAssertFalse(first === second)
+        XCTAssertEqual(first.size, NSSize(width: 18, height: 18))
+        XCTAssertEqual(second.size, NSSize(width: 18, height: 18))
+        XCTAssertEqual(compact.size, NSSize(width: 14, height: 14))
     }
 
     func testTextChoreographyCyclesThroughExpectedWords() {
@@ -65,7 +85,7 @@ final class LaunchOverlayTests: XCTestCase {
         XCTAssertEqual(LaunchOverlayView.totalDuration, LaunchTextChoreography.totalDuration)
     }
 
-    func testTaglineLayoutIsCenteredBelowWordmarkAndContained() {
+    func testTaglineLayoutIsCenteredBelowLockupAndContained() {
         let boundsCases = [
             CGRect(x: 0, y: 0, width: 640, height: 480),
             CGRect(x: 0, y: 0, width: 1728, height: 1117)
@@ -73,7 +93,7 @@ final class LaunchOverlayTests: XCTestCase {
         for bounds in boundsCases {
             let layout = LaunchOverlayLayout(bounds: bounds)
             XCTAssertEqual(layout.taglineRect.midX, bounds.midX, accuracy: 0.001)
-            XCTAssertLessThan(layout.taglineRect.maxY, layout.wordmarkRect.minY)
+            XCTAssertLessThan(layout.taglineRect.maxY, layout.lockupRect.minY)
             XCTAssertTrue(bounds.contains(layout.taglineRect))
             XCTAssertTrue(bounds.contains(layout.tickerClipRect))
             XCTAssertTrue(layout.tickerClipRect.contains(layout.tickerRect))
