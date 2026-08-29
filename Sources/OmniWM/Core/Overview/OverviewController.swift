@@ -753,8 +753,7 @@ final class OverviewController {
                 let dwindleProjection = dwindleOverviewProjection(for: ws.id)
 
                 for entry in workspaceManager.entries(in: ws.id) {
-                    guard entry.layoutReason == .standard,
-                          !workspaceManager.isAppHidden(pid: entry.pid),
+                    guard isOverviewEligible(entry, workspaceManager: workspaceManager),
                           dwindleProjection?.includes(entry.token) != false,
                           let handle = workspaceManager.handle(for: entry.token)
                     else {
@@ -920,8 +919,7 @@ final class OverviewController {
         var desiredHandles: Set<WindowHandle> = []
 
         for entry in workspaceManager.entries(in: workspaceId) {
-            guard entry.layoutReason == .standard,
-                  !workspaceManager.isAppHidden(pid: entry.pid),
+            guard isOverviewEligible(entry, workspaceManager: workspaceManager),
                   projection.includes(entry.token),
                   let handle = workspaceManager.handle(for: entry.token)
             else {
@@ -975,8 +973,7 @@ final class OverviewController {
         var desiredHandles: Set<WindowHandle> = []
 
         for entry in workspaceManager.entries(in: workspaceId) {
-            guard entry.layoutReason == .standard,
-                  !workspaceManager.isAppHidden(pid: entry.pid),
+            guard isOverviewEligible(entry, workspaceManager: workspaceManager),
                   let handle = workspaceManager.handle(for: entry.token)
             else {
                 continue
@@ -1037,11 +1034,20 @@ final class OverviewController {
         guard let workspaceManager = wmController?.workspaceManager,
               workspaceManager.handle(for: handle.id) === handle,
               let entry = workspaceManager.entry(for: handle),
-              !workspaceManager.isAppHidden(pid: entry.pid)
+              isOverviewEligible(entry, workspaceManager: workspaceManager)
         else {
             return nil
         }
         return entry
+    }
+
+    private func isOverviewEligible(
+        _ entry: WindowState,
+        workspaceManager: WorkspaceManager
+    ) -> Bool {
+        entry.layoutReason == .standard
+            && !entry.interactionPolicy.isHandsOff
+            && !workspaceManager.isAppHidden(pid: entry.pid)
     }
 
     private func cachedNiriSnapshot(
@@ -1049,9 +1055,13 @@ final class OverviewController {
     ) -> NiriOverviewWorkspaceSnapshot? {
         let columns = snapshot.columns.compactMap { column -> NiriOverviewColumnSnapshot? in
             let tiles = column.tiles.filter { tile in
-                guard let workspaceManager = wmController?.workspaceManager else { return false }
-                return workspaceManager.workspace(for: tile.token) == snapshot.workspaceId
-                    && !workspaceManager.isAppHidden(tile.token)
+                guard let workspaceManager = wmController?.workspaceManager,
+                      let entry = workspaceManager.entry(for: tile.token)
+                else {
+                    return false
+                }
+                return entry.workspaceId == snapshot.workspaceId
+                    && isOverviewEligible(entry, workspaceManager: workspaceManager)
             }
             guard !tiles.isEmpty else { return nil }
             return NiriOverviewColumnSnapshot(

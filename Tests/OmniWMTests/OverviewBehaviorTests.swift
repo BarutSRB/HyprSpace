@@ -1460,6 +1460,34 @@ final class OverviewBehaviorTests: XCTestCase {
         XCTAssertEqual(frameReads, 1)
     }
 
+    func testOverviewSnapshotExcludesHandsOffSurfaces() throws {
+        var titleReads = 0
+        var frameReads = 0
+        var fixture = try makeRuntimeOverviewFixture(windowCount: 2)
+        fixture.environment.windowTitle = { _ in
+            titleReads += 1
+            return "Window"
+        }
+        fixture.environment.windowFrame = { _ in
+            frameReads += 1
+            return CGRect(x: 10, y: 10, width: 500, height: 400)
+        }
+        let handsOffToken = fixture.handles[0].id
+        let visibleToken = fixture.handles[1].id
+        fixture.controller.workspaceManager.setInteractionPolicy(.handsOffSurface, for: handsOffToken)
+        let overview = OverviewController(
+            wmController: fixture.controller,
+            motionPolicy: fixture.controller.motionPolicy,
+            environment: fixture.environment
+        )
+
+        overview.prepareOpenState()
+
+        XCTAssertEqual(overview.selectedWindowHandle?.id, visibleToken)
+        XCTAssertEqual(titleReads, 1)
+        XCTAssertEqual(frameReads, 1)
+    }
+
     func testCachedProjectionRemovesAndRestoresHiddenNiriWindow() throws {
         var titleReads = 0
         var fixture = try makeRuntimeOverviewFixture(windowCount: 2)
@@ -1498,6 +1526,39 @@ final class OverviewBehaviorTests: XCTestCase {
         )
 
         XCTAssertEqual(overview.selectedWindowHandle, hiddenHandle)
+        XCTAssertEqual(titleReads, 1)
+    }
+
+    func testCachedProjectionRemovesAndRestoresHandsOffNiriWindow() throws {
+        var titleReads = 0
+        var fixture = try makeRuntimeOverviewFixture(windowCount: 2)
+        fixture.environment.windowTitle = { _ in
+            titleReads += 1
+            return "Window"
+        }
+        let overview = OverviewController(
+            wmController: fixture.controller,
+            motionPolicy: fixture.controller.motionPolicy,
+            environment: fixture.environment
+        )
+        overview.prepareOpenState()
+        overview.onAnimationComplete(state: .open)
+        let handsOffHandle = try XCTUnwrap(overview.selectedWindowHandle)
+
+        titleReads = 0
+        fixture.controller.workspaceManager.setInteractionPolicy(.handsOffSurface, for: handsOffHandle.id)
+        overview.refreshCachedOverviewProjection(affectedWorkspaceIds: [fixture.workspaceId])
+
+        XCTAssertNotEqual(overview.selectedWindowHandle, handsOffHandle)
+        XCTAssertEqual(titleReads, 0)
+
+        fixture.controller.workspaceManager.setInteractionPolicy(.full, for: handsOffHandle.id)
+        overview.refreshCachedOverviewProjection(
+            affectedWorkspaceIds: [fixture.workspaceId],
+            selectedHandle: handsOffHandle
+        )
+
+        XCTAssertEqual(overview.selectedWindowHandle, handsOffHandle)
         XCTAssertEqual(titleReads, 1)
     }
 
