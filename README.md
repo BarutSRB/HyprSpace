@@ -141,6 +141,23 @@
       <sub>@albertilagan</sub>
     </td>
     <td align="center" valign="top">
+      <a href="https://github.com/nrwl">
+        <img src="https://avatars.githubusercontent.com/u/23692104?v=4" width="72" alt="Nx">
+      </a>
+      <br>
+      <a href="https://github.com/nrwl"><strong>Nx</strong></a>
+      <br>
+      <sub>━━━━━━━━</sub>
+      <br>
+      <a href="https://github.com/llwt" title="Steven Nance">
+        <img src="https://github.com/llwt.png?size=96" width="72" alt="Steven Nance">
+      </a>
+      <br>
+      <a href="https://github.com/llwt"><strong>Steven Nance</strong></a>
+      <br>
+      <sub>@llwt</sub>
+    </td>
+    <td align="center" valign="top">
       <a href="https://www.reactsquad.io">
         <img src="https://cdn.prod.website-files.com/657d97b1704ec3bbd13b7b7f/65ae5ba5042fdf11343fdcae_reactsquad-webclipV2.png" width="72" alt="ReactSquad">
       </a>
@@ -393,6 +410,9 @@
       </a>
       <a href="https://github.com/RyanHecht" title="Ryan Hecht">
         <img src="https://github.com/RyanHecht.png?size=96" width="72" alt="Ryan Hecht">
+      </a>
+      <a href="https://github.com/llwt" title="Steven Nance">
+        <img src="https://github.com/llwt.png?size=96" width="72" alt="Steven Nance">
       </a>
       <a href="https://github.com/chenhaozhenss" title="Williamufo">
         <img src="https://github.com/chenhaozhenss.png?size=96" width="72" alt="Williamufo">
