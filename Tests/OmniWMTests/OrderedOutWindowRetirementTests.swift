@@ -91,4 +91,94 @@ final class OrderedOutWindowRetirementTests: XCTestCase {
         XCTAssertEqual(refresh.kind, .fullRescan)
         XCTAssertEqual(refresh.rescanScope, .targeted(appPIDs: [token.pid], nativeSpaceIds: []))
     }
+
+    func testWindowlessForeignAppTakingFrontDoesNotRescanTheFocusedApp() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let token = controller.workspaceManager.addWindow(
+            AXWindowRef(element: AXUIElementCreateApplication(913_003), windowId: 913_103),
+            pid: 913_003,
+            windowId: 913_103,
+            to: workspaceId
+        )
+        XCTAssertTrue(
+            controller.workspaceManager.confirmManagedFocus(
+                token,
+                in: workspaceId,
+                activateWorkspaceOnMonitor: false
+            )
+        )
+        controller.hasStartedServices = true
+        controller.layoutRefreshController.layoutState.activeRefresh = nil
+        controller.axEventHandler.previouslyFocusedManagedToken = token
+
+        controller.axEventHandler.handleActivationFactsResolved(
+            ActivationFacts(
+                pid: 913_903,
+                source: .cgsFrontAppChanged,
+                origin: .external,
+                observationGeneration: 0,
+                requestedAtSeq: UInt64.max,
+                focusedWindow: nil
+            )
+        )
+
+        XCTAssertNil(controller.workspaceManager.focusedToken)
+        XCTAssertNil(controller.workspaceManager.nonManagedFocusToken)
+        XCTAssertNil(controller.layoutRefreshController.layoutState.activeRefresh)
+        XCTAssertNil(controller.layoutRefreshController.layoutState.pendingRefresh)
+        XCTAssertEqual(controller.axEventHandler.previouslyFocusedManagedToken, token)
+    }
+
+    func testConcreteNonManagedFocusRescansBeforeSameManagedWindowReturns() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let managedToken = controller.workspaceManager.addWindow(
+            AXWindowRef(element: AXUIElementCreateApplication(913_004), windowId: 913_104),
+            pid: 913_004,
+            windowId: 913_104,
+            to: workspaceId
+        )
+        XCTAssertTrue(
+            controller.workspaceManager.confirmManagedFocus(
+                managedToken,
+                in: workspaceId,
+                activateWorkspaceOnMonitor: false
+            )
+        )
+        controller.hasStartedServices = true
+        controller.layoutRefreshController.layoutState.activeRefresh = nil
+        controller.axEventHandler.previouslyFocusedManagedToken = managedToken
+
+        let unmanagedToken = WindowToken(pid: 913_904, windowId: 913_194)
+        XCTAssertTrue(controller.workspaceManager.enterNonManagedFocus(target: unmanagedToken))
+        XCTAssertNil(controller.workspaceManager.focusedToken)
+        XCTAssertEqual(controller.workspaceManager.nonManagedFocusToken, unmanagedToken)
+        XCTAssertTrue(controller.shouldSuppressManagedFocusRecovery)
+
+        controller.axEventHandler.rescanAppThatLostFocus()
+
+        let refresh = try XCTUnwrap(controller.layoutRefreshController.layoutState.activeRefresh)
+        XCTAssertEqual(refresh.kind, .fullRescan)
+        XCTAssertEqual(refresh.rescanScope, .targeted(appPIDs: [managedToken.pid], nativeSpaceIds: []))
+        XCTAssertNil(controller.axEventHandler.previouslyFocusedManagedToken)
+
+        controller.layoutRefreshController.layoutState.activeRefresh = nil
+        XCTAssertTrue(
+            controller.workspaceManager.confirmManagedFocus(
+                managedToken,
+                in: workspaceId,
+                activateWorkspaceOnMonitor: false
+            )
+        )
+        controller.axEventHandler.rescanAppThatLostFocus()
+
+        XCTAssertNil(controller.layoutRefreshController.layoutState.activeRefresh)
+        XCTAssertNil(controller.layoutRefreshController.layoutState.pendingRefresh)
+        XCTAssertEqual(controller.axEventHandler.previouslyFocusedManagedToken, managedToken)
+    }
 }

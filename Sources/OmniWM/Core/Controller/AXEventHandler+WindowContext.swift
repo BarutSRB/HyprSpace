@@ -30,6 +30,7 @@ extension AXEventHandler {
     func rescanAppThatLostFocus() {
         guard let controller else { return }
         let focusedToken = controller.workspaceManager.focusedToken
+        guard focusedToken != nil || controller.workspaceManager.nonManagedFocusToken != nil else { return }
         defer { previouslyFocusedManagedToken = focusedToken }
         guard let previousToken = previouslyFocusedManagedToken,
               previousToken != focusedToken,
