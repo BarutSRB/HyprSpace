@@ -14,7 +14,8 @@ final class OverviewDwindleProjectionTests: XCTestCase {
         let fixture = makeGroupedFixture()
         let projection = DwindleOverviewWorkspaceProjection(
             engine: fixture.engine,
-            workspaceId: fixture.workspaceId
+            workspaceId: fixture.workspaceId,
+            eligibleTokens: [fixture.first, fixture.second, fixture.standalone]
         )
 
         XCTAssertFalse(projection.includes(fixture.first))
@@ -32,7 +33,8 @@ final class OverviewDwindleProjectionTests: XCTestCase {
 
         let projection = DwindleOverviewWorkspaceProjection(
             engine: fixture.engine,
-            workspaceId: fixture.workspaceId
+            workspaceId: fixture.workspaceId,
+            eligibleTokens: [fixture.first, fixture.second, fixture.standalone]
         )
 
         XCTAssertTrue(projection.includes(fixture.first))
@@ -52,12 +54,42 @@ final class OverviewDwindleProjectionTests: XCTestCase {
         _ = fixture.engine.calculateLayout(for: fixture.workspaceId, screen: screen)
         let projection = DwindleOverviewWorkspaceProjection(
             engine: fixture.engine,
-            workspaceId: fixture.workspaceId
+            workspaceId: fixture.workspaceId,
+            eligibleTokens: [fixture.first, fixture.second, fixture.standalone]
         )
 
         XCTAssertEqual(removed, [fixture.second])
         XCTAssertTrue(projection.includes(fixture.first))
         XCTAssertEqual(Set(projection.frames.keys), [fixture.first, fixture.standalone])
+        XCTAssertTrue(projection.groupCountByToken.isEmpty)
+    }
+
+    func testProjectionPromotesEligibleMemberWhenActiveMemberIsIneligible() {
+        let fixture = makeGroupedFixture()
+        let projection = DwindleOverviewWorkspaceProjection(
+            engine: fixture.engine,
+            workspaceId: fixture.workspaceId,
+            eligibleTokens: [fixture.first, fixture.standalone]
+        )
+
+        XCTAssertTrue(projection.includes(fixture.first))
+        XCTAssertFalse(projection.includes(fixture.second))
+        XCTAssertTrue(projection.includes(fixture.standalone))
+        XCTAssertEqual(Set(projection.frames.keys), [fixture.first, fixture.standalone])
+        XCTAssertTrue(projection.groupCountByToken.isEmpty)
+    }
+
+    func testProjectionExcludesIneligibleInactiveMemberFromGroupCount() {
+        let fixture = makeGroupedFixture()
+        let projection = DwindleOverviewWorkspaceProjection(
+            engine: fixture.engine,
+            workspaceId: fixture.workspaceId,
+            eligibleTokens: [fixture.second, fixture.standalone]
+        )
+
+        XCTAssertFalse(projection.includes(fixture.first))
+        XCTAssertTrue(projection.includes(fixture.second))
+        XCTAssertEqual(Set(projection.frames.keys), [fixture.second, fixture.standalone])
         XCTAssertTrue(projection.groupCountByToken.isEmpty)
     }
 
@@ -167,6 +199,105 @@ final class OverviewDwindleProjectionTests: XCTestCase {
         )
 
         XCTAssertEqual(overview.selectedWindowHandle?.id, first)
+    }
+
+    @MainActor
+    func testOverviewPromotesEligibleGroupedMemberForInitialAndCachedProjections() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("OmniWMOverviewDwindleEligibilityTests-\(UUID().uuidString)", isDirectory: true)
+        let settings = SettingsStore(
+            persistence: SettingsFilePersistence(
+                directory: root.appendingPathComponent("config", isDirectory: true),
+                startWatching: false,
+                deferSaves: false
+            ),
+            runtimeState: RuntimeStateStore(
+                directory: root.appendingPathComponent("state", isDirectory: true),
+                deferSaves: false
+            ),
+            autosaveEnabled: false
+        )
+        let controller = WMController(
+            settings: settings,
+            windowFocusOperations: WindowFocusOperations(
+                activateApp: { _ in },
+                focusSpecificWindow: { _, _, _ in },
+                raiseWindow: { _ in }
+            )
+        )
+        controller.settings.workspaceConfigurations.append(
+            WorkspaceConfiguration(name: "98", layoutType: .dwindle)
+        )
+        let monitor = Monitor(
+            id: .init(displayId: 92_002),
+            displayId: 92_002,
+            frame: screen,
+            visibleFrame: screen,
+            hasNotch: false,
+            name: "Overview Dwindle Eligibility"
+        )
+        controller.workspaceManager.applyMonitorConfigurationChange([monitor])
+        controller.workspaceManager.applySettings()
+        let workspaceId = try XCTUnwrap(controller.workspaceManager.workspaceId(named: "98"))
+        controller.workspaceManager.assignWorkspaceToMonitor(workspaceId, monitorId: monitor.id)
+        XCTAssertTrue(controller.workspaceManager.setActiveWorkspace(workspaceId, on: monitor.id))
+
+        let first = controller.workspaceManager.addWindow(
+            AXWindowRef(element: AXUIElementCreateApplication(92_103), windowId: 92_203),
+            pid: 92_103,
+            windowId: 92_203,
+            to: workspaceId
+        )
+        let second = controller.workspaceManager.addWindow(
+            AXWindowRef(element: AXUIElementCreateApplication(92_104), windowId: 92_204),
+            pid: 92_104,
+            windowId: 92_204,
+            to: workspaceId
+        )
+        let engine = DwindleLayoutEngine()
+        controller.dwindleEngine = engine
+        controller.workspaceManager.withEngineMutationScope {
+            _ = engine.addWindow(token: first, to: workspaceId, activeWindowFrame: nil)
+            _ = engine.addWindow(token: second, to: workspaceId, activeWindowFrame: nil)
+            _ = engine.calculateLayout(for: workspaceId, screen: screen)
+            _ = engine.groupWindow(direction: .left, in: workspaceId)
+            _ = engine.calculateLayout(for: workspaceId, screen: screen)
+        }
+        controller.workspaceManager.setInteractionPolicy(.handsOffSurface, for: second)
+
+        var titleReads = 0
+        var environment = OverviewEnvironment()
+        environment.windowTitle = { _ in
+            titleReads += 1
+            return "Window"
+        }
+        environment.windowFrame = { _ in .zero }
+        let overview = OverviewController(
+            wmController: controller,
+            motionPolicy: controller.motionPolicy,
+            environment: environment
+        )
+
+        overview.prepareOpenState()
+
+        XCTAssertEqual(overview.selectedWindowHandle?.id, first)
+        XCTAssertEqual(titleReads, 1)
+
+        overview.onAnimationComplete(state: .open)
+        controller.workspaceManager.setInteractionPolicy(.full, for: second)
+        overview.refreshCachedOverviewProjection(
+            affectedWorkspaceIds: [workspaceId],
+            selectedHandle: controller.workspaceManager.handle(for: second)
+        )
+
+        XCTAssertEqual(overview.selectedWindowHandle?.id, second)
+        XCTAssertEqual(titleReads, 2)
+
+        controller.workspaceManager.setInteractionPolicy(.handsOffSurface, for: second)
+        overview.refreshCachedOverviewProjection(affectedWorkspaceIds: [workspaceId])
+
+        XCTAssertEqual(overview.selectedWindowHandle?.id, first)
+        XCTAssertEqual(titleReads, 3)
     }
 
     private func makeGroupedFixture() -> (
