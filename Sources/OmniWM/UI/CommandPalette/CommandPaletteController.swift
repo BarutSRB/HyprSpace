@@ -639,6 +639,7 @@ final class CommandPaletteController: NSObject, NSWindowDelegate {
 
         for entry in entries {
             guard entry.layoutReason == .standard,
+                  !entry.interactionPolicy.isHandsOff,
                   let handle = wmController.workspaceManager.handle(for: entry.token) else { continue }
 
             let title = AXWindowService.titlePreferFast(windowId: UInt32(entry.windowId)) ?? ""
