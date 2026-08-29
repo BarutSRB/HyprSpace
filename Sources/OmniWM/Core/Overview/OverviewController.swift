@@ -60,23 +60,49 @@ struct OverviewEnvironment {
 }
 
 struct DwindleOverviewWorkspaceProjection {
+    let eligibleTokens: Set<WindowToken>
     let inactiveTokens: Set<WindowToken>
     let frames: [WindowToken: CGRect]
     let groupCountByToken: [WindowToken: Int]
 
-    init(engine: DwindleLayoutEngine, workspaceId: WorkspaceDescriptor.ID) {
-        inactiveTokens = engine.inactiveGroupTokens(in: workspaceId)
-        frames = engine.currentFrames(in: workspaceId)
+    init(
+        engine: DwindleLayoutEngine,
+        workspaceId: WorkspaceDescriptor.ID,
+        eligibleTokens: Set<WindowToken>
+    ) {
+        self.eligibleTokens = eligibleTokens
+
+        var inactiveTokens = engine.inactiveGroupTokens(in: workspaceId)
+        var frames = engine.currentFrames(in: workspaceId)
 
         var groupCounts: [WindowToken: Int] = [:]
         for snapshot in engine.groupedTileSnapshots(in: workspaceId) {
-            groupCounts[snapshot.activeToken] = snapshot.members.count
+            let eligibleMembers = snapshot.members.filter { eligibleTokens.contains($0.token) }
+            let representative = eligibleMembers.first { $0.token == snapshot.activeToken }
+                ?? eligibleMembers.first
+            let frame = frames[snapshot.activeToken] ?? snapshot.contentFrame ?? snapshot.tileFrame
+
+            inactiveTokens.formUnion(snapshot.members.map(\.token))
+            for member in snapshot.members {
+                frames.removeValue(forKey: member.token)
+            }
+
+            guard let representative else { continue }
+            inactiveTokens.remove(representative.token)
+            if let frame {
+                frames[representative.token] = frame
+            }
+            if eligibleMembers.count > 1 {
+                groupCounts[representative.token] = eligibleMembers.count
+            }
         }
+        self.inactiveTokens = inactiveTokens
+        self.frames = frames
         groupCountByToken = groupCounts
     }
 
     func includes(_ token: WindowToken) -> Bool {
-        !inactiveTokens.contains(token)
+        eligibleTokens.contains(token) && !inactiveTokens.contains(token)
     }
 }
 
@@ -828,11 +854,7 @@ final class OverviewController {
                     overviewSnapshot.niriSnapshotsByWorkspace.removeValue(forKey: workspaceId)
                 }
             case .dwindle:
-                if let engine = wmController.dwindleEngine {
-                    let projection = DwindleOverviewWorkspaceProjection(
-                        engine: engine,
-                        workspaceId: workspaceId
-                    )
+                if let projection = dwindleOverviewProjection(for: workspaceId) {
                     dwindleProjections[workspaceId] = projection
                     engineFrames.merge(projection.frames) { _, new in new }
                 }
@@ -907,7 +929,16 @@ final class OverviewController {
         else {
             return nil
         }
-        return DwindleOverviewWorkspaceProjection(engine: engine, workspaceId: workspaceId)
+        let eligibleTokens = Set(
+            wmController.workspaceManager.entries(in: workspaceId).lazy
+                .filter { isOverviewEligible($0, workspaceManager: wmController.workspaceManager) }
+                .map(\.token)
+        )
+        return DwindleOverviewWorkspaceProjection(
+            engine: engine,
+            workspaceId: workspaceId,
+            eligibleTokens: eligibleTokens
+        )
     }
 
     private func reconcileDwindleOverviewProjection(
