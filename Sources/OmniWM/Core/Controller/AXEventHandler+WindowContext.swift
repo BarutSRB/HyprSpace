@@ -30,6 +30,11 @@ extension AXEventHandler {
     func rescanAppThatLostFocus() {
         guard let controller else { return }
         let focusedToken = controller.workspaceManager.focusedToken
+        // Focus that landed on no tracked window went to a foreign front process, such as a
+        // menu bar extra showing its menu. That is not the ordered-out signal, and the
+        // rescan's focus recovery would front the tile and cancel that menu. Returning
+        // before the memo update keeps the rescan pending for the next real focus change.
+        guard focusedToken != nil else { return }
         defer { previouslyFocusedManagedToken = focusedToken }
         guard let previousToken = previouslyFocusedManagedToken,
               previousToken != focusedToken,
