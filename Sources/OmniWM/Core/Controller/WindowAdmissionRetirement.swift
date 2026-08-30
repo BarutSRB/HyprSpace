@@ -175,7 +175,7 @@ extension AXEventHandler {
         guard WMController.isMeaningfulAdmissionFrame(refusal.targetFrame),
               !WMController.isMeaningfulAdmissionFrame(refusal.observedFrame)
         else {
-            controller.adoptObservedSizeAfterTerminalFrameRefusal(refusal)
+            controller.adoptObservedMinimumAfterTerminalSizeWriteFailure(refusal)
             return nil
         }
         guard let entry = controller.workspaceManager.entry(forWindowId: refusal.windowId),

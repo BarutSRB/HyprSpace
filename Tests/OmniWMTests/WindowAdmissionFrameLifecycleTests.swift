@@ -141,6 +141,28 @@ final class WindowAdmissionFrameLifecycleTests: XCTestCase {
         XCTAssertNil(dedupedDecision.request)
     }
 
+    func testStableGhosttyWidthFloorConvergesWithoutTerminalRefusal() throws {
+        let ledger = AXFrameApplicationLedger()
+        let pid: pid_t = 467_312
+        let target = CGRect(x: 0, y: 0, width: 95, height: 1_410)
+        let observed = CGRect(x: 0, y: 0, width: 105, height: 1_410)
+        let window = AXWindowRef(element: AXUIElementCreateApplication(pid), windowId: 467_415)
+
+        let settlement = try settleSizeConvergence(
+            ledger,
+            pid: pid,
+            window: window,
+            target: target,
+            observed: observed
+        )
+
+        XCTAssertTrue(settlement.outcome.retries.isEmpty)
+        XCTAssertTrue(settlement.outcome.terminalRefusals.isEmpty)
+        XCTAssertTrue(settlement.outcome.terminalFailures.isEmpty)
+        XCTAssertEqual(settlement.acceptedResults.map(\.confirmedFrame), [observed])
+        XCTAssertEqual(ledger.lastAppliedFrame(for: window.windowId), observed)
+    }
+
     func testAcceptedSizeConvergenceSuppressesOnlyItsExactTarget() throws {
         let ledger = AXFrameApplicationLedger()
         let pid: pid_t = 467_306
@@ -1063,6 +1085,65 @@ final class WindowAdmissionFrameLifecycleTests: XCTestCase {
         XCTAssertNotNil(controller.workspaceManager.entry(for: token))
         XCTAssertNil(controller.workspaceManager.observedMinSize(for: token))
         XCTAssertFalse(controller.axEventHandler.isAdmissionQuarantined(windowId: windowId, axRef: axRef))
+    }
+
+    func testMeaningfulVerificationMismatchDoesNotAdoptObservedMinimum() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let pid: pid_t = 467_311
+        let windowId = 467_414
+        let axRef = AXWindowRef(element: AXUIElementCreateApplication(pid), windowId: windowId)
+        let token = controller.workspaceManager.addWindow(
+            axRef,
+            pid: pid,
+            windowId: windowId,
+            to: workspaceId
+        )
+        let refusal = AXFrameTerminalRefusal(
+            pid: pid,
+            windowId: windowId,
+            targetFrame: CGRect(x: 1_288, y: 0, width: 1_272, height: 1_410),
+            observedFrame: CGRect(x: 1_288, y: 0, width: 2_560, height: 1_410),
+            failureReason: .verificationMismatch
+        )
+
+        controller.axEventHandler.handleTerminalFrameRefusal(refusal)
+
+        XCTAssertNotNil(controller.workspaceManager.entry(for: token))
+        XCTAssertNil(controller.workspaceManager.observedMinSize(for: token))
+        XCTAssertFalse(controller.axEventHandler.isAdmissionQuarantined(windowId: windowId, axRef: axRef))
+    }
+
+    func testRepeatedDegenerateVerificationMismatchQuarantinesIncarnation() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let pid: pid_t = 467_702
+        let windowId = 467_802
+        let axRef = AXWindowRef(element: AXUIElementCreateApplication(pid), windowId: windowId)
+        let token = controller.workspaceManager.addWindow(
+            axRef,
+            pid: pid,
+            windowId: windowId,
+            to: workspaceId
+        )
+        let refusal = AXFrameTerminalRefusal(
+            pid: pid,
+            windowId: windowId,
+            targetFrame: CGRect(x: 20, y: 30, width: 640, height: 480),
+            observedFrame: CGRect(x: 0, y: 0, width: 1, height: 1),
+            failureReason: .verificationMismatch
+        )
+
+        controller.axEventHandler.handleTerminalFrameRefusal(refusal)
+        XCTAssertNotNil(controller.workspaceManager.entry(for: token))
+
+        controller.axEventHandler.handleTerminalFrameRefusal(refusal)
+        XCTAssertNil(controller.workspaceManager.entry(for: token))
+        XCTAssertTrue(controller.axEventHandler.isAdmissionQuarantined(windowId: windowId, axRef: axRef))
     }
 
     func testRepeatedDegenerateTerminalRefusalRemovesAndQuarantinesIncarnation() throws {

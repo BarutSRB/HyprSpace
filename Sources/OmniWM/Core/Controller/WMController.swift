@@ -1383,8 +1383,9 @@ final class WMController {
         }
     }
 
-    func adoptObservedSizeAfterTerminalFrameRefusal(_ refusal: AXFrameTerminalRefusal) {
-        guard let entry = workspaceManager.entry(forWindowId: refusal.windowId),
+    func adoptObservedMinimumAfterTerminalSizeWriteFailure(_ refusal: AXFrameTerminalRefusal) {
+        guard case .sizeWriteFailed = refusal.failureReason,
+              let entry = workspaceManager.entry(forWindowId: refusal.windowId),
               entry.mode == .tiling,
               workspaceManager.hiddenState(for: entry.token) == nil
         else {
