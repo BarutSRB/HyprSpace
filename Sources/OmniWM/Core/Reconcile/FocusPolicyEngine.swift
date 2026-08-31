@@ -8,7 +8,6 @@ enum FocusPolicyLeaseOwner: String, Equatable {
     case nativeMenu = "native_menu"
     case windowCloseFocusRecovery = "window_close_focus_recovery"
     case nativeAppSwitch = "native_app_switch"
-    case ruleCreatedFloatingWindow = "rule_created_floating_window"
 }
 
 struct FocusPolicyLease: Equatable {
@@ -41,8 +40,7 @@ final class FocusPolicyEngine {
         .foreignTransientUI,
         .nativeMenu,
         .windowCloseFocusRecovery,
-        .nativeAppSwitch,
-        .ruleCreatedFloatingWindow
+        .nativeAppSwitch
     ]
 
     private let nowProvider: () -> Date

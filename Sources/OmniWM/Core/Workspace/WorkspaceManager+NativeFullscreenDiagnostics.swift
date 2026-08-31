@@ -35,8 +35,7 @@ extension WorkspaceManager {
             }
         return NativeFullscreenLifecycleDiagnosticsSnapshot(
             records: records,
-            isNonManagedFocusActive: isNonManagedFocusActive,
-            nonManagedFocusToken: nonManagedFocusToken,
+            nativeFocusOwner: nativeFocusOwner,
             activeFocusOwnerToken: activeNativeFullscreenFocusOwnerToken,
             renderableFocusToken: renderableFocusToken
         )

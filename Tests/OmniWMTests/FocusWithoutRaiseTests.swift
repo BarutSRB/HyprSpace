@@ -177,35 +177,6 @@ final class FocusWithoutRaiseTests: XCTestCase {
         XCTAssertEqual(fixture.controller.intentLedger.activeManagedRequest?.phase, .awaitingConfirmation)
     }
 
-    func testFailedStrongerRequestRestoresCapturedSameAppSourceAndCancels() throws {
-        let fixture = try makeFixture()
-        let source = addWindow(
-            pid: 820_002,
-            windowId: 820_221,
-            to: fixture.workspaceId,
-            controller: fixture.controller
-        )
-        let target = addWindow(
-            pid: source.pid,
-            windowId: 820_222,
-            to: fixture.workspaceId,
-            controller: fixture.controller
-        )
-        setFocused(source, in: fixture.workspaceId, controller: fixture.controller)
-        fixture.recorder.operations.removeAll()
-        fixture.controller.focusWindow(target, origin: .focusFollowsMouse)
-        fixture.controller.workspaceManager.setInteractionPolicy(.handsOffSurface, for: target)
-
-        fixture.controller.focusWindow(target, origin: .pointerHover)
-
-        XCTAssertEqual(
-            fixture.recorder.operations,
-            [.deactivate(source), .activateSameApp(source)]
-        )
-        XCTAssertNil(fixture.controller.intentLedger.activeManagedRequest)
-        XCTAssertNil(fixture.controller.workspaceManager.pendingFocusedToken)
-    }
-
     func testDifferentTargetSupersedesHandoffWithoutSourceRestoreAndIgnoresLateSourceEcho() throws {
         let fixture = try makeFixture()
         let source = addWindow(
@@ -1140,15 +1111,14 @@ final class FocusWithoutRaiseTests: XCTestCase {
         )
     }
 
-    func testFocusOnlyPreservesHiddenLockInteractionAndForeignTransientGates() throws {
+    func testFocusOnlyPreservesHiddenLockAndForeignTransientGates() throws {
         enum Gate {
             case hidden
             case lockScreen
-            case interactionPolicy
             case foreignTransient
         }
 
-        for gate in [Gate.hidden, .lockScreen, .interactionPolicy, .foreignTransient] {
+        for gate in [Gate.hidden, .lockScreen, .foreignTransient] {
             let fixture = try makeFixture()
             let target = addWindow(
                 pid: 820_021,
@@ -1161,8 +1131,6 @@ final class FocusWithoutRaiseTests: XCTestCase {
                 fixture.controller.workspaceManager.setAppHidden(true, pid: target.pid, source: .ax)
             case .lockScreen:
                 fixture.controller.isLockScreenActive = true
-            case .interactionPolicy:
-                fixture.controller.workspaceManager.setInteractionPolicy(.handsOffSurface, for: target)
             case .foreignTransient:
                 fixture.controller.focusPolicyEngine.beginLease(
                     owner: .foreignTransientUI,

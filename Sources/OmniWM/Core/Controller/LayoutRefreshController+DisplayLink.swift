@@ -274,7 +274,6 @@ extension LayoutRefreshController {
 
     func startWindowCloseAnimation(entry: WindowState, monitor: Monitor) {
         guard controller?.motionPolicy.animationsEnabled != false else { return }
-        guard entry.interactionPolicy.mayWriteFrame else { return }
         guard let controller else { return }
         guard !controller.workspaceManager.isAppHidden(entry.token) else { return }
         guard let frame = fastFrame(for: entry.token, axRef: entry.axRef) else { return }

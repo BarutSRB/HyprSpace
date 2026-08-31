@@ -253,8 +253,6 @@ final class AXManager {
     private var parkPIDByWindowId: [Int: pid_t] = [:]
     private var nextParkFrameRequestId: AXFrameRequestId = 1
 
-    var interactionPolicyForWindowId: ((Int) -> WindowInteractionPolicy)?
-
     init() {
         installWorkspaceObservers()
     }
@@ -2050,8 +2048,7 @@ final class AXManager {
     private func framesAllowedToWrite(
         _ frames: [AXFrameApplicationTarget]
     ) -> [AXFrameApplicationTarget] {
-        guard interactionPolicyForWindowId != nil
-            || !macOSHiddenAppPIDs.isEmpty
+        guard !macOSHiddenAppPIDs.isEmpty
             || nativeTitleBarDrag != nil
         else { return frames }
         return frames.filter { isFrameAllowedToWrite($0) }
@@ -2059,7 +2056,6 @@ final class AXManager {
 
     private func isFrameAllowedToWrite(_ target: AXFrameApplicationTarget) -> Bool {
         !macOSHiddenAppPIDs.contains(target.pid)
-            && (interactionPolicyForWindowId?(target.windowId).mayWriteFrame ?? true)
             && !excludeFrameWriteForNativeTitleBarDrag(
                 pid: target.pid,
                 windowId: target.windowId
@@ -2640,7 +2636,6 @@ final class AXManager {
         let filtered = positions.filter {
             (allowInactive || !inactiveWorkspaceWindowIds.contains($0.windowId))
                 && !macOSHiddenAppPIDs.contains($0.pid)
-                && (interactionPolicyForWindowId?($0.windowId).mayWriteFrame ?? true)
                 && !excludeFrameWriteForNativeTitleBarDrag(pid: $0.pid, windowId: $0.windowId)
         }
         guard !filtered.isEmpty else { return .submitted }

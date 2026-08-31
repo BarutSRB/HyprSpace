@@ -84,7 +84,7 @@ extension AXEventHandler {
         {
             return true
         }
-        if let focusedToken = controller?.workspaceManager.focusedToken,
+        if let focusedToken = controller?.workspaceManager.selectedManagedToken,
            managedWindowTokenUsingCachedIdentity(focusedToken, matchesObservedPid: lhs),
            managedWindowTokenUsingCachedIdentity(focusedToken, matchesObservedPid: rhs)
         {

@@ -33,7 +33,7 @@
         "level": 2004,
         "parentId": 0,
         "pid": 422,
-        "tags": 36063986760559618
+        "tags": 36063986760559620
       }
     },
     "observedDecision": {
@@ -129,12 +129,9 @@
     }
   ],
   "expectedDecision": {
-    "disposition": "floating",
-    "source": "heuristic",
-    "heuristicReasons": [
-      "accessoryWithoutClose"
-    ],
-    "layoutDecisionKind": "fallbackLayout"
-  },
-  "expectedPolicy": "handsOffSurface"
+    "disposition": "unmanaged",
+    "source": "builtInRule(externalSurface)",
+    "heuristicReasons": [],
+    "layoutDecisionKind": "explicitLayout"
+  }
 }

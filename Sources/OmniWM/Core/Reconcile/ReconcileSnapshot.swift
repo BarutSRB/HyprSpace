@@ -160,8 +160,38 @@ struct MonitorSession: Equatable {
     var previousVisibleWorkspaceId: WorkspaceDescriptor.ID?
 }
 
+enum NativeFocusOwner: Equatable, Sendable {
+    case managed(WindowToken)
+    case external(pid: pid_t?, windowId: Int?)
+    case ownedSurface
+    case none
+
+    var managedToken: WindowToken? {
+        guard case let .managed(token) = self else { return nil }
+        return token
+    }
+
+    var externalToken: WindowToken? {
+        guard case let .external(pid, windowId) = self,
+              let pid,
+              let windowId
+        else {
+            return nil
+        }
+        return WindowToken(pid: pid, windowId: windowId)
+    }
+
+    var isExternal: Bool {
+        if case .external = self {
+            return true
+        }
+        return false
+    }
+}
+
 struct FocusSessionSnapshot: Equatable {
-    var focusedToken: WindowToken? = nil
+    var selectedManagedToken: WindowToken? = nil
+    var nativeFocusOwner: NativeFocusOwner = .none
     var pendingManagedFocus: PendingManagedFocusSnapshot = .empty
     var lastTiledFocusedByWorkspace: [WorkspaceDescriptor.ID: WindowToken] = [:]
     var lastFloatingFocusedByWorkspace: [WorkspaceDescriptor.ID: WindowToken] = [:]
@@ -169,8 +199,6 @@ struct FocusSessionSnapshot: Equatable {
     var lastTiledFocusedToken: WindowToken? = nil
     var tiledFocusHistory: [WindowToken] = []
     var focusLease: FocusPolicyLease? = nil
-    var isNonManagedFocusActive: Bool = false
-    var nonManagedFocusToken: WindowToken? = nil
     var suppressedFocusToken: WindowToken? = nil
     var systemModalFocusToken: WindowToken? = nil
     var interactionMonitorId: Monitor.ID? = nil
@@ -345,7 +373,7 @@ extension FocusSessionSnapshot {
             }
         }
 
-        if focusedToken == token || pendingManagedFocus.token == token {
+        if selectedManagedToken == token || pendingManagedFocus.token == token {
             changed = rememberFocus(token, in: workspaceId, mode: newMode) || changed
         }
 
@@ -411,7 +439,27 @@ struct ReconcileWindowSnapshot: Equatable {
     let observedState: ObservedWindowState
     let desiredState: DesiredWindowState
     let restoreIntent: RestoreIntent?
-    let interactionPolicy: WindowInteractionPolicy
+    let lifetimeAuthority: ManagedWindowLifetimeAuthority
+
+    init(
+        token: WindowToken,
+        workspaceId: WorkspaceDescriptor.ID,
+        mode: TrackedWindowMode,
+        lifecyclePhase: WindowLifecyclePhase,
+        observedState: ObservedWindowState,
+        desiredState: DesiredWindowState,
+        restoreIntent: RestoreIntent?,
+        lifetimeAuthority: ManagedWindowLifetimeAuthority = .axTopLevelInventory
+    ) {
+        self.token = token
+        self.workspaceId = workspaceId
+        self.mode = mode
+        self.lifecyclePhase = lifecyclePhase
+        self.observedState = observedState
+        self.desiredState = desiredState
+        self.restoreIntent = restoreIntent
+        self.lifetimeAuthority = lifetimeAuthority
+    }
 }
 
 struct ReconcileSnapshot: Equatable {
@@ -421,8 +469,12 @@ struct ReconcileSnapshot: Equatable {
     var viewports: [WorkspaceDescriptor.ID: ViewportState] = [:]
     var layouts: [WorkspaceDescriptor.ID: LayoutTopology] = [:]
 
-    var focusedToken: WindowToken? {
-        focusSession.focusedToken
+    var selectedManagedToken: WindowToken? {
+        focusSession.selectedManagedToken
+    }
+
+    var nativeManagedFocusToken: WindowToken? {
+        focusSession.nativeFocusOwner.managedToken
     }
 
     var interactionMonitorId: Monitor.ID? {

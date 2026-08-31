@@ -189,7 +189,7 @@ final class WorkspaceMonitorMoveStateTests: XCTestCase {
 
         XCTAssertEqual(outcome.status, .executed)
         XCTAssertEqual(outcome.affectedWorkspaces, [workspaceId, replacementWorkspaceId])
-        XCTAssertEqual(manager.focusedToken, focusedToken)
+        XCTAssertEqual(manager.selectedManagedToken, focusedToken)
         XCTAssertEqual(manager.pendingFocusedToken, pendingToken)
         XCTAssertEqual(manager.pendingFocusedWorkspaceId, workspaceId)
         XCTAssertEqual(manager.pendingFocusedMonitorId, fixture.center.id)
@@ -254,7 +254,7 @@ final class WorkspaceMonitorMoveStateTests: XCTestCase {
         XCTAssertNil(manager.descriptor(for: movedWorkspaceId)?.runtimeMonitorOverride)
         XCTAssertEqual(manager.activeWorkspace(on: fixture.left.id)?.id, movedWorkspaceId)
         XCTAssertEqual(manager.activeWorkspace(on: fixture.center.id)?.id, pendingWorkspaceId)
-        XCTAssertEqual(manager.focusedToken, focusedToken)
+        XCTAssertEqual(manager.selectedManagedToken, focusedToken)
         XCTAssertEqual(manager.pendingFocusedToken, pendingToken)
         XCTAssertEqual(manager.pendingFocusedWorkspaceId, pendingWorkspaceId)
         XCTAssertEqual(manager.pendingFocusedMonitorId, fixture.center.id)
@@ -280,7 +280,7 @@ final class WorkspaceMonitorMoveStateTests: XCTestCase {
                 requestId: 44
             )
         )
-        XCTAssertNil(manager.focusedToken)
+        XCTAssertNil(manager.selectedManagedToken)
         let initialSeq = manager.worldSeq
         let initialEntry = try XCTUnwrap(manager.entry(for: pendingToken))
 
@@ -300,7 +300,7 @@ final class WorkspaceMonitorMoveStateTests: XCTestCase {
         XCTAssertEqual(manager.entry(for: pendingToken), initialEntry)
     }
 
-    func testPendingDestinationAndNonManagedInteractionRemainProtected() throws {
+    func testPendingDestinationAndExternalInteractionRemainProtected() throws {
         let fixture = makeFixture(assignments: [("1", 0), ("2", 1), ("3", 2)])
         let manager = fixture.manager
         let movedWorkspaceId = try XCTUnwrap(manager.workspaceId(named: "1"))
@@ -321,11 +321,12 @@ final class WorkspaceMonitorMoveStateTests: XCTestCase {
             )
         )
         _ = manager.setInteractionMonitor(fixture.right.id)
-        let nonManagedToken = WindowToken(pid: 963_999, windowId: 963_199)
+        let externalToken = WindowToken(pid: 963_999, windowId: 963_199)
         XCTAssertTrue(
-            manager.enterNonManagedFocus(
-                preservePendingManagedFocus: true,
-                target: nonManagedToken
+            manager.recordExternalFocus(
+                pid: externalToken.pid,
+                windowId: externalToken.windowId,
+                preservePendingManagedFocus: true
             )
         )
 
@@ -340,8 +341,8 @@ final class WorkspaceMonitorMoveStateTests: XCTestCase {
         XCTAssertEqual(manager.activeWorkspace(on: fixture.center.id)?.id, destinationWorkspaceId)
         XCTAssertEqual(manager.pendingFocusedToken, pendingToken)
         XCTAssertEqual(manager.pendingFocusedMonitorId, fixture.center.id)
-        XCTAssertTrue(manager.isNonManagedFocusActive)
-        XCTAssertEqual(manager.nonManagedFocusToken, nonManagedToken)
+        XCTAssertTrue(manager.nativeFocusOwner.isExternal)
+        XCTAssertEqual(manager.externalFocusToken, externalToken)
         XCTAssertEqual(manager.interactionMonitorId, fixture.right.id)
         XCTAssertEqual(manager.activeWorkspace(on: fixture.right.id)?.id, interactionWorkspaceId)
     }
@@ -550,7 +551,7 @@ final class WorkspaceMonitorMoveStateTests: XCTestCase {
             XCTAssertEqual(manager.worldSeq, initialSeq)
             XCTAssertNil(manager.descriptor(for: workspaceId)?.runtimeMonitorOverride)
             XCTAssertEqual(manager.monitorForWorkspace(workspaceId)?.id, fixture.left.id)
-            XCTAssertEqual(manager.focusedToken, token)
+            XCTAssertEqual(manager.selectedManagedToken, token)
             XCTAssertEqual(manager.entry(for: token), initialEntry)
         }
     }
@@ -641,7 +642,7 @@ final class WorkspaceMonitorMoveStateTests: XCTestCase {
             manager: manager
         )
         XCTAssertTrue(manager.setScratchpadMembership(token, to: 1))
-        XCTAssertNil(manager.focusedToken)
+        XCTAssertNil(manager.selectedManagedToken)
         XCTAssertNil(manager.hiddenState(for: token))
         let initialSeq = manager.worldSeq
         let initialEntry = try XCTUnwrap(manager.entry(for: token))
@@ -671,15 +672,15 @@ final class WorkspaceMonitorMoveStateTests: XCTestCase {
         )
 
         XCTAssertTrue(manager.requestNativeFullscreenEnter(token, in: workspaceId))
-        XCTAssertTrue(manager.enterNonManagedFocus(target: token))
+        XCTAssertTrue(manager.recordExternalFocus(pid: token.pid, windowId: token.windowId))
         let generation = try XCTUnwrap(manager.nativeFullscreenRecord(for: token)?.transitionGeneration)
 
         XCTAssertTrue(manager.expireNativeFullscreenTransition(originalToken: token, generation: generation))
         XCTAssertNil(manager.nativeFullscreenRecord(for: token))
         XCTAssertEqual(manager.entry(for: token)?.layoutReason, .standard)
         XCTAssertFalse(manager.hasPendingNativeFullscreenTransition)
-        XCTAssertFalse(manager.isNonManagedFocusActive)
-        XCTAssertNil(manager.nonManagedFocusToken)
+        XCTAssertFalse(manager.nativeFocusOwner.isExternal)
+        XCTAssertNil(manager.externalFocusToken)
     }
 
     func testNativeFullscreenEnterExpiryDrainsDeferredRuntimeMonitorOverrideClear() throws {
@@ -770,7 +771,7 @@ final class WorkspaceMonitorMoveStateTests: XCTestCase {
         XCTAssertTrue(manager.requestNativeFullscreenEnter(token, in: workspaceId))
         XCTAssertEqual(manager.nativeFullscreenTransitionTimeoutCount, 1)
 
-        XCTAssertTrue(manager.markNativeFullscreenSuspended(token, ownsNonManagedFocus: false))
+        XCTAssertTrue(manager.markNativeFullscreenSuspended(token, ownsNativeFocus: false))
         XCTAssertEqual(manager.nativeFullscreenTransitionTimeoutCount, 0)
 
         XCTAssertTrue(manager.requestNativeFullscreenExit(token))
@@ -809,7 +810,7 @@ final class WorkspaceMonitorMoveStateTests: XCTestCase {
         XCTAssertFalse(manager.hasPendingNativeFullscreenTransition(for: secondToken))
         XCTAssertFalse(manager.hasPendingNativeFullscreenTransition(in: secondWorkspaceId))
 
-        XCTAssertTrue(manager.markNativeFullscreenSuspended(firstToken, ownsNonManagedFocus: false))
+        XCTAssertTrue(manager.markNativeFullscreenSuspended(firstToken, ownsNativeFocus: false))
         XCTAssertFalse(manager.hasPendingNativeFullscreenTransition)
         XCTAssertTrue(manager.requestNativeFullscreenExit(firstToken))
         XCTAssertTrue(manager.hasPendingNativeFullscreenTransition)
@@ -836,9 +837,9 @@ final class WorkspaceMonitorMoveStateTests: XCTestCase {
             manager: manager
         )
 
-        XCTAssertTrue(manager.markNativeFullscreenSuspended(firstToken, ownsNonManagedFocus: false))
-        XCTAssertFalse(manager.isNonManagedFocusActive)
-        XCTAssertNil(manager.nonManagedFocusToken)
+        XCTAssertTrue(manager.markNativeFullscreenSuspended(firstToken, ownsNativeFocus: false))
+        XCTAssertFalse(manager.nativeFocusOwner.isExternal)
+        XCTAssertNil(manager.externalFocusToken)
         XCTAssertTrue(
             manager.selectNativeFullscreenPlaceholder(
                 firstToken,
@@ -848,19 +849,19 @@ final class WorkspaceMonitorMoveStateTests: XCTestCase {
         )
         XCTAssertEqual(manager.activeNativeFullscreenFocusOwnerToken, firstToken)
         XCTAssertTrue(manager.markNativeFullscreenSuspended(secondToken))
-        XCTAssertTrue(manager.isNonManagedFocusActive)
-        XCTAssertEqual(manager.nonManagedFocusToken, secondToken)
+        XCTAssertTrue(manager.nativeFocusOwner.isExternal)
+        XCTAssertEqual(manager.externalFocusToken, secondToken)
         XCTAssertEqual(manager.activeNativeFullscreenFocusOwnerToken, secondToken)
         XCTAssertNil(manager.renderableFocusToken)
 
         XCTAssertTrue(manager.restoreNativeFullscreenRecord(for: firstToken))
-        XCTAssertTrue(manager.isNonManagedFocusActive)
-        XCTAssertEqual(manager.nonManagedFocusToken, secondToken)
+        XCTAssertTrue(manager.nativeFocusOwner.isExternal)
+        XCTAssertEqual(manager.externalFocusToken, secondToken)
         XCTAssertEqual(manager.activeNativeFullscreenFocusOwnerToken, secondToken)
 
         XCTAssertTrue(manager.restoreNativeFullscreenRecord(for: secondToken))
-        XCTAssertFalse(manager.isNonManagedFocusActive)
-        XCTAssertNil(manager.nonManagedFocusToken)
+        XCTAssertFalse(manager.nativeFocusOwner.isExternal)
+        XCTAssertNil(manager.externalFocusToken)
     }
 
     func testManagedFocusConfirmationClearsNativeFullscreenOwner() throws {
@@ -890,8 +891,8 @@ final class WorkspaceMonitorMoveStateTests: XCTestCase {
                 onMonitor: fixture.center.id
             )
         )
-        XCTAssertFalse(manager.isNonManagedFocusActive)
-        XCTAssertNil(manager.nonManagedFocusToken)
+        XCTAssertFalse(manager.nativeFocusOwner.isExternal)
+        XCTAssertNil(manager.externalFocusToken)
         XCTAssertEqual(manager.renderableFocusToken, managedToken)
     }
 
@@ -934,9 +935,9 @@ final class WorkspaceMonitorMoveStateTests: XCTestCase {
 
         XCTAssertTrue(manager.reconcileNativeFullscreenWithTopology(for: fullscreenToken))
         XCTAssertEqual(manager.nativeFullscreenRecord(for: fullscreenToken)?.transition, .suspended)
-        XCTAssertFalse(manager.isNonManagedFocusActive)
-        XCTAssertNil(manager.nonManagedFocusToken)
-        XCTAssertEqual(manager.focusedToken, managedToken)
+        XCTAssertFalse(manager.nativeFocusOwner.isExternal)
+        XCTAssertNil(manager.externalFocusToken)
+        XCTAssertEqual(manager.selectedManagedToken, managedToken)
         XCTAssertEqual(manager.renderableFocusToken, managedToken)
         XCTAssertNil(manager.lastFocusedToken(in: fullscreenWorkspaceId))
     }
@@ -967,8 +968,8 @@ final class WorkspaceMonitorMoveStateTests: XCTestCase {
         XCTAssertTrue(manager.reconcileNativeFullscreenWithTopology(for: token))
         XCTAssertNil(manager.nativeFullscreenRecord(for: token))
         XCTAssertEqual(manager.layoutReason(for: token), .standard)
-        XCTAssertTrue(manager.isNonManagedFocusActive)
-        XCTAssertEqual(manager.nonManagedFocusToken, token)
+        XCTAssertTrue(manager.nativeFocusOwner.isExternal)
+        XCTAssertEqual(manager.externalFocusToken, token)
     }
 
     func testNativeFullscreenOwnerRekeysAndDefinitiveRemovalClearsMode() throws {
@@ -994,12 +995,12 @@ final class WorkspaceMonitorMoveStateTests: XCTestCase {
                 )
             )
         )
-        XCTAssertEqual(manager.nonManagedFocusToken, replacementToken)
+        XCTAssertEqual(manager.externalFocusToken, replacementToken)
         XCTAssertEqual(manager.nativeFullscreenRecord(for: replacementToken)?.currentToken, replacementToken)
 
         XCTAssertNotNil(manager.removeWindow(pid: replacementToken.pid, windowId: replacementToken.windowId))
-        XCTAssertFalse(manager.isNonManagedFocusActive)
-        XCTAssertNil(manager.nonManagedFocusToken)
+        XCTAssertFalse(manager.nativeFocusOwner.isExternal)
+        XCTAssertNil(manager.externalFocusToken)
         XCTAssertNil(manager.nativeFullscreenRecord(for: replacementToken))
     }
 
@@ -1303,7 +1304,7 @@ final class WorkspaceMonitorMoveStateTests: XCTestCase {
 
         XCTAssertNil(manager.descriptor(for: movedWorkspaceId)?.runtimeMonitorOverride)
         XCTAssertEqual(manager.monitorForWorkspace(movedWorkspaceId)?.id, fixture.left.id)
-        XCTAssertEqual(manager.focusedToken, focusedToken)
+        XCTAssertEqual(manager.selectedManagedToken, focusedToken)
         XCTAssertTrue(manager.pendingRuntimeMonitorOverrideClearWorkspaceIds.isEmpty)
         XCTAssertEqual(outcomes.count, 1)
     }
@@ -1505,7 +1506,7 @@ final class WorkspaceMonitorMoveStateTests: XCTestCase {
 
         XCTAssertEqual(manager.monitorForWorkspace(movedWorkspaceId)?.id, fixture.center.id)
         XCTAssertEqual(manager.activeWorkspace(on: fixture.center.id)?.id, destinationWorkspaceId)
-        XCTAssertEqual(manager.focusedToken, focusedToken)
+        XCTAssertEqual(manager.selectedManagedToken, focusedToken)
     }
 
     func testReconnectPrioritizesConfirmedAndPendingFocusOverRuntimeOverrideRestore() throws {
@@ -1594,7 +1595,7 @@ final class WorkspaceMonitorMoveStateTests: XCTestCase {
             XCTAssertNotEqual(manager.activeWorkspace(on: fixture.center.id)?.id, movedWorkspaceId)
             XCTAssertEqual(manager.interactionMonitorId, fixture.center.id)
             if focusKind == "confirmed" {
-                XCTAssertEqual(manager.focusedToken, protectedToken)
+                XCTAssertEqual(manager.selectedManagedToken, protectedToken)
                 XCTAssertEqual(manager.pendingFocusedToken, displacedPendingToken)
                 XCTAssertEqual(manager.pendingFocusedWorkspaceId, movedWorkspaceId)
                 XCTAssertEqual(manager.pendingFocusedMonitorId, fixture.center.id)
@@ -1606,7 +1607,7 @@ final class WorkspaceMonitorMoveStateTests: XCTestCase {
         }
     }
 
-    func testReconnectIgnoresPreservedManagedFocusWhileNonManagedFocusIsActive() throws {
+    func testReconnectIgnoresPreservedManagedFocusWhileExternalFocusIsActive() throws {
         let fixture = makeFixture(
             assignments: [("1", 0), ("2", 0), ("3", 1), ("4", 2)],
             centerSize: CGSize(width: 100, height: 400)
@@ -1652,17 +1653,44 @@ final class WorkspaceMonitorMoveStateTests: XCTestCase {
             )
         )
         XCTAssertTrue(
-            manager.enterNonManagedFocus(
-                preserveFocusedToken: true,
-                target: WindowToken(pid: 967_999, windowId: 967_299)
+            manager.recordExternalFocus(
+                pid: 967_999,
+                windowId: 967_299
             )
         )
 
         manager.applyMonitorConfigurationChange([fixture.left, fixture.center, fixture.right])
 
         XCTAssertEqual(manager.activeWorkspace(on: fixture.center.id)?.id, movedWorkspaceId)
-        XCTAssertEqual(manager.focusedToken, preservedToken)
-        XCTAssertTrue(manager.isNonManagedFocusActive)
+        XCTAssertEqual(manager.selectedManagedToken, preservedToken)
+        XCTAssertTrue(manager.nativeFocusOwner.isExternal)
+        XCTAssertEqual(manager.interactionMonitorId, fixture.right.id)
+    }
+
+    func testTopologyReapplyOwnedSurfacePreservesInteractionMonitorOverStaleSelection() throws {
+        let fixture = makeFixture(assignments: [("1", 0), ("2", 1), ("3", 2)])
+        let manager = fixture.manager
+        let staleWorkspaceId = try XCTUnwrap(manager.workspaceId(named: "1"))
+        let staleManagedToken = addWindow(
+            pid: 967_105,
+            windowId: 967_205,
+            workspaceId: staleWorkspaceId,
+            manager: manager
+        )
+        XCTAssertTrue(
+            manager.setManagedFocus(
+                staleManagedToken,
+                in: staleWorkspaceId,
+                onMonitor: fixture.left.id
+            )
+        )
+        XCTAssertTrue(manager.setInteractionMonitor(fixture.right.id))
+        XCTAssertTrue(manager.recordOwnedSurfaceFocus())
+
+        manager.applyMonitorConfigurationChange([fixture.left, fixture.center, fixture.right])
+
+        XCTAssertEqual(manager.selectedManagedToken, staleManagedToken)
+        XCTAssertEqual(manager.nativeFocusOwner, .ownedSurface)
         XCTAssertEqual(manager.interactionMonitorId, fixture.right.id)
     }
 
@@ -1706,7 +1734,7 @@ final class WorkspaceMonitorMoveStateTests: XCTestCase {
         XCTAssertNil(manager.descriptor(for: movedWorkspaceId)?.runtimeMonitorOverride)
         XCTAssertEqual(manager.monitorForWorkspace(movedWorkspaceId)?.id, fixture.left.id)
         XCTAssertEqual(manager.activeWorkspace(on: fixture.left.id)?.id, focusedWorkspaceId)
-        XCTAssertEqual(manager.focusedToken, focusedToken)
+        XCTAssertEqual(manager.selectedManagedToken, focusedToken)
         XCTAssertEqual(manager.interactionMonitorId, fixture.left.id)
     }
 

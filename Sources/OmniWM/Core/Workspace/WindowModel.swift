@@ -224,7 +224,7 @@ final class WindowModel {
         mode: TrackedWindowMode = .tiling,
         ruleEffects: ManagedWindowRuleEffects = .none,
         admissionHints: ManagedWindowAdmissionHints = .none,
-        interactionPolicy: WindowInteractionPolicy = .full,
+        lifetimeAuthority: ManagedWindowLifetimeAuthority = .axTopLevelInventory,
         managedReplacementMetadata: ManagedReplacementMetadata? = nil
     ) -> WindowToken {
         let token = WindowToken(pid: pid, windowId: windowId)
@@ -246,7 +246,7 @@ final class WindowModel {
                 constraintsCacheByToken.removeValue(forKey: token)
             }
             entries[token]?.admissionHints = admissionHints
-            entries[token]?.interactionPolicy = interactionPolicy
+            entries[token]?.lifetimeAuthority = lifetimeAuthority
             return token
         }
 
@@ -258,12 +258,19 @@ final class WindowModel {
             managedReplacementMetadata: managedReplacementMetadata,
             ruleEffects: ruleEffects,
             admissionHints: admissionHints,
-            interactionPolicy: interactionPolicy
+            lifetimeAuthority: lifetimeAuthority
         )
         entries[token] = entry
         handleByToken[token] = WindowHandle(id: token)
         appendIndexes(for: entry)
         return token
+    }
+
+    func setLifetimeAuthority(
+        _ authority: ManagedWindowLifetimeAuthority,
+        for token: WindowToken
+    ) {
+        entries[token]?.lifetimeAuthority = authority
     }
 
     @discardableResult
@@ -454,10 +461,6 @@ final class WindowModel {
 
     func setAdmissionHints(_ hints: ManagedWindowAdmissionHints, for token: WindowToken) {
         entries[token]?.admissionHints = hints
-    }
-
-    func setInteractionPolicy(_ policy: WindowInteractionPolicy, for token: WindowToken) {
-        entries[token]?.interactionPolicy = policy
     }
 
     func lifecyclePhase(for token: WindowToken) -> WindowLifecyclePhase? {

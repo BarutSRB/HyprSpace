@@ -44,19 +44,15 @@
       "layoutDecisionKind": "fallbackLayout",
       "source": "heuristic"
     },
-    "observedPolicy": "handsOffSurface",
     "rulesRevision": 1,
     "tokenPid": 15351,
     "tokenWindowId": 264
   },
   "rules": [],
   "expectedDecision": {
-    "disposition": "floating",
-    "source": "heuristic",
-    "heuristicReasons": [
-      "accessoryWithoutClose"
-    ],
-    "layoutDecisionKind": "fallbackLayout"
-  },
-  "expectedPolicy": "handsOffSurface"
+    "disposition": "unmanaged",
+    "source": "builtInRule(externalSurface)",
+    "heuristicReasons": [],
+    "layoutDecisionKind": "explicitLayout"
+  }
 }

@@ -508,27 +508,8 @@ final class RuntimeArchitectureTests: XCTestCase {
     }
 
     @MainActor
-    func testHandsOffSurfaceFocusDoesNotActivateItsWorkspace() throws {
+    func testManagedSurfaceFocusActivatesItsWorkspace() throws {
         let fixture = try Self.inactiveWorkspaceFocusFixture(
-            policy: .handsOffSurface,
-            pid: 765_760,
-            windowId: 765_860
-        )
-
-        fixture.controller.axEventHandler.handleActivationFactsResolved(fixture.facts)
-
-        XCTAssertEqual(
-            fixture.controller.workspaceManager.activeWorkspace(on: fixture.monitorId)?.id,
-            fixture.activeWorkspaceId
-        )
-        XCTAssertEqual(fixture.controller.workspaceManager.nonManagedFocusToken, fixture.token)
-        XCTAssertNotEqual(fixture.controller.workspaceManager.focusedToken, fixture.token)
-    }
-
-    @MainActor
-    func testFullPolicySurfaceFocusStillActivatesItsWorkspace() throws {
-        let fixture = try Self.inactiveWorkspaceFocusFixture(
-            policy: .full,
             pid: 765_761,
             windowId: 765_861
         )
@@ -1871,8 +1852,10 @@ final class RuntimeArchitectureTests: XCTestCase {
                 monitorId: previousMonitorId,
                 requestId: 7
             ),
-            isNonManagedFocusActive: true,
-            nonManagedFocusToken: nativeFullscreenOwner,
+            nativeFocusOwner: .external(
+                pid: nativeFullscreenOwner.pid,
+                windowId: nativeFullscreenOwner.windowId
+            ),
             interactionMonitorId: previousMonitorId
         )
 
@@ -1902,11 +1885,11 @@ final class RuntimeArchitectureTests: XCTestCase {
         )
 
         XCTAssertFalse(mismatch.mutatesRuntimeState)
-        XCTAssertEqual(snapshot.focusSession.nonManagedFocusToken, nativeFullscreenOwner)
-        XCTAssertEqual(match.focusSession?.focusedToken, token)
+        XCTAssertEqual(snapshot.focusSession.nativeFocusOwner.externalToken, nativeFullscreenOwner)
+        XCTAssertEqual(match.focusSession?.selectedManagedToken, token)
         XCTAssertEqual(match.focusSession?.pendingManagedFocus, .empty)
-        XCTAssertEqual(match.focusSession?.isNonManagedFocusActive, false)
-        XCTAssertNil(match.focusSession?.nonManagedFocusToken)
+        XCTAssertEqual(match.focusSession?.nativeFocusOwner.isExternal, false)
+        XCTAssertNil(match.focusSession?.nativeFocusOwner.externalToken)
         XCTAssertEqual(match.focusSession?.interactionMonitorId, monitorId)
         XCTAssertEqual(match.focusSession?.previousInteractionMonitorId, previousMonitorId)
     }
@@ -2029,7 +2012,7 @@ final class RuntimeArchitectureTests: XCTestCase {
                 Self.window(token: token, workspaceId: workspaceId, lifecyclePhase: .destroyed)
             ]
         )
-        XCTAssertTrue(destroyedFocusedCodes.contains("focused_token_destroyed"))
+        XCTAssertTrue(destroyedFocusedCodes.contains("selected_managed_token_destroyed"))
 
         let requestShapeCodes = Self.invariantCodes(
             pendingManagedFocus: PendingManagedFocusSnapshot(
@@ -2422,12 +2405,12 @@ final class RuntimeArchitectureTests: XCTestCase {
     }
 
     @MainActor
-    func testAnimationBorderDerivationReusesNonManagedFrameWithoutBoundsQuery() throws {
+    func testAnimationBorderDerivationDropsExternalSurfaceWithoutBoundsQuery() {
         let controller = Self.controller()
         controller.hasStartedServices = true
         controller.settings.bordersEnabled = true
         let token = WindowToken(pid: 765_019, windowId: 765_119)
-        _ = controller.workspaceManager.enterNonManagedFocus(target: token)
+        _ = controller.workspaceManager.recordExternalFocus(pid: token.pid, windowId: token.windowId)
         let previous = DesiredBorderSurface(
             token: token,
             frame: CGRect(x: 20, y: 30, width: 400, height: 300),
@@ -2439,11 +2422,9 @@ final class RuntimeArchitectureTests: XCTestCase {
             return nil
         })
 
-        let derived = try XCTUnwrap(
-            SurfaceDerivation.deriveAnimationBorder(world: world, previous: previous)
-        )
+        let derived = SurfaceDerivation.deriveAnimationBorder(world: world, previous: previous)
 
-        XCTAssertEqual(derived, previous)
+        XCTAssertNil(derived)
         XCTAssertEqual(boundsQueryCount, 0)
     }
 
@@ -2683,7 +2664,7 @@ final class RuntimeArchitectureTests: XCTestCase {
 
         XCTAssertNotNil(accepted)
         XCTAssertTrue(controller.shouldSuppressManagedFocusRecovery)
-        XCTAssertEqual(controller.workspaceManager.focusedToken, modalToken)
+        XCTAssertEqual(controller.workspaceManager.selectedManagedToken, modalToken)
         XCTAssertNil(controller.workspaceManager.pendingFocusedToken)
         XCTAssertNil(controller.intentLedger.activeManagedRequest)
         XCTAssertTrue(focusedTokens.isEmpty)
@@ -4802,7 +4783,7 @@ final class RuntimeArchitectureTests: XCTestCase {
         XCTAssertNil(controller.workspaceManager.entry(for: oldToken))
         XCTAssertNotNil(controller.workspaceManager.entry(for: newToken))
         XCTAssertTrue(controller.workspaceManager.handle(for: newToken) === oldHandle)
-        XCTAssertEqual(controller.workspaceManager.focusedToken, newToken)
+        XCTAssertEqual(controller.workspaceManager.selectedManagedToken, newToken)
 
         let plans = controller.workspaceManager.withEngineMutationScope {
             controller.niriLayoutHandler.layoutWithNiriEngine(
@@ -5606,8 +5587,8 @@ final class RuntimeArchitectureTests: XCTestCase {
         XCTAssertTrue(controller.workspaceManager.markNativeFullscreenSuspended(token))
         var publishedOwnerLoss = false
         controller.workspaceManager.onSessionStateChanged = {
-            if !controller.workspaceManager.isNonManagedFocusActive
-                || controller.workspaceManager.nonManagedFocusToken != token
+            if !controller.workspaceManager.nativeFocusOwner.isExternal
+                || controller.workspaceManager.externalFocusToken != token
             {
                 publishedOwnerLoss = true
             }
@@ -5955,14 +5936,14 @@ final class RuntimeArchitectureTests: XCTestCase {
     }
 
     @MainActor
-    func testAutomaticTransientWidgetDecisionPreservesModeWhileHelpTagEvicts() throws {
+    func testAutomaticUnprovenIndependentRootDecisionPreservesModeWhileExternalSurfaceEvicts() throws {
         let controller = Self.controller()
         let workspaceId = try XCTUnwrap(
             controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
         )
-        let transientWidgetDecision = WindowDecision(
+        let unprovenRootDecision = WindowDecision(
             disposition: .unmanaged,
-            source: .builtInRule(WindowRuleEngine.transientWidgetSurfaceRuleName),
+            source: .builtInRule(WindowRuleEngine.unprovenIndependentRootRuleName),
             layoutDecisionKind: .fallbackLayout,
             workspaceName: nil,
             ruleEffects: .none,
@@ -5970,9 +5951,9 @@ final class RuntimeArchitectureTests: XCTestCase {
             heuristicReasons: [],
             deferredReason: nil
         )
-        let helpTagDecision = WindowDecision(
+        let externalSurfaceDecision = WindowDecision(
             disposition: .unmanaged,
-            source: .builtInRule(WindowRuleEngine.helpTagSurfaceRuleName),
+            source: .builtInRule(WindowRuleEngine.externalSurfaceRuleName),
             layoutDecisionKind: .explicitLayout,
             workspaceName: nil,
             ruleEffects: .none,
@@ -5995,7 +5976,7 @@ final class RuntimeArchitectureTests: XCTestCase {
 
             XCTAssertEqual(
                 controller.trackedModePreservingAutomaticFallbackState(
-                    decision: transientWidgetDecision,
+                    decision: unprovenRootDecision,
                     existingEntry: entry,
                     context: .automatic
                 ),
@@ -6003,7 +5984,7 @@ final class RuntimeArchitectureTests: XCTestCase {
             )
             XCTAssertNil(
                 controller.trackedModePreservingAutomaticFallbackState(
-                    decision: helpTagDecision,
+                    decision: externalSurfaceDecision,
                     existingEntry: entry,
                     context: .automatic
                 )
@@ -6012,7 +5993,7 @@ final class RuntimeArchitectureTests: XCTestCase {
     }
 
     @MainActor
-    func testTransientWidgetWindowServerResolutionUsesAtMostOneTargetedLookup() {
+    func testWindowServerResolutionUsesPreferredEvidenceOrOneTargetedLookupForAXWindows() {
         let controller = Self.controller()
         let token = WindowToken(pid: 940_301, windowId: 940_302)
         let exactWindowInfo = WindowServerInfo(
@@ -6060,7 +6041,7 @@ final class RuntimeArchitectureTests: XCTestCase {
             hasZoomButton: false,
             hasMinimizeButton: false,
             appPolicy: .regular,
-            bundleId: WindowRuleEngine.cleanShotBundleId,
+            bundleId: "pl.maketheweb.cleanshotx",
             attributeFetchSucceeded: true
         )
         var queryCount = 0
@@ -6069,15 +6050,16 @@ final class RuntimeArchitectureTests: XCTestCase {
             return exactWindowInfo
         }
 
-        XCTAssertNil(
+        XCTAssertEqual(
             controller.resolveWindowServerInfoForDisposition(
                 token: token,
                 bundleId: ordinaryFacts.bundleId,
                 axFacts: ordinaryFacts,
                 preferredWindowInfo: nil
-            )
+            ),
+            exactWindowInfo
         )
-        XCTAssertEqual(queryCount, 0)
+        XCTAssertEqual(queryCount, 1)
         XCTAssertNil(
             controller.resolveWindowServerInfoForDisposition(
                 token: token,
@@ -6086,7 +6068,7 @@ final class RuntimeArchitectureTests: XCTestCase {
                 preferredWindowInfo: nil
             )
         )
-        XCTAssertEqual(queryCount, 0)
+        XCTAssertEqual(queryCount, 1)
         XCTAssertEqual(
             controller.resolveWindowServerInfoForDisposition(
                 token: token,
@@ -6096,7 +6078,7 @@ final class RuntimeArchitectureTests: XCTestCase {
             ),
             exactWindowInfo
         )
-        XCTAssertEqual(queryCount, 0)
+        XCTAssertEqual(queryCount, 1)
         XCTAssertEqual(
             controller.resolveWindowServerInfoForDisposition(
                 token: token,
@@ -6106,17 +6088,17 @@ final class RuntimeArchitectureTests: XCTestCase {
             ),
             exactWindowInfo
         )
-        XCTAssertEqual(queryCount, 1)
+        XCTAssertEqual(queryCount, 2)
         XCTAssertEqual(
             controller.resolveWindowServerInfoForDisposition(
                 token: token,
-                bundleId: WindowRuleEngine.cleanShotBundleId,
+                bundleId: "pl.maketheweb.cleanshotx",
                 axFacts: ordinaryFacts,
                 preferredWindowInfo: nil
             ),
             exactWindowInfo
         )
-        XCTAssertEqual(queryCount, 2)
+        XCTAssertEqual(queryCount, 3)
     }
 
     @MainActor
@@ -6350,8 +6332,7 @@ final class RuntimeArchitectureTests: XCTestCase {
     private static func snapshot(
         focusedToken: WindowToken? = nil,
         pendingManagedFocus: PendingManagedFocusSnapshot = .empty,
-        isNonManagedFocusActive: Bool = false,
-        nonManagedFocusToken: WindowToken? = nil,
+        nativeFocusOwner: NativeFocusOwner? = nil,
         systemModalFocusToken: WindowToken? = nil,
         interactionMonitorId: Monitor.ID? = nil,
         previousInteractionMonitorId: Monitor.ID? = nil,
@@ -6362,11 +6343,10 @@ final class RuntimeArchitectureTests: XCTestCase {
         ReconcileSnapshot(
             topologyProfile: TopologyProfile(sortedMonitors: []),
             focusSession: FocusSessionSnapshot(
-                focusedToken: focusedToken,
+                selectedManagedToken: focusedToken,
+                nativeFocusOwner: nativeFocusOwner ?? focusedToken.map(NativeFocusOwner.managed) ?? .none,
                 pendingManagedFocus: pendingManagedFocus,
                 focusLease: nil,
-                isNonManagedFocusActive: isNonManagedFocusActive,
-                nonManagedFocusToken: nonManagedFocusToken,
                 systemModalFocusToken: systemModalFocusToken,
                 interactionMonitorId: interactionMonitorId,
                 previousInteractionMonitorId: previousInteractionMonitorId
@@ -6405,8 +6385,7 @@ final class RuntimeArchitectureTests: XCTestCase {
             lifecyclePhase: lifecyclePhase,
             observedState: .initial(workspaceId: workspaceId, monitorId: nil),
             desiredState: .initial(workspaceId: workspaceId, monitorId: nil, disposition: .tiling),
-            restoreIntent: nil,
-            interactionPolicy: .full
+            restoreIntent: nil
         )
     }
 
@@ -6947,7 +6926,7 @@ final class RuntimeArchitectureTests: XCTestCase {
         _ = controller.workspaceManager.confirmManagedFocus(
             token, in: leftWs, onMonitor: leftMonitor.id, activateWorkspaceOnMonitor: true
         )
-        XCTAssertEqual(controller.workspaceManager.focusedToken, token)
+        XCTAssertEqual(controller.workspaceManager.selectedManagedToken, token)
 
         controller.motionPolicy.animationsEnabled = false
         XCTAssertEqual(
@@ -7197,7 +7176,7 @@ final class RuntimeArchitectureTests: XCTestCase {
         _ = controller.workspaceManager.confirmManagedFocus(
             token, in: sourceWs, onMonitor: lowerMonitor.id, activateWorkspaceOnMonitor: true
         )
-        XCTAssertEqual(controller.workspaceManager.focusedToken, token)
+        XCTAssertEqual(controller.workspaceManager.selectedManagedToken, token)
 
         nodeA.renderedFrame = CGRect(x: 20, y: 820, width: 360, height: 760)
         nodeB.renderedFrame = CGRect(x: 420, y: 820, width: 360, height: 760)
@@ -7275,7 +7254,7 @@ final class RuntimeArchitectureTests: XCTestCase {
         _ = controller.workspaceManager.confirmManagedFocus(
             token, in: sourceWs, onMonitor: upperMonitor.id, activateWorkspaceOnMonitor: true
         )
-        XCTAssertEqual(controller.workspaceManager.focusedToken, token)
+        XCTAssertEqual(controller.workspaceManager.selectedManagedToken, token)
 
         nodeA.renderedFrame = CGRect(x: 20, y: 20, width: 360, height: 760)
         nodeB.renderedFrame = CGRect(x: 420, y: 20, width: 360, height: 760)
@@ -7354,7 +7333,7 @@ final class RuntimeArchitectureTests: XCTestCase {
         _ = controller.workspaceManager.confirmManagedFocus(
             token, in: rightWs, onMonitor: rightMonitor.id, activateWorkspaceOnMonitor: true
         )
-        XCTAssertEqual(controller.workspaceManager.focusedToken, token)
+        XCTAssertEqual(controller.workspaceManager.selectedManagedToken, token)
 
         nodeA.renderedFrame = CGRect(x: 20, y: 20, width: 360, height: 760)
         nodeB.renderedFrame = CGRect(x: 420, y: 20, width: 360, height: 360)
@@ -7658,7 +7637,6 @@ final class RuntimeArchitectureTests: XCTestCase {
 
     @MainActor
     private static func inactiveWorkspaceFocusFixture(
-        policy: WindowInteractionPolicy,
         pid: pid_t,
         windowId: Int,
         file: StaticString = #filePath,
@@ -7689,7 +7667,6 @@ final class RuntimeArchitectureTests: XCTestCase {
             windowId: windowId,
             to: surfaceWorkspaceId
         )
-        controller.workspaceManager.setInteractionPolicy(policy, for: token)
         _ = controller.workspaceManager.focusWorkspace(named: "1")
         controller.hasStartedServices = true
 

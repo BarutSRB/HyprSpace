@@ -165,7 +165,7 @@ final class NativeFullscreenSlotProjectionTests: XCTestCase {
         XCTAssertTrue(
             fixture.controller.workspaceManager.markNativeFullscreenSuspended(
                 fixture.token,
-                ownsNonManagedFocus: false
+                ownsNativeFocus: false
             )
         )
         fixture.controller.surfaceReconciler.reconcileNow()
@@ -597,7 +597,7 @@ final class NativeFullscreenSlotProjectionTests: XCTestCase {
             XCTAssertTrue(
                 controller.workspaceManager.markNativeFullscreenSuspended(
                     token,
-                    ownsNonManagedFocus: false
+                    ownsNativeFocus: false
                 ),
                 file: file,
                 line: line

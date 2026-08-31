@@ -383,14 +383,14 @@ extension WMController {
            frontmost.processIdentifier != ownPID
         {
             let pid = frontmost.processIdentifier
-            let token = workspaceManager.focusedToken.flatMap { $0.pid == pid ? $0 : nil }
+            let token = workspaceManager.selectedManagedToken.flatMap { $0.pid == pid ? $0 : nil }
             return AutomaticAXSnapshotRequest(
                 reason: "frontmost_external",
                 pid: pid,
                 windowId: token?.windowId
             )
         }
-        guard let token = workspaceManager.focusedToken,
+        guard let token = workspaceManager.selectedManagedToken,
               token.pid != ownPID
         else {
             return nil
@@ -426,7 +426,7 @@ extension WMController {
             )
             return
         }
-        guard let focused = workspaceManager.focusedToken,
+        guard let focused = workspaceManager.selectedManagedToken,
               focused.pid != ownPID
         else { return }
         recordInitialTarget(
@@ -443,7 +443,7 @@ extension WMController {
         bundleId: String?,
         reason: String
     ) {
-        let token = workspaceManager.focusedToken.flatMap { $0.pid == pid ? $0 : nil }
+        let token = workspaceManager.selectedManagedToken.flatMap { $0.pid == pid ? $0 : nil }
         WindowAdmissionTrace.record(
             WindowAdmissionTraceEvent(
                 action: action,

@@ -675,7 +675,7 @@ final class OverviewController {
         renderPalette = appearance.renderPalette
         buildOverviewSnapshot()
 
-        if let focusedHandle = wmController.workspaceManager.focusedHandle,
+        if let focusedHandle = wmController.workspaceManager.selectedManagedHandle,
            overviewSnapshot.windows[focusedHandle] != nil
         {
             selectedWindowHandle = focusedHandle
@@ -1077,7 +1077,6 @@ final class OverviewController {
         workspaceManager: WorkspaceManager
     ) -> Bool {
         entry.layoutReason == .standard
-            && !entry.interactionPolicy.isHandsOff
             && !workspaceManager.isAppHidden(pid: entry.pid)
     }
 

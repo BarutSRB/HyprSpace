@@ -238,7 +238,7 @@ final class WorkspaceNavigationHandler {
             controller.abortScratchpadStacking(matching: canceledRequest.requestId)
             controller.intentLedger.discardPendingFocus(canceledRequest.token)
         }
-        _ = controller.workspaceManager.enterNonManagedFocus()
+        _ = controller.workspaceManager.clearNativeFocusOwner()
     }
 
     private func commitWorkspaceTransitionFocusHandoff(
@@ -303,7 +303,7 @@ final class WorkspaceNavigationHandler {
         guard let targetWorkspace = controller.workspaceManager.activeWorkspaceOrFirst(on: target.id)
         else { return false }
 
-        let sourceFrame = controller.workspaceManager.focusedToken
+        let sourceFrame = controller.workspaceManager.selectedManagedToken
             .flatMap { controller.preferredKeyboardFocusFrame(for: $0) }
         let dwindleEngine = controller.workspaceManager.activeLayoutKind(for: targetWorkspace.id) == .dwindle
             ? controller.dwindleEngine
@@ -345,7 +345,7 @@ final class WorkspaceNavigationHandler {
         focusPolicy: WorkspaceMoveFocusPolicy
     ) {
         guard let controller else { return }
-        guard let token = controller.workspaceManager.focusedToken else { return }
+        guard let token = controller.workspaceManager.selectedManagedToken else { return }
         guard let currentWsId = controller.workspaceManager.workspace(for: token) else { return }
 
         saveNiriViewportState(for: currentWsId)
@@ -626,7 +626,7 @@ final class WorkspaceNavigationHandler {
         guard controller.workspaceManager.activeLayoutKind(for: workspaceId) == .niri else { return }
         guard let engine = controller.niriEngine else { return }
 
-        if let focusedToken = controller.workspaceManager.focusedToken,
+        if let focusedToken = controller.workspaceManager.selectedManagedToken,
            controller.workspaceManager.workspace(for: focusedToken) == workspaceId,
            let focusedNode = engine.findNode(for: focusedToken, in: workspaceId)
         {
@@ -858,7 +858,7 @@ final class WorkspaceNavigationHandler {
 
     func moveWindowToAdjacentWorkspace(direction: Direction) {
         guard let controller else { return }
-        guard let token = controller.workspaceManager.focusedToken else { return }
+        guard let token = controller.workspaceManager.selectedManagedToken else { return }
         guard let sourceWorkspaceId = controller.workspaceManager.workspace(for: token) else { return }
 
         saveNiriViewportState(for: sourceWorkspaceId)
@@ -872,7 +872,7 @@ final class WorkspaceNavigationHandler {
 
     func moveColumnToAdjacentWorkspace(direction: Direction) {
         guard let controller else { return }
-        guard let token = controller.workspaceManager.focusedToken else { return }
+        guard let token = controller.workspaceManager.selectedManagedToken else { return }
         guard let sourceWorkspaceId = controller.workspaceManager.workspace(for: token) else { return }
 
         saveNiriViewportState(for: sourceWorkspaceId)
@@ -891,7 +891,7 @@ final class WorkspaceNavigationHandler {
 
     func moveColumnToWorkspace(rawWorkspaceID: String) {
         guard let controller else { return }
-        guard let token = controller.workspaceManager.focusedToken else { return }
+        guard let token = controller.workspaceManager.selectedManagedToken else { return }
         guard let sourceWorkspaceId = controller.workspaceManager.workspace(for: token),
               let targetWorkspaceId = controller.workspaceManager.workspaceId(
                   for: rawWorkspaceID,
@@ -915,7 +915,7 @@ final class WorkspaceNavigationHandler {
 
     func moveFocusedWindow(toRawWorkspaceID rawWorkspaceID: String) {
         guard let controller else { return }
-        guard let token = controller.workspaceManager.focusedToken else { return }
+        guard let token = controller.workspaceManager.selectedManagedToken else { return }
         guard let targetWorkspaceId = controller.workspaceManager.workspaceId(
             for: rawWorkspaceID,
             createIfMissing: false
@@ -956,7 +956,7 @@ final class WorkspaceNavigationHandler {
         let matchingRequest = activeRequest?.token == token ? activeRequest : nil
         let hasNewerUnrelatedRequest = activeRequest.map { $0.token != token } ?? false
         let hasUnrelatedPendingFocus = workspaceManager.pendingFocusedToken.map { $0 != token } ?? false
-        let shouldRehomeFocusedWindow = workspaceManager.focusedToken == token
+        let shouldRehomeFocusedWindow = workspaceManager.selectedManagedToken == token
             && !hasNewerUnrelatedRequest
             && !hasUnrelatedPendingFocus
 
@@ -1250,7 +1250,7 @@ final class WorkspaceNavigationHandler {
 
     func moveWindowToWorkspaceOnMonitor(rawWorkspaceID: String, monitorDirection: Direction) {
         guard let controller else { return }
-        guard let token = controller.workspaceManager.focusedToken else { return }
+        guard let token = controller.workspaceManager.selectedManagedToken else { return }
         guard case let .changed(mutation) = moveWindowToWorkspaceOnMonitor(
             handle: WindowHandle(id: token),
             rawWorkspaceId: rawWorkspaceID,

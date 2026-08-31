@@ -231,10 +231,76 @@ final class MacOSHiddenAppTests: XCTestCase {
 
         controller.workspaceManager.setAppHidden(true, pid: token.pid, source: .ax)
 
-        XCTAssertEqual(controller.workspaceManager.focusedToken, token)
+        XCTAssertEqual(controller.workspaceManager.selectedManagedToken, token)
         XCTAssertNil(controller.workspaceManager.pendingFocusedToken)
-        XCTAssertTrue(controller.workspaceManager.isNonManagedFocusActive)
+        XCTAssertTrue(controller.workspaceManager.nativeFocusOwner.isExternal)
         XCTAssertNil(controller.workspaceManager.renderableFocusToken)
+    }
+
+    func testHiddenWorldTransitionPreservesUnrelatedExternalFocusOwner() throws {
+        let controller = makeController()
+        let workspaceId = try XCTUnwrap(controller.workspaceManager.workspaceId(for: "1", createIfMissing: true))
+        let hiddenToken = addWindow(pid: 880_033, windowId: 880_133, to: workspaceId, controller: controller)
+        let externalToken = WindowToken(pid: 880_034, windowId: 880_134)
+        XCTAssertTrue(
+            controller.workspaceManager.confirmManagedFocus(
+                hiddenToken,
+                in: workspaceId,
+                activateWorkspaceOnMonitor: false
+            )
+        )
+        XCTAssertTrue(
+            controller.workspaceManager.recordExternalFocus(
+                pid: externalToken.pid,
+                windowId: externalToken.windowId
+            )
+        )
+
+        controller.workspaceManager.setAppHidden(true, pid: hiddenToken.pid, source: .ax)
+
+        XCTAssertEqual(controller.workspaceManager.selectedManagedToken, hiddenToken)
+        XCTAssertEqual(
+            controller.workspaceManager.nativeFocusOwner,
+            .external(pid: externalToken.pid, windowId: externalToken.windowId)
+        )
+    }
+
+    func testHiddenWorldTransitionPreservesOwnedSurfaceFocusOwner() throws {
+        let controller = makeController()
+        let workspaceId = try XCTUnwrap(controller.workspaceManager.workspaceId(for: "1", createIfMissing: true))
+        let hiddenToken = addWindow(pid: 880_035, windowId: 880_135, to: workspaceId, controller: controller)
+        XCTAssertTrue(
+            controller.workspaceManager.confirmManagedFocus(
+                hiddenToken,
+                in: workspaceId,
+                activateWorkspaceOnMonitor: false
+            )
+        )
+        XCTAssertTrue(controller.workspaceManager.recordOwnedSurfaceFocus())
+
+        controller.workspaceManager.setAppHidden(true, pid: hiddenToken.pid, source: .ax)
+
+        XCTAssertEqual(controller.workspaceManager.selectedManagedToken, hiddenToken)
+        XCTAssertEqual(controller.workspaceManager.nativeFocusOwner, .ownedSurface)
+    }
+
+    func testHiddenWorldTransitionStripsExactWindowFromHiddenExternalOwner() throws {
+        let controller = makeController()
+        let workspaceId = try XCTUnwrap(controller.workspaceManager.workspaceId(for: "1", createIfMissing: true))
+        let hiddenToken = addWindow(pid: 880_036, windowId: 880_136, to: workspaceId, controller: controller)
+        XCTAssertTrue(
+            controller.workspaceManager.recordExternalFocus(
+                pid: hiddenToken.pid,
+                windowId: hiddenToken.windowId
+            )
+        )
+
+        controller.workspaceManager.setAppHidden(true, pid: hiddenToken.pid, source: .ax)
+
+        XCTAssertEqual(
+            controller.workspaceManager.nativeFocusOwner,
+            .external(pid: hiddenToken.pid, windowId: nil)
+        )
     }
 
     func testHiddenFocusTransitionPublishesOneSessionChange() throws {
@@ -288,7 +354,7 @@ final class MacOSHiddenAppTests: XCTestCase {
             )
         )
 
-        XCTAssertTrue(controller.workspaceManager.isNonManagedFocusActive)
+        XCTAssertTrue(controller.workspaceManager.nativeFocusOwner.isExternal)
         XCTAssertNil(controller.workspaceManager.renderableFocusToken)
     }
 
@@ -325,7 +391,7 @@ final class MacOSHiddenAppTests: XCTestCase {
             )
         )
 
-        XCTAssertTrue(controller.workspaceManager.isNonManagedFocusActive)
+        XCTAssertTrue(controller.workspaceManager.nativeFocusOwner.isExternal)
         XCTAssertNil(controller.workspaceManager.renderableFocusToken)
     }
 
@@ -341,7 +407,7 @@ final class MacOSHiddenAppTests: XCTestCase {
                 activateWorkspaceOnMonitor: false
             )
         )
-        XCTAssertTrue(controller.workspaceManager.enterNonManagedFocus(preserveFocusedToken: true))
+        XCTAssertTrue(controller.workspaceManager.recordExternalFocus())
         controller.hasStartedServices = true
         let previousIncarnationGeneration = controller.workspaceManager.appVisibilityGeneration(for: token.pid)
         controller.workspaceManager.invalidateAppVisibility(for: token.pid, source: .service)
@@ -362,7 +428,7 @@ final class MacOSHiddenAppTests: XCTestCase {
             )
         )
 
-        XCTAssertTrue(controller.workspaceManager.isNonManagedFocusActive)
+        XCTAssertTrue(controller.workspaceManager.nativeFocusOwner.isExternal)
         XCTAssertNil(controller.workspaceManager.renderableFocusToken)
     }
 

@@ -283,6 +283,8 @@ struct AXWindowFacts: Equatable, Sendable {
     let appPolicy: NSApplication.ActivationPolicy?
     let bundleId: String?
     let attributeFetchSucceeded: Bool
+    var isMain: Bool? = nil
+    var isModal: Bool? = nil
 }
 
 struct AXWindowDecisionEvidence: Equatable, Sendable {
@@ -323,6 +325,8 @@ struct AXWindowFactAttributeValues {
     let fullscreenButtonEnabled: Bool?
     let zoomButton: Any?
     let minimizeButton: Any?
+    var main: Any? = nil
+    var modal: Any? = nil
 }
 
 struct AXWindowConstraintInputs {
@@ -363,6 +367,8 @@ enum AXWindowService {
         case fullScreenButton
         case zoomButton
         case minimizeButton
+        case main
+        case modal
         case title
     }
 
@@ -461,7 +467,7 @@ enum AXWindowService {
     }
 
     static func shouldTreatAsTopLevelWindow(role: String?, subrole: String?) -> Bool {
-        role == kAXWindowRole as String || subrole == kAXStandardWindowSubrole as String
+        role == kAXWindowRole as String
     }
 
     static func windowId(_ window: AXWindowRef) -> Int {
@@ -787,7 +793,9 @@ enum AXWindowService {
             kAXCloseButtonAttribute as CFString,
             kAXFullScreenButtonAttribute as CFString,
             kAXZoomButtonAttribute as CFString,
-            kAXMinimizeButtonAttribute as CFString
+            kAXMinimizeButtonAttribute as CFString,
+            kAXMainAttribute as CFString,
+            kAXModalAttribute as CFString
         ]
         if includeTitle {
             attributes.append(kAXTitleAttribute as CFString)
@@ -803,7 +811,7 @@ enum AXWindowService {
 
         guard result == .success,
               let values,
-              CFArrayGetCount(values) > WindowTypeAttributeIndex.minimizeButton.rawValue
+              CFArrayGetCount(values) > WindowTypeAttributeIndex.modal.rawValue
         else {
             return AXWindowDecisionEvidence.unavailable(
                 appPolicy: appPolicy,
@@ -847,7 +855,9 @@ enum AXWindowService {
                 fullscreenButton: fullscreenButtonValue,
                 fullscreenButtonEnabled: fullscreenButtonEnabled,
                 zoomButton: attributeValue(.zoomButton),
-                minimizeButton: attributeValue(.minimizeButton)
+                minimizeButton: attributeValue(.minimizeButton),
+                main: attributeValue(.main),
+                modal: attributeValue(.modal)
             ),
             appPolicy: appPolicy,
             bundleId: bundleId,
@@ -872,7 +882,9 @@ enum AXWindowService {
             hasMinimizeButton: resolvedAttribute(attributes.minimizeButton),
             appPolicy: appPolicy,
             bundleId: bundleId,
-            attributeFetchSucceeded: attributeFetchSucceeded
+            attributeFetchSucceeded: attributeFetchSucceeded,
+            isMain: attributes.main as? Bool,
+            isModal: attributes.modal as? Bool
         )
     }
 

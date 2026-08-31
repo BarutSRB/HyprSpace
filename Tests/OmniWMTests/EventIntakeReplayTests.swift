@@ -548,7 +548,7 @@ final class EventIntakeReplayTests: XCTestCase {
         XCTAssertTrue(
             controller.workspaceManager.markNativeFullscreenSuspended(
                 liveToken,
-                ownsNonManagedFocus: false
+                ownsNativeFocus: false
             )
         )
         XCTAssertTrue(controller.workspaceManager.markNativeFullscreenSuspended(deadToken))
@@ -572,8 +572,8 @@ final class EventIntakeReplayTests: XCTestCase {
 
         XCTAssertNil(controller.workspaceManager.entry(for: deadToken))
         XCTAssertNil(controller.workspaceManager.nativeFullscreenRecord(for: deadToken))
-        XCTAssertFalse(controller.workspaceManager.isNonManagedFocusActive)
-        XCTAssertNil(controller.workspaceManager.nonManagedFocusToken)
+        XCTAssertFalse(controller.workspaceManager.nativeFocusOwner.isExternal)
+        XCTAssertNil(controller.workspaceManager.externalFocusToken)
         XCTAssertNil(controller.workspaceManager.activeNativeFullscreenFocusOwnerToken)
         XCTAssertEqual(controller.workspaceManager.nativeFullscreenTransitionTimeoutCount, 1)
         XCTAssertNotNil(controller.workspaceManager.entry(for: liveToken))
@@ -633,8 +633,8 @@ final class EventIntakeReplayTests: XCTestCase {
             controller.workspaceManager.nativeFullscreenRecord(for: liveToken)?.transition,
             .suspended
         )
-        XCTAssertTrue(controller.workspaceManager.isNonManagedFocusActive)
-        XCTAssertEqual(controller.workspaceManager.nonManagedFocusToken, liveToken)
+        XCTAssertTrue(controller.workspaceManager.nativeFocusOwner.isExternal)
+        XCTAssertEqual(controller.workspaceManager.externalFocusToken, liveToken)
         XCTAssertEqual(controller.workspaceManager.activeNativeFullscreenFocusOwnerToken, liveToken)
         XCTAssertFalse(controller.eventIntake.hasPendingEvents)
     }
@@ -697,7 +697,7 @@ final class EventIntakeReplayTests: XCTestCase {
                     ) != nil,
                         controller.workspaceManager.markNativeFullscreenSuspended(
                             replacementToken,
-                            ownsNonManagedFocus: false
+                            ownsNativeFocus: false
                         )
                     else {
                         return .notFound
@@ -757,7 +757,7 @@ final class EventIntakeReplayTests: XCTestCase {
         }
 
         func committedState() -> String {
-            let focused = controller.workspaceManager.focusedToken?.windowId ?? -1
+            let focused = controller.workspaceManager.selectedManagedToken?.windowId ?? -1
             let intents = controller.intentLedger.entries
                 .filter { $0.kind.isFocusWindow }
                 .map { intent in
@@ -802,7 +802,7 @@ final class EventIntakeReplayTests: XCTestCase {
                 scenario.controller.eventIntake.enqueue(event)
             }
             scenario.drainToQuiescence()
-            XCTAssertEqual(scenario.controller.workspaceManager.focusedToken, scenario.tokenB)
+            XCTAssertEqual(scenario.controller.workspaceManager.selectedManagedToken, scenario.tokenB)
             outcomes.append(scenario.committedState())
             scenario.tearDown()
         }
@@ -829,7 +829,7 @@ final class EventIntakeReplayTests: XCTestCase {
                 scenario.controller.eventIntake.enqueue(event)
             }
             scenario.drainToQuiescence()
-            XCTAssertEqual(scenario.controller.workspaceManager.focusedToken, scenario.tokenB)
+            XCTAssertEqual(scenario.controller.workspaceManager.selectedManagedToken, scenario.tokenB)
             let newestIntentForB = scenario.controller.intentLedger.entries
                 .last { $0.kind.focusTargetToken == scenario.tokenB }
             XCTAssertEqual(newestIntentForB?.phase, .confirmed)
@@ -983,7 +983,7 @@ final class EventIntakeReplayTests: XCTestCase {
         controller.focusWindow(tokenA)
         controller.eventIntake.enqueue(.axFocusedWindowChanged(pid: pid, callbackGeneration: nil))
         scenario.drainToQuiescence()
-        XCTAssertEqual(controller.workspaceManager.focusedToken, tokenA)
+        XCTAssertEqual(controller.workspaceManager.selectedManagedToken, tokenA)
 
         controller.focusWindow(tokenB)
         return scenario

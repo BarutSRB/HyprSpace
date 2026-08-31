@@ -423,13 +423,13 @@ final class ScratchpadRevealTests: XCTestCase {
         XCTAssertTrue(
             fixture.controller.workspaceManager.markNativeFullscreenSuspended(
                 fullscreen,
-                ownsNonManagedFocus: false
+                ownsNativeFocus: false
             )
         )
 
         XCTAssertNil(fixture.controller.focusWindow(fullscreen))
 
-        XCTAssertEqual(fixture.controller.workspaceManager.nonManagedFocusToken, fullscreen)
+        XCTAssertEqual(fixture.controller.workspaceManager.externalFocusToken, fullscreen)
         XCTAssertNil(fixture.controller.intentLedger.activeManagedRequest)
         XCTAssertEqual(
             fixture.controller.intentLedger.intent(id: stackingRequest.requestId)?.phase,
@@ -733,53 +733,6 @@ final class ScratchpadRevealTests: XCTestCase {
         }
     }
 
-    func testPartialParkingClearsSlotAndAllowsAnotherSlot() throws {
-        let fixture = try makeFixture()
-        let parked = addFloatingWindow(pid: 971_113, windowId: 971_213, to: fixture)
-        let unparked = addFloatingWindow(pid: 971_114, windowId: 971_214, to: fixture)
-        let replacement = addFloatingWindow(pid: 971_115, windowId: 971_215, to: fixture)
-        XCTAssertEqual(assign(parked, to: 6, in: fixture), .executed)
-        XCTAssertEqual(assign(unparked, to: 6, in: fixture), .executed)
-        XCTAssertEqual(assign(replacement, to: 7, in: fixture), .executed)
-        XCTAssertEqual(fixture.controller.toggleScratchpad(6), .executed)
-        try completeReveal(parked, in: fixture)
-        try completeReveal(unparked, in: fixture)
-        _ = fixture.controller.workspaceManager.cancelCurrentManagedFocusRequest()
-        _ = fixture.controller.workspaceManager.setManagedFocus(
-            unparked,
-            in: fixture.workspaceId,
-            onMonitor: fixture.monitor.id
-        )
-        XCTAssertEqual(fixture.controller.workspaceManager.focusedToken, unparked)
-        fixture.controller.workspaceManager.setInteractionPolicy(
-            WindowInteractionPolicy(
-                tracksInModel: true,
-                mayFocus: true,
-                mayActivateApp: true,
-                mayRaise: true,
-                mayOrder: true,
-                mayWriteFrame: true,
-                mayBorder: true,
-                mayPark: false
-            ),
-            for: unparked
-        )
-
-        XCTAssertEqual(fixture.controller.toggleScratchpad(6), .executed)
-
-        XCTAssertNil(fixture.controller.workspaceManager.revealedScratchpadIndex())
-        XCTAssertEqual(
-            fixture.controller.workspaceManager.hiddenState(for: parked)?.isScratchpad,
-            true
-        )
-        XCTAssertNil(fixture.controller.workspaceManager.hiddenState(for: unparked))
-        XCTAssertEqual(fixture.controller.toggleScratchpad(7), .executed)
-        try completeReveal(replacement, in: fixture)
-        XCTAssertEqual(fixture.controller.workspaceManager.revealedScratchpadIndex(), 7)
-        XCTAssertNil(fixture.controller.workspaceManager.hiddenState(for: replacement))
-        XCTAssertNil(fixture.controller.workspaceManager.hiddenState(for: unparked))
-    }
-
     func testUnavailableParkingLeavesFailedMemberRevealableAndRetryable() throws {
         let fixture = try makeFixture()
         let parked = addFloatingWindow(pid: 971_116, windowId: 971_216, to: fixture)
@@ -1005,30 +958,6 @@ final class ScratchpadRevealTests: XCTestCase {
         )
     }
 
-    func testPolicyDeniedWindowCannotJoinScratchpad() throws {
-        let fixture = try makeFixture()
-        let policy = WindowInteractionPolicy(
-            tracksInModel: true,
-            mayFocus: true,
-            mayActivateApp: true,
-            mayRaise: true,
-            mayOrder: true,
-            mayWriteFrame: true,
-            mayBorder: true,
-            mayPark: false
-        )
-        let token = addFloatingWindow(
-            pid: 971_171,
-            windowId: 971_271,
-            interactionPolicy: policy,
-            to: fixture
-        )
-
-        XCTAssertEqual(assign(token, to: 1, in: fixture), .notFound)
-        XCTAssertNil(fixture.controller.workspaceManager.scratchpadIndex(for: token))
-        XCTAssertNil(fixture.controller.workspaceManager.hiddenState(for: token))
-    }
-
     func testExplicitSelectionAdoptsInFlightGroupAndKeepsSlotRevealed() throws {
         let fixture = try makeFixture()
         let first = addFloatingWindow(pid: 971_181, windowId: 971_281, to: fixture)
@@ -1208,7 +1137,7 @@ final class ScratchpadRevealTests: XCTestCase {
         XCTAssertTrue(
             fixture.controller.workspaceManager.markNativeFullscreenSuspended(
                 token,
-                ownsNonManagedFocus: false
+                ownsNativeFocus: false
             )
         )
         XCTAssertEqual(fixture.controller.toggleScratchpad(4), .executed)
@@ -1249,7 +1178,7 @@ final class ScratchpadRevealTests: XCTestCase {
         XCTAssertTrue(
             fixture.controller.workspaceManager.markNativeFullscreenSuspended(
                 fullscreen,
-                ownsNonManagedFocus: false
+                ownsNativeFocus: false
             )
         )
         XCTAssertEqual(fixture.controller.toggleScratchpad(5), .executed)
@@ -1377,7 +1306,6 @@ final class ScratchpadRevealTests: XCTestCase {
     private func addFloatingWindow(
         pid: pid_t,
         windowId: Int,
-        interactionPolicy: WindowInteractionPolicy = .full,
         to fixture: Fixture
     ) -> WindowToken {
         let token = fixture.controller.workspaceManager.addWindow(
@@ -1385,8 +1313,7 @@ final class ScratchpadRevealTests: XCTestCase {
             pid: pid,
             windowId: windowId,
             to: fixture.workspaceId,
-            mode: .floating,
-            interactionPolicy: interactionPolicy
+            mode: .floating
         )
         fixture.controller.workspaceManager.setFloatingState(
             FloatingState(

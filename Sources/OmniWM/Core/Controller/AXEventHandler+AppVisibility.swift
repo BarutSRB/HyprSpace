@@ -6,7 +6,7 @@ import Foundation
 @MainActor
 extension AXEventHandler {
     func handleWindowMiniaturized(pid: pid_t, windowId: Int) {
-        controller?.workspaceManager.clearNonManagedFocusTarget(
+        controller?.workspaceManager.clearExternalFocusIdentity(
             matching: WindowToken(pid: pid, windowId: windowId)
         )
     }
@@ -14,10 +14,9 @@ extension AXEventHandler {
     func handleAppDeactivated(pid: pid_t) {
         guard let controller else { return }
         let workspaceManager = controller.workspaceManager
-        workspaceManager.clearNonManagedFocusTarget(pid: pid)
+        workspaceManager.clearExternalFocusIdentity(pid: pid)
 
-        guard !workspaceManager.isNonManagedFocusActive,
-              let focusedToken = workspaceManager.focusedToken,
+        guard let focusedToken = workspaceManager.nativeManagedFocusToken,
               focusedToken.pid == pid,
               let entry = workspaceManager.entry(for: focusedToken),
               entry.mode == .floating
@@ -81,9 +80,7 @@ extension AXEventHandler {
             controller.intentLedger.discardPendingFocus(activeRequest.token)
         }
         if controller.workspaceManager.renderableFocusToken?.pid == pid {
-            _ = controller.workspaceManager.enterNonManagedFocus(
-                preserveFocusedToken: true
-            )
+            _ = controller.workspaceManager.clearNativeFocusOwner()
         }
         controller.windowActionHandler.refreshOverviewProjection(
             affectedWorkspaceIds: affectedWorkspaceIds

@@ -31,7 +31,7 @@ extension AXEventHandler {
             )
         }
 
-        controller.workspaceManager.clearNonManagedFocusTarget(pid: pid)
+        controller.workspaceManager.clearExternalFocusIdentity(pid: pid)
     }
 
     func handleAppTerminationFocusActivation(
@@ -84,11 +84,10 @@ extension AXEventHandler {
             }
         }
 
-        guard let departingToken = controller.workspaceManager.focusedToken,
+        guard let departingToken = controller.workspaceManager.nativeManagedFocusToken,
               departingToken.pid != pid,
               let departingEntry = controller.workspaceManager.entry(for: departingToken),
               departingEntry.mode == .floating,
-              departingEntry.interactionPolicy.mayFocus,
               let monitorId = controller.workspaceManager.monitorId(for: departingEntry.workspaceId),
               controller.workspaceManager.activeWorkspace(on: monitorId)?.id == departingEntry.workspaceId,
               let preferredTiledToken = controller.workspaceManager.preferredFocusToken(
@@ -151,11 +150,10 @@ extension AXEventHandler {
             return (payload.workspaceId, payload.preferredTiledToken)
         }
 
-        guard let departingToken = controller.workspaceManager.focusedToken,
+        guard let departingToken = controller.workspaceManager.nativeManagedFocusToken,
               departingToken.pid == pid,
               let departingEntry = controller.workspaceManager.entry(for: departingToken),
               departingEntry.mode == .floating,
-              departingEntry.interactionPolicy.mayFocus,
               let preferredTiledToken = controller.workspaceManager.preferredFocusToken(
                   in: departingEntry.workspaceId
               ),

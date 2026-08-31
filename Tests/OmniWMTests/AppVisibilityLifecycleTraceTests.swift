@@ -86,7 +86,6 @@ final class AppVisibilityLifecycleTraceTests: XCTestCase {
         let fixture = try makeFixture(pid: 92_003, windowId: 92_103, withMonitor: true)
         let handler = WindowActionHandler(
             controller: fixture.controller,
-            visibleWindowInfoProvider: { [] },
             visibleOwnedWindowsProvider: { [] },
             frontOwnedWindow: { _ in },
             requestApplicationUnhide: { _ in .requestReportedSent }
@@ -133,7 +132,6 @@ final class AppVisibilityLifecycleTraceTests: XCTestCase {
         let fixture = try makeFixture(pid: 92_004, windowId: 92_104, withMonitor: true)
         let handler = WindowActionHandler(
             controller: fixture.controller,
-            visibleWindowInfoProvider: { [] },
             visibleOwnedWindowsProvider: { [] },
             frontOwnedWindow: { _ in },
             requestApplicationUnhide: { _ in .requestReportedSent }

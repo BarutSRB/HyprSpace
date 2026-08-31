@@ -19,7 +19,9 @@ final class WindowRuleEngineTests: XCTestCase {
         hasZoomButton: Bool = true,
         hasMinimizeButton: Bool = true,
         windowServer: WindowServerInfo? = nil,
-        attributeFetchSucceeded: Bool = true
+        attributeFetchSucceeded: Bool = true,
+        isMain: Bool? = false,
+        isModal: Bool? = false
     ) -> WindowRuleFacts {
         WindowRuleFacts(
             appName: appName,
@@ -34,7 +36,9 @@ final class WindowRuleEngineTests: XCTestCase {
                 hasMinimizeButton: hasMinimizeButton,
                 appPolicy: .regular,
                 bundleId: bundleId,
-                attributeFetchSucceeded: attributeFetchSucceeded
+                attributeFetchSucceeded: attributeFetchSucceeded,
+                isMain: isMain,
+                isModal: isModal
             ),
             sizeConstraints: nil,
             windowServer: windowServer
@@ -59,7 +63,9 @@ final class WindowRuleEngineTests: XCTestCase {
         hasCloseButton: Bool = false,
         hasFullscreenButton: Bool = false,
         hasZoomButton: Bool = false,
-        hasMinimizeButton: Bool = false
+        hasMinimizeButton: Bool = false,
+        isMain: Bool? = false,
+        isModal: Bool? = false
     ) -> WindowRuleFacts {
         facts(
             appName: "Widget Host",
@@ -71,7 +77,9 @@ final class WindowRuleEngineTests: XCTestCase {
             hasFullscreenButton: hasFullscreenButton,
             hasZoomButton: hasZoomButton,
             hasMinimizeButton: hasMinimizeButton,
-            windowServer: windowServer
+            windowServer: windowServer,
+            isMain: isMain,
+            isModal: isModal
         )
     }
 
@@ -225,17 +233,18 @@ final class WindowRuleEngineTests: XCTestCase {
         )
 
         XCTAssertNotEqual(decision.source, .builtInRule("steamClient"))
-        XCTAssertEqual(decision.disposition, .floating)
+        XCTAssertEqual(decision.disposition, .unmanaged)
+        XCTAssertEqual(decision.source, .builtInRule(WindowRuleEngine.externalSurfaceRuleName))
     }
 
-    func testCleanShotRecordingOverlayStillFloatsWithWindowServerEvidence() {
+    func testCleanShotRecordingOverlayIsExternalAtSystemWindowLevel() {
         let engine = WindowRuleEngine()
         let token = WindowToken(pid: 84_061, windowId: 84_062)
         let decision = evaluate(
             engine,
             facts(
                 appName: "CleanShot X",
-                bundleId: WindowRuleEngine.cleanShotBundleId,
+                bundleId: "pl.maketheweb.cleanshotx",
                 windowServer: WindowServerInfo(
                     id: 84_062,
                     pid: 84_061,
@@ -246,8 +255,8 @@ final class WindowRuleEngineTests: XCTestCase {
             token: token
         )
 
-        XCTAssertEqual(decision.disposition, .floating)
-        XCTAssertEqual(decision.source, .builtInRule("cleanShotRecordingOverlay"))
+        XCTAssertEqual(decision.disposition, .unmanaged)
+        XCTAssertEqual(decision.source, .builtInRule(WindowRuleEngine.externalSurfaceRuleName))
     }
 
     func testMoreSpecificRuleWithoutInitialWidthShadowsGenericWidthRule() {
@@ -352,7 +361,7 @@ final class WindowRuleEngineTests: XCTestCase {
         XCTAssertFalse(snapshot.validationMessages.isEmpty)
     }
 
-    func testTraceProvenParentedTransientWidgetsAreUnmanagedAcrossBundles() {
+    func testParentedSurfacesAreExternalAcrossBundles() {
         let engine = WindowRuleEngine()
         let popupToken = WindowToken(pid: 86_312, windowId: 7_916)
         let dropdownToken = WindowToken(pid: 86_312, windowId: 7_907)
@@ -383,18 +392,16 @@ final class WindowRuleEngineTests: XCTestCase {
                 XCTAssertEqual(decision.disposition, .unmanaged)
                 XCTAssertEqual(
                     decision.source,
-                    .builtInRule(WindowRuleEngine.transientWidgetSurfaceRuleName)
+                    .builtInRule(WindowRuleEngine.externalSurfaceRuleName)
                 )
-                XCTAssertTrue(decision.isTransientWidgetSurfaceDecision)
-                XCTAssertTrue(decision.isNonRenderableTransientSurfaceDecision)
                 XCTAssertEqual(decision.admissionOutcome, .ignored)
-                XCTAssertEqual(decision.admissionRejectionReason, .nonRenderableTransientSurface)
+                XCTAssertEqual(decision.admissionRejectionReason, .externalSurface)
                 XCTAssertNil(decision.deferredReason)
             }
         }
     }
 
-    func testTransientWidgetMissingOrMismatchedWindowServerEvidenceDefers() {
+    func testMissingOrMismatchedWindowServerEvidenceDefers() {
         let engine = WindowRuleEngine()
         let token = WindowToken(pid: 84_011, windowId: 84_012)
         let mismatchedEvidence = [
@@ -411,14 +418,11 @@ final class WindowRuleEngineTests: XCTestCase {
             XCTAssertEqual(decision.disposition, .undecided)
             XCTAssertEqual(decision.deferredReason, .windowServerEvidenceMissing)
             XCTAssertEqual(decision.admissionPendingReason, .windowServerEvidenceMissing)
-            XCTAssertEqual(
-                decision.source,
-                .builtInRule(WindowRuleEngine.transientWidgetSurfaceRuleName)
-            )
+            XCTAssertEqual(decision.source, .heuristic)
         }
     }
 
-    func testTransientWidgetRequiresEveryWindowServerPredicate() {
+    func testUnknownSubroleIsExternalRegardlessOfWindowServerTagsOrLevel() {
         let engine = WindowRuleEngine()
         let token = WindowToken(pid: 84_021, windowId: 84_022)
         let nonmatchingEvidence = [
@@ -436,14 +440,12 @@ final class WindowRuleEngineTests: XCTestCase {
                 transientFacts(bundleId: "org.example.widget-host", windowServer: evidence),
                 token: token
             )
-            XCTAssertEqual(decision.disposition, .floating)
-            XCTAssertEqual(decision.source, .heuristic)
-            XCTAssertFalse(decision.isTransientWidgetSurfaceDecision)
-            XCTAssertFalse(decision.isNonRenderableTransientSurfaceDecision)
+            XCTAssertEqual(decision.disposition, .unmanaged)
+            XCTAssertEqual(decision.source, .builtInRule(WindowRuleEngine.externalSurfaceRuleName))
         }
     }
 
-    func testTransientWidgetRequiresEveryAXPredicate() {
+    func testParentedWindowAndNonWindowRolesRemainExternal() {
         let engine = WindowRuleEngine()
         let token = WindowToken(pid: 84_031, windowId: 84_032)
         let windowServer = transientWindowServerInfo(token: token)
@@ -462,13 +464,12 @@ final class WindowRuleEngineTests: XCTestCase {
 
         for facts in candidates {
             let decision = evaluate(engine, facts, token: token)
-            XCTAssertEqual(decision.disposition, .floating)
-            XCTAssertFalse(decision.isTransientWidgetSurfaceDecision)
-            XCTAssertFalse(decision.isNonRenderableTransientSurfaceDecision)
+            XCTAssertEqual(decision.disposition, .unmanaged)
+            XCTAssertEqual(decision.source, .builtInRule(WindowRuleEngine.externalSurfaceRuleName))
         }
     }
 
-    func testDialogsSheetsAndFailedAXFactsDoNotMatchTransientWidgetSignature() {
+    func testParentedDialogsSheetsAndFailedAXFactsAreNeverTracked() {
         let engine = WindowRuleEngine()
         let token = WindowToken(pid: 84_035, windowId: 84_036)
         let windowServer = transientWindowServerInfo(token: token)
@@ -492,9 +493,8 @@ final class WindowRuleEngineTests: XCTestCase {
 
         for facts in semanticWindows {
             let decision = evaluate(engine, facts, token: token)
-            XCTAssertEqual(decision.disposition, .floating)
-            XCTAssertFalse(decision.isTransientWidgetSurfaceDecision)
-            XCTAssertFalse(decision.isNonRenderableTransientSurfaceDecision)
+            XCTAssertEqual(decision.disposition, .unmanaged)
+            XCTAssertEqual(decision.source, .builtInRule(WindowRuleEngine.externalSurfaceRuleName))
         }
 
         let failedFacts = facts(
@@ -512,35 +512,34 @@ final class WindowRuleEngineTests: XCTestCase {
         let failedDecision = evaluate(engine, failedFacts, token: token)
         XCTAssertEqual(failedDecision.disposition, .undecided)
         XCTAssertEqual(failedDecision.deferredReason, .attributeFetchFailed)
-        XCTAssertFalse(failedDecision.isTransientWidgetSurfaceDecision)
-        XCTAssertFalse(failedDecision.isNonRenderableTransientSurfaceDecision)
     }
 
-    func testExplicitRulesPrecedeTransientWidgetClassification() {
+    func testParentedSurfacesPrecedeBroadAndPreciseLayoutRules() {
         let token = WindowToken(pid: 84_041, windowId: 84_042)
         let windowServer = transientWindowServerInfo(token: token)
 
         let userEngine = WindowRuleEngine()
-        let userRule = AppRule(bundleId: "org.example.widget-host", layout: .tile)
-        userEngine.rebuild(rules: [userRule])
-        let userDecision = evaluate(
-            userEngine,
-            transientFacts(bundleId: "org.example.widget-host", windowServer: windowServer),
-            token: token
+        let broadRule = AppRule(bundleId: "org.example.widget-host", layout: .tile)
+        let preciseRule = AppRule(
+            bundleId: "org.example.widget-host",
+            axRole: kAXWindowRole as String,
+            axSubrole: kAXUnknownSubrole as String,
+            layout: .tile
         )
-        XCTAssertEqual(userDecision.disposition, .managed)
-        XCTAssertEqual(userDecision.source, .userRule(userRule.id))
+        userEngine.rebuild(rules: [broadRule, preciseRule])
 
-        let builtInDecision = evaluate(
-            WindowRuleEngine(),
-            transientFacts(bundleId: "com.valvesoftware.steam.helper", windowServer: windowServer),
-            token: token
-        )
-        XCTAssertEqual(builtInDecision.disposition, .managed)
-        XCTAssertEqual(builtInDecision.source, .builtInRule("steamClient"))
+        for bundleId in ["org.example.widget-host", "com.valvesoftware.steam.helper"] {
+            let decision = evaluate(
+                bundleId == "org.example.widget-host" ? userEngine : WindowRuleEngine(),
+                transientFacts(bundleId: bundleId, windowServer: windowServer),
+                token: token
+            )
+            XCTAssertEqual(decision.disposition, .unmanaged)
+            XCTAssertEqual(decision.source, .builtInRule(WindowRuleEngine.externalSurfaceRuleName))
+        }
     }
 
-    func testFullscreenAndBrowserPictureInPicturePrecedeTransientWidgetClassification() {
+    func testParentedSurfacesPrecedeFullscreenAndPictureInPictureRules() {
         let engine = WindowRuleEngine()
         let token = WindowToken(pid: 84_045, windowId: 84_046)
         let windowServer = transientWindowServerInfo(token: token)
@@ -551,9 +550,11 @@ final class WindowRuleEngineTests: XCTestCase {
             appFullscreen: true
         )
 
-        XCTAssertEqual(fullscreenDecision.disposition, .managed)
-        XCTAssertEqual(fullscreenDecision.source, .heuristic)
-        XCTAssertFalse(fullscreenDecision.isTransientWidgetSurfaceDecision)
+        XCTAssertEqual(fullscreenDecision.disposition, .unmanaged)
+        XCTAssertEqual(
+            fullscreenDecision.source,
+            .builtInRule(WindowRuleEngine.externalSurfaceRuleName)
+        )
 
         for bundleId in ["org.mozilla.firefox", "app.zen-browser.zen"] {
             let pictureInPictureDecision = evaluate(
@@ -565,13 +566,15 @@ final class WindowRuleEngineTests: XCTestCase {
                 ),
                 token: token
             )
-            XCTAssertEqual(pictureInPictureDecision.disposition, .floating)
-            XCTAssertEqual(pictureInPictureDecision.source, .builtInRule("browserPictureInPicture"))
-            XCTAssertFalse(pictureInPictureDecision.isTransientWidgetSurfaceDecision)
+            XCTAssertEqual(pictureInPictureDecision.disposition, .unmanaged)
+            XCTAssertEqual(
+                pictureInPictureDecision.source,
+                .builtInRule(WindowRuleEngine.externalSurfaceRuleName)
+            )
         }
     }
 
-    func testAutomaticRuleEffectsDoNotOverrideTransientWidgetClassification() {
+    func testAutomaticRuleEffectsAndManualOverridesDoNotAdmitExternalSurfaces() {
         let engine = WindowRuleEngine()
         let rule = AppRule(bundleId: "org.example.widget-host", minWidth: 420)
         engine.rebuild(rules: [rule])
@@ -586,8 +589,196 @@ final class WindowRuleEngineTests: XCTestCase {
         let overridden = WindowRuleEngine.applyingManualOverride(decision, manualOverride: .forceTile)
 
         XCTAssertEqual(decision.disposition, .unmanaged)
-        XCTAssertEqual(decision.ruleEffects.minWidth, 420)
+        XCTAssertEqual(decision.ruleEffects, .none)
         XCTAssertEqual(overridden.disposition, .unmanaged)
+    }
+
+    func testRootDialogAndFloatingSubrolesRemainManagedFloatingWindows() {
+        let engine = WindowRuleEngine()
+
+        for subrole in [kAXDialogSubrole as String, kAXFloatingWindowSubrole as String] {
+            let token = WindowToken(pid: 84_061, windowId: subrole == kAXDialogSubrole as String ? 84_062 : 84_063)
+            let decision = evaluate(
+                engine,
+                transientFacts(
+                    bundleId: "org.example",
+                    windowServer: transientWindowServerInfo(token: token, parentId: 0),
+                    subrole: subrole,
+                    isModal: true
+                ),
+                token: token
+            )
+
+            XCTAssertEqual(decision.disposition, .floating)
+            XCTAssertEqual(decision.source, .heuristic)
+        }
+    }
+
+    func testSupportedRootUtilitiesRemainExplicitFloatingWindows() {
+        let engine = WindowRuleEngine()
+        let quickLookToken = WindowToken(pid: 84_064, windowId: 84_065)
+        let quickLookDecision = evaluate(
+            engine,
+            facts(
+                appName: "Finder",
+                bundleId: "com.apple.finder",
+                title: "Quick Look",
+                subrole: "Quick Look",
+                windowServer: transientWindowServerInfo(token: quickLookToken, parentId: 0)
+            ),
+            token: quickLookToken
+        )
+
+        XCTAssertEqual(quickLookDecision.disposition, .floating)
+        XCTAssertEqual(quickLookDecision.source, .builtInRule("finderQuickLook"))
+
+        let pictureInPictureToken = WindowToken(pid: 84_066, windowId: 84_067)
+        let pictureInPictureDecision = evaluate(
+            engine,
+            facts(
+                appName: "Firefox",
+                bundleId: "org.mozilla.firefox",
+                title: "Picture-in-Picture",
+                windowServer: transientWindowServerInfo(token: pictureInPictureToken, parentId: 0)
+            ),
+            token: pictureInPictureToken
+        )
+
+        XCTAssertEqual(pictureInPictureDecision.disposition, .floating)
+        XCTAssertEqual(pictureInPictureDecision.source, .builtInRule("browserPictureInPicture"))
+    }
+
+    func testRootNonstandardSurfaceRequiresPreciseRoleAndSubroleRule() {
+        let token = WindowToken(pid: 84_071, windowId: 84_072)
+        let rootFacts = transientFacts(
+            bundleId: "org.example.widget-host",
+            windowServer: transientWindowServerInfo(token: token, parentId: 0)
+        )
+        let broadEngine = WindowRuleEngine()
+        broadEngine.rebuild(rules: [AppRule(bundleId: "org.example.widget-host", layout: .float)])
+        let broadDecision = evaluate(broadEngine, rootFacts, token: token)
+
+        XCTAssertEqual(broadDecision.disposition, .unmanaged)
+        XCTAssertEqual(broadDecision.source, .builtInRule(WindowRuleEngine.externalSurfaceRuleName))
+
+        let preciseEngine = WindowRuleEngine()
+        let preciseRule = AppRule(
+            bundleId: "org.example.widget-host",
+            axRole: kAXWindowRole as String,
+            axSubrole: kAXUnknownSubrole as String,
+            layout: .float
+        )
+        preciseEngine.rebuild(rules: [preciseRule])
+        let preciseDecision = evaluate(preciseEngine, rootFacts, token: token)
+
+        XCTAssertEqual(preciseDecision.disposition, .floating)
+        XCTAssertEqual(preciseDecision.source, .userRule(preciseRule.id))
+    }
+
+    func testIncompleteFactsCannotBeAdmittedByRulesOrManualOverrides() {
+        let engine = WindowRuleEngine()
+        engine.rebuild(rules: [AppRule(bundleId: "org.example", layout: .float)])
+        let decision = evaluate(
+            engine,
+            facts(
+                appName: "Example",
+                bundleId: "org.example",
+                role: nil,
+                subrole: nil,
+                attributeFetchSucceeded: false
+            )
+        )
+        let overridden = WindowRuleEngine.applyingManualOverride(decision, manualOverride: .forceFloat)
+
+        XCTAssertEqual(decision.disposition, .undecided)
+        XCTAssertEqual(decision.deferredReason, .attributeFetchFailed)
+        XCTAssertEqual(overridden, decision)
+    }
+
+    func testOnlyAXWindowRoleIsAcceptedAsTopLevel() {
+        XCTAssertTrue(
+            AXWindowService.shouldTreatAsTopLevelWindow(
+                role: kAXWindowRole as String,
+                subrole: kAXDialogSubrole as String
+            )
+        )
+        XCTAssertFalse(
+            AXWindowService.shouldTreatAsTopLevelWindow(
+                role: kAXToolbarRole as String,
+                subrole: kAXStandardWindowSubrole as String
+            )
+        )
+    }
+
+    func testSystemWindowLevelIsHardExternal() {
+        let engine = WindowRuleEngine()
+        let rule = AppRule(
+            bundleId: "org.example",
+            axRole: kAXWindowRole as String,
+            axSubrole: kAXStandardWindowSubrole as String,
+            layout: .tile
+        )
+        engine.rebuild(rules: [rule])
+        let token = WindowToken(pid: 84_081, windowId: 84_082)
+        let decision = evaluate(
+            engine,
+            facts(
+                appName: "Overlay",
+                bundleId: "org.example",
+                windowServer: transientWindowServerInfo(
+                    token: token,
+                    level: CGWindowLevelForKey(.statusWindow),
+                    parentId: 0
+                )
+            ),
+            token: token
+        )
+
+        XCTAssertEqual(decision.disposition, .unmanaged)
+        XCTAssertEqual(decision.source, .builtInRule(WindowRuleEngine.externalSurfaceRuleName))
+    }
+
+    func testAccessoryAppRequiresPreciseSemanticInclusion() {
+        let token = WindowToken(pid: 84_091, windowId: 84_092)
+        let windowServer = transientWindowServerInfo(token: token, parentId: 0)
+        let accessoryFacts = WindowRuleFacts(
+            appName: "Accessory",
+            ax: AXWindowFacts(
+                role: kAXWindowRole as String,
+                subrole: kAXStandardWindowSubrole as String,
+                title: "Accessory",
+                hasCloseButton: true,
+                hasFullscreenButton: true,
+                fullscreenButtonEnabled: true,
+                hasZoomButton: true,
+                hasMinimizeButton: true,
+                appPolicy: .accessory,
+                bundleId: "org.example.accessory",
+                attributeFetchSucceeded: true
+            ),
+            sizeConstraints: nil,
+            windowServer: windowServer
+        )
+        let broadEngine = WindowRuleEngine()
+        broadEngine.rebuild(rules: [AppRule(bundleId: "org.example.accessory", layout: .float)])
+
+        XCTAssertEqual(
+            evaluate(broadEngine, accessoryFacts, token: token).source,
+            .builtInRule(WindowRuleEngine.externalSurfaceRuleName)
+        )
+
+        let preciseEngine = WindowRuleEngine()
+        let preciseRule = AppRule(
+            bundleId: "org.example.accessory",
+            axRole: kAXWindowRole as String,
+            axSubrole: kAXStandardWindowSubrole as String,
+            layout: .float
+        )
+        preciseEngine.rebuild(rules: [preciseRule])
+        let preciseDecision = evaluate(preciseEngine, accessoryFacts, token: token)
+
+        XCTAssertEqual(preciseDecision.disposition, .floating)
+        XCTAssertEqual(preciseDecision.source, .userRule(preciseRule.id))
     }
 
     func testHelpTagIsHardUnmanagedWithoutWindowServerOrCompleteAXFacts() {
@@ -620,10 +811,8 @@ final class WindowRuleEngineTests: XCTestCase {
                 token: token
             )
             XCTAssertEqual(decision.disposition, .unmanaged)
-            XCTAssertEqual(decision.source, .builtInRule(WindowRuleEngine.helpTagSurfaceRuleName))
-            XCTAssertTrue(decision.isHelpTagSurfaceDecision)
-            XCTAssertTrue(decision.isNonRenderableTransientSurfaceDecision)
-            XCTAssertEqual(decision.admissionRejectionReason, .nonRenderableTransientSurface)
+            XCTAssertEqual(decision.source, .builtInRule(WindowRuleEngine.externalSurfaceRuleName))
+            XCTAssertEqual(decision.admissionRejectionReason, .externalSurface)
             XCTAssertNil(decision.deferredReason)
         }
     }
@@ -653,7 +842,7 @@ final class WindowRuleEngineTests: XCTestCase {
             appFullscreen: true
         )
 
-        XCTAssertEqual(userDecision.source, .builtInRule(WindowRuleEngine.helpTagSurfaceRuleName))
+        XCTAssertEqual(userDecision.source, .builtInRule(WindowRuleEngine.externalSurfaceRuleName))
         XCTAssertEqual(userDecision.disposition, .unmanaged)
         XCTAssertNil(userDecision.workspaceName)
         XCTAssertEqual(userDecision.ruleEffects, .none)
@@ -677,7 +866,7 @@ final class WindowRuleEngineTests: XCTestCase {
                     hasMinimizeButton: false
                 )
             )
-            XCTAssertEqual(decision.source, .builtInRule(WindowRuleEngine.helpTagSurfaceRuleName))
+            XCTAssertEqual(decision.source, .builtInRule(WindowRuleEngine.externalSurfaceRuleName))
             XCTAssertEqual(decision.disposition, .unmanaged)
         }
 
@@ -698,11 +887,11 @@ final class WindowRuleEngineTests: XCTestCase {
                 hasMinimizeButton: false
             )
         )
-        XCTAssertEqual(titleDecision.source, .builtInRule(WindowRuleEngine.helpTagSurfaceRuleName))
+        XCTAssertEqual(titleDecision.source, .builtInRule(WindowRuleEngine.externalSurfaceRuleName))
         XCTAssertNil(titleDecision.deferredReason)
     }
 
-    func testNonRenderableDecisionSemanticsDistinguishTransientHelpTagAndPolicyIgnore() {
+    func testParentedHelpTagAndInputMethodShareExternalAdmissionSemantics() {
         let engine = WindowRuleEngine()
         let transientToken = WindowToken(pid: 84_071, windowId: 84_072)
         let transientDecision = evaluate(
@@ -731,18 +920,12 @@ final class WindowRuleEngineTests: XCTestCase {
             facts(appName: "Input Agent", bundleId: "com.apple.textinputmenuagent")
         )
 
-        XCTAssertTrue(transientDecision.isTransientWidgetSurfaceDecision)
-        XCTAssertFalse(transientDecision.isHelpTagSurfaceDecision)
-        XCTAssertEqual(transientDecision.layoutDecisionKind, .fallbackLayout)
-        XCTAssertEqual(transientDecision.admissionRejectionReason, .nonRenderableTransientSurface)
-
-        XCTAssertFalse(helpTagDecision.isTransientWidgetSurfaceDecision)
-        XCTAssertTrue(helpTagDecision.isHelpTagSurfaceDecision)
-        XCTAssertEqual(helpTagDecision.layoutDecisionKind, .explicitLayout)
-        XCTAssertEqual(helpTagDecision.admissionRejectionReason, .nonRenderableTransientSurface)
-
-        XCTAssertEqual(policyDecision.disposition, .unmanaged)
-        XCTAssertFalse(policyDecision.isNonRenderableTransientSurfaceDecision)
-        XCTAssertEqual(policyDecision.admissionRejectionReason, .policyIgnored)
+        for decision in [transientDecision, helpTagDecision, policyDecision] {
+            XCTAssertEqual(decision.disposition, .unmanaged)
+            XCTAssertEqual(decision.source, .builtInRule(WindowRuleEngine.externalSurfaceRuleName))
+            XCTAssertEqual(decision.layoutDecisionKind, .explicitLayout)
+            XCTAssertEqual(decision.admissionOutcome, .ignored)
+            XCTAssertEqual(decision.admissionRejectionReason, .externalSurface)
+        }
     }
 }

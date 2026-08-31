@@ -32,8 +32,8 @@ extension AXEventHandler {
         let workspaceId = entry.workspaceId
         let layoutType = controller.workspaceManager.descriptor(for: workspaceId)
             .map { controller.settings.layoutType(for: $0.name) } ?? .defaultLayout
-        let ownsLiveFocus = controller.workspaceManager.focusedToken == token
-            || controller.workspaceManager.nonManagedFocusToken == token
+        let ownsLiveFocus = controller.workspaceManager.nativeManagedFocusToken == token
+            || controller.workspaceManager.externalFocusToken == token
         let removesScratchpadResources = controller.workspaceManager.isScratchpadToken(token)
             || controller.workspaceManager.hiddenState(for: token)?.isScratchpad == true
         let policy = retirementPolicy(for: reason)
@@ -50,14 +50,20 @@ extension AXEventHandler {
 
         clearTerminalFrameFailure(windowId: token.windowId)
         cancelCreatedWindowRetry(windowId: token.windowId)
-        cancelPostCreateLifecycleVerification(for: token)
         cancelSameAppCloseProbe(matchingFocusedToken: token, reason: policy.traceReason)
         if let request = controller.intentLedger.activeManagedRequest(for: token),
            case .awaitingSameAppActivation = request.phase
         {
             controller.cancelManagedFocusRequestAndRestoreSource(request)
         } else {
-            clearManagedFocusState(matching: token, workspaceId: workspaceId)
+            clearManagedFocusState(
+                matching: token,
+                workspaceId: workspaceId,
+                preservesExternalFocusIdentity: policy.preservesLiveFocusAsExternal && ownsLiveFocus
+            )
+        }
+        if policy.preservesLiveFocusAsExternal, ownsLiveFocus {
+            _ = controller.workspaceManager.externalizeNativeFocus(matching: token)
         }
         controller.mouseEventHandler.discardNativeTitleBarDrag(for: token)
         _ = controller.workspaceManager.removeWindow(pid: token.pid, windowId: token.windowId)
@@ -81,22 +87,16 @@ extension AXEventHandler {
             allowsPreferredRecoveryToken: policy.allowsPreferredRecoveryToken
         )
         if case .terminalFrameRefusal = reason {
-            if ownsLiveFocus {
-                _ = controller.workspaceManager.enterNonManagedFocus(target: token)
-            }
             controller.surfaceReconciler.noteRestackOccurred()
         }
     }
 
     func retireManagedWindowFromAuthoritativeRescan(_ entry: WindowState) {
-        let shouldRecoverFocus = controller?.workspaceManager.focusedToken == entry.token
-        retireManagedWindow(
-            entry,
-            reason: .destroyed(
-                shouldRecoverFocus: shouldRecoverFocus,
-                allowsPreferredRecoveryToken: false
-            )
-        )
+        retireManagedWindow(entry, reason: .authoritativeRescan)
+    }
+
+    func retireManagedWindowAfterDecisionRejection(_ entry: WindowState) {
+        retireManagedWindow(entry, reason: .decisionRejection)
     }
 
     func handleTerminalFrameRefusal(_ refusal: AXFrameTerminalRefusal) {
@@ -148,21 +148,40 @@ extension AXEventHandler {
                 shouldRecoverFocus: shouldRecoverFocus,
                 allowsPreferredRecoveryToken: allowsPreferredRecoveryToken,
                 traceReason: "focused_token_removed",
-                removesIdentityAliases: true
+                removesIdentityAliases: true,
+                preservesLiveFocusAsExternal: false
+            )
+        case .authoritativeRescan:
+            return ManagedWindowRetirementPolicy(
+                shouldRecoverFocus: false,
+                allowsPreferredRecoveryToken: false,
+                traceReason: "authoritative_rescan_retirement",
+                removesIdentityAliases: true,
+                preservesLiveFocusAsExternal: false
+            )
+        case .decisionRejection:
+            return ManagedWindowRetirementPolicy(
+                shouldRecoverFocus: false,
+                allowsPreferredRecoveryToken: false,
+                traceReason: "window_decision_rejected",
+                removesIdentityAliases: true,
+                preservesLiveFocusAsExternal: true
             )
         case .staleIncarnation:
             return ManagedWindowRetirementPolicy(
                 shouldRecoverFocus: false,
                 allowsPreferredRecoveryToken: false,
                 traceReason: "stale_ax_incarnation",
-                removesIdentityAliases: true
+                removesIdentityAliases: true,
+                preservesLiveFocusAsExternal: false
             )
         case .terminalFrameRefusal:
             return ManagedWindowRetirementPolicy(
                 shouldRecoverFocus: false,
                 allowsPreferredRecoveryToken: false,
                 traceReason: "admission_quarantine",
-                removesIdentityAliases: false
+                removesIdentityAliases: false,
+                preservesLiveFocusAsExternal: true
             )
         }
     }

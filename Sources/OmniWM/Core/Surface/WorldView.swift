@@ -26,10 +26,6 @@ struct WorldView {
         controller.workspaceManager.renderableFocusToken
     }
 
-    var isNonManagedFocusActive: Bool {
-        controller.workspaceManager.isNonManagedFocusActive
-    }
-
     var suppressedFocusToken: WindowToken? {
         controller.workspaceManager.suppressedFocusToken
     }
@@ -56,10 +52,6 @@ struct WorldView {
 
     func entry(for token: WindowToken) -> WindowState? {
         controller.workspaceManager.entry(for: token)
-    }
-
-    func isOwnedWindow(windowId: Int) -> Bool {
-        controller.isOwnedWindow(windowNumber: windowId)
     }
 
     func isWindowFullscreenInLayout(_ token: WindowToken) -> Bool {
@@ -128,7 +120,7 @@ struct WorldView {
                     workspaceId: record.workspaceId,
                     frame: .zero,
                     displayContext: nil,
-                    selected: workspaceManager.focusedToken == record.currentToken
+                    selected: workspaceManager.selectedManagedToken == record.currentToken
                         || workspaceManager.pendingFocusedToken == record.currentToken,
                     visible: record.transition == .suspended
                         && entry?.layoutReason == .nativeFullscreen

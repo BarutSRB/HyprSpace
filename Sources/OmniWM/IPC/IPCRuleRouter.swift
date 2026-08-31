@@ -103,7 +103,7 @@ final class IPCRuleRouter {
         switch target {
         case .focused:
             guard let token = controller.focusedOrFrontmostWindowTokenForAutomation(
-                preferFrontmostWhenNonManagedFocusActive: true
+                preferFrontmostWhenExternalOrOwnedFocusActive: true
             ) else {
                 return .failure(.notFound)
             }

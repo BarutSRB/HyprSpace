@@ -132,12 +132,9 @@
     }
   ],
   "expectedDecision": {
-    "disposition": "floating",
-    "source": "heuristic",
-    "heuristicReasons": [
-      "accessoryWithoutClose"
-    ],
-    "layoutDecisionKind": "fallbackLayout"
-  },
-  "expectedPolicy": "handsOffSurface"
+    "disposition": "unmanaged",
+    "source": "builtInRule(externalSurface)",
+    "heuristicReasons": [],
+    "layoutDecisionKind": "explicitLayout"
+  }
 }

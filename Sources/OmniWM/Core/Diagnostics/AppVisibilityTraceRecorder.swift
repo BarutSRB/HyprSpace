@@ -72,7 +72,6 @@ enum AppVisibilityTrace {
         case pidChanged = "pid_changed"
         case workspaceChanged = "workspace_changed"
         case ineligibleLayout = "ineligible_layout"
-        case focusDisallowed = "focus_disallowed"
         case intentNotPending = "intent_not_pending"
         case navigationFailed = "navigation_failed"
     }

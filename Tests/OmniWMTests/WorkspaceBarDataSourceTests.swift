@@ -133,48 +133,15 @@ final class WorkspaceBarDataSourceTests: XCTestCase {
         XCTAssertEqual(fixture.workspaceManager.entry(for: token)?.workspaceId, fixture.workspaceId)
     }
 
-    func testHandsOffSurfacesNeverReachTheBar() throws {
+    func testConfiguredBundleExclusionFiltersFloatingWindow() throws {
         let fixture = try makeFixture()
-        let handsOff = addWindow(
-            pid: 46_001,
-            windowId: 46_101,
-            bundleId: "com.example.overlay",
-            mode: .floating,
-            to: fixture
-        )
-        let ordinary = addWindow(
-            pid: 46_002,
-            windowId: 46_102,
-            bundleId: "com.example.ordinary",
-            mode: .floating,
-            to: fixture
-        )
-        fixture.workspaceManager.setInteractionPolicy(.handsOffSurface, for: handsOff)
-        fixture.workspaceManager.setInteractionPolicy(.full, for: ordinary)
-
-        let projection = project(fixture, showFloatingWindows: true, excludedBundleIDs: [])
-        let item = try XCTUnwrap(projection.items.first { $0.id == fixture.workspaceId })
-
-        XCTAssertEqual(
-            item.floatingWindows.count,
-            1,
-            "a surface OmniWM may not focus, raise or frame must not be offered as a clickable bar pill"
-        )
-        XCTAssertFalse(item.floatingWindows.contains { $0.id == handsOff })
-        XCTAssertTrue(item.floatingWindows.contains { $0.id == ordinary })
-    }
-
-    func testHandsOffExclusionDoesNotDisturbConfiguredBundleExclusions() throws {
-        let fixture = try makeFixture()
-        let excluded = addWindow(
+        _ = addWindow(
             pid: 46_003,
             windowId: 46_103,
             bundleId: "com.example.excluded",
             mode: .floating,
             to: fixture
         )
-        fixture.workspaceManager.setInteractionPolicy(.full, for: excluded)
-
         let projection = project(
             fixture,
             showFloatingWindows: true,

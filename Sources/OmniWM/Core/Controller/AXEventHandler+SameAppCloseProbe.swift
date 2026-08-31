@@ -138,7 +138,7 @@ extension AXEventHandler {
     ) {
         guard let controller else { return }
         let focusedToken = focusedToken ?? payload.focusedToken
-        guard controller.workspaceManager.focusedToken == focusedToken,
+        guard controller.workspaceManager.selectedManagedToken == focusedToken,
               controller.workspaceManager.entry(for: focusedToken) != nil,
               controller.intentLedger.activeManagedRequest == nil
         else {

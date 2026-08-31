@@ -1250,7 +1250,6 @@ import QuartzCore
         }
         var seenKeys: Set<WindowToken> = []
         var decisionBasedRemovals: [WindowToken] = []
-        var floatingFocusCandidate: FullRescanFloatingFocusCandidate?
         let focusedWorkspaceId = controller.activeWorkspace()?.id
         let screenFrames = NSScreen.screens.map(\.frame)
 
@@ -1447,7 +1446,7 @@ import QuartzCore
                     cancelPendingScratchpadReveal(for: existingEntry.token)
                     _ = controller.workspaceManager.markNativeFullscreenSuspended(
                         existingEntry.token,
-                        ownsNonManagedFocus: false
+                        ownsNativeFocus: false
                     )
                     let existingAssignment = controller.workspaceAssignment(pid: pid, windowId: winId)
                     wsForWindow = existingAssignment ?? defaultWorkspace
@@ -1496,9 +1495,7 @@ import QuartzCore
                     || evaluation.facts.degradedWindowServerChildEvidence
             )
 
-            let interactionPolicy = WindowInteractionPolicy.resolve(for: evaluation)
             let admittedToken: WindowToken
-            let reusedTrackedEntry: Bool
             if let refreshedEntry,
                !Self.shouldReadmitTrackedWindow(
                    entry: refreshedEntry,
@@ -1509,12 +1506,25 @@ import QuartzCore
                    appFullscreen: appFullscreen
                )
             {
-                _ = controller.workspaceManager.setManagedReplacementMetadata(
-                    managedReplacementMetadata,
-                    for: refreshedEntry.token
-                )
-                admittedToken = refreshedEntry.token
-                reusedTrackedEntry = true
+                if refreshedEntry.lifetimeAuthority == .directLifecycle {
+                    admittedToken = controller.workspaceManager.addWindow(
+                        ax,
+                        pid: pid,
+                        windowId: winId,
+                        to: wsForWindow,
+                        mode: admittedMode,
+                        ruleEffects: ruleEffects,
+                        admissionHints: admissionHints,
+                        lifetimeAuthority: .axTopLevelInventory,
+                        managedReplacementMetadata: managedReplacementMetadata
+                    )
+                } else {
+                    _ = controller.workspaceManager.setManagedReplacementMetadata(
+                        managedReplacementMetadata,
+                        for: refreshedEntry.token
+                    )
+                    admittedToken = refreshedEntry.token
+                }
             } else {
                 admittedToken = controller.workspaceManager.addWindow(
                     ax,
@@ -1524,10 +1534,8 @@ import QuartzCore
                     mode: admittedMode,
                     ruleEffects: ruleEffects,
                     admissionHints: admissionHints,
-                    interactionPolicy: interactionPolicy,
                     managedReplacementMetadata: managedReplacementMetadata
                 )
-                reusedTrackedEntry = false
             }
             guard admittedToken == token else {
                 seenKeys.insert(admittedToken)
@@ -1545,29 +1553,8 @@ import QuartzCore
                 candidate.enumeratedWindow.decisionEvidence.sizeConstraints,
                 for: admittedToken
             )
-            if reusedTrackedEntry {
-                controller.workspaceManager.setInteractionPolicy(interactionPolicy, for: admittedToken)
-            }
             if refreshedEntry != nil {
                 _ = controller.workspaceManager.updateAdmissionHints(admissionHints, for: admittedToken)
-            }
-            let admittedEntry = controller.workspaceManager.entry(for: admittedToken)
-            if let candidate = FullRescanFloatingFocusCandidate(
-                token: admittedToken,
-                workspaceId: admittedEntry?.workspaceId ?? wsForWindow,
-                isNewAdmission: existingEntry == nil,
-                mode: admittedEntry?.mode ?? admittedMode,
-                interactionPolicy: interactionPolicy,
-                createPlacementContext: createPlacementContext,
-                isSystemModalSurface: AXWindowService.isSystemModalSurface(
-                    role: admittedEntry?.managedReplacementMetadata?.role,
-                    subrole: admittedEntry?.managedReplacementMetadata?.subrole
-                )
-            ) {
-                floatingFocusCandidate = Self.newestFullRescanFloatingFocusCandidate(
-                    floatingFocusCandidate,
-                    considering: candidate
-                )
             }
             if existingEntry == nil {
                 controller.axEventHandler.discardCreatePlacementContext(for: winId)
@@ -1604,17 +1591,7 @@ import QuartzCore
             seenKeys.insert(admittedToken)
         }
 
-        let floatingFocusResolution = controller.hasStartedServices
-            ? focusFullRescanFloatingCandidate(floatingFocusCandidate)
-            : FullRescanFloatingFocusResolution.fallback
-        let focusValidationWorkspaceId: WorkspaceDescriptor.ID? = switch floatingFocusResolution {
-        case let .focused(workspaceId):
-            workspaceId
-        case .fallback:
-            focusedWorkspaceId
-        case .systemModalBarrier:
-            nil
-        }
+        let focusValidationWorkspaceId = focusedWorkspaceId
 
         controller.axEventHandler.updateIdentityAliases(
             enumerationSnapshot.identityAliasesByWindowId
@@ -1622,7 +1599,7 @@ import QuartzCore
 
         for token in decisionBasedRemovals {
             guard let entry = controller.workspaceManager.entry(for: token) else { continue }
-            controller.axEventHandler.retireManagedWindowFromAuthoritativeRescan(entry)
+            controller.axEventHandler.retireManagedWindowAfterDecisionRejection(entry)
         }
 
         let shouldPreserveMissingWindows = hadNativeFullscreenLifecycleContextAtStart
@@ -1659,11 +1636,6 @@ import QuartzCore
                 seenKeys: &seenKeys
             )
         }
-
-        preserveFocusedSheetDuringFullRescan(
-            windowServerInfoByWindowId: enumerationSnapshot.windowServerInfoByWindowId,
-            seenKeys: &seenKeys
-        )
 
         let eligibleKeys: Set<WindowToken>? = switch scope {
         case .all:
@@ -1809,7 +1781,7 @@ import QuartzCore
         {
             effects.focusValidationWorkspaceIds = [focusValidationWorkspaceId]
         }
-        effects.suppressWindowActivation = floatingFocusResolution == .systemModalBarrier
+        effects.suppressWindowActivation = false
         effects.markInitialRefreshComplete = true
         effects.drainDeferredCreatedWindows = true
         effects.subscribeManagedWindows = true
@@ -2612,7 +2584,7 @@ import QuartzCore
         animationTick: Bool = false,
         preserveWorkspaceInactive: Bool = true
     ) -> HideOperationResolution {
-        guard let controller, entry.interactionPolicy.mayPark else { return .unavailable }
+        guard let controller else { return .unavailable }
         var resolvedFrame = fastFrame(for: entry.token, axRef: entry.axRef)
             ?? controller.axManager.lastAppliedFrame(for: entry.windowId)
         if resolvedFrame == nil, !animationTick {

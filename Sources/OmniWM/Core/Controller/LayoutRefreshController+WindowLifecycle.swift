@@ -47,78 +47,6 @@ extension LayoutRefreshController {
         )
     }
 
-    struct FullRescanFloatingFocusCandidate: Equatable {
-        let token: WindowToken
-        let workspaceId: WorkspaceDescriptor.ID
-        let createdAt: Date
-        let createsSystemModalBarrier: Bool
-
-        init?(
-            token: WindowToken,
-            workspaceId: WorkspaceDescriptor.ID,
-            isNewAdmission: Bool,
-            mode: TrackedWindowMode,
-            interactionPolicy: WindowInteractionPolicy,
-            createPlacementContext: WindowCreatePlacementContext?,
-            isSystemModalSurface: Bool = false
-        ) {
-            guard isNewAdmission,
-                  mode == .floating,
-                  interactionPolicy.mayFocus || isSystemModalSurface,
-                  let createPlacementContext
-            else {
-                return nil
-            }
-            self.token = token
-            self.workspaceId = workspaceId
-            createdAt = createPlacementContext.createdAt
-            createsSystemModalBarrier = isSystemModalSurface
-        }
-    }
-
-    enum FullRescanFloatingFocusResolution: Equatable {
-        case focused(WorkspaceDescriptor.ID)
-        case fallback
-        case systemModalBarrier
-    }
-
-    static func newestFullRescanFloatingFocusCandidate(
-        _ current: FullRescanFloatingFocusCandidate?,
-        considering candidate: FullRescanFloatingFocusCandidate
-    ) -> FullRescanFloatingFocusCandidate {
-        guard let current else { return candidate }
-        if current.createsSystemModalBarrier != candidate.createsSystemModalBarrier {
-            return current.createsSystemModalBarrier ? current : candidate
-        }
-        return candidate.createdAt > current.createdAt ? candidate : current
-    }
-
-    func focusFullRescanFloatingCandidate(
-        _ candidate: FullRescanFloatingFocusCandidate?
-    ) -> FullRescanFloatingFocusResolution {
-        guard let controller else {
-            return .fallback
-        }
-        if let token = controller.workspaceManager.systemModalFocusToken,
-           controller.workspaceManager.focusedToken != token,
-           controller.axEventHandler.hasLiveFocusedAdmissionContinuation(for: token)
-        {
-            return .systemModalBarrier
-        }
-        guard let candidate else { return .fallback }
-        if candidate.createsSystemModalBarrier {
-            return .systemModalBarrier
-        }
-        switch controller.windowActionHandler.focusCreatedFloatingWindow(candidate.token) {
-        case .focused:
-            return .focused(candidate.workspaceId)
-        case .systemModalBarrier:
-            return .systemModalBarrier
-        case .rejected:
-            return .fallback
-        }
-    }
-
     func yieldToDeferredCreate(
         token: WindowToken,
         bundleId: String?,
@@ -218,10 +146,14 @@ extension LayoutRefreshController {
     ) -> [WindowState] {
         guard let workspaceManager = controller?.workspaceManager else { return [] }
         let threshold = max(1, requiredConsecutiveMisses)
-        let knownEntries = if let eligibleKeys {
+        let scopedEntries = if let eligibleKeys {
             eligibleKeys.compactMap { workspaceManager.entry(for: $0) }
         } else {
             workspaceManager.allEntries()
+        }
+        let knownEntries = scopedEntries.filter {
+            $0.lifetimeAuthority == .axTopLevelInventory
+                || nativeFullscreenRetirementKeys.contains($0.token)
         }
 
         for token in activeKeys {
@@ -272,31 +204,6 @@ extension LayoutRefreshController {
 
     func recordWindowPresence(_ handle: WindowHandle) {
         layoutState.consecutiveMissCountByHandle.removeValue(forKey: handle)
-    }
-
-    func preserveFocusedSheetDuringFullRescan(
-        windowServerInfoByWindowId: [Int: WindowServerInfo],
-        seenKeys: inout Set<WindowToken>
-    ) {
-        guard let controller,
-              let token = controller.workspaceManager.systemModalFocusToken,
-              controller.workspaceManager.focusedToken == token,
-              !seenKeys.contains(token),
-              let entry = controller.workspaceManager.entry(for: token),
-              let metadata = entry.managedReplacementMetadata,
-              metadata.role == (kAXSheetRole as String),
-              let windowId = UInt32(exactly: token.windowId),
-              let windowInfo = windowServerInfoByWindowId[token.windowId]
-              ?? controller.axEventHandler.resolveWindowInfo(windowId),
-              windowInfo.id == windowId,
-              windowInfo.pid == token.pid,
-              windowInfo.parentId != 0,
-              metadata.parentWindowId == nil
-              || metadata.parentWindowId == windowInfo.parentId
-        else {
-            return
-        }
-        seenKeys.insert(token)
     }
 
     func makeNiriRemovalSeeds(

@@ -102,7 +102,7 @@ final class WorkspaceManager {
                 observedState: entry.observedState,
                 desiredState: entry.desiredState,
                 restoreIntent: entry.restoreIntent,
-                interactionPolicy: entry.interactionPolicy
+                lifetimeAuthority: entry.lifetimeAuthority
             )
         }
 
@@ -282,7 +282,7 @@ final class WorkspaceManager {
             || current.lastFloatingFocusedByWorkspace != previous.lastFloatingFocusedByWorkspace
             || current.lastFocusedByWorkspace != previous.lastFocusedByWorkspace
             || current.lastTiledFocusedToken != previous.lastTiledFocusedToken
-            || current.nonManagedFocusToken != previous.nonManagedFocusToken
+            || current.nativeFocusOwner != previous.nativeFocusOwner
             || current.suppressedFocusToken != previous.suppressedFocusToken
             || current.systemModalFocusToken != previous.systemModalFocusToken
     }
@@ -300,8 +300,7 @@ final class WorkspaceManager {
             guard auxiliaryFocusStateChanged(from: previousFocus) else { return }
             let workspaceId = focusInvalidationWorkspaceId(for: world.focus)
             noteFocusInvalidation(previousWorkspaceId: workspaceId, currentWorkspaceId: workspaceId)
-        case .nonManagedFocusTargetChanged,
-             .suppressedFocusChanged,
+        case .suppressedFocusChanged,
              .systemModalFocusChanged:
             guard plan.focusSession != nil else { return }
             let workspaceId = focusInvalidationWorkspaceId(for: world.focus)
@@ -412,11 +411,10 @@ final class WorkspaceManager {
              .managedFocusConfirmed,
              .managedFocusRequested,
              .managedReplacementMetadataChanged,
+             .nativeFocusOwnerChanged,
              .nativeFullscreenPlaceholderSelected,
              .nativeFullscreenTransition,
              .niriPlacementsResolved,
-             .nonManagedFocusChanged,
-             .nonManagedFocusTargetChanged,
              .scratchpadMembershipChanged,
              .scratchpadRevealChanged,
              .selectionChanged,
@@ -857,8 +855,16 @@ final class WorkspaceManager {
         world.focus.previousInteractionMonitorId
     }
 
-    var focusedToken: WindowToken? {
-        world.focus.focusedToken
+    var selectedManagedToken: WindowToken? {
+        world.focus.selectedManagedToken
+    }
+
+    var nativeFocusOwner: NativeFocusOwner {
+        world.focus.nativeFocusOwner
+    }
+
+    var nativeManagedFocusToken: WindowToken? {
+        world.focus.nativeFocusOwner.managedToken
     }
 
     var lastTiledFocusedToken: WindowToken? {
@@ -871,8 +877,8 @@ final class WorkspaceManager {
         }
     }
 
-    var focusedHandle: WindowHandle? {
-        focusedToken.flatMap { world.handle(for: $0) }
+    var selectedManagedHandle: WindowHandle? {
+        selectedManagedToken.flatMap { world.handle(for: $0) }
     }
 
     var pendingFocusedToken: WindowToken? {
@@ -889,10 +895,6 @@ final class WorkspaceManager {
 
     var pendingFocusedMonitorId: Monitor.ID? {
         world.focus.pendingManagedFocus.monitorId
-    }
-
-    var isNonManagedFocusActive: Bool {
-        world.focus.isNonManagedFocusActive
     }
 
     func scratchpadMembers(in index: ScratchpadIndex) -> [WindowToken] {
@@ -1084,11 +1086,10 @@ final class WorkspaceManager {
     }
 
     @discardableResult
-    func exitNonManagedFocus() -> Bool {
+    func clearNativeFocusOwner() -> Bool {
         let changed = applyFocusReconcileEvent(
-            .nonManagedFocusChanged(
-                active: false,
-                preserveFocusedToken: true,
+            .nativeFocusOwnerChanged(
+                owner: .none,
                 preservePendingManagedFocus: false,
                 source: .workspaceManager
             )
@@ -1157,13 +1158,13 @@ final class WorkspaceManager {
     @discardableResult
     func markNativeFullscreenSuspended(
         _ token: WindowToken,
-        ownsNonManagedFocus: Bool = true
+        ownsNativeFocus: Bool = true
     ) -> Bool {
         guard let entry = entry(for: token) else { return false }
 
         let existing = nativeFullscreenRecord(for: token)
         guard existing != nil || nativeFullscreenRecordsByOriginalToken[token] == nil else { return false }
-        var changed = ownsNonManagedFocus ? rememberFocus(token, in: entry.workspaceId) : false
+        var changed = ownsNativeFocus ? rememberFocus(token, in: entry.workspaceId) : false
         let workspaceId = workspace(for: token) ?? entry.workspaceId
         let originalToken = existing?.originalToken ?? token
         var record = existing ?? NativeFullscreenRecord(
@@ -1193,8 +1194,8 @@ final class WorkspaceManager {
             setLayoutReason(.nativeFullscreen, for: token)
             changed = true
         }
-        if ownsNonManagedFocus {
-            changed = enterNonManagedFocus(target: token) || changed
+        if ownsNativeFocus {
+            changed = recordExternalFocus(pid: token.pid, windowId: token.windowId) || changed
         }
         return changed
     }
@@ -1241,23 +1242,23 @@ final class WorkspaceManager {
     @discardableResult
     func restoreNativeFullscreenRecord(
         for token: WindowToken,
-        clearsNonManagedFocusOwner: Bool = true
+        clearsNativeFocusOwner: Bool = true
     ) -> Bool {
         let record = nativeFullscreenRecord(for: token)
         let resolvedToken = record?.currentToken ?? token
         if let record {
             _ = removeNativeFullscreenRecord(
                 originalToken: record.originalToken,
-                clearsNonManagedFocusOwner: clearsNonManagedFocusOwner
+                clearsNativeFocusOwner: clearsNativeFocusOwner
             )
         }
         let restored = restoreFromNativeState(
             for: resolvedToken,
             drainPendingRuntimeMonitorOverrides: false
         )
-        if clearsNonManagedFocusOwner, record == nil, nonManagedFocusToken == resolvedToken {
-            _ = exitNonManagedFocus()
-            clearNonManagedFocusTarget(matching: resolvedToken)
+        if clearsNativeFocusOwner, record == nil, externalFocusToken == resolvedToken {
+            _ = clearNativeFocusOwner()
+            clearExternalFocusIdentity(matching: resolvedToken)
         }
         drainPendingRuntimeMonitorOverrideClears()
         return restored
@@ -1406,7 +1407,7 @@ final class WorkspaceManager {
         }
 
         if let confirmed = eligibleFocusCandidate(
-            world.focus.focusedToken,
+            world.focus.selectedManagedToken,
             in: workspaceId,
             mode: .tiling
         ) {
@@ -1444,7 +1445,7 @@ final class WorkspaceManager {
             return rememberedFloating
         }
         if let confirmed = eligibleFocusCandidate(
-            world.focus.focusedToken,
+            world.focus.selectedManagedToken,
             in: workspaceId,
             mode: .floating
         ) {
@@ -1468,7 +1469,7 @@ final class WorkspaceManager {
         let focus = world.focus
         let clearsPending = focus.pendingManagedFocus != .empty
             && focus.pendingManagedFocus.workspaceId == workspaceId
-        let clearsFocused = focus.focusedToken.flatMap { entry(for: $0)?.workspaceId } == workspaceId
+        let clearsFocused = focus.selectedManagedToken.flatMap { entry(for: $0)?.workspaceId } == workspaceId
         if clearsPending || clearsFocused,
            applyFocusReconcileEvent(.workspaceFocusCleared(workspaceId: workspaceId, source: .workspaceManager))
         {
@@ -1479,32 +1480,47 @@ final class WorkspaceManager {
     }
 
     @discardableResult
-    func enterNonManagedFocus(
-        preserveFocusedToken: Bool = false,
-        preservePendingManagedFocus: Bool = false,
-        target: WindowToken? = nil
+    func recordExternalFocus(
+        pid: pid_t? = nil,
+        windowId: Int? = nil,
+        preservePendingManagedFocus: Bool = false
     ) -> Bool {
-        var changed = applyFocusReconcileEvent(
-            .nonManagedFocusChanged(
-                active: true,
-                preserveFocusedToken: preserveFocusedToken,
+        let changed = applyFocusReconcileEvent(
+            .nativeFocusOwnerChanged(
+                owner: .external(pid: pid, windowId: windowId),
                 preservePendingManagedFocus: preservePendingManagedFocus,
                 source: .workspaceManager
             )
         )
-        if world.focus.nonManagedFocusToken != target {
-            changed = applyFocusReconcileEvent(
-                .nonManagedFocusTargetChanged(target: target, source: .workspaceManager)
-            ) || changed
-        }
         if changed {
             notifySessionStateChanged()
         }
         return changed
     }
 
-    var nonManagedFocusToken: WindowToken? {
-        world.focus.nonManagedFocusToken
+    @discardableResult
+    func externalizeNativeFocus(matching token: WindowToken) -> Bool {
+        guard nativeManagedFocusToken == token else { return false }
+        return recordExternalFocus(pid: token.pid, windowId: token.windowId)
+    }
+
+    @discardableResult
+    func recordOwnedSurfaceFocus() -> Bool {
+        let changed = applyFocusReconcileEvent(
+            .nativeFocusOwnerChanged(
+                owner: .ownedSurface,
+                preservePendingManagedFocus: false,
+                source: .workspaceManager
+            )
+        )
+        if changed {
+            notifySessionStateChanged()
+        }
+        return changed
+    }
+
+    var externalFocusToken: WindowToken? {
+        world.focus.nativeFocusOwner.externalToken
     }
 
     var suppressedFocusToken: WindowToken? {
@@ -1516,23 +1532,25 @@ final class WorkspaceManager {
     }
 
     var renderableFocusToken: WindowToken? {
-        if world.focus.isNonManagedFocusActive {
-            guard let token = world.focus.nonManagedFocusToken else { return nil }
-            return isNativeFullscreenSuspended(token) ? nil : token
-        }
-        return world.focus.focusedToken
+        nativeManagedFocusToken
     }
 
-    func clearNonManagedFocusTarget(matching token: WindowToken? = nil, pid: pid_t? = nil) {
-        guard let current = world.focus.nonManagedFocusToken else { return }
+    func clearExternalFocusIdentity(matching token: WindowToken? = nil, pid: pid_t? = nil) {
+        guard let current = externalFocusToken else { return }
         if let token, current != token { return }
         if let pid, current.pid != pid { return }
         let clearsNativeFullscreenOwner = activeNativeFullscreenFocusOwnerToken == current
-        if applyFocusReconcileEvent(.nonManagedFocusTargetChanged(target: nil, source: .workspaceManager)) {
+        if applyFocusReconcileEvent(
+            .nativeFocusOwnerChanged(
+                owner: .external(pid: current.pid, windowId: nil),
+                preservePendingManagedFocus: true,
+                source: .workspaceManager
+            )
+        ) {
             notifySessionStateChanged()
         }
         if clearsNativeFullscreenOwner {
-            _ = exitNonManagedFocus()
+            _ = clearNativeFocusOwner()
         }
     }
 
@@ -1554,7 +1572,7 @@ final class WorkspaceManager {
 
     private func focusInvalidationWorkspaceId(for focus: FocusSessionSnapshot) -> WorkspaceDescriptor.ID? {
         focus.pendingManagedFocus.workspaceId
-            ?? focus.focusedToken.flatMap { world.entry(for: $0)?.workspaceId }
+            ?? focus.selectedManagedToken.flatMap { world.entry(for: $0)?.workspaceId }
     }
 
     private func noteFocusInvalidation(
@@ -1978,7 +1996,7 @@ final class WorkspaceManager {
         mode: TrackedWindowMode = .tiling,
         ruleEffects: ManagedWindowRuleEffects = .none,
         admissionHints: ManagedWindowAdmissionHints = .none,
-        interactionPolicy: WindowInteractionPolicy = .full,
+        lifetimeAuthority: ManagedWindowLifetimeAuthority = .axTopLevelInventory,
         managedReplacementMetadata: ManagedReplacementMetadata? = nil
     ) -> WindowToken {
         let token = WindowToken(pid: pid, windowId: windowId)
@@ -2005,7 +2023,7 @@ final class WorkspaceManager {
                 axRef: ax,
                 ruleEffects: ruleEffects,
                 admissionHints: admissionHints,
-                interactionPolicy: interactionPolicy,
+                lifetimeAuthority: lifetimeAuthority,
                 managedReplacementMetadata: managedReplacementMetadata,
                 source: .workspaceManager
             )
@@ -2163,10 +2181,6 @@ final class WorkspaceManager {
 
     func admissionHints(for token: WindowToken) -> ManagedWindowAdmissionHints? {
         world.admissionHints(for: token)
-    }
-
-    func setInteractionPolicy(_ policy: WindowInteractionPolicy, for token: WindowToken) {
-        world.setInteractionPolicy(policy, for: token)
     }
 
     func setNiriRestorePlacements(_ placements: [WindowToken: PersistedNiriPlacement]) {
@@ -2409,7 +2423,7 @@ final class WorkspaceManager {
         )
         _ = removeNativeFullscreenRecord(containing: entry.token)
         if removesNativeFullscreenFocusOwner {
-            _ = exitNonManagedFocus()
+            _ = clearNativeFocusOwner()
         }
         let focusChanged = auxiliaryFocusStateChanged(from: previousFocus)
         let scratchpadChanged = updateScratchpadMembership(entry.token, to: nil, notify: false)
@@ -2605,20 +2619,20 @@ final class WorkspaceManager {
     @discardableResult
     private func removeNativeFullscreenRecord(
         originalToken: WindowToken,
-        clearsNonManagedFocusOwner: Bool = true
+        clearsNativeFocusOwner: Bool = true
     ) -> NativeFullscreenRecord? {
         guard let record = nativeFullscreenRecordsByOriginalToken.removeValue(forKey: originalToken) else {
             return nil
         }
-        let clearsFocusTarget = clearsNonManagedFocusOwner && nonManagedFocusToken == record.currentToken
-        let exitsNonManagedFocus = clearsFocusTarget && isNonManagedFocusActive
+        let clearsFocusTarget = clearsNativeFocusOwner && externalFocusToken == record.currentToken
+        let clearsNativeFocus = clearsFocusTarget
         nativeFullscreenOriginalTokenByCurrentToken.removeValue(forKey: record.currentToken)
         cancelNativeFullscreenTransitionTimeout(originalToken: originalToken)
-        if exitsNonManagedFocus {
-            _ = exitNonManagedFocus()
+        if clearsNativeFocus {
+            _ = clearNativeFocusOwner()
         }
         if clearsFocusTarget {
-            clearNonManagedFocusTarget(matching: record.currentToken)
+            clearExternalFocusIdentity(matching: record.currentToken)
         }
         noteInvalidation(workspaceId: record.workspaceId, domains: [.workspace, .layout, .focus, .fullscreen])
         NativeFullscreenPlaceholderTrace.record(
@@ -2697,9 +2711,7 @@ final class WorkspaceManager {
 
         let visibleBefore = activeVisibleWorkspaceMap()
         let movedWorkspaceWasVisible = visibleBefore[sourceMonitorId] == workspaceId
-        let managedFocusedEntry = world.focus.isNonManagedFocusActive
-            ? nil
-            : world.focus.focusedToken.flatMap { world.entry(for: $0) }
+        let managedFocusedEntry = nativeManagedFocusToken.flatMap { world.entry(for: $0) }
         let managedFocusedWorkspaceId = managedFocusedEntry?.workspaceId
         let transfersManagedFocus = managedFocusedWorkspaceId == workspaceId
         guard !isWorkspaceMonitorMoveUnsafe(
@@ -3205,9 +3217,8 @@ final class WorkspaceManager {
             snapshot: { self.reconcileSnapshot() },
             preMutate: {
                 for move in moves {
-                    let transfersManagedFocus = self.world.focus.focusedToken
+                    let transfersManagedFocus = self.nativeManagedFocusToken
                         .flatMap { self.world.entry(for: $0)?.workspaceId } == move.workspaceId
-                        && !self.world.focus.isNonManagedFocusActive
                     self.world.applyWorkspaceMonitorMove(
                         workspaceId: move.workspaceId,
                         targetMonitorId: move.targetMonitor.id,
@@ -3309,9 +3320,8 @@ final class WorkspaceManager {
         guard !visibleMonitorByWorkspace.isEmpty else { return false }
         let context = monitorResolutionContext()
         var sessions = world.monitorSessions
-        let managedFocusedWorkspaceId = world.focus.isNonManagedFocusActive
-            ? nil
-            : world.focus.focusedToken.flatMap { world.entry(for: $0)?.workspaceId }
+        let managedFocusedWorkspaceId = nativeManagedFocusToken
+            .flatMap { world.entry(for: $0)?.workspaceId }
 
         for workspaceId in visibleMonitorByWorkspace.keys.sorted(by: { $0.uuidString < $1.uuidString }) {
             guard let sourceMonitorId = visibleMonitorByWorkspace[workspaceId],
@@ -3802,7 +3812,7 @@ final class WorkspaceManager {
 
     private func reconcileInteractionMonitorState(notify: Bool = true) {
         let validMonitorIds = Set(monitors.map(\.id))
-        let focusedWorkspaceMonitorId = world.focus.focusedToken
+        let focusedWorkspaceMonitorId = nativeManagedFocusToken
             .flatMap { entry(for: $0)?.workspaceId }
             .flatMap { monitorId(for: $0) }
         let newInteractionMonitorId = world.focus.interactionMonitorId.flatMap {
@@ -3902,7 +3912,6 @@ extension WorkspaceManager {
         case .focusForgotten,
              .interactionMonitorChanged,
              .nativeFullscreenPlaceholderSelected,
-             .nonManagedFocusTargetChanged,
              .scratchpadMembershipChanged,
              .scratchpadRevealChanged,
              .selectionChanged,
@@ -3918,7 +3927,7 @@ extension WorkspaceManager {
             break
 
         case .focusLeaseChanged,
-             .nonManagedFocusChanged:
+             .nativeFocusOwnerChanged:
             noteInvalidation(workspaceId: nil, domains: .focus)
 
         case .topologyChanged,

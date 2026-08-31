@@ -68,7 +68,7 @@ final class IPCQueryRouter {
         let focusedApp: IPCAppRef?
 
         if let workspace,
-           let focusedToken = controller.workspaceManager.focusedToken,
+           let focusedToken = controller.workspaceManager.nativeManagedFocusToken,
            let entry = controller.workspaceManager.entry(for: focusedToken),
            entry.workspaceId == workspace.id
         {
@@ -110,7 +110,7 @@ final class IPCQueryRouter {
     }
 
     func focusedWindowResult() -> IPCFocusedWindowQueryResult {
-        guard let focusedToken = controller.workspaceManager.focusedToken,
+        guard let focusedToken = controller.workspaceManager.nativeManagedFocusToken,
               let entry = controller.workspaceManager.entry(for: focusedToken)
         else {
             return IPCFocusedWindowQueryResult(window: nil)
@@ -135,7 +135,7 @@ final class IPCQueryRouter {
 
     func windowsResult(_ request: IPCQueryRequest) -> IPCWindowsQueryResult {
         let fieldSet = requestedFieldSet(from: request)
-        let focusedToken = controller.workspaceManager.focusedToken
+        let focusedToken = controller.workspaceManager.nativeManagedFocusToken
         let visibleWorkspaceIds = controller.workspaceManager.visibleWorkspaceIds()
         let windows = orderedWorkspaces().flatMap { workspace in
             WorkspaceEntryOrdering.orderedEntries(
@@ -165,8 +165,8 @@ final class IPCQueryRouter {
 
     func workspacesResult(_ request: IPCQueryRequest) -> IPCWorkspacesQueryResult {
         let fieldSet = requestedFieldSet(from: request)
-        let focusedWindowToken = controller.workspaceManager.focusedToken
-        let focusedWorkspaceId = controller.workspaceManager.focusedToken
+        let focusedWindowToken = controller.workspaceManager.nativeManagedFocusToken
+        let focusedWorkspaceId = controller.workspaceManager.nativeManagedFocusToken
             .flatMap { controller.workspaceManager.workspace(for: $0) }
         let currentWorkspaceId = controller.monitorForInteraction()
             .flatMap { controller.workspaceManager.activeWorkspace(on: $0.id)?.id }

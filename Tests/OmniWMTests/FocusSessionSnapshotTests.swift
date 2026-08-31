@@ -5,6 +5,24 @@
 import XCTest
 
 final class FocusSessionSnapshotTests: XCTestCase {
+    func testSelectedManagedWindowRemainsIndependentFromNativeFocusOwner() {
+        let selected = WindowToken(pid: 1, windowId: 10)
+        let external = WindowToken(pid: 1, windowId: 11)
+        var focus = FocusSessionSnapshot(
+            selectedManagedToken: selected,
+            nativeFocusOwner: .external(pid: external.pid, windowId: external.windowId)
+        )
+
+        XCTAssertEqual(focus.selectedManagedToken, selected)
+        XCTAssertEqual(focus.nativeFocusOwner.externalToken, external)
+        XCTAssertNil(focus.nativeFocusOwner.managedToken)
+
+        focus.nativeFocusOwner = .ownedSurface
+
+        XCTAssertEqual(focus.selectedManagedToken, selected)
+        XCTAssertEqual(focus.nativeFocusOwner, .ownedSurface)
+    }
+
     func testRecordTiledFocusReportsOnlyHistoryChangesAndMaintainsBound() {
         let newest = WindowToken(pid: 1, windowId: 1)
         let second = WindowToken(pid: 1, windowId: 2)

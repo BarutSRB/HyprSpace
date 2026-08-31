@@ -1985,7 +1985,7 @@ final class MouseEventHandler {
         guard controller.focusPolicyEngine.evaluate(.focusFollowsMouse).allowsFocusChange else {
             return
         }
-        guard !nonManagedFocusBlocksFocusFollowsMouse,
+        guard !externalFocusBlocksFocusFollowsMouse,
               !hasPendingNativeFullscreenTransition(at: location),
               !isPointerDisplayShowingFullscreenSpace(at: location)
         else {
@@ -2003,19 +2003,23 @@ final class MouseEventHandler {
         ) else { return }
         let token = focusFollowsMouseToken(for: target)
 
-        guard token != controller.workspaceManager.focusedToken else { return }
+        guard token != controller.workspaceManager.selectedManagedToken else { return }
 
         state.lastFocusFollowsMouseTime = now
         activateFocusFollowsMouseTarget(target)
     }
 
-    private var nonManagedFocusBlocksFocusFollowsMouse: Bool {
-        guard let workspaceManager = controller?.workspaceManager,
-              workspaceManager.isNonManagedFocusActive
-        else {
+    private var externalFocusBlocksFocusFollowsMouse: Bool {
+        guard let workspaceManager = controller?.workspaceManager else { return false }
+        switch workspaceManager.nativeFocusOwner {
+        case .ownedSurface:
+            return true
+        case .external:
+            return workspaceManager.activeNativeFullscreenFocusOwnerToken == nil
+        case .managed,
+             .none:
             return false
         }
-        return workspaceManager.activeNativeFullscreenFocusOwnerToken == nil
     }
 
     private func hasPendingNativeFullscreenTransition(at location: CGPoint) -> Bool {
@@ -2146,7 +2150,7 @@ final class MouseEventHandler {
               !state.isResizing,
               !isTrackpadSwipeSessionActive,
               controller.focusPolicyEngine.evaluate(.focusFollowsMouse).allowsFocusChange,
-              !nonManagedFocusBlocksFocusFollowsMouse,
+              !externalFocusBlocksFocusFollowsMouse,
               !hasPendingNativeFullscreenTransition(at: sample.location),
               !isPointerDisplayShowingFullscreenSpace(at: sample.location),
               let target = resolveFocusFollowsMouseTarget(
@@ -2831,7 +2835,7 @@ final class MouseEventHandler {
     private func focusViewportSelectionAfterGesture(_ window: NiriWindow) {
         guard let controller else { return }
         guard !controller.hasFrontmostOwnedWindow else { return }
-        guard controller.workspaceManager.focusedToken != window.token else { return }
+        guard controller.workspaceManager.selectedManagedToken != window.token else { return }
         controller.focusWindow(window.token, origin: .pointerHover)
     }
 

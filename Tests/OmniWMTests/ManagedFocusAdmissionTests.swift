@@ -8,7 +8,7 @@ import XCTest
 
 @MainActor
 final class ManagedFocusAdmissionTests: XCTestCase {
-    func testUnexpectedActivationClearsManagedCommandTargetBeforeFactResolution() throws {
+    func testUnexpectedActivationPreservesManagedSelectionBeforeFactResolution() throws {
         let controller = WindowAdmissionTestSupport.controller()
         let workspaceId = try XCTUnwrap(
             controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
@@ -31,12 +31,12 @@ final class ManagedFocusAdmissionTests: XCTestCase {
 
         controller.axEventHandler.handleAppActivation(pid: 467_212, source: .cgsFrontAppChanged)
 
-        XCTAssertTrue(controller.workspaceManager.isNonManagedFocusActive)
-        XCTAssertNil(controller.workspaceManager.focusedToken)
+        XCTAssertTrue(controller.workspaceManager.nativeFocusOwner.isExternal)
+        XCTAssertEqual(controller.workspaceManager.selectedManagedToken, token)
         XCTAssertNil(controller.workspaceManager.renderableFocusToken)
     }
 
-    func testConflictingExternalActivationCancelsPendingCommandTargetBeforeFactResolution() throws {
+    func testConflictingExternalActivationCancelsPendingRequestAndPreservesSelection() throws {
         let controller = WindowAdmissionTestSupport.controller()
         let workspaceId = try XCTUnwrap(
             controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
@@ -66,8 +66,8 @@ final class ManagedFocusAdmissionTests: XCTestCase {
         controller.axEventHandler.handleAppActivation(pid: token.pid + 1, source: .cgsFrontAppChanged)
 
         XCTAssertNil(controller.intentLedger.activeManagedRequest)
-        XCTAssertTrue(controller.workspaceManager.isNonManagedFocusActive)
-        XCTAssertNil(controller.workspaceManager.focusedToken)
+        XCTAssertTrue(controller.workspaceManager.nativeFocusOwner.isExternal)
+        XCTAssertEqual(controller.workspaceManager.selectedManagedToken, token)
         XCTAssertNil(controller.workspaceManager.renderableFocusToken)
     }
 
@@ -104,7 +104,7 @@ final class ManagedFocusAdmissionTests: XCTestCase {
 
         XCTAssertEqual(controller.intentLedger.activeManagedRequest?.token, token)
         XCTAssertEqual(controller.workspaceManager.pendingFocusedToken, token)
-        XCTAssertFalse(controller.workspaceManager.isNonManagedFocusActive)
+        XCTAssertFalse(controller.workspaceManager.nativeFocusOwner.isExternal)
     }
 
     func testSupersededActivationFactsCannotRestoreStaleCommandTarget() throws {
@@ -149,8 +149,8 @@ final class ManagedFocusAdmissionTests: XCTestCase {
             )
         )
 
-        XCTAssertTrue(controller.workspaceManager.isNonManagedFocusActive)
-        XCTAssertNil(controller.workspaceManager.focusedToken)
+        XCTAssertTrue(controller.workspaceManager.nativeFocusOwner.isExternal)
+        XCTAssertEqual(controller.workspaceManager.selectedManagedToken, token)
         XCTAssertNil(controller.workspaceManager.renderableFocusToken)
     }
 
@@ -198,8 +198,8 @@ final class ManagedFocusAdmissionTests: XCTestCase {
             )
         )
 
-        XCTAssertEqual(controller.workspaceManager.focusedToken, secondToken)
-        XCTAssertFalse(controller.workspaceManager.isNonManagedFocusActive)
+        XCTAssertEqual(controller.workspaceManager.selectedManagedToken, secondToken)
+        XCTAssertFalse(controller.workspaceManager.nativeFocusOwner.isExternal)
     }
 
     func testStaleFocusedRetryRetiresBeforeFocusPolicySuppression() {
@@ -290,7 +290,7 @@ final class ManagedFocusAdmissionTests: XCTestCase {
             )
         )
 
-        XCTAssertEqual(controller.workspaceManager.focusedToken, modalToken)
+        XCTAssertEqual(controller.workspaceManager.selectedManagedToken, modalToken)
         XCTAssertEqual(controller.workspaceManager.systemModalFocusToken, modalToken)
         XCTAssertEqual(operations, ["order:\(modalToken.windowId)"])
         XCTAssertNil(controller.intentLedger.activeManagedRequest)
@@ -363,14 +363,14 @@ final class ManagedFocusAdmissionTests: XCTestCase {
             )
         )
 
-        XCTAssertEqual(controller.workspaceManager.focusedToken, frontmostToken)
+        XCTAssertEqual(controller.workspaceManager.selectedManagedToken, frontmostToken)
         XCTAssertNil(controller.workspaceManager.systemModalFocusToken)
         XCTAssertTrue(operations.isEmpty)
         XCTAssertNil(controller.intentLedger.activeManagedRequest)
         XCTAssertNil(controller.workspaceManager.pendingFocusedToken)
     }
 
-    func testTraceShapedTransientDecisionSuppressesRenderableFocusTargetAndBorder() throws {
+    func testTraceShapedExternalDecisionPreservesManagedSelectionWithoutRenderableBorder() throws {
         let controller = WindowAdmissionTestSupport.controller()
         let workspaceId = try XCTUnwrap(
             controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
@@ -389,11 +389,13 @@ final class ManagedFocusAdmissionTests: XCTestCase {
                 activateWorkspaceOnMonitor: false
             )
         )
+        controller.workspaceManager.setSystemModalFocus(parentToken)
+        XCTAssertTrue(controller.isSystemModalFocusActive)
         let parentFrame = CGRect(x: 1_280, y: 70, width: 1_200, height: 1_350)
         let managedWorld = WorldView(controller: controller, borderFrameResolver: { windowId in
             windowId == parentToken.windowId ? parentFrame : nil
         })
-        XCTAssertNotNil(SurfaceDerivation.deriveBorder(world: managedWorld))
+        XCTAssertNil(SurfaceDerivation.deriveBorder(world: managedWorld))
 
         let token = WindowToken(pid: 86_312, windowId: 7_916)
         let popupFrame = CGRect(x: 2_128, y: 126, width: 320, height: 425)
@@ -437,22 +439,22 @@ final class ManagedFocusAdmissionTests: XCTestCase {
         let rejectionReason = evaluation.decision.admissionRejectionReason
 
         XCTAssertEqual(evaluation.decision.disposition, .unmanaged)
-        XCTAssertEqual(rejectionReason, .nonRenderableTransientSurface)
-        XCTAssertTrue(WindowAdmissionPendingReason.windowServerEvidenceMissing.suppressesNonManagedFocusTarget)
-        XCTAssertFalse(WindowAdmissionPendingReason.factsDeferred.suppressesNonManagedFocusTarget)
-        XCTAssertTrue(rejectionReason.suppressesNonManagedFocusTarget)
-        XCTAssertFalse(WindowAdmissionRejectionReason.policyIgnored.suppressesNonManagedFocusTarget)
+        XCTAssertEqual(rejectionReason, .externalSurface)
+        XCTAssertFalse(WindowAdmissionPendingReason.windowServerEvidenceMissing.hasVerifiedExternalWindowIdentity)
+        XCTAssertTrue(WindowAdmissionPendingReason.factsDeferred.hasVerifiedExternalWindowIdentity)
 
-        XCTAssertTrue(
-            controller.workspaceManager.enterNonManagedFocus(
-                target: rejectionReason.suppressesNonManagedFocusTarget ? nil : token
-            )
+        XCTAssertTrue(controller.workspaceManager.recordExternalFocus(pid: token.pid, windowId: token.windowId))
+        XCTAssertTrue(controller.workspaceManager.nativeFocusOwner.isExternal)
+        XCTAssertEqual(controller.workspaceManager.externalFocusToken, token)
+        XCTAssertEqual(controller.workspaceManager.selectedManagedToken, parentToken)
+        XCTAssertEqual(
+            controller.workspaceManager.nativeFocusOwner,
+            .external(pid: token.pid, windowId: token.windowId)
         )
-        XCTAssertTrue(controller.workspaceManager.isNonManagedFocusActive)
-        XCTAssertNil(controller.workspaceManager.nonManagedFocusToken)
         XCTAssertNil(controller.workspaceManager.renderableFocusToken)
-        let nonManagedWorld = WorldView(controller: controller, borderFrameResolver: { _ in popupFrame })
-        XCTAssertNil(SurfaceDerivation.deriveBorder(world: nonManagedWorld))
+        XCTAssertFalse(controller.isSystemModalFocusActive)
+        let externalWorld = WorldView(controller: controller, borderFrameResolver: { _ in popupFrame })
+        XCTAssertNil(SurfaceDerivation.deriveBorder(world: externalWorld))
     }
 
     func testBackgroundFocusedWindowChangeRequiresMouseAuthorityBeforeMutation() throws {
@@ -495,8 +497,8 @@ final class ManagedFocusAdmissionTests: XCTestCase {
         )
 
         XCTAssertEqual(requestedPIDs, [frontmostToken.pid])
-        XCTAssertEqual(controller.workspaceManager.focusedToken, frontmostToken)
-        XCTAssertFalse(controller.workspaceManager.isNonManagedFocusActive)
+        XCTAssertEqual(controller.workspaceManager.selectedManagedToken, frontmostToken)
+        XCTAssertFalse(controller.workspaceManager.nativeFocusOwner.isExternal)
 
         controller.axEventHandler.noteMouseFocusIntent(token: backgroundToken)
         _ = controller.axEventHandler.handleAppActivation(
@@ -518,7 +520,7 @@ final class ManagedFocusAdmissionTests: XCTestCase {
                 )
             )
         )
-        XCTAssertEqual(controller.workspaceManager.focusedToken, backgroundToken)
+        XCTAssertEqual(controller.workspaceManager.selectedManagedToken, backgroundToken)
     }
 
     func testFocusedWindowFactsAreRejectedIfNativeFrontmostEvidenceChangesDuringResolution() throws {
@@ -568,7 +570,7 @@ final class ManagedFocusAdmissionTests: XCTestCase {
             )
         )
 
-        XCTAssertEqual(controller.workspaceManager.focusedToken, originalToken)
+        XCTAssertEqual(controller.workspaceManager.selectedManagedToken, originalToken)
     }
 
     func testBackgroundFocusedWindowChangeRequiresExactManagedFocusRequestAtFactResolution() throws {
@@ -640,7 +642,7 @@ final class ManagedFocusAdmissionTests: XCTestCase {
             )
         )
 
-        XCTAssertEqual(controller.workspaceManager.focusedToken, frontmostToken)
+        XCTAssertEqual(controller.workspaceManager.selectedManagedToken, frontmostToken)
         XCTAssertEqual(controller.intentLedger.activeManagedRequest?.requestId, request.requestId)
         XCTAssertEqual(controller.workspaceManager.pendingFocusedToken, requestedToken)
 
@@ -664,7 +666,7 @@ final class ManagedFocusAdmissionTests: XCTestCase {
             )
         )
 
-        XCTAssertEqual(controller.workspaceManager.focusedToken, requestedToken)
+        XCTAssertEqual(controller.workspaceManager.selectedManagedToken, requestedToken)
         XCTAssertNil(controller.intentLedger.activeManagedRequest)
         XCTAssertNil(controller.workspaceManager.pendingFocusedToken)
     }

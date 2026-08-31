@@ -588,7 +588,7 @@ final class WindowAdmissionTraceTests: XCTestCase {
         XCTAssertEqual(snapshots.count, 1)
     }
 
-    func testClassificationDumpCarriesInteractionPolicy() throws {
+    func testClassificationDumpCarriesDecisionOnly() throws {
         let recorder = WindowAdmissionTrace(capacity: 4)
         let observation = classificationObservation(rulesRevision: 11)
         recorder.beginCapture()
@@ -610,7 +610,8 @@ final class WindowAdmissionTraceTests: XCTestCase {
         )
         let dumped = try XCTUnwrap(object["observation"] as? [String: Any])
 
-        XCTAssertEqual(dumped["observedPolicy"] as? String, "handsOffSurface")
+        XCTAssertNotNil(dumped["observedDecision"])
+        XCTAssertNil(dumped["observedPolicy"])
     }
 
     func testRulesSnapshotIsIndividuallyByteBounded() throws {
@@ -770,8 +771,7 @@ final class WindowAdmissionTraceTests: XCTestCase {
                     heuristicReasons: [],
                     deferredReason: nil
                 )
-            ),
-            observedPolicy: WindowInteractionPolicy.handsOffSurface.name
+            )
         )
     }
 

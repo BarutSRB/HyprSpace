@@ -73,7 +73,7 @@ final class OverviewStructuralCommandTests: XCTestCase {
         )
         XCTAssertEqual(mutation.selectedHandle, selected)
         XCTAssertEqual(mutation.movedTokens, [selected.id])
-        XCTAssertEqual(fixture.controller.workspaceManager.focusedToken, liveFocused.id)
+        XCTAssertEqual(fixture.controller.workspaceManager.selectedManagedToken, liveFocused.id)
         XCTAssertEqual(fixture.controller.workspaceManager.lastFocusedToken(in: workspaceId), selected.id)
         XCTAssertEqual(fixture.focusRecorder.callCount, 0)
     }
@@ -178,7 +178,7 @@ final class OverviewStructuralCommandTests: XCTestCase {
         )
         XCTAssertEqual(fixture.controller.workspaceManager.interactionMonitorId, targetMonitor.id)
         XCTAssertEqual(overview.selectedWindowHandle, selected)
-        XCTAssertEqual(fixture.controller.workspaceManager.focusedToken, liveFocused.id)
+        XCTAssertEqual(fixture.controller.workspaceManager.selectedManagedToken, liveFocused.id)
         XCTAssertEqual(fixture.focusRecorder.callCount, 0)
     }
 
@@ -367,7 +367,7 @@ final class OverviewStructuralCommandTests: XCTestCase {
         )
         XCTAssertEqual(fixture.controller.workspaceManager.interactionMonitorId, fixture.monitor.id)
         XCTAssertEqual(overview.selectedWindowHandle, selected)
-        XCTAssertEqual(fixture.controller.workspaceManager.focusedToken, liveFocused.id)
+        XCTAssertEqual(fixture.controller.workspaceManager.selectedManagedToken, liveFocused.id)
         XCTAssertEqual(fixture.focusRecorder.callCount, 0)
     }
 
@@ -423,7 +423,7 @@ final class OverviewStructuralCommandTests: XCTestCase {
         XCTAssertEqual(outcome, StructuralMutationOutcome.unchanged)
         XCTAssertEqual(engine.columns(in: workspaceId).flatMap { $0.windowNodes.map(\.token) }, originalOrder)
         XCTAssertEqual(fixture.controller.workspaceManager.lastFocusedToken(in: workspaceId), second.id)
-        XCTAssertEqual(fixture.controller.workspaceManager.focusedToken, second.id)
+        XCTAssertEqual(fixture.controller.workspaceManager.selectedManagedToken, second.id)
         XCTAssertEqual(fixture.focusRecorder.callCount, 0)
     }
 

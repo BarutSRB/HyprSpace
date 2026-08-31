@@ -347,7 +347,7 @@ enum StructuralMutationOutcome: Equatable {
 
         if controller.moveMouseToFocusedWindowEnabled,
            controller.workspaceManager.pendingFocusedToken == nil,
-           let token = controller.workspaceManager.focusedToken,
+           let token = controller.workspaceManager.nativeManagedFocusToken,
            !controller.axEventHandler.hasRecentMouseFocusIntent(for: token),
            controller.intentLedger.allowsMouseToFocusedWarp(for: token)
         {

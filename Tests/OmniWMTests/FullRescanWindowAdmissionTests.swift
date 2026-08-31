@@ -212,7 +212,7 @@ final class FullRescanWindowAdmissionTests: XCTestCase {
         XCTAssertEqual(retainedEntry.workspaceId, workspaceId)
         XCTAssertEqual(retainedEntry.mode, .floating)
         XCTAssertTrue(CFEqual(retainedEntry.axRef.element, logicalAXRef.element))
-        XCTAssertTrue(controller.workspaceManager.focusedHandle === originalHandle)
+        XCTAssertTrue(controller.workspaceManager.selectedManagedHandle === originalHandle)
 
         let executionOwner: UInt64 = 467_949
         var runningState = retainedState
@@ -242,8 +242,8 @@ final class FullRescanWindowAdmissionTests: XCTestCase {
         XCTAssertTrue(CFEqual(reboundEntry.axRef.element, helperAXRef.element))
         XCTAssertTrue(controller.workspaceManager.handle(for: newToken) === originalHandle)
         XCTAssertTrue(controller.workspaceManager.entry(for: originalHandle)?.token == newToken)
-        XCTAssertTrue(controller.workspaceManager.focusedHandle === originalHandle)
-        XCTAssertEqual(controller.workspaceManager.focusedToken, newToken)
+        XCTAssertTrue(controller.workspaceManager.selectedManagedHandle === originalHandle)
+        XCTAssertEqual(controller.workspaceManager.selectedManagedToken, newToken)
         XCTAssertEqual(controller.workspaceManager.allEntries().count, 1)
     }
 
@@ -503,8 +503,8 @@ final class FullRescanWindowAdmissionTests: XCTestCase {
         XCTAssertTrue(engine.column(of: originalNode) === originalColumn)
         XCTAssertEqual(engine.columns(in: workspaceId).count, 1)
         XCTAssertEqual(originalColumn.windowNodes.map(\.token), [transientToken])
-        XCTAssertTrue(controller.workspaceManager.focusedHandle === originalHandle)
-        XCTAssertEqual(controller.workspaceManager.focusedToken, transientToken)
+        XCTAssertTrue(controller.workspaceManager.selectedManagedHandle === originalHandle)
+        XCTAssertEqual(controller.workspaceManager.selectedManagedToken, transientToken)
         XCTAssertEqual(
             controller.workspaceManager.niriViewportState(for: workspaceId),
             originalViewport
@@ -593,7 +593,7 @@ final class FullRescanWindowAdmissionTests: XCTestCase {
         XCTAssertTrue(engine.column(of: originalNode) === originalColumn)
         XCTAssertEqual(engine.columns(in: workspaceId).count, 1)
         XCTAssertEqual(originalColumn.windowNodes.map(\.token), [transientToken])
-        XCTAssertTrue(controller.workspaceManager.focusedHandle === originalHandle)
+        XCTAssertTrue(controller.workspaceManager.selectedManagedHandle === originalHandle)
         XCTAssertEqual(
             controller.workspaceManager.niriViewportState(for: workspaceId),
             originalViewport
@@ -605,8 +605,8 @@ final class FullRescanWindowAdmissionTests: XCTestCase {
         XCTAssertNil(controller.workspaceManager.entry(for: transientToken))
         XCTAssertEqual(controller.workspaceManager.allEntries().map(\.token), [restoredToken])
         XCTAssertTrue(controller.workspaceManager.handle(for: restoredToken) === originalHandle)
-        XCTAssertTrue(controller.workspaceManager.focusedHandle === originalHandle)
-        XCTAssertEqual(controller.workspaceManager.focusedToken, restoredToken)
+        XCTAssertTrue(controller.workspaceManager.selectedManagedHandle === originalHandle)
+        XCTAssertEqual(controller.workspaceManager.selectedManagedToken, restoredToken)
         XCTAssertNil(engine.findNode(for: transientToken, in: workspaceId))
         XCTAssertTrue(engine.findNode(for: restoredToken, in: workspaceId) === originalNode)
         XCTAssertTrue(engine.column(of: originalNode) === originalColumn)

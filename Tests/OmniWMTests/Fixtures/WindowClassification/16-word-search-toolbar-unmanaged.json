@@ -1,0 +1,52 @@
+{
+  "observation": {
+    "tokenPid": 20789,
+    "tokenWindowId": 2040,
+    "appName": "Microsoft Word",
+    "bundleId": "com.microsoft.Word",
+    "rulesRevision": 1,
+    "input": {
+      "appName": "Microsoft Word",
+      "ax": {
+        "role": "AXToolbar",
+        "subrole": "AXSystemDialog",
+        "title": "",
+        "hasCloseButton": true,
+        "hasFullscreenButton": false,
+        "hasZoomButton": false,
+        "hasMinimizeButton": true,
+        "appPolicy": "regular",
+        "bundleId": "com.microsoft.Word",
+        "attributeFetchSucceeded": true
+      },
+      "windowServer": {
+        "id": 2040,
+        "pid": 20789,
+        "level": 0,
+        "frameX": 427,
+        "frameY": 139,
+        "frameWidth": 482,
+        "frameHeight": 44,
+        "tags": 0,
+        "attributes": 0,
+        "parentId": 2033
+      },
+      "appFullscreen": false
+    },
+    "observedDecision": {
+      "disposition": "floating",
+      "source": "heuristic",
+      "heuristicReasons": [
+        "nonStandardSubrole"
+      ],
+      "layoutDecisionKind": "fallbackLayout"
+    }
+  },
+  "rules": [],
+  "expectedDecision": {
+    "disposition": "unmanaged",
+    "source": "builtInRule(externalSurface)",
+    "heuristicReasons": [],
+    "layoutDecisionKind": "explicitLayout"
+  }
+}

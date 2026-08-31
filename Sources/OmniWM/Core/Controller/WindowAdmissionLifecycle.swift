@@ -11,23 +11,18 @@ enum WindowAdmissionPendingReason: String, Equatable {
     case windowServerEvidenceMissing = "window_server_evidence_missing"
     case degenerateGeometry = "degenerate_geometry"
 
-    var suppressesNonManagedFocusTarget: Bool {
-        self == .windowServerEvidenceMissing
+    var hasVerifiedExternalWindowIdentity: Bool {
+        self != .windowServerEvidenceMissing
     }
 }
 
 enum WindowAdmissionRejectionReason: String, Equatable {
     case invalidIdentity = "invalid_identity"
     case ownedWindow = "owned_window"
-    case policyIgnored = "policy_ignored"
-    case nonRenderableTransientSurface = "non_renderable_transient_surface"
+    case externalSurface = "external_surface"
     case quarantined = "quarantined"
     case retryExhausted = "retry_exhausted"
     case terminalFrameRefusal = "terminal_frame_refusal"
-
-    var suppressesNonManagedFocusTarget: Bool {
-        self == .nonRenderableTransientSurface
-    }
 }
 
 enum ActivationRetryReason: String, Equatable {
@@ -45,7 +40,7 @@ extension WindowDecision {
 
     @MainActor
     var admissionRejectionReason: WindowAdmissionRejectionReason {
-        isNonRenderableTransientSurfaceDecision ? .nonRenderableTransientSurface : .policyIgnored
+        .externalSurface
     }
 }
 
@@ -270,6 +265,8 @@ enum FullRescanIdentityResolution {
 
 enum ManagedWindowRetirementReason {
     case destroyed(shouldRecoverFocus: Bool, allowsPreferredRecoveryToken: Bool)
+    case authoritativeRescan
+    case decisionRejection
     case staleIncarnation
     case terminalFrameRefusal
 }
@@ -279,6 +276,7 @@ struct ManagedWindowRetirementPolicy {
     let allowsPreferredRecoveryToken: Bool
     let traceReason: String
     let removesIdentityAliases: Bool
+    let preservesLiveFocusAsExternal: Bool
 }
 
 struct WindowIdentityAliasGeneration {

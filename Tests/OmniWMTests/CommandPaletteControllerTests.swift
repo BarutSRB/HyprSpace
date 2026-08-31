@@ -130,16 +130,6 @@ final class CommandPaletteControllerTests: XCTestCase {
         XCTAssertFalse(CommandPaletteController.allowsSummonRight(items[1]))
     }
 
-    func testHandsOffSurfacesAreExcludedFromWindowItems() throws {
-        let (wmController, visibleToken, hiddenToken) = try makeWindowFixture()
-        wmController.workspaceManager.setInteractionPolicy(.handsOffSurface, for: visibleToken)
-        let palette = CommandPaletteController(
-            motionPolicy: MotionPolicy(animationsEnabled: false)
-        )
-
-        XCTAssertEqual(palette.buildWindowItems(from: wmController).map(\.id), [hiddenToken])
-    }
-
     func testWindowStatusTextDescribesSelectedHiddenWindowPrimaryAction() throws {
         let (wmController, _, hiddenToken) = try makeWindowFixture()
         let palette = CommandPaletteController(

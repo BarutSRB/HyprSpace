@@ -19,6 +19,18 @@
         "bundleId": "com.example.accessory",
         "attributeFetchSucceeded": true
       },
+      "windowServer": {
+        "id": 2,
+        "pid": 1000,
+        "level": 0,
+        "frameX": 0,
+        "frameY": 0,
+        "frameWidth": 480,
+        "frameHeight": 320,
+        "tags": 0,
+        "attributes": 0,
+        "parentId": 0
+      },
       "appFullscreen": false
     },
     "observedDecision": {
@@ -32,12 +44,9 @@
   },
   "rules": [],
   "expectedDecision": {
-    "disposition": "floating",
-    "source": "heuristic",
-    "heuristicReasons": [
-      "accessoryWithoutClose"
-    ],
-    "layoutDecisionKind": "fallbackLayout"
-  },
-  "expectedPolicy": "handsOffSurface"
+    "disposition": "unmanaged",
+    "source": "builtInRule(externalSurface)",
+    "heuristicReasons": [],
+    "layoutDecisionKind": "explicitLayout"
+  }
 }

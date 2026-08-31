@@ -20,6 +20,18 @@
         "bundleId": "com.example.wide",
         "attributeFetchSucceeded": true
       },
+      "windowServer": {
+        "id": 7,
+        "pid": 1000,
+        "level": 0,
+        "frameX": 0,
+        "frameY": 0,
+        "frameWidth": 1200,
+        "frameHeight": 800,
+        "tags": 0,
+        "attributes": 0,
+        "parentId": 0
+      },
       "appFullscreen": false
     },
     "observedDecision": {
@@ -43,6 +55,5 @@
     "heuristicReasons": [],
     "layoutDecisionKind": "fallbackLayout",
     "initialNiriContainerPrimarySpan": 0.75
-  },
-  "expectedPolicy": "full"
+  }
 }

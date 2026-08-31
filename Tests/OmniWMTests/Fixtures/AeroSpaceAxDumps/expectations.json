@@ -1,604 +1,531 @@
 {
   "1password": {
     "aeroSpaceLabel": "window",
-    "expectedDisposition": "managed",
-    "expectedPolicy": "full"
+    "expectedDisposition": "managed"
   },
   "1password_large_type_window": {
     "aeroSpaceLabel": "dialog",
     "expectedDisposition": "managed",
-    "expectedPolicy": "full",
     "note": "AeroSpace floats these via an app rule keyed on 1Password + non-normal level. OmniWM tiles standard windows that expose a full button set; no OmniWM-visible signal separates this from an ordinary window."
   },
   "1password_mini_window": {
     "aeroSpaceLabel": "dialog",
     "expectedDisposition": "managed",
-    "expectedPolicy": "full",
     "note": "Same as 1password_large_type_window."
   },
   "about_this_mac": {
     "aeroSpaceLabel": "dialog",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "full"
+    "expectedDisposition": "unmanaged",
+    "note": "AeroSpace manages this as a floating dialog; OmniWM deliberately excludes it because its AX role, app policy, or WindowServer level does not establish an eligible root window."
   },
   "alacritty_decorations_buttonless": {
     "aeroSpaceLabel": "window",
-    "expectedDisposition": "managed",
-    "expectedPolicy": "full"
+    "expectedDisposition": "managed"
   },
   "apple_calendar": {
     "aeroSpaceLabel": "window",
-    "expectedDisposition": "managed",
-    "expectedPolicy": "full"
+    "expectedDisposition": "managed"
   },
   "apple_calendar_settings": {
     "aeroSpaceLabel": "dialog",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "full"
+    "expectedDisposition": "floating"
   },
   "apple_followup_sign_in_to_a_new_device_confirmation": {
     "aeroSpaceLabel": "popup",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "handsOffSurface"
+    "expectedDisposition": "unmanaged",
+    "note": "AeroSpace retains this in its global popup container; OmniWM deliberately keeps it outside authoritative window state."
   },
   "apple_mail": {
     "aeroSpaceLabel": "window",
-    "expectedDisposition": "managed",
-    "expectedPolicy": "full"
+    "expectedDisposition": "managed"
   },
   "apple_mail_new_email": {
     "aeroSpaceLabel": "window",
-    "expectedDisposition": "managed",
-    "expectedPolicy": "full"
+    "expectedDisposition": "managed"
   },
   "apple_mail_settings": {
     "aeroSpaceLabel": "dialog",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "full"
+    "expectedDisposition": "floating"
   },
   "archiveutility": {
     "aeroSpaceLabel": "dialog",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "full"
+    "expectedDisposition": "floating"
   },
   "brave": {
     "aeroSpaceLabel": "window",
-    "expectedDisposition": "managed",
-    "expectedPolicy": "full"
+    "expectedDisposition": "managed"
   },
   "brave_pip": {
     "aeroSpaceLabel": "popup",
     "expectedDisposition": "floating",
-    "expectedPolicy": "full",
     "note": "Picture-in-Picture. OmniWM deliberately gives PiP full rights so the user can move it (see the browserPictureInPicture built-in rule); AeroSpace makes it untouchable. Consider extending the built-in PiP rule to Brave/Chrome/Edge for consistency."
   },
   "calculator": {
     "aeroSpaceLabel": "dialog",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "full"
+    "expectedDisposition": "floating"
   },
   "choose_1_5_0": {
     "aeroSpaceLabel": "popup",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "handsOffSurface"
+    "expectedDisposition": "unmanaged",
+    "note": "AeroSpace retains this in its global popup container; OmniWM deliberately keeps it outside authoritative window state."
   },
   "chrome": {
     "aeroSpaceLabel": "window",
-    "expectedDisposition": "managed",
-    "expectedPolicy": "full"
+    "expectedDisposition": "managed"
   },
   "chrome_choose_what_to_share_popup": {
     "aeroSpaceLabel": "popup",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "handsOffSurface"
+    "expectedDisposition": "unmanaged",
+    "note": "AeroSpace retains this in its global popup container; OmniWM deliberately keeps it outside authoritative window state."
   },
   "chrome_extensions_popup": {
     "aeroSpaceLabel": "popup",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "handsOffSurface"
+    "expectedDisposition": "unmanaged",
+    "note": "AeroSpace retains this in its global popup container; OmniWM deliberately keeps it outside authoritative window state."
   },
   "chrome_find_in_page": {
     "aeroSpaceLabel": "popup",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "handsOffSurface"
+    "expectedDisposition": "unmanaged",
+    "note": "AeroSpace retains this in its global popup container; OmniWM deliberately keeps it outside authoritative window state."
   },
   "chrome_pip": {
     "aeroSpaceLabel": "popup",
     "expectedDisposition": "floating",
-    "expectedPolicy": "full",
     "note": "Same as brave_pip."
   },
   "chrome_sharing_is_in_progress_popup": {
     "aeroSpaceLabel": "popup",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "handsOffSurface"
+    "expectedDisposition": "unmanaged",
+    "note": "AeroSpace retains this in its global popup container; OmniWM deliberately keeps it outside authoritative window state."
   },
   "cleanshotx_monitor_1": {
     "aeroSpaceLabel": "popup",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "handsOffSurface"
+    "expectedDisposition": "unmanaged",
+    "note": "AeroSpace retains this in its global popup container; OmniWM deliberately keeps it outside authoritative window state."
   },
   "cleanshotx_monitor_2": {
     "aeroSpaceLabel": "popup",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "handsOffSurface"
+    "expectedDisposition": "unmanaged",
+    "note": "AeroSpace retains this in its global popup container; OmniWM deliberately keeps it outside authoritative window state."
   },
   "codex": {
     "aeroSpaceLabel": "window",
-    "expectedDisposition": "managed",
-    "expectedPolicy": "full"
+    "expectedDisposition": "managed"
   },
   "codex_pet_window": {
     "aeroSpaceLabel": "popup",
     "expectedDisposition": "floating",
-    "expectedPolicy": "full",
     "note": "Desktop pet at kCGFloatingWindowLevel. Level 3 is not a usable hands-off signal -- the corpus has it on four throwaway overlays and five legitimate utility windows -- so OmniWM leaves it floating with full rights."
   },
   "drracket": {
     "aeroSpaceLabel": "window",
-    "expectedDisposition": "managed",
-    "expectedPolicy": "full"
+    "expectedDisposition": "managed"
   },
   "emacs": {
     "aeroSpaceLabel": "window",
-    "expectedDisposition": "managed",
-    "expectedPolicy": "full"
+    "expectedDisposition": "managed"
   },
   "emacs_child_frame_corfu": {
     "aeroSpaceLabel": "popup",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "handsOffSurface"
+    "expectedDisposition": "unmanaged",
+    "note": "Emacs exposes this completion child frame as AXFloatingWindow without reliable parent metadata; reviewed popup semantics keep it outside authoritative window state."
   },
   "emacs_child_frame_posframe": {
     "aeroSpaceLabel": "popup",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "handsOffSurface"
+    "expectedDisposition": "unmanaged",
+    "note": "Emacs exposes this child frame as AXFloatingWindow without reliable parent metadata; reviewed popup semantics keep it outside authoritative window state."
   },
   "finder": {
     "aeroSpaceLabel": "window",
-    "expectedDisposition": "managed",
-    "expectedPolicy": "full"
+    "expectedDisposition": "managed"
   },
   "finder_quick_look": {
     "aeroSpaceLabel": "dialog",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "full"
+    "expectedDisposition": "floating"
   },
   "firefox": {
     "aeroSpaceLabel": "window",
-    "expectedDisposition": "managed",
-    "expectedPolicy": "full"
+    "expectedDisposition": "managed"
   },
   "firefox_extensions_popup": {
     "aeroSpaceLabel": "popup",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "handsOffSurface"
+    "expectedDisposition": "unmanaged",
+    "note": "AeroSpace retains this in its global popup container; OmniWM deliberately keeps it outside authoritative window state."
   },
   "firefox_mouse_hover_over_extensions_button": {
     "aeroSpaceLabel": "popup",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "handsOffSurface"
+    "expectedDisposition": "unmanaged",
+    "note": "AeroSpace retains this in its global popup container; OmniWM deliberately keeps it outside authoritative window state."
   },
   "firefox_mouse_hover_over_tab": {
     "aeroSpaceLabel": "popup",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "handsOffSurface"
+    "expectedDisposition": "unmanaged",
+    "note": "AeroSpace retains this in its global popup container; OmniWM deliberately keeps it outside authoritative window state."
   },
   "firefox_non_native_fullscreen": {
     "aeroSpaceLabel": "dialog",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "handsOffSurface",
-    "note": "Known miss of noButtonsOnNonStandardSubrole. That rule is 22/23 correct for AXUnknown/AXSystemDialog/AXFloatingWindow; narrowing it would win 4 and lose 6."
+    "expectedDisposition": "unmanaged",
+    "note": "AeroSpace manages this as a floating dialog; OmniWM deliberately excludes it because its AX role, app policy, or WindowServer level does not establish an eligible root window."
   },
   "firefox_normal_window_when_non_native_fullscreen_in_background": {
     "aeroSpaceLabel": "dialog",
     "expectedDisposition": "managed",
-    "expectedPolicy": "full",
     "note": "An ordinary background window. OmniWM tiling it is arguably better than AeroSpace floating it."
   },
   "firefox_pinterest_sign_in_with_google": {
     "aeroSpaceLabel": "window",
-    "expectedDisposition": "managed",
-    "expectedPolicy": "full"
+    "expectedDisposition": "managed"
   },
   "firefox_pip": {
     "aeroSpaceLabel": "popup",
     "expectedDisposition": "floating",
-    "expectedPolicy": "full",
     "note": "Deliberate browserPictureInPicture built-in rule."
   },
   "ghostty": {
     "aeroSpaceLabel": "window",
-    "expectedDisposition": "managed",
-    "expectedPolicy": "full"
+    "expectedDisposition": "managed"
   },
   "ghostty_about": {
     "aeroSpaceLabel": "dialog",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "full"
+    "expectedDisposition": "floating"
   },
   "ghostty_check_for_updates_1_dialog": {
     "aeroSpaceLabel": "window",
-    "expectedDisposition": "managed",
-    "expectedPolicy": "full"
+    "expectedDisposition": "managed"
   },
   "ghostty_check_for_updates_2_alert": {
     "aeroSpaceLabel": "dialog",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "handsOffSurface",
-    "note": "Known miss of noButtonsOnNonStandardSubrole; see firefox_non_native_fullscreen."
+    "expectedDisposition": "floating"
   },
   "ghostty_config_error": {
     "aeroSpaceLabel": "dialog",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "handsOffSurface",
-    "note": "Sits at kCGPopUpMenuWindowLevel (101), at or above the overlay floor, so OmniWM treats it as an overlay. An error dialog at popup-menu level is unusual enough that deferring to the level is defensible."
+    "expectedDisposition": "unmanaged",
+    "note": "AeroSpace manages this as a floating dialog; OmniWM deliberately excludes it because its AX role, app policy, or WindowServer level does not establish an eligible root window."
   },
   "ghostty_quick_terminal": {
     "aeroSpaceLabel": "popup",
     "expectedDisposition": "floating",
-    "expectedPolicy": "handsOffSurface"
+    "note": "Reviewed independent quick-terminal utility. OmniWM deliberately manages it as a movable floating root while AeroSpace treats it as a popup."
   },
   "ghostty_window_decorations_false": {
     "aeroSpaceLabel": "window",
-    "expectedDisposition": "managed",
-    "expectedPolicy": "full"
+    "expectedDisposition": "managed"
   },
   "intellij": {
     "aeroSpaceLabel": "window",
-    "expectedDisposition": "managed",
-    "expectedPolicy": "full"
+    "expectedDisposition": "managed"
   },
   "intellij_background_tasks": {
     "aeroSpaceLabel": "popup",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "handsOffSurface"
+    "expectedDisposition": "unmanaged",
+    "note": "AeroSpace retains this in its global popup container; OmniWM deliberately keeps it outside authoritative window state."
   },
   "intellij_context_menu": {
     "aeroSpaceLabel": "popup",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "handsOffSurface"
+    "expectedDisposition": "unmanaged",
+    "note": "AeroSpace retains this in its global popup container; OmniWM deliberately keeps it outside authoritative window state."
   },
   "intellij_native_open_window": {
     "aeroSpaceLabel": "dialog",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "handsOffSurface",
-    "note": "Known miss of noButtonsOnNonStandardSubrole; see firefox_non_native_fullscreen."
+    "expectedDisposition": "floating"
   },
   "intellij_quick_doc_popup": {
     "aeroSpaceLabel": "popup",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "handsOffSurface"
+    "expectedDisposition": "unmanaged",
+    "note": "AeroSpace retains this in its global popup container; OmniWM deliberately keeps it outside authoritative window state."
   },
   "intellij_rebase_dialog": {
     "aeroSpaceLabel": "dialog",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "full"
+    "expectedDisposition": "floating"
   },
   "iphonesimulator": {
     "aeroSpaceLabel": "dialog",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "full"
+    "expectedDisposition": "floating"
   },
   "iterm2": {
     "aeroSpaceLabel": "window",
-    "expectedDisposition": "managed",
-    "expectedPolicy": "full"
+    "expectedDisposition": "managed"
   },
   "iterm2_hotkey_window": {
     "aeroSpaceLabel": "popup",
     "expectedDisposition": "floating",
-    "expectedPolicy": "full",
     "note": "AX-indistinguishable from an ordinary iTerm2 window at level 0. AeroSpace separates them with an app-specific rule; OmniWM has no signal to key on."
   },
   "iterm2_no_title_bar": {
     "aeroSpaceLabel": "window",
-    "expectedDisposition": "managed",
-    "expectedPolicy": "full"
+    "expectedDisposition": "managed"
   },
   "jetbrains_toolbox": {
     "aeroSpaceLabel": "popup",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "handsOffSurface"
+    "expectedDisposition": "unmanaged",
+    "note": "AeroSpace retains this in its global popup container; OmniWM deliberately keeps it outside authoritative window state."
   },
   "karabiner_event_viewer": {
     "aeroSpaceLabel": "window",
-    "expectedDisposition": "managed",
-    "expectedPolicy": "full"
+    "expectedDisposition": "managed"
   },
   "karabiner_settings": {
     "aeroSpaceLabel": "window",
-    "expectedDisposition": "managed",
-    "expectedPolicy": "full"
+    "expectedDisposition": "managed"
   },
   "kitty_quick_access": {
     "aeroSpaceLabel": "popup",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "handsOffSurface"
+    "expectedDisposition": "unmanaged",
+    "note": "AeroSpace retains this in its global popup container; OmniWM deliberately keeps it outside authoritative window state."
   },
   "macos_capslock_popup_safari": {
     "aeroSpaceLabel": "popup",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "handsOffSurface"
+    "expectedDisposition": "unmanaged",
+    "note": "The Caps Lock indicator is native transient UI, not a semantic dialog, so OmniWM deliberately keeps it outside authoritative window state."
   },
   "macos_capslock_popup_textedit": {
     "aeroSpaceLabel": "popup",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "handsOffSurface"
+    "expectedDisposition": "unmanaged",
+    "note": "The Caps Lock indicator is native transient UI, not a semantic dialog, so OmniWM deliberately keeps it outside authoritative window state."
   },
   "macos_join_network": {
     "aeroSpaceLabel": "dialog",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "full"
+    "expectedDisposition": "unmanaged",
+    "note": "AeroSpace manages this as a floating dialog; OmniWM deliberately excludes it because its AX role, app policy, or WindowServer level does not establish an eligible root window."
   },
   "macos_share_window_purple_pill_sublime": {
     "aeroSpaceLabel": "popup",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "handsOffSurface"
+    "expectedDisposition": "unmanaged",
+    "note": "The screen-sharing indicator is native transient UI, not a semantic dialog, so OmniWM deliberately keeps it outside authoritative window state."
   },
   "marta": {
     "aeroSpaceLabel": "window",
-    "expectedDisposition": "managed",
-    "expectedPolicy": "full"
+    "expectedDisposition": "managed"
   },
   "microsoft_edge": {
     "aeroSpaceLabel": "window",
-    "expectedDisposition": "managed",
-    "expectedPolicy": "full"
+    "expectedDisposition": "managed"
   },
   "microsoft_edge_pip": {
     "aeroSpaceLabel": "dialog",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "full"
+    "expectedDisposition": "floating"
+  },
+  "microsoft_word_search_toolbar": {
+    "aeroSpaceLabel": "popup",
+    "expectedDisposition": "unmanaged",
+    "note": "Word exposes Cmd-F as a parented AXToolbar/AXSystemDialog. It is native child UI, not a semantic window, and must never enter WorldStore even when a broad Word float rule exists."
   },
   "mpv_fullscreen": {
     "aeroSpaceLabel": "popup",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "handsOffSurface"
+    "expectedDisposition": "unmanaged",
+    "note": "AeroSpace retains this in its global popup container; OmniWM deliberately keeps it outside authoritative window state."
   },
   "mpv_windowed": {
     "aeroSpaceLabel": "window",
-    "expectedDisposition": "managed",
-    "expectedPolicy": "full"
+    "expectedDisposition": "managed"
   },
   "nomachine_session_1": {
     "aeroSpaceLabel": "popup",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "handsOffSurface"
+    "expectedDisposition": "unmanaged",
+    "note": "AeroSpace retains this in its global popup container; OmniWM deliberately keeps it outside authoritative window state."
   },
   "nomachine_session_2": {
     "aeroSpaceLabel": "dialog",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "full"
+    "expectedDisposition": "unmanaged",
+    "note": "AeroSpace manages this as a floating dialog; OmniWM deliberately excludes it because its AX role, app policy, or WindowServer level does not establish an eligible root window."
   },
   "nomachine_welcome_window_1": {
     "aeroSpaceLabel": "popup",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "handsOffSurface"
+    "expectedDisposition": "unmanaged",
+    "note": "AeroSpace retains this in its global popup container; OmniWM deliberately keeps it outside authoritative window state."
   },
   "nomachine_welcome_window_2": {
     "aeroSpaceLabel": "dialog",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "full"
+    "expectedDisposition": "unmanaged",
+    "note": "AeroSpace manages this as a floating dialog; OmniWM deliberately excludes it because its AX role, app policy, or WindowServer level does not establish an eligible root window."
   },
   "outlook_reminder": {
     "aeroSpaceLabel": "popup",
     "expectedDisposition": "floating",
-    "expectedPolicy": "full",
     "note": "Reminder panel at kCGFloatingWindowLevel; see codex_pet_window on why level 3 is not actionable."
   },
   "qutebrowser": {
     "aeroSpaceLabel": "window",
-    "expectedDisposition": "managed",
-    "expectedPolicy": "full"
+    "expectedDisposition": "managed"
   },
   "qutebrowser_context_menu": {
     "aeroSpaceLabel": "popup",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "handsOffSurface"
+    "expectedDisposition": "unmanaged",
+    "note": "AeroSpace retains this in its global popup container; OmniWM deliberately keeps it outside authoritative window state."
   },
   "qutebrowser_hide_decoration": {
     "aeroSpaceLabel": "window",
-    "expectedDisposition": "managed",
-    "expectedPolicy": "full"
+    "expectedDisposition": "managed"
   },
   "raycast": {
     "aeroSpaceLabel": "popup",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "handsOffSurface"
+    "expectedDisposition": "unmanaged",
+    "note": "AeroSpace retains this in its global popup container; OmniWM deliberately keeps it outside authoritative window state."
   },
   "raycast_settings": {
     "aeroSpaceLabel": "dialog",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "full"
+    "expectedDisposition": "floating"
   },
   "safari": {
     "aeroSpaceLabel": "window",
-    "expectedDisposition": "managed",
-    "expectedPolicy": "full"
+    "expectedDisposition": "managed"
   },
   "safari_pinterest_sign_in_with_google": {
     "aeroSpaceLabel": "dialog",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "full"
+    "expectedDisposition": "floating"
   },
   "slack": {
     "aeroSpaceLabel": "window",
-    "expectedDisposition": "managed",
-    "expectedPolicy": "full"
+    "expectedDisposition": "managed"
   },
   "slack_chat_in_a_separate_window": {
     "aeroSpaceLabel": "window",
-    "expectedDisposition": "managed",
-    "expectedPolicy": "full"
+    "expectedDisposition": "managed"
   },
   "slack_huddle_share_screen_draw_on_screen_fake_window": {
     "aeroSpaceLabel": "popup",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "handsOffSurface"
+    "expectedDisposition": "unmanaged",
+    "note": "AeroSpace retains this in its global popup container; OmniWM deliberately keeps it outside authoritative window state."
   },
   "slack_huddle_share_screen_floating_popup": {
     "aeroSpaceLabel": "popup",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "handsOffSurface"
+    "expectedDisposition": "unmanaged",
+    "note": "AeroSpace retains this in its global popup container; OmniWM deliberately keeps it outside authoritative window state."
   },
   "slack_huddle_share_screen_target_picker": {
     "aeroSpaceLabel": "popup",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "handsOffSurface"
+    "expectedDisposition": "unmanaged",
+    "note": "AeroSpace retains this in its global popup container; OmniWM deliberately keeps it outside authoritative window state."
   },
   "spotify": {
     "aeroSpaceLabel": "window",
-    "expectedDisposition": "managed",
-    "expectedPolicy": "full"
+    "expectedDisposition": "managed"
   },
   "spotify_miniplayer": {
     "aeroSpaceLabel": "dialog",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "full"
+    "expectedDisposition": "floating"
   },
   "steam_1": {
     "aeroSpaceLabel": "window",
-    "expectedDisposition": "managed",
-    "expectedPolicy": "full"
+    "expectedDisposition": "managed"
   },
   "steam_2": {
     "aeroSpaceLabel": "popup",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "handsOffSurface"
+    "expectedDisposition": "unmanaged",
+    "note": "AeroSpace retains this in its global popup container; OmniWM deliberately keeps it outside authoritative window state."
   },
   "sublime_text_4": {
     "aeroSpaceLabel": "window",
-    "expectedDisposition": "managed",
-    "expectedPolicy": "full"
+    "expectedDisposition": "managed"
   },
   "system_settings": {
     "aeroSpaceLabel": "dialog",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "full"
+    "expectedDisposition": "floating"
   },
   "telegram": {
     "aeroSpaceLabel": "window",
-    "expectedDisposition": "managed",
-    "expectedPolicy": "full"
+    "expectedDisposition": "managed"
   },
   "telegram_image_viewer": {
     "aeroSpaceLabel": "dialog",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "handsOffSurface",
-    "note": "Known miss of noButtonsOnNonStandardSubrole; see firefox_non_native_fullscreen."
+    "expectedDisposition": "unmanaged",
+    "note": "AeroSpace manages this as a floating dialog; OmniWM deliberately excludes it because its AX role, app policy, or WindowServer level does not establish an eligible root window."
   },
   "terminal_app": {
     "aeroSpaceLabel": "window",
-    "expectedDisposition": "managed",
-    "expectedPolicy": "full"
+    "expectedDisposition": "managed"
   },
   "transmission": {
     "aeroSpaceLabel": "window",
-    "expectedDisposition": "managed",
-    "expectedPolicy": "full"
+    "expectedDisposition": "managed"
   },
   "transmission_torrent_inspector": {
     "aeroSpaceLabel": "dialog",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "full"
+    "expectedDisposition": "floating"
   },
   "vlc_empty": {
     "aeroSpaceLabel": "dialog",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "full"
+    "expectedDisposition": "floating"
   },
   "vlc_fullscreen": {
     "aeroSpaceLabel": "popup",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "handsOffSurface"
+    "expectedDisposition": "unmanaged",
+    "note": "AeroSpace retains this in its global popup container; OmniWM deliberately keeps it outside authoritative window state."
   },
   "vlc_video_playing": {
     "aeroSpaceLabel": "dialog",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "full"
+    "expectedDisposition": "floating"
   },
   "vs_code": {
     "aeroSpaceLabel": "window",
-    "expectedDisposition": "managed",
-    "expectedPolicy": "full"
+    "expectedDisposition": "managed"
   },
   "vs_code_nativeFullScreen_false": {
     "aeroSpaceLabel": "window",
-    "expectedDisposition": "managed",
-    "expectedPolicy": "full"
+    "expectedDisposition": "managed"
   },
   "vs_codium": {
     "aeroSpaceLabel": "window",
-    "expectedDisposition": "managed",
-    "expectedPolicy": "full"
+    "expectedDisposition": "managed"
   },
   "vs_codium_nativeFullScreen_false": {
     "aeroSpaceLabel": "window",
-    "expectedDisposition": "managed",
-    "expectedPolicy": "full"
+    "expectedDisposition": "managed"
   },
   "wisprFlow1": {
     "aeroSpaceLabel": "popup",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "handsOffSurface"
+    "expectedDisposition": "unmanaged",
+    "note": "AeroSpace retains this in its global popup container; OmniWM deliberately keeps it outside authoritative window state."
   },
   "wisprFlow2": {
     "aeroSpaceLabel": "popup",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "handsOffSurface"
+    "expectedDisposition": "unmanaged",
+    "note": "AeroSpace retains this in its global popup container; OmniWM deliberately keeps it outside authoritative window state."
   },
   "xcode": {
     "aeroSpaceLabel": "window",
-    "expectedDisposition": "managed",
-    "expectedPolicy": "full"
+    "expectedDisposition": "managed"
   },
   "xcode_build_succeeded_popup": {
     "aeroSpaceLabel": "popup",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "handsOffSurface"
+    "expectedDisposition": "unmanaged",
+    "note": "AeroSpace retains this in its global popup container; OmniWM deliberately keeps it outside authoritative window state."
   },
   "xcode_open_quickly": {
     "aeroSpaceLabel": "popup",
     "expectedDisposition": "floating",
-    "expectedPolicy": "full",
     "note": "AXDialog with buttons. AeroSpace demotes it with an Xcode-plus-AXIdentifier rule; OmniWM floats it with full rights."
   },
   "xcode_quick_actions": {
     "aeroSpaceLabel": "popup",
     "expectedDisposition": "floating",
-    "expectedPolicy": "full",
     "note": "Same as xcode_open_quickly."
   },
   "xcode_settings": {
     "aeroSpaceLabel": "dialog",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "full"
+    "expectedDisposition": "floating"
   },
   "xcode_welcome_window": {
     "aeroSpaceLabel": "popup",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "handsOffSurface"
+    "expectedDisposition": "unmanaged",
+    "note": "AeroSpace retains this in its global popup container; OmniWM deliberately keeps it outside authoritative window state."
   },
   "zebar": {
     "aeroSpaceLabel": "popup",
-    "expectedDisposition": "floating",
-    "expectedPolicy": "handsOffSurface"
+    "expectedDisposition": "unmanaged",
+    "note": "AeroSpace retains this in its global popup container; OmniWM deliberately keeps it outside authoritative window state."
   },
   "zed": {
     "aeroSpaceLabel": "window",
-    "expectedDisposition": "managed",
-    "expectedPolicy": "full"
+    "expectedDisposition": "managed"
   },
   "zen_browser": {
     "aeroSpaceLabel": "window",
-    "expectedDisposition": "managed",
-    "expectedPolicy": "full"
+    "expectedDisposition": "managed"
   },
   "zen_browser_pip": {
     "aeroSpaceLabel": "popup",
     "expectedDisposition": "floating",
-    "expectedPolicy": "full",
     "note": "Deliberate browserPictureInPicture built-in rule."
   }
 }

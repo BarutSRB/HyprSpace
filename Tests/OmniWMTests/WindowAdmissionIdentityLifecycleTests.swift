@@ -246,6 +246,45 @@ final class WindowAdmissionIdentityLifecycleTests: XCTestCase {
         XCTAssertFalse(controller.dwindleEngine?.containsWindow(token, in: workspaceId) == true)
     }
 
+    func testDecisionRejectionExternalizesNativeFocusedWindowWithoutManagedRecovery() async throws {
+        var focusOperations: [String] = []
+        let controller = WindowAdmissionTestSupport.controller(
+            windowFocusOperations: WindowFocusOperations(
+                activateApp: { _ in focusOperations.append("activate") },
+                focusSpecificWindow: { _, _, _ in focusOperations.append("focus") },
+                raiseWindow: { _ in focusOperations.append("raise") }
+            )
+        )
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let fallbackToken = WindowToken(pid: 467_978, windowId: 467_979)
+        let rejectedToken = WindowToken(pid: 467_980, windowId: 467_981)
+        _ = WindowAdmissionTestSupport.track(fallbackToken, in: workspaceId, controller: controller)
+        _ = WindowAdmissionTestSupport.track(rejectedToken, in: workspaceId, controller: controller)
+        XCTAssertTrue(
+            controller.workspaceManager.confirmManagedFocus(
+                rejectedToken,
+                in: workspaceId,
+                activateWorkspaceOnMonitor: false
+            )
+        )
+        let rejectedEntry = try XCTUnwrap(controller.workspaceManager.entry(for: rejectedToken))
+
+        controller.axEventHandler.retireManagedWindowAfterDecisionRejection(rejectedEntry)
+        await WindowAdmissionTestSupport.drainLayoutRefreshes(controller)
+
+        XCTAssertNil(controller.workspaceManager.entry(for: rejectedToken))
+        XCTAssertNotNil(controller.workspaceManager.entry(for: fallbackToken))
+        XCTAssertEqual(
+            controller.workspaceManager.nativeFocusOwner,
+            .external(pid: rejectedToken.pid, windowId: rejectedToken.windowId)
+        )
+        XCTAssertTrue(focusOperations.isEmpty)
+        XCTAssertNil(controller.intentLedger.activeManagedRequest)
+        XCTAssertNil(controller.workspaceManager.pendingFocusedToken)
+    }
+
     func testIdentityAliasHistoryRetainsOnlyTwoCommittedGenerations() {
         let controller = WindowAdmissionTestSupport.controller()
         let windowId = 467_963

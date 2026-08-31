@@ -443,7 +443,7 @@ final class ServiceLifecycleManager {
         controller.syncMonitorsToNiriEngine()
         controller.surfaceReconciler.noteWorldChanged()
 
-        let focusedWsId = controller.workspaceManager.focusedToken
+        let focusedWsId = controller.workspaceManager.selectedManagedToken
             .flatMap { controller.workspaceManager.workspace(for: $0) }
         controller.workspaceManager.garbageCollectUnusedWorkspaces(focusedWorkspaceId: focusedWsId)
 

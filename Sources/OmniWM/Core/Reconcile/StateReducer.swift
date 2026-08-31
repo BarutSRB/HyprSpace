@@ -133,16 +133,16 @@ enum StateReducer {
             {
                 focusSession.pendingManagedFocus = .empty
             }
-            if let focusedToken = focusSession.focusedToken,
-               pids.contains(focusedToken.pid)
-            {
-                focusSession.isNonManagedFocusActive = true
-                focusSession.nonManagedFocusToken = nil
-            }
-            if let nonManagedFocusToken = focusSession.nonManagedFocusToken,
-               pids.contains(nonManagedFocusToken.pid)
-            {
-                focusSession.nonManagedFocusToken = nil
+            switch focusSession.nativeFocusOwner {
+            case let .managed(token) where pids.contains(token.pid):
+                focusSession.nativeFocusOwner = .external(pid: nil, windowId: nil)
+            case let .external(pid?, _) where pids.contains(pid):
+                focusSession.nativeFocusOwner = .external(pid: pid, windowId: nil)
+            case .managed,
+                 .external,
+                 .ownedSurface,
+                 .none:
+                break
             }
             setFocusSession(focusSession, current: currentSnapshot.focusSession, plan: &plan)
             plan.notes = ["hidden_apps=\(pids.count)", "workspaces=\(affectedWorkspaceIds.count)"]
@@ -253,7 +253,6 @@ enum StateReducer {
                 if focusSession.suppressedFocusToken == token {
                     focusSession.suppressedFocusToken = nil
                 }
-                focusSession.nonManagedFocusToken = nil
             }
             setFocusSession(focusSession, current: currentSnapshot.focusSession, plan: &plan)
 
@@ -269,22 +268,16 @@ enum StateReducer {
                 plan: &plan
             )
 
-        case let .nonManagedFocusChanged(
-            active,
-            preserveFocusedToken,
-            preservePendingManagedFocus,
-            _
-        ):
-            setFocusSession(
-                nonManagedFocusChanged(
-                    from: currentSnapshot.focusSession,
-                    active: active,
-                    preserveFocusedToken: preserveFocusedToken,
-                    preservePendingManagedFocus: preservePendingManagedFocus
-                ),
-                current: currentSnapshot.focusSession,
-                plan: &plan
-            )
+        case let .nativeFocusOwnerChanged(owner, preservePendingManagedFocus, _):
+            var focusSession = currentSnapshot.focusSession
+            focusSession.nativeFocusOwner = owner
+            if case let .managed(token) = owner {
+                focusSession.selectedManagedToken = token
+            }
+            if !preservePendingManagedFocus {
+                focusSession.pendingManagedFocus = .empty
+            }
+            setFocusSession(focusSession, current: currentSnapshot.focusSession, plan: &plan)
 
         case let .focusRemembered(token, workspaceId, mode, _):
             var focusSession = currentSnapshot.focusSession
@@ -307,11 +300,6 @@ enum StateReducer {
             }
             setFocusSession(focusSession, current: currentSnapshot.focusSession, plan: &plan)
 
-        case let .nonManagedFocusTargetChanged(target, _):
-            var focusSession = currentSnapshot.focusSession
-            focusSession.nonManagedFocusToken = target
-            setFocusSession(focusSession, current: currentSnapshot.focusSession, plan: &plan)
-
         case let .suppressedFocusChanged(token, _):
             var focusSession = currentSnapshot.focusSession
             focusSession.suppressedFocusToken = token
@@ -329,18 +317,20 @@ enum StateReducer {
                 workspaceId: workspaceId,
                 requestId: focusSession.pendingManagedFocus.requestId
             )
-            if let focusedToken = focusSession.focusedToken,
+            if let focusedToken = focusSession.selectedManagedToken,
                currentSnapshot.windows.first(where: { $0.token == focusedToken })?.workspaceId == workspaceId
             {
-                focusSession.focusedToken = nil
+                focusSession.selectedManagedToken = nil
+                if case .managed(focusedToken) = focusSession.nativeFocusOwner {
+                    focusSession.nativeFocusOwner = .none
+                }
             }
             setFocusSession(focusSession, current: currentSnapshot.focusSession, plan: &plan)
 
         case let .nativeFullscreenPlaceholderSelected(token, _, _):
             var focusSession = currentSnapshot.focusSession
-            focusSession.focusedToken = token
-            focusSession.isNonManagedFocusActive = true
-            focusSession.nonManagedFocusToken = token
+            focusSession.selectedManagedToken = token
+            focusSession.nativeFocusOwner = .external(pid: token.pid, windowId: token.windowId)
             focusSession.clearPendingManagedFocus()
             setFocusSession(focusSession, current: currentSnapshot.focusSession, plan: &plan)
 
@@ -514,7 +504,8 @@ enum StateReducer {
                 return (focusSession, false)
             }
         }
-        focusSession.focusedToken = token
+        focusSession.selectedManagedToken = token
+        focusSession.nativeFocusOwner = .managed(token)
         focusSession.pendingManagedFocus = .empty
         if mode != .floating {
             _ = focusSession.recordTiledFocus(token)
@@ -527,7 +518,6 @@ enum StateReducer {
             }
             focusSession.interactionMonitorId = monitorId
         }
-        focusSession.isNonManagedFocusActive = false
         return (focusSession, true)
     }
 
@@ -569,38 +559,24 @@ enum StateReducer {
         plan.viewport = .set(workspaceId: workspaceId, state: next)
     }
 
-    private static func nonManagedFocusChanged(
-        from focusSession: FocusSessionSnapshot,
-        active: Bool,
-        preserveFocusedToken: Bool,
-        preservePendingManagedFocus: Bool
-    ) -> FocusSessionSnapshot {
-        var focusSession = focusSession
-        if active, !preserveFocusedToken {
-            focusSession.focusedToken = nil
-        }
-        if !preservePendingManagedFocus {
-            focusSession.pendingManagedFocus = .empty
-        }
-        focusSession.isNonManagedFocusActive = active
-        return focusSession
-    }
-
     private static func rekeyedFocusSession(
         from focusSession: FocusSessionSnapshot,
         oldToken: WindowToken,
         newToken: WindowToken
     ) -> FocusSessionSnapshot {
         var focusSession = focusSession
-        if focusSession.focusedToken == oldToken {
-            focusSession.focusedToken = newToken
+        if focusSession.selectedManagedToken == oldToken {
+            focusSession.selectedManagedToken = newToken
+        }
+        if case .managed(oldToken) = focusSession.nativeFocusOwner {
+            focusSession.nativeFocusOwner = .managed(newToken)
         }
         if focusSession.pendingManagedFocus.token == oldToken {
             focusSession.pendingManagedFocus.token = newToken
         }
         focusSession.replaceRememberedFocus(from: oldToken, to: newToken)
-        if focusSession.nonManagedFocusToken == oldToken {
-            focusSession.nonManagedFocusToken = newToken
+        if focusSession.nativeFocusOwner.externalToken == oldToken {
+            focusSession.nativeFocusOwner = .external(pid: newToken.pid, windowId: newToken.windowId)
         }
         if focusSession.suppressedFocusToken == oldToken {
             focusSession.suppressedFocusToken = newToken
@@ -617,8 +593,11 @@ enum StateReducer {
         workspaceId: WorkspaceDescriptor.ID?
     ) -> FocusSessionSnapshot {
         var focusSession = focusSession
-        if focusSession.focusedToken == token {
-            focusSession.focusedToken = nil
+        if focusSession.selectedManagedToken == token {
+            focusSession.selectedManagedToken = nil
+        }
+        if case .managed(token) = focusSession.nativeFocusOwner {
+            focusSession.nativeFocusOwner = .none
         }
         if focusSession.pendingManagedFocus.token == token {
             focusSession.pendingManagedFocus = .empty
@@ -628,10 +607,6 @@ enum StateReducer {
         }
         if focusSession.suppressedFocusToken == token {
             focusSession.suppressedFocusToken = nil
-        }
-        if focusSession.nonManagedFocusToken == token {
-            focusSession.nonManagedFocusToken = nil
-            focusSession.isNonManagedFocusActive = false
         }
         focusSession.clearRememberedFocus(token, workspaceId: workspaceId)
         return focusSession

@@ -1,7 +1,7 @@
 {
   "observation": {
     "tokenPid": 86312,
-    "tokenWindowId": 7907,
+    "tokenWindowId": 7916,
     "appName": "Google Chrome",
     "bundleId": "com.google.Chrome",
     "rulesRevision": 1,
@@ -27,11 +27,11 @@
       },
       "windowServer": {
         "attributes": 3,
-        "frameHeight": 89,
-        "frameWidth": 824,
-        "frameX": 1387,
-        "frameY": 71,
-        "id": 7907,
+        "frameHeight": 425,
+        "frameWidth": 320,
+        "frameX": 2128,
+        "frameY": 126,
+        "id": 7916,
         "level": 0,
         "parentId": 7905,
         "pid": 86312,
@@ -134,11 +134,8 @@
   ],
   "expectedDecision": {
     "disposition": "unmanaged",
-    "source": "builtInRule(transientWidgetSurface)",
+    "source": "builtInRule(externalSurface)",
     "heuristicReasons": [],
-    "layoutDecisionKind": "fallbackLayout",
-    "minHeight": 375,
-    "minWidth": 500
-  },
-  "expectedPolicy": "untracked"
+    "layoutDecisionKind": "explicitLayout"
+  }
 }

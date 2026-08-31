@@ -7,17 +7,17 @@ enum ReconcileDebugDump {
     static func snapshot(_ snapshot: ReconcileSnapshot) -> String {
         var lines: [String] = [
             "topology displays=\(snapshot.topologyProfile.displays.count)",
-            "focused=\(snapshot.focusedToken.map(String.init(describing:)) ?? "nil")",
+            "selected-managed=\(snapshot.selectedManagedToken.map(String.init(describing:)) ?? "nil")",
+            "native-focus=\(snapshot.focusSession.nativeFocusOwner)",
             "pending-focus=\(snapshot.focusSession.pendingManagedFocus.token.map(String.init(describing:)) ?? "nil")",
             "focus-lease=\(snapshot.focusSession.focusLease?.owner.rawValue ?? "nil")",
-            "non-managed-focus=\(snapshot.focusSession.isNonManagedFocusActive)",
             "interaction-monitor=\(snapshot.interactionMonitorId.map(String.init(describing:)) ?? "nil")",
             "previous-interaction-monitor=\(snapshot.previousInteractionMonitorId.map(String.init(describing:)) ?? "nil")"
         ]
 
         for window in snapshot.windows {
             lines.append(
-                "\(window.token) workspace=\(window.workspaceId.uuidString) mode=\(window.mode) phase=\(window.lifecyclePhase.rawValue) policy=\(window.interactionPolicy.name) observed=\(describe(window.observedState)) desired=\(window.desiredState.summary)"
+                "\(window.token) workspace=\(window.workspaceId.uuidString) mode=\(window.mode) phase=\(window.lifecyclePhase.rawValue) lifetime=\(window.lifetimeAuthority) observed=\(describe(window.observedState)) desired=\(window.desiredState.summary)"
             )
         }
 

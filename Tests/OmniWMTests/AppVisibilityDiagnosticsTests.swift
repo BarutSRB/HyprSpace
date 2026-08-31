@@ -39,11 +39,10 @@ final class AppVisibilityDiagnosticsTests: XCTestCase {
                 token.pid: controller.workspaceManager.appVisibilityGeneration(for: token.pid)
             ],
             focusFingerprint: AppRevealFocusFingerprint(
-                focusedToken: nil,
+                selectedManagedToken: nil,
                 pendingFocusedToken: nil,
                 pendingFocusedWorkspaceId: nil,
-                isNonManagedFocusActive: false,
-                nonManagedFocusToken: nil,
+                nativeFocusOwner: .none,
                 interactionMonitorId: nil,
                 activeWorkspaceIdsByMonitor: [:]
             ),

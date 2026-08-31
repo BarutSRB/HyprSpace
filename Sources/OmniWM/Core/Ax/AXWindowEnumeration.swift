@@ -159,7 +159,9 @@ enum AXWindowEnumerationInspector {
         kAXMinimizeButtonAttribute as String,
         "AXGrowArea",
         "AXMinSize",
-        "AXMaxSize"
+        "AXMaxSize",
+        kAXMainAttribute as String,
+        kAXModalAttribute as String
     ]
 
     static func enumerateApplication(
@@ -360,12 +362,14 @@ enum AXWindowEnumerationInspector {
             AXWindowFactAttributeValues(
                 role: value(at: 0, in: values) as? String,
                 subrole: value(at: 1, in: values) as? String,
-                title: context.inspection.includeTitle ? value(at: 12, in: values) as? String : nil,
+                title: context.inspection.includeTitle ? value(at: 14, in: values) as? String : nil,
                 closeButton: value(at: 5, in: values),
                 fullscreenButton: fullscreenButtonValue,
                 fullscreenButtonEnabled: fullscreenButtonState.enabled,
                 zoomButton: value(at: 7, in: values),
-                minimizeButton: value(at: 8, in: values)
+                minimizeButton: value(at: 8, in: values),
+                main: value(at: 12, in: values),
+                modal: value(at: 13, in: values)
             ),
             appPolicy: context.inspection.appPolicy,
             bundleId: context.inspection.bundleId,

@@ -124,11 +124,10 @@ struct RestorePlanner {
              .managedFocusRequested,
              .managedReplacementMetadataChanged,
              .manualLayoutOverrideChanged,
+             .nativeFocusOwnerChanged,
              .nativeFullscreenPlaceholderSelected,
              .nativeFullscreenTransition,
              .niriPlacementsResolved,
-             .nonManagedFocusChanged,
-             .nonManagedFocusTargetChanged,
              .scratchpadMembershipChanged,
              .scratchpadRevealChanged,
              .selectionChanged,
@@ -153,7 +152,7 @@ struct RestorePlanner {
         let reconciled = reconcileInteractionMonitors(
             interactionMonitorId: input.snapshot.interactionMonitorId,
             previousInteractionMonitorId: input.snapshot.previousInteractionMonitorId,
-            focusedToken: input.snapshot.focusedToken,
+            nativeManagedFocusToken: input.snapshot.nativeManagedFocusToken,
             windows: input.snapshot.windows,
             monitors: input.monitors
         )
@@ -248,11 +247,24 @@ struct RestorePlanner {
         let fallbackAssignments = plan.visibleAssignments
         let sortedNewMonitors = Monitor.sortedByPosition(input.newMonitors)
         let validMonitorIds = Set(sortedNewMonitors.map(\.id))
-        let confirmedFocusWorkspaceId = input.snapshot.focusSession.isNonManagedFocusActive
-            ? nil
-            : input.snapshot.focusedToken.flatMap { token in
-                input.snapshot.windows.first(where: { $0.token == token })?.workspaceId
-            }
+        let confirmedFocusWorkspaceId: WorkspaceDescriptor.ID?
+        switch input.snapshot.focusSession.nativeFocusOwner {
+        case let .managed(token):
+            confirmedFocusWorkspaceId = input.snapshot.windows.first(where: { $0.token == token })?.workspaceId
+        case .external,
+             .ownedSurface,
+             .none:
+            confirmedFocusWorkspaceId = nil
+        }
+        let prioritizesInteractionMonitor: Bool
+        switch input.snapshot.focusSession.nativeFocusOwner {
+        case .external,
+             .ownedSurface:
+            prioritizesInteractionMonitor = true
+        case .managed,
+             .none:
+            prioritizesInteractionMonitor = false
+        }
         let pendingFocusWorkspaceId = input.snapshot.focusSession.pendingManagedFocus.workspaceId
         var prioritizedAssignments: [Monitor.ID: WorkspaceDescriptor.ID] = [:]
         var prioritizedWorkspaceIds: Set<WorkspaceDescriptor.ID> = []
@@ -317,7 +329,7 @@ struct RestorePlanner {
             previousInteractionMonitorId: input.previousInteractionMonitorId,
             confirmedFocusWorkspaceId: confirmedFocusWorkspaceId,
             pendingFocusWorkspaceId: pendingFocusWorkspaceId,
-            isNonManagedFocusActive: input.snapshot.focusSession.isNonManagedFocusActive,
+            prioritizesInteractionMonitor: prioritizesInteractionMonitor,
             monitors: input.newMonitors,
             visibleAssignments: plan.visibleAssignments
         )
@@ -336,7 +348,7 @@ struct RestorePlanner {
         previousInteractionMonitorId: Monitor.ID?,
         confirmedFocusWorkspaceId: WorkspaceDescriptor.ID?,
         pendingFocusWorkspaceId: WorkspaceDescriptor.ID?,
-        isNonManagedFocusActive: Bool,
+        prioritizesInteractionMonitor: Bool,
         monitors: [Monitor],
         visibleAssignments: [Monitor.ID: WorkspaceDescriptor.ID]
     ) -> (interactionMonitorId: Monitor.ID?, previousInteractionMonitorId: Monitor.ID?) {
@@ -354,7 +366,7 @@ struct RestorePlanner {
         let firstAssignedMonitorId = sortedMonitors.first(where: {
             visibleAssignments[$0.id] != nil
         })?.id
-        let resolvedInteractionMonitorId = isNonManagedFocusActive
+        let resolvedInteractionMonitorId = prioritizesInteractionMonitor
             ? connectedInteractionMonitorId
             ?? pendingFocusMonitorId
             ?? firstAssignedMonitorId
@@ -571,13 +583,13 @@ struct RestorePlanner {
     private func reconcileInteractionMonitors(
         interactionMonitorId: Monitor.ID?,
         previousInteractionMonitorId: Monitor.ID?,
-        focusedToken: WindowToken?,
+        nativeManagedFocusToken: WindowToken?,
         windows: [ReconcileWindowSnapshot],
         monitors: [Monitor],
         visibleAssignments: [Monitor.ID: WorkspaceDescriptor.ID] = [:]
     ) -> (interactionMonitorId: Monitor.ID?, previousInteractionMonitorId: Monitor.ID?) {
         let validMonitorIds = Set(monitors.map(\.id))
-        let focusedWorkspaceId = focusedToken.flatMap { token in
+        let focusedWorkspaceId = nativeManagedFocusToken.flatMap { token in
             windows.first(where: { $0.token == token })?.workspaceId
         }
         let focusedWorkspaceMonitorId = focusedWorkspaceId.flatMap { workspaceId in

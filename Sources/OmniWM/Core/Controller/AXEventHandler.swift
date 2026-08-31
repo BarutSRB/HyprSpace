@@ -59,8 +59,8 @@ struct NiriCreateFocusTraceEvent: Equatable {
         )
         case focusConfirmed(token: WindowToken, workspaceId: WorkspaceDescriptor.ID, source: ActivationEventSource)
         case borderReapplied(token: WindowToken, phase: ManagedBorderReapplyPhase)
-        case provisionalNonManagedFocusEntered(pid: pid_t, source: ActivationEventSource)
-        case nonManagedFallbackEntered(pid: pid_t, source: ActivationEventSource)
+        case provisionalExternalFocusEntered(pid: pid_t, source: ActivationEventSource)
+        case externalFocusFallbackEntered(pid: pid_t, source: ActivationEventSource)
     }
 
     let timestamp: Date
@@ -124,10 +124,10 @@ extension NiriCreateFocusTraceEvent: CustomStringConvertible {
             "focus_confirmed token=\(token) workspace=\(workspaceId.uuidString) source=\(source.rawValue)"
         case let .borderReapplied(token, phase):
             "border_reapplied token=\(token) phase=\(phase.rawValue)"
-        case let .provisionalNonManagedFocusEntered(pid, source):
-            "provisional_non_managed_focus_entered pid=\(pid) source=\(source.rawValue)"
-        case let .nonManagedFallbackEntered(pid, source):
-            "non_managed_fallback_entered pid=\(pid) source=\(source.rawValue)"
+        case let .provisionalExternalFocusEntered(pid, source):
+            "provisional_external_focus_entered pid=\(pid) source=\(source.rawValue)"
+        case let .externalFocusFallbackEntered(pid, source):
+            "external_focus_fallback_entered pid=\(pid) source=\(source.rawValue)"
         }
     }
 }
@@ -174,8 +174,6 @@ final class AXEventHandler {
         let admissionHints: ManagedWindowAdmissionHints
         let replacementMetadata: ManagedReplacementMetadata
         let structuralReplacementMatch: StructuralReplacementMatch?
-        let requiresPostCreateLifecycleVerification: Bool
-        let interactionPolicy: WindowInteractionPolicy
 
         var bundleId: String? {
             replacementMetadata.bundleId
@@ -320,7 +318,6 @@ final class AXEventHandler {
 
     private static let managedReplacementGraceDelay: Duration = .milliseconds(150)
     static let stabilizationRetryDelay: Duration = .milliseconds(100)
-    static let postCreateLifecycleVerificationDelay: Duration = .milliseconds(75)
     static let createdWindowRetryLimit = 5
     static let createPlacementContextTTL: TimeInterval = 15
     static let activationRetryLimit = 5
@@ -345,9 +342,6 @@ final class AXEventHandler {
     private var pendingWindowRuleReevaluationTask: Task<Void, Never>?
     private var pendingWindowRuleReevaluationTargets: Set<WindowRuleReevaluationTarget> = []
     private var pendingWindowRuleReevaluationGeneration: UInt64 = 0
-    var pendingPostCreateLifecycleVerificationTasks: [WindowToken: Task<Void, Never>] = [:]
-    var pendingPostCreateLifecycleVerificationOwners: [WindowToken: UInt64] = [:]
-    var nextPostCreateLifecycleVerificationOwner: UInt64 = 1
     var admissionRetryStateByWindowId: [UInt32: AdmissionRetryState] = [:]
     var nextAdmissionRetryGeneration: UInt64 = 1
     var nextAdmissionRetryExecutionOwner: UInt64 = 1
@@ -405,7 +399,6 @@ final class AXEventHandler {
         resetManagedReplacementState()
         endWindowCloseFocusRecovery(reason: "cleanup")
         cancelSameAppCloseProbe(reason: "cleanup")
-        resetPostCreateLifecycleVerificationState()
         resetCreatedWindowRetryState()
         terminalFrameFailureStateByWindowId.removeAll()
         admissionQuarantineByWindowId.removeAll()
@@ -794,7 +787,7 @@ final class AXEventHandler {
             return selected
         }
 
-        if let focusedToken = controller.workspaceManager.focusedToken,
+        if let focusedToken = controller.workspaceManager.selectedManagedToken,
            eligible(focusedToken)
         {
             return focusedToken
@@ -1264,7 +1257,6 @@ final class AXEventHandler {
         if let windowId = UInt32(exactly: token.windowId) {
             cancelCreatedWindowRetry(windowId: windowId)
         }
-        cancelPostCreateLifecycleVerification(for: token)
         guard let controller else { return }
         if controller.workspaceManager.entry(forWindowId: token.windowId) == nil {
             controller.axManager.removeWindowLedgerState(pid: token.pid, windowId: token.windowId)
@@ -1279,7 +1271,7 @@ final class AXEventHandler {
         _ entry: WindowState
     ) -> (shouldRecoverFocus: Bool, closeRecoveryArmed: Bool) {
         guard let controller else { return (false, false) }
-        let shouldRecoverFocus = controller.workspaceManager.focusedToken == entry.token
+        let shouldRecoverFocus = controller.workspaceManager.nativeManagedFocusToken == entry.token
         let closeRecoveryArmed: Bool
         if shouldRecoverFocus {
             closeRecoveryArmed = beginWindowCloseFocusRecovery(
@@ -1387,7 +1379,7 @@ final class AXEventHandler {
             return false
         }
 
-        guard let focusedToken = controller.workspaceManager.focusedToken,
+        guard let focusedToken = controller.workspaceManager.selectedManagedToken,
               focusedToken != observedEntry.token,
               focusedToken.pid == observedEntry.pid,
               let focusedEntry = controller.workspaceManager.entry(for: focusedToken),
@@ -1499,7 +1491,7 @@ final class AXEventHandler {
         return true
     }
 
-    private func shouldSuppressNonManagedFallbackDuringWindowCloseRecovery(
+    private func shouldSuppressExternalFocusFallbackDuringWindowCloseRecovery(
         observedToken: WindowToken,
         requestDisposition: ActivationRequestDisposition,
         source: ActivationEventSource,
@@ -1625,9 +1617,7 @@ final class AXEventHandler {
             if let activeRequest = controller.intentLedger.activeManagedRequest, activeRequest.token.pid == pid {
                 _ = controller.cancelManagedFocusRequest(activeRequest)
             }
-            _ = controller.workspaceManager.enterNonManagedFocus(
-                preserveFocusedToken: true
-            )
+            _ = controller.workspaceManager.recordOwnedSurfaceFocus()
             return false
         }
 
@@ -1635,7 +1625,7 @@ final class AXEventHandler {
         let conflictsWithActiveRequest = activeRequest.map {
             !managedWindowToken($0.token, matchesObservedPid: pid)
         } ?? true
-        let focusedToken = controller.workspaceManager.focusedToken
+        let focusedToken = controller.workspaceManager.selectedManagedToken
         if origin == .external,
            source != .focusedWindowChanged,
            conflictsWithActiveRequest,
@@ -1647,10 +1637,10 @@ final class AXEventHandler {
                     workspaceId: activeRequest.workspaceId
                 )
             }
-            _ = controller.workspaceManager.enterNonManagedFocus()
+            _ = controller.workspaceManager.recordExternalFocus(pid: pid, windowId: nil)
             controller.surfaceReconciler.noteRestackOccurred()
             recordNiriCreateFocusTrace(
-                .init(kind: .provisionalNonManagedFocusEntered(pid: pid, source: source))
+                .init(kind: .provisionalExternalFocusEntered(pid: pid, source: source))
             )
         }
 
@@ -1759,9 +1749,7 @@ final class AXEventHandler {
 
         let appFullscreen = focusedWindow.isFullscreen
 
-        if let entry = controller.workspaceManager.entry(for: token),
-           entry.interactionPolicy.mayFocus
-        {
+        if let entry = controller.workspaceManager.entry(for: token) {
             discardCreatePlacementContext(for: token.windowId)
             if appFullscreen {
                 suspendManagedWindowForNativeFullscreen(entry)
@@ -1842,7 +1830,7 @@ final class AXEventHandler {
             return
         }
 
-        let admissionAttempt = admitFocusedWindowBeforeNonManagedFallback(
+        let admissionAttempt = admitFocusedWindowBeforeExternalFocusFallback(
             token: token,
             axRef: axRef,
             source: source,
@@ -1856,7 +1844,7 @@ final class AXEventHandler {
             return
         }
 
-        if shouldSuppressNonManagedFallbackDuringWindowCloseRecovery(
+        if shouldSuppressExternalFocusFallbackDuringWindowCloseRecovery(
             observedToken: token,
             requestDisposition: requestDisposition,
             source: source,
@@ -1900,14 +1888,17 @@ final class AXEventHandler {
 
         if case let .admissionPending(reason) = admissionAttempt {
             let ownsProvisionalFocus = origin == .external
-                || controller.workspaceManager.nonManagedFocusToken == token
+                || controller.workspaceManager.externalFocusToken == token
                 || frontmostApplicationPIDProvider() == token.pid
             if ownsProvisionalFocus {
-                let provisionalTarget: WindowToken? = reason.suppressesNonManagedFocusTarget ? nil : token
-                _ = controller.workspaceManager.enterNonManagedFocus(target: provisionalTarget)
+                let provisionalTarget: WindowToken? = reason.hasVerifiedExternalWindowIdentity ? token : nil
+                _ = controller.workspaceManager.recordExternalFocus(
+                    pid: pid,
+                    windowId: provisionalTarget?.windowId
+                )
                 controller.surfaceReconciler.noteRestackOccurred()
                 recordNiriCreateFocusTrace(
-                    .init(kind: .provisionalNonManagedFocusEntered(pid: pid, source: source))
+                    .init(kind: .provisionalExternalFocusEntered(pid: pid, source: source))
                 )
             }
             _ = scheduleFocusedAdmissionReadmit(
@@ -1921,14 +1912,15 @@ final class AXEventHandler {
             return
         }
 
-        let nonManagedTarget: WindowToken? = admissionAttempt
-            == .admissionRejected(.nonRenderableTransientSurface) ? nil : token
-        _ = controller.workspaceManager.enterNonManagedFocus(target: nonManagedTarget)
+        _ = controller.workspaceManager.recordExternalFocus(
+            pid: pid,
+            windowId: token.windowId
+        )
         controller.surfaceReconciler.noteRestackOccurred()
 
         recordNiriCreateFocusTrace(
             .init(
-                kind: .nonManagedFallbackEntered(
+                kind: .externalFocusFallbackEntered(
                     pid: pid,
                     source: source
                 )
@@ -1936,7 +1928,7 @@ final class AXEventHandler {
         )
     }
 
-    private func admitFocusedWindowBeforeNonManagedFallback(
+    private func admitFocusedWindowBeforeExternalFocusFallback(
         token: WindowToken,
         axRef: AXWindowRef,
         source: ActivationEventSource,
@@ -1970,8 +1962,7 @@ final class AXEventHandler {
             candidate = prepared
         case let .alreadyTracked(trackedToken):
             discardCreatePlacementContext(windowId: windowId)
-            let policy = controller.workspaceManager.entry(for: trackedToken)?.interactionPolicy ?? .full
-            return policy.mayFocus ? .handled : .rejected
+            return controller.workspaceManager.entry(for: trackedToken) == nil ? .rejected : .handled
         case .identityRebindPending:
             return .handled
         case let .pending(pendingToken, pendingAXRef, reason):
@@ -2103,7 +2094,6 @@ final class AXEventHandler {
         bindCurrentPidRequest: Bool = true
     ) -> Bool {
         guard let controller else { return false }
-        guard entry.interactionPolicy.mayFocus else { return false }
         if shouldSuppressObservedManagedActivation(
             entry: entry,
             requestDisposition: requestDisposition,
@@ -2157,7 +2147,7 @@ final class AXEventHandler {
             return true
         case .unrelatedNoRequest:
             if activation.origin == .retry,
-               controller.workspaceManager.nonManagedFocusToken != entry.token,
+               controller.workspaceManager.externalFocusToken != entry.token,
                frontmostApplicationPIDProvider() != entry.pid
             {
                 return true
@@ -2304,7 +2294,7 @@ final class AXEventHandler {
         if !omitsExplicitOrdering,
            isRetriedAuthoritativeSystemModalFocus,
            frontmostApplicationPIDProvider() == entry.pid,
-           controller.workspaceManager.focusedToken == entry.token
+           controller.workspaceManager.nativeManagedFocusToken == entry.token
         {
             controller.performWindowOrdering(windowId: entry.windowId)
         }
@@ -2391,8 +2381,7 @@ final class AXEventHandler {
            controller.moveMouseToFocusedWindowEnabled,
            !hasRecentMouseFocusIntent(for: entry.token),
            controller.intentLedger.allowsMouseToFocusedWarp(for: entry.token),
-           controller.workspaceManager.focusedToken == entry.token,
-           !controller.workspaceManager.isNonManagedFocusActive
+           controller.workspaceManager.nativeManagedFocusToken == entry.token
         {
             controller.moveMouseToWindow(entry.token, preferredFrame: preferredMouseFrame)
         }
@@ -2441,15 +2430,15 @@ final class AXEventHandler {
         guard record == nil ? shouldPreserveNativeFullscreenDestroy(entry) : record?.currentToken == token else {
             return false
         }
-        let ownsNonManagedFocus = record == nil || controller.workspaceManager.nonManagedFocusToken == token
+        let ownsNativeFocus = record == nil || controller.workspaceManager.externalFocusToken == token
 
         clearManagedFocusState(
             matching: token,
             workspaceId: entry.workspaceId,
-            preservesNonManagedFocusTarget: ownsNonManagedFocus
+            preservesExternalFocusIdentity: ownsNativeFocus
         )
         _ = controller.workspaceManager.markNativeFullscreenSuspended(
-            entry.token, ownsNonManagedFocus: ownsNonManagedFocus
+            entry.token, ownsNativeFocus: ownsNativeFocus
         )
         requestNativeFullscreenRelayout(for: token, fallback: entry.workspaceId)
         return true
@@ -2458,7 +2447,7 @@ final class AXEventHandler {
     private func shouldPreserveNativeFullscreenDestroy(_ entry: WindowState) -> Bool {
         guard let controller else { return false }
         guard entry.mode == .tiling else { return false }
-        guard controller.workspaceManager.focusedToken == entry.token else { return false }
+        guard controller.workspaceManager.nativeManagedFocusToken == entry.token else { return false }
         guard !controller.workspaceManager.isScratchpadToken(entry.token) else { return false }
         guard let descriptor = controller.workspaceManager.descriptor(for: entry.workspaceId) else { return false }
         guard controller.settings.layoutType(for: descriptor.name) != .dwindle else { return false }
@@ -2595,7 +2584,6 @@ final class AXEventHandler {
             windowInfo: matchingWindowInfo,
             windowServerLookupAttempted: true
         )
-        let interactionPolicy = WindowInteractionPolicy.resolve(for: evaluation)
         WindowAdmissionTrace.record(
             .init(
                 action: .classificationObserved,
@@ -2607,8 +2595,7 @@ final class AXEventHandler {
                     token: token,
                     bundleId: bundleId,
                     rulesRevision: controller.settings.appRulesRevision,
-                    evaluation: evaluation,
-                    policy: interactionPolicy
+                    evaluation: evaluation
                 ),
                 classificationRulesSnapshot: controller.settings.appRulesDiagnosticSnapshot,
                 axRef: axRef
@@ -2687,12 +2674,7 @@ final class AXEventHandler {
                 mode: trackedMode,
                 facts: evaluation.facts
             ),
-            structuralReplacementMatch: replacementMatch,
-            requiresPostCreateLifecycleVerification: requiresPostCreateLifecycleVerification(
-                trackedMode: trackedMode,
-                facts: evaluation.facts
-            ),
-            interactionPolicy: interactionPolicy
+            structuralReplacementMatch: replacementMatch
         )
         WindowAdmissionTrace.record(
             .init(
@@ -2763,16 +2745,6 @@ final class AXEventHandler {
             )
         }
         return nil
-    }
-
-    private func requiresPostCreateLifecycleVerification(
-        trackedMode: TrackedWindowMode,
-        facts: WindowRuleFacts
-    ) -> Bool {
-        guard trackedMode == .floating else { return false }
-        return !facts.ax.attributeFetchSucceeded
-            || facts.ax.subrole == (kAXSystemDialogSubrole as String)
-            || facts.windowServer?.hasTransientSurfaceEvidence == true
     }
 
     private func prepareDestroyCandidate(
@@ -2925,7 +2897,6 @@ final class AXEventHandler {
         clearTerminalFrameFailure(windowId: Int(windowId))
         guard let resolvedToken else { return }
         cancelCreatedWindowRetry(windowId: windowId)
-        cancelPostCreateLifecycleVerification(for: resolvedToken)
         controller?.clearManualWindowOverride(for: resolvedToken)
         cancelSameAppCloseProbe(matchingFocusedToken: resolvedToken, reason: "destroy_resolved")
     }
@@ -2936,7 +2907,7 @@ final class AXEventHandler {
         pidHint: pid_t?
     ) {
         guard let controller,
-              let target = controller.workspaceManager.nonManagedFocusToken
+              let target = controller.workspaceManager.externalFocusToken
         else { return }
 
         let matchesResolvedToken = resolvedToken.map { $0 == target } ?? false
@@ -2944,7 +2915,7 @@ final class AXEventHandler {
         let matchesWindowId = target.windowId == Int(windowId)
         guard matchesResolvedToken || matchesPidHint || matchesWindowId else { return }
 
-        controller.workspaceManager.clearNonManagedFocusTarget(matching: target)
+        controller.workspaceManager.clearExternalFocusIdentity(matching: target)
     }
 
     private func processPreparedDestroy(_ candidate: PreparedDestroy) {
@@ -3723,10 +3694,14 @@ final class AXEventHandler {
             )
             return
         }
-        if let focusedToken = controller.workspaceManager.focusedToken,
+        if let focusedToken = controller.workspaceManager.selectedManagedToken,
            managedWindowToken(focusedToken, matchesObservedPid: pid)
         {
             requestTargetedFullRescan(for: [focusedToken.pid])
+            if focusedToken.pid == pid {
+                _ = controller.workspaceManager.recordExternalFocus(pid: pid, windowId: nil)
+                controller.surfaceReconciler.noteRestackOccurred()
+            }
             return
         }
 
@@ -3756,10 +3731,10 @@ final class AXEventHandler {
             break
         }
 
-        _ = controller.workspaceManager.enterNonManagedFocus()
+        _ = controller.workspaceManager.recordExternalFocus(pid: pid, windowId: nil)
         recordNiriCreateFocusTrace(
             .init(
-                kind: .nonManagedFallbackEntered(
+                kind: .externalFocusFallbackEntered(
                     pid: pid,
                     source: source
                 )
@@ -3885,7 +3860,7 @@ final class AXEventHandler {
         } else {
             recordNiriCreateFocusTrace(
                 .init(
-                    kind: .nonManagedFallbackEntered(
+                    kind: .externalFocusFallbackEntered(
                         pid: request.token.pid,
                         source: source
                     )
@@ -3909,7 +3884,7 @@ extension AXEventHandler {
     func clearManagedFocusState(
         matching token: WindowToken,
         workspaceId: WorkspaceDescriptor.ID?,
-        preservesNonManagedFocusTarget: Bool = false
+        preservesExternalFocusIdentity: Bool = false
     ) {
         guard let controller else { return }
 
@@ -3931,8 +3906,8 @@ extension AXEventHandler {
                 workspaceId: workspaceId
             )
         }
-        if !preservesNonManagedFocusTarget {
-            controller.workspaceManager.clearNonManagedFocusTarget(matching: token)
+        if !preservesExternalFocusIdentity {
+            controller.workspaceManager.clearExternalFocusIdentity(matching: token)
         }
     }
 

@@ -21,7 +21,7 @@ final class AppRevealFocusTests: XCTestCase {
             source: .service
         )
         let plannedSeq = fixture.controller.workspaceManager.worldSeq
-        let focusedToken = fixture.controller.workspaceManager.focusedToken
+        let focusedToken = fixture.controller.workspaceManager.selectedManagedToken
         let pendingToken = fixture.controller.workspaceManager.pendingFocusedToken
         let activeWorkspaceId = fixture.controller.workspaceManager.activeWorkspace(on: fixture.monitor.id)?.id
 
@@ -30,7 +30,7 @@ final class AppRevealFocusTests: XCTestCase {
         XCTAssertEqual(unhiddenPIDs, [fixture.token.pid])
         XCTAssertTrue(fixture.controller.workspaceManager.isAppHidden(pid: fixture.token.pid))
         XCTAssertEqual(fixture.controller.workspaceManager.worldSeq, plannedSeq)
-        XCTAssertEqual(fixture.controller.workspaceManager.focusedToken, focusedToken)
+        XCTAssertEqual(fixture.controller.workspaceManager.selectedManagedToken, focusedToken)
         XCTAssertEqual(fixture.controller.workspaceManager.pendingFocusedToken, pendingToken)
         XCTAssertEqual(
             fixture.controller.workspaceManager.activeWorkspace(on: fixture.monitor.id)?.id,
@@ -141,7 +141,6 @@ final class AppRevealFocusTests: XCTestCase {
         let fixture = try makeFixture(pid: 91_017, windowId: 91_117)
         let handler = WindowActionHandler(
             controller: fixture.controller,
-            visibleWindowInfoProvider: { [] },
             visibleOwnedWindowsProvider: { [] },
             frontOwnedWindow: { _ in },
             requestApplicationUnhide: { _ in .applicationUnavailable }
@@ -428,10 +427,33 @@ final class AppRevealFocusTests: XCTestCase {
         let intentId = try XCTUnwrap(
             fixture.controller.intentLedger.openAppRevealFocusIntent(pid: fixture.token.pid)?.intent.id
         )
-        _ = fixture.controller.workspaceManager.enterNonManagedFocus(
-            preserveFocusedToken: true,
-            target: WindowToken(pid: 99_999, windowId: 99_999)
+        _ = fixture.controller.workspaceManager.recordExternalFocus(
+            pid: 99_999,
+            windowId: 99_999
         )
+        fixture.controller.workspaceManager.setAppHidden(
+            false,
+            pid: fixture.token.pid,
+            source: .service
+        )
+
+        XCTAssertFalse(handler.completeAppRevealFocus(intentId: intentId))
+        XCTAssertEqual(fixture.controller.intentLedger.intent(id: intentId)?.phase, .cancelled)
+    }
+
+    func testOwnedSurfaceFocusFingerprintChangeRejectsRevealContinuation() throws {
+        let fixture = try makeFixture(pid: 91_032, windowId: 91_132)
+        let handler = makeHandler(controller: fixture.controller) { _ in true }
+        fixture.controller.workspaceManager.setAppHidden(
+            true,
+            pid: fixture.token.pid,
+            source: .service
+        )
+        XCTAssertTrue(handler.navigateToExplicitlySelectedWindow(handle: fixture.handle))
+        let intentId = try XCTUnwrap(
+            fixture.controller.intentLedger.openAppRevealFocusIntent(pid: fixture.token.pid)?.intent.id
+        )
+        XCTAssertTrue(fixture.controller.workspaceManager.recordOwnedSurfaceFocus())
         fixture.controller.workspaceManager.setAppHidden(
             false,
             pid: fixture.token.pid,
@@ -498,11 +520,10 @@ final class AppRevealFocusTests: XCTestCase {
         let samePIDToken = WindowToken(pid: oldToken.pid, windowId: 91_108)
         let handle = WindowHandle(id: oldToken)
         let fingerprint = AppRevealFocusFingerprint(
-            focusedToken: oldToken,
+            selectedManagedToken: oldToken,
             pendingFocusedToken: oldToken,
             pendingFocusedWorkspaceId: nil,
-            isNonManagedFocusActive: true,
-            nonManagedFocusToken: oldToken,
+            nativeFocusOwner: .managed(oldToken),
             interactionMonitorId: nil,
             activeWorkspaceIdsByMonitor: [:]
         )
@@ -519,9 +540,9 @@ final class AppRevealFocusTests: XCTestCase {
         let rekeyed = try XCTUnwrap(ledger.openAppRevealFocusIntent(pid: oldToken.pid))
         XCTAssertEqual(rekeyed.payload.token, samePIDToken)
         XCTAssertEqual(rekeyed.payload.handleIdentity, ObjectIdentifier(handle))
-        XCTAssertEqual(rekeyed.payload.focusFingerprint.focusedToken, samePIDToken)
+        XCTAssertEqual(rekeyed.payload.focusFingerprint.selectedManagedToken, samePIDToken)
         XCTAssertEqual(rekeyed.payload.focusFingerprint.pendingFocusedToken, samePIDToken)
-        XCTAssertEqual(rekeyed.payload.focusFingerprint.nonManagedFocusToken, samePIDToken)
+        XCTAssertEqual(rekeyed.payload.focusFingerprint.nativeFocusOwner, .managed(samePIDToken))
         XCTAssertEqual(ledger.intent(id: samePIDIntent.id)?.phase, .pending)
 
         ledger.cancelAppRevealFocus(pid: samePIDToken.pid)
@@ -548,6 +569,37 @@ final class AppRevealFocusTests: XCTestCase {
         XCTAssertEqual(trace.components(separatedBy: "outcome=rekeyed").count - 1, 1)
         XCTAssertTrue(trace.contains("outcome=cancelled"))
         XCTAssertTrue(trace.contains("reason=pid_changed"))
+    }
+
+    func testRevealFocusFingerprintRekeysOnlyExactExternalOwner() {
+        let oldToken = WindowToken(pid: 91_033, windowId: 91_133)
+        let newToken = WindowToken(pid: oldToken.pid, windowId: 91_134)
+        let unrelatedToken = WindowToken(pid: oldToken.pid, windowId: 91_135)
+        var exact = AppRevealFocusFingerprint(
+            selectedManagedToken: nil,
+            pendingFocusedToken: nil,
+            pendingFocusedWorkspaceId: nil,
+            nativeFocusOwner: .external(pid: oldToken.pid, windowId: oldToken.windowId),
+            interactionMonitorId: nil,
+            activeWorkspaceIdsByMonitor: [:]
+        )
+        var unrelated = AppRevealFocusFingerprint(
+            selectedManagedToken: nil,
+            pendingFocusedToken: nil,
+            pendingFocusedWorkspaceId: nil,
+            nativeFocusOwner: .external(pid: unrelatedToken.pid, windowId: unrelatedToken.windowId),
+            interactionMonitorId: nil,
+            activeWorkspaceIdsByMonitor: [:]
+        )
+
+        exact.rekey(from: oldToken, to: newToken)
+        unrelated.rekey(from: oldToken, to: newToken)
+
+        XCTAssertEqual(exact.nativeFocusOwner, .external(pid: newToken.pid, windowId: newToken.windowId))
+        XCTAssertEqual(
+            unrelated.nativeFocusOwner,
+            .external(pid: unrelatedToken.pid, windowId: unrelatedToken.windowId)
+        )
     }
 
     func testNewerWorkspaceSelectionRejectsRevealContinuation() throws {
@@ -783,7 +835,6 @@ final class AppRevealFocusTests: XCTestCase {
     ) -> WindowActionHandler {
         WindowActionHandler(
             controller: controller,
-            visibleWindowInfoProvider: { [] },
             visibleOwnedWindowsProvider: { [] },
             frontOwnedWindow: { _ in },
             requestApplicationUnhide: { pid in
@@ -810,11 +861,10 @@ final class AppRevealFocusTests: XCTestCase {
 
     private func emptyFocusFingerprint() -> AppRevealFocusFingerprint {
         AppRevealFocusFingerprint(
-            focusedToken: nil,
+            selectedManagedToken: nil,
             pendingFocusedToken: nil,
             pendingFocusedWorkspaceId: nil,
-            isNonManagedFocusActive: false,
-            nonManagedFocusToken: nil,
+            nativeFocusOwner: .none,
             interactionMonitorId: nil,
             activeWorkspaceIdsByMonitor: [:]
         )

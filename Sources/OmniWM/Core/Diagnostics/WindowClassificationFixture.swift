@@ -17,6 +17,8 @@ struct AXWindowFactsDTO: Codable, Equatable, Sendable {
     var appPolicy: String?
     var bundleId: String?
     var attributeFetchSucceeded: Bool
+    var isMain: Bool?
+    var isModal: Bool?
 
     init(from model: AXWindowFacts) {
         role = model.role
@@ -30,6 +32,8 @@ struct AXWindowFactsDTO: Codable, Equatable, Sendable {
         appPolicy = model.appPolicy.flatMap(Self.string(from:))
         bundleId = model.bundleId
         attributeFetchSucceeded = model.attributeFetchSucceeded
+        isMain = model.isMain
+        isModal = model.isModal
     }
 
     private static func string(from policy: NSApplication.ActivationPolicy) -> String {

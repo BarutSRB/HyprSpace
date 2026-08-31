@@ -207,7 +207,7 @@ final class NiriHiddenVisibilityIntegrationTests: XCTestCase {
         XCTAssertTrue(
             controller.workspaceManager.markNativeFullscreenSuspended(
                 originalToken,
-                ownsNonManagedFocus: false
+                ownsNativeFocus: false
             )
         )
         let replacementToken = WindowToken(pid: originalToken.pid, windowId: 880_173)
@@ -301,7 +301,7 @@ final class NiriHiddenVisibilityIntegrationTests: XCTestCase {
         XCTAssertTrue(
             controller.workspaceManager.markNativeFullscreenSuspended(
                 originalToken,
-                ownsNonManagedFocus: false
+                ownsNativeFocus: false
             )
         )
         let replacementToken = WindowToken(pid: originalToken.pid, windowId: 880_176)
@@ -360,7 +360,7 @@ final class NiriHiddenVisibilityIntegrationTests: XCTestCase {
         XCTAssertTrue(
             controller.workspaceManager.markNativeFullscreenSuspended(
                 token,
-                ownsNonManagedFocus: false
+                ownsNativeFocus: false
             )
         )
         XCTAssertTrue(controller.workspaceManager.requestNativeFullscreenExit(token))

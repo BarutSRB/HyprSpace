@@ -86,7 +86,7 @@ final class OrderedOutWindowRetirementTests: XCTestCase {
             )
         )
 
-        XCTAssertEqual(controller.workspaceManager.focusedToken, token)
+        XCTAssertEqual(controller.workspaceManager.selectedManagedToken, token)
         let refresh = try XCTUnwrap(controller.layoutRefreshController.layoutState.activeRefresh)
         XCTAssertEqual(refresh.kind, .fullRescan)
         XCTAssertEqual(refresh.rescanScope, .targeted(appPIDs: [token.pid], nativeSpaceIds: []))
@@ -125,14 +125,18 @@ final class OrderedOutWindowRetirementTests: XCTestCase {
             )
         )
 
-        XCTAssertNil(controller.workspaceManager.focusedToken)
-        XCTAssertNil(controller.workspaceManager.nonManagedFocusToken)
+        XCTAssertEqual(controller.workspaceManager.selectedManagedToken, token)
+        XCTAssertEqual(
+            controller.workspaceManager.nativeFocusOwner,
+            .external(pid: 913_903, windowId: nil)
+        )
+        XCTAssertNil(controller.workspaceManager.externalFocusToken)
         XCTAssertNil(controller.layoutRefreshController.layoutState.activeRefresh)
         XCTAssertNil(controller.layoutRefreshController.layoutState.pendingRefresh)
         XCTAssertEqual(controller.axEventHandler.previouslyFocusedManagedToken, token)
     }
 
-    func testConcreteNonManagedFocusRescansBeforeSameManagedWindowReturns() throws {
+    func testConcreteExternalFocusRescansBeforeSameManagedWindowReturns() throws {
         let controller = WindowAdmissionTestSupport.controller()
         let workspaceId = try XCTUnwrap(
             controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
@@ -155,16 +159,24 @@ final class OrderedOutWindowRetirementTests: XCTestCase {
         controller.axEventHandler.previouslyFocusedManagedToken = managedToken
 
         let unmanagedToken = WindowToken(pid: 913_904, windowId: 913_194)
-        XCTAssertTrue(controller.workspaceManager.enterNonManagedFocus(target: unmanagedToken))
-        XCTAssertNil(controller.workspaceManager.focusedToken)
-        XCTAssertEqual(controller.workspaceManager.nonManagedFocusToken, unmanagedToken)
+        XCTAssertTrue(
+            controller.workspaceManager.recordExternalFocus(
+                pid: unmanagedToken.pid,
+                windowId: unmanagedToken.windowId
+            )
+        )
+        XCTAssertEqual(controller.workspaceManager.selectedManagedToken, managedToken)
+        XCTAssertEqual(controller.workspaceManager.externalFocusToken, unmanagedToken)
         XCTAssertTrue(controller.shouldSuppressManagedFocusRecovery)
 
         controller.axEventHandler.rescanAppThatLostFocus()
 
         let refresh = try XCTUnwrap(controller.layoutRefreshController.layoutState.activeRefresh)
         XCTAssertEqual(refresh.kind, .fullRescan)
-        XCTAssertEqual(refresh.rescanScope, .targeted(appPIDs: [managedToken.pid], nativeSpaceIds: []))
+        XCTAssertEqual(
+            refresh.rescanScope,
+            .targeted(appPIDs: [managedToken.pid], nativeSpaceIds: [])
+        )
         XCTAssertNil(controller.axEventHandler.previouslyFocusedManagedToken)
 
         controller.layoutRefreshController.layoutState.activeRefresh = nil

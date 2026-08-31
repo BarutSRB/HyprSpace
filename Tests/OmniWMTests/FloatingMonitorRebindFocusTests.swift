@@ -70,7 +70,7 @@ final class FloatingMonitorRebindFocusTests: XCTestCase {
         rebind(moving, fixture: fixture)
 
         XCTAssertEqual(manager.workspace(for: moving), fixture.targetWorkspaceId)
-        XCTAssertEqual(manager.focusedToken, moving)
+        XCTAssertEqual(manager.selectedManagedToken, moving)
         XCTAssertEqual(manager.interactionMonitorId, fixture.targetMonitor.id)
         XCTAssertEqual(manager.previousInteractionMonitorId, fixture.sourceMonitor.id)
         XCTAssertEqual(manager.lastFloatingFocusedToken(in: fixture.sourceWorkspaceId), sourceFallback)
@@ -209,7 +209,7 @@ final class FloatingMonitorRebindFocusTests: XCTestCase {
         XCTAssertEqual(manager.pendingFocusedToken, moving)
         XCTAssertEqual(manager.pendingFocusedWorkspaceId, fixture.targetWorkspaceId)
         XCTAssertEqual(manager.pendingFocusedMonitorId, fixture.targetMonitor.id)
-        XCTAssertNil(manager.focusedToken)
+        XCTAssertNil(manager.selectedManagedToken)
         XCTAssertEqual(manager.interactionMonitorId, fixture.sourceMonitor.id)
         XCTAssertEqual(manager.lastFloatingFocusedToken(in: fixture.sourceWorkspaceId), sourceFallback)
         XCTAssertEqual(manager.lastFloatingFocusedToken(in: fixture.targetWorkspaceId), moving)
@@ -233,7 +233,7 @@ final class FloatingMonitorRebindFocusTests: XCTestCase {
                 requestId: request.requestId
             )
         )
-        XCTAssertEqual(manager.focusedToken, moving)
+        XCTAssertEqual(manager.selectedManagedToken, moving)
         XCTAssertNil(manager.pendingFocusedToken)
         XCTAssertEqual(manager.interactionMonitorId, fixture.targetMonitor.id)
     }
@@ -370,7 +370,7 @@ final class FloatingMonitorRebindFocusTests: XCTestCase {
         rebind(moving, fixture: fixture)
 
         XCTAssertEqual(manager.workspace(for: moving), fixture.targetWorkspaceId)
-        XCTAssertEqual(manager.focusedToken, focused)
+        XCTAssertEqual(manager.selectedManagedToken, focused)
         XCTAssertEqual(manager.interactionMonitorId, fixture.sourceMonitor.id)
         XCTAssertEqual(manager.lastFloatingFocusedToken(in: fixture.targetWorkspaceId), targetFallback)
         XCTAssertEqual(resolvedFocus(in: fixture.targetWorkspaceId, manager: manager), targetFallback)
@@ -437,7 +437,7 @@ final class FloatingMonitorRebindFocusTests: XCTestCase {
         rebind(moving, fixture: fixture)
 
         XCTAssertEqual(manager.workspace(for: moving), fixture.targetWorkspaceId)
-        XCTAssertEqual(manager.focusedToken, rememberedFloating)
+        XCTAssertEqual(manager.selectedManagedToken, rememberedFloating)
         XCTAssertEqual(manager.interactionMonitorId, fixture.sourceMonitor.id)
         XCTAssertEqual(
             manager.lastFloatingFocusedToken(in: fixture.sourceWorkspaceId),
@@ -675,7 +675,7 @@ final class FloatingMonitorRebindFocusTests: XCTestCase {
         XCTAssertEqual(manager.pendingFocusedToken, newerTarget)
         XCTAssertEqual(manager.pendingFocusedWorkspaceId, fixture.sourceWorkspaceId)
         XCTAssertEqual(manager.pendingFocusedMonitorId, fixture.sourceMonitor.id)
-        XCTAssertEqual(manager.focusedToken, moving)
+        XCTAssertEqual(manager.selectedManagedToken, moving)
         XCTAssertEqual(manager.interactionMonitorId, fixture.sourceMonitor.id)
         XCTAssertEqual(manager.lastFloatingFocusedToken(in: fixture.targetWorkspaceId), targetFallback)
         XCTAssertEqual(resolvedFocus(in: fixture.targetWorkspaceId, manager: manager), targetFallback)
@@ -827,7 +827,7 @@ final class FloatingMonitorRebindFocusTests: XCTestCase {
             workspaceManager: controller.workspaceManager,
             appInfoCache: controller.appInfoCache,
             iconResolver: controller.workspaceBarIconResolver,
-            focusedToken: controller.workspaceManager.focusedToken,
+            focusedToken: controller.workspaceManager.selectedManagedToken,
             settings: controller.settings
         )
     }

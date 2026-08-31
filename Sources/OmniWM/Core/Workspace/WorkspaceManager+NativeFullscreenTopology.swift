@@ -33,12 +33,12 @@ extension WorkspaceManager {
         let onFullscreenSpace = topology.isFullscreenSpace(spaceId)
         let isSuspended = entry.layoutReason == .nativeFullscreen
         if onFullscreenSpace, !isSuspended, topology.isCurrentSpace(spaceId) {
-            return markNativeFullscreenSuspended(entry.token, ownsNonManagedFocus: false)
+            return markNativeFullscreenSuspended(entry.token, ownsNativeFocus: false)
         }
         if !onFullscreenSpace, isSuspended {
             return restoreNativeFullscreenRecord(
                 for: entry.token,
-                clearsNonManagedFocusOwner: false
+                clearsNativeFocusOwner: false
             )
         }
         return false

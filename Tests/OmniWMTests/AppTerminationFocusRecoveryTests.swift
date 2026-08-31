@@ -68,10 +68,10 @@ final class AppTerminationFocusRecoveryTests: XCTestCase {
             )
         )
         fixture.controller.eventIntake.drainNow()
-        XCTAssertNotEqual(fixture.controller.workspaceManager.focusedToken, fixture.finderToken)
+        XCTAssertNotEqual(fixture.controller.workspaceManager.selectedManagedToken, fixture.finderToken)
         fixture.controller.eventIntake.drainNow()
 
-        XCTAssertEqual(fixture.controller.workspaceManager.focusedToken, fixture.fallbackToken)
+        XCTAssertEqual(fixture.controller.workspaceManager.selectedManagedToken, fixture.fallbackToken)
         let recoveredViewport = fixture.controller.workspaceManager.niriViewportState(
             for: fixture.workspaceId
         )
@@ -105,7 +105,7 @@ final class AppTerminationFocusRecoveryTests: XCTestCase {
             )
         )
         fixture.controller.eventIntake.drainNow()
-        XCTAssertEqual(fixture.controller.workspaceManager.focusedToken, fixture.finderToken)
+        XCTAssertEqual(fixture.controller.workspaceManager.selectedManagedToken, fixture.finderToken)
     }
 
     func testActivationFirstTerminationRecoversBeforeAcceptingFallback() throws {
@@ -142,7 +142,7 @@ final class AppTerminationFocusRecoveryTests: XCTestCase {
             )
         )
         fixture.controller.eventIntake.drainNow()
-        XCTAssertEqual(fixture.controller.workspaceManager.focusedToken, fixture.fallbackToken)
+        XCTAssertEqual(fixture.controller.workspaceManager.selectedManagedToken, fixture.fallbackToken)
     }
 
     func testTerminationRecoversWhenDepartingEntryWasAlreadyRemoved() throws {
@@ -190,7 +190,7 @@ final class AppTerminationFocusRecoveryTests: XCTestCase {
                 source: .workspaceDidActivateApplication
             )
         )
-        XCTAssertEqual(fixture.controller.workspaceManager.focusedToken, fixture.departingToken)
+        XCTAssertEqual(fixture.controller.workspaceManager.selectedManagedToken, fixture.departingToken)
         let verifying = try XCTUnwrap(
             fixture.controller.intentLedger.openAppTerminationFocusRecovery()
         )
@@ -200,7 +200,7 @@ final class AppTerminationFocusRecoveryTests: XCTestCase {
         fixture.controller.eventIntake.drainNow()
 
         XCTAssertNotNil(fixture.controller.workspaceManager.entry(for: fixture.departingToken))
-        XCTAssertEqual(fixture.controller.workspaceManager.focusedToken, fixture.finderToken)
+        XCTAssertEqual(fixture.controller.workspaceManager.selectedManagedToken, fixture.finderToken)
         XCTAssertNil(fixture.controller.intentLedger.openAppTerminationFocusRecovery())
     }
 
@@ -223,7 +223,7 @@ final class AppTerminationFocusRecoveryTests: XCTestCase {
         fixture.controller.eventIntake.drainNow()
 
         XCTAssertNil(fixture.controller.intentLedger.openAppTerminationFocusRecovery())
-        XCTAssertEqual(fixture.controller.workspaceManager.focusedToken, fixture.finderToken)
+        XCTAssertEqual(fixture.controller.workspaceManager.selectedManagedToken, fixture.finderToken)
         XCTAssertNil(fixture.controller.intentLedger.activeManagedRequest)
     }
 
@@ -382,7 +382,7 @@ final class AppTerminationFocusRecoveryTests: XCTestCase {
         )
         controller.eventIntake.drainNow()
 
-        XCTAssertEqual(controller.workspaceManager.focusedToken, fallbackToken)
+        XCTAssertEqual(controller.workspaceManager.selectedManagedToken, fallbackToken)
         XCTAssertNil(controller.intentLedger.activeManagedRequest)
     }
 
@@ -399,7 +399,7 @@ final class AppTerminationFocusRecoveryTests: XCTestCase {
             )
         )
         mouseFixture.controller.eventIntake.drainNow()
-        XCTAssertEqual(mouseFixture.controller.workspaceManager.focusedToken, mouseFixture.finderToken)
+        XCTAssertEqual(mouseFixture.controller.workspaceManager.selectedManagedToken, mouseFixture.finderToken)
         XCTAssertNil(mouseFixture.controller.intentLedger.openAppTerminationFocusRecovery())
 
         let managedFixture = try makeFixture(suffix: 5)
@@ -424,7 +424,7 @@ final class AppTerminationFocusRecoveryTests: XCTestCase {
             )
         )
         managedFixture.controller.eventIntake.drainNow()
-        XCTAssertEqual(managedFixture.controller.workspaceManager.focusedToken, managedFixture.finderToken)
+        XCTAssertEqual(managedFixture.controller.workspaceManager.selectedManagedToken, managedFixture.finderToken)
         XCTAssertNil(managedFixture.controller.intentLedger.openAppTerminationFocusRecovery())
 
         let delayedMouseFixture = try makeFixture(suffix: 6)
@@ -451,7 +451,7 @@ final class AppTerminationFocusRecoveryTests: XCTestCase {
             delayedMouseFixture.controller.workspaceManager.entry(for: delayedMouseFixture.departingToken)
         )
         XCTAssertEqual(
-            delayedMouseFixture.controller.workspaceManager.focusedToken,
+            delayedMouseFixture.controller.workspaceManager.selectedManagedToken,
             delayedMouseFixture.finderToken
         )
         XCTAssertNil(

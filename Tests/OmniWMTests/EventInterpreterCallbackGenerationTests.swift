@@ -96,7 +96,7 @@ final class EventInterpreterCallbackGenerationTests: XCTestCase {
         let currentGeneration: UInt64 = 32
         let controller = WindowAdmissionTestSupport.controller()
         defer { stop(controller) }
-        _ = controller.workspaceManager.enterNonManagedFocus(target: token)
+        _ = controller.workspaceManager.recordExternalFocus(pid: token.pid, windowId: token.windowId)
         let interpreter = EventInterpreter(
             controller: controller,
             callbackGenerationProvider: { candidatePID in
@@ -113,7 +113,7 @@ final class EventInterpreterCallbackGenerationTests: XCTestCase {
                 )
             )
         )
-        XCTAssertEqual(controller.workspaceManager.nonManagedFocusToken, token)
+        XCTAssertEqual(controller.workspaceManager.externalFocusToken, token)
 
         interpreter.handleIntakeEvent(
             stamped(
@@ -124,7 +124,7 @@ final class EventInterpreterCallbackGenerationTests: XCTestCase {
                 )
             )
         )
-        XCTAssertNil(controller.workspaceManager.nonManagedFocusToken)
+        XCTAssertNil(controller.workspaceManager.externalFocusToken)
     }
 
     private func stamped(_ event: IntakeEvent) -> StampedIntakeEvent {

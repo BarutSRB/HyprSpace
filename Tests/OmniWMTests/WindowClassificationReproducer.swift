@@ -19,7 +19,9 @@ extension AXWindowFactsDTO {
             hasMinimizeButton: hasMinimizeButton,
             appPolicy: Self.policy(from: appPolicy),
             bundleId: bundleId,
-            attributeFetchSucceeded: attributeFetchSucceeded
+            attributeFetchSucceeded: attributeFetchSucceeded,
+            isMain: isMain,
+            isModal: isModal
         )
     }
 
@@ -58,17 +60,12 @@ extension WindowServerInfoDTO {
     }
 }
 
-struct WindowClassificationOutcome: Equatable {
-    var decision: WindowClassificationDecisionDTO
-    var policy: String
-}
-
 @MainActor
 enum WindowClassificationReproducer {
-    static func recomputeOutcome(
+    static func recompute(
         _ observation: WindowClassificationObservation,
         rules: [AppRule]
-    ) -> WindowClassificationOutcome {
+    ) -> WindowClassificationDecisionDTO {
         let input = observation.input
         let engine = WindowRuleEngine()
         engine.rebuild(rules: rules)
@@ -84,20 +81,6 @@ enum WindowClassificationReproducer {
         )
         let base = engine.decision(for: facts, token: token, appFullscreen: input.appFullscreen)
         let final = WindowRuleEngine.applyingManualOverride(base, manualOverride: input.manualOverride)
-        let policy = WindowInteractionPolicy.resolve(
-            decision: final,
-            windowServerLevel: input.windowServer?.level
-        )
-        return WindowClassificationOutcome(
-            decision: WindowClassificationDecisionDTO(from: final),
-            policy: policy.name
-        )
-    }
-
-    static func recompute(
-        _ observation: WindowClassificationObservation,
-        rules: [AppRule]
-    ) -> WindowClassificationDecisionDTO {
-        recomputeOutcome(observation, rules: rules).decision
+        return WindowClassificationDecisionDTO(from: final)
     }
 }

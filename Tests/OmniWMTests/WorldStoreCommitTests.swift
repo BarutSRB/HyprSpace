@@ -29,7 +29,7 @@ final class WorldStoreCommitTests: XCTestCase {
         let world = WorldStore()
         var snapshotCount = 0
         var nextFocus = FocusSessionSnapshot()
-        nextFocus.isNonManagedFocusActive = true
+        nextFocus.nativeFocusOwner = .external(pid: nil, windowId: nil)
 
         let transaction = world.commit(
             .userCommand(workspaceId: nil, label: "projection_test", source: .command),
@@ -67,7 +67,7 @@ final class WorldStoreCommitTests: XCTestCase {
                 axRef: axRef,
                 ruleEffects: .none,
                 admissionHints: .none,
-                interactionPolicy: .full,
+                lifetimeAuthority: .axTopLevelInventory,
                 managedReplacementMetadata: nil,
                 source: .workspaceManager
             ),
@@ -109,7 +109,7 @@ final class WorldStoreCommitTests: XCTestCase {
                     observedState: $0.observedState,
                     desiredState: $0.desiredState,
                     restoreIntent: $0.restoreIntent,
-                    interactionPolicy: $0.interactionPolicy
+                    lifetimeAuthority: $0.lifetimeAuthority
                 )
             }
         )

@@ -200,7 +200,6 @@ enum WorkspaceBarDataSource {
         options: WorkspaceBarProjectionOptions,
         appInfoCache: AppInfoCache
     ) -> Bool {
-        if entry.interactionPolicy.isHandsOff { return true }
         guard !options.excludedBundleIDs.isEmpty else { return false }
         return options.excludes(bundleId: bundleId(for: entry, appInfoCache: appInfoCache))
     }

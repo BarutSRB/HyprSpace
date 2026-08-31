@@ -106,23 +106,31 @@ enum AppRevealFocusDrainResult: Equatable, Sendable {
 }
 
 struct AppRevealFocusFingerprint: Equatable, Sendable {
-    var focusedToken: WindowToken?
+    var selectedManagedToken: WindowToken?
     var pendingFocusedToken: WindowToken?
     let pendingFocusedWorkspaceId: WorkspaceDescriptor.ID?
-    let isNonManagedFocusActive: Bool
-    var nonManagedFocusToken: WindowToken?
+    var nativeFocusOwner: NativeFocusOwner
     let interactionMonitorId: Monitor.ID?
     let activeWorkspaceIdsByMonitor: [Monitor.ID: WorkspaceDescriptor.ID]
 
     mutating func rekey(from oldToken: WindowToken, to newToken: WindowToken) {
-        if focusedToken == oldToken {
-            focusedToken = newToken
+        if selectedManagedToken == oldToken {
+            selectedManagedToken = newToken
         }
         if pendingFocusedToken == oldToken {
             pendingFocusedToken = newToken
         }
-        if nonManagedFocusToken == oldToken {
-            nonManagedFocusToken = newToken
+        switch nativeFocusOwner {
+        case let .managed(token) where token == oldToken:
+            nativeFocusOwner = .managed(newToken)
+        case let .external(pid, windowId)
+            where pid == oldToken.pid && windowId == oldToken.windowId:
+            nativeFocusOwner = .external(pid: newToken.pid, windowId: newToken.windowId)
+        case .managed,
+             .external,
+             .ownedSurface,
+             .none:
+            break
         }
     }
 }

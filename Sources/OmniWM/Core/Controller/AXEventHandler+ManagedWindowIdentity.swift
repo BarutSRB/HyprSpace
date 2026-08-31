@@ -468,7 +468,6 @@ extension AXEventHandler {
 
         finishAdmissionRetryAfterTracking(windowId: windowId)
         discardCreatePlacementContext(windowId: windowId)
-        cancelPostCreateLifecycleVerification(for: oldWindow.token)
         let closeProbe = cancelSameAppCloseProbe(
             matchingFocusedToken: oldWindow.token,
             reason: "identity_rebind"

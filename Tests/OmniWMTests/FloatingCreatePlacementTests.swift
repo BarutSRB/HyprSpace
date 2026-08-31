@@ -29,7 +29,7 @@ final class FloatingCreatePlacementTests: XCTestCase {
             monitors: []
         )
 
-        XCTAssertEqual(plan.focusSession?.focusedToken, token)
+        XCTAssertEqual(plan.focusSession?.selectedManagedToken, token)
         XCTAssertEqual(plan.focusSession?.lastTiledFocusedToken, token)
     }
 
@@ -52,7 +52,7 @@ final class FloatingCreatePlacementTests: XCTestCase {
             monitors: []
         )
 
-        XCTAssertEqual(plan.focusSession?.focusedToken, token)
+        XCTAssertEqual(plan.focusSession?.selectedManagedToken, token)
         XCTAssertNil(plan.focusSession?.lastTiledFocusedToken)
     }
 
@@ -75,7 +75,7 @@ final class FloatingCreatePlacementTests: XCTestCase {
             monitors: []
         )
 
-        XCTAssertNotEqual(plan.focusSession?.focusedToken, token)
+        XCTAssertNotEqual(plan.focusSession?.selectedManagedToken, token)
         XCTAssertNotEqual(plan.focusSession?.lastTiledFocusedToken, token)
     }
 
@@ -83,7 +83,8 @@ final class FloatingCreatePlacementTests: XCTestCase {
         let workspaceId = WorkspaceDescriptor.ID()
         let token = WindowToken(pid: 5001, windowId: 14)
         var focus = FocusSessionSnapshot()
-        focus.focusedToken = token
+        focus.selectedManagedToken = token
+        focus.nativeFocusOwner = .managed(token)
         focus.lastTiledFocusedToken = token
 
         let plan = StateReducer.reduce(
@@ -126,7 +127,8 @@ final class FloatingCreatePlacementTests: XCTestCase {
         let workspaceId = WorkspaceDescriptor.ID()
         let token = WindowToken(pid: 5001, windowId: 17)
         var focus = FocusSessionSnapshot()
-        focus.focusedToken = token
+        focus.selectedManagedToken = token
+        focus.nativeFocusOwner = .managed(token)
         focus.lastTiledFocusedToken = token
 
         let toFloating = StateReducer.reduce(
@@ -701,6 +703,42 @@ final class FloatingCreatePlacementTests: XCTestCase {
         XCTAssertEqual(resolved.rung, .interactionMonitor)
     }
 
+    func testResolveLiveOwnedSurfaceIgnoresStaleManagedPlacementAndUsesInteractionMonitor() throws {
+        let fixture = try makeTwoMonitorFixture()
+        let manager = fixture.controller.workspaceManager
+        let staleManagedToken = manager.addWindow(
+            axRef(6_122, 572),
+            pid: 6_122,
+            windowId: 572,
+            to: fixture.secondaryWorkspace
+        )
+        XCTAssertTrue(
+            manager.confirmManagedFocus(
+                staleManagedToken,
+                in: fixture.secondaryWorkspace,
+                activateWorkspaceOnMonitor: false
+            )
+        )
+        XCTAssertTrue(manager.setInteractionMonitor(fixture.primary.id))
+        XCTAssertTrue(manager.recordOwnedSurfaceFocus())
+        XCTAssertEqual(manager.selectedManagedToken, staleManagedToken)
+        XCTAssertEqual(manager.lastTiledFocusedToken, staleManagedToken)
+        XCTAssertEqual(manager.nativeFocusOwner, .ownedSurface)
+
+        let resolved = resolvePlacement(
+            fixture,
+            pid: 6_123,
+            placementMode: .floating,
+            origin: .liveCreate,
+            createPlacementContext: placementContext(),
+            windowFrame: fixture.secondary.frame.insetBy(dx: 100, dy: 100),
+            fallbackWorkspaceId: nil
+        )
+
+        XCTAssertEqual(resolved.workspaceId, fixture.primaryWorkspace)
+        XCTAssertEqual(resolved.rung, .interactionMonitor)
+    }
+
     func testResolveLiveDoesNotSynthesizeInteractionMonitorFromFocusedWindow() throws {
         let fixture = try makeTwoMonitorFixture()
         let manager = fixture.controller.workspaceManager
@@ -1029,6 +1067,35 @@ final class FloatingCreatePlacementTests: XCTestCase {
         XCTAssertEqual(resolved.rung, .interactionWorkspace)
     }
 
+    func testSynthesizedContextOmitsStaleSelectionForOwnedSurfaceFocus() throws {
+        let fixture = try makeTwoMonitorFixture()
+        let manager = fixture.controller.workspaceManager
+        let token = manager.addWindow(
+            axRef(6_124, 573),
+            pid: 6_124,
+            windowId: 573,
+            to: fixture.secondaryWorkspace
+        )
+        XCTAssertTrue(
+            manager.confirmManagedFocus(
+                token,
+                in: fixture.secondaryWorkspace,
+                activateWorkspaceOnMonitor: false
+            )
+        )
+        XCTAssertTrue(manager.setInteractionMonitor(fixture.primary.id))
+        XCTAssertTrue(manager.recordOwnedSurfaceFocus())
+
+        let synthesized = fixture.controller.axEventHandler.liveCreatePlacementContext(
+            controller: fixture.controller
+        )
+
+        XCTAssertNil(synthesized.focusedWorkspaceId)
+        XCTAssertNil(synthesized.focusedMonitorId)
+        XCTAssertEqual(synthesized.interactionWorkspaceId, fixture.primaryWorkspace)
+        XCTAssertEqual(synthesized.interactionMonitorId, fixture.primary.id)
+    }
+
     func testRetainedAXFirstContextKeepsInitialInteractionWorkspace() throws {
         let fixture = try makeTwoMonitorFixture()
         let manager = fixture.controller.workspaceManager
@@ -1250,93 +1317,6 @@ final class FloatingCreatePlacementTests: XCTestCase {
         )
 
         XCTAssertEqual(workspaceId, fixture.secondaryWorkspace)
-    }
-
-    func testHandsOffSurfaceIsNeverFronted() throws {
-        final class FrontingRecorder: @unchecked Sendable {
-            var activatedPids: [pid_t] = []
-            var focusedWindowIds: [UInt32] = []
-            var raiseCount = 0
-        }
-        let recorder = FrontingRecorder()
-        let controller = WMController(
-            settings: makeSettings(),
-            windowFocusOperations: WindowFocusOperations(
-                activateApp: { recorder.activatedPids.append($0) },
-                focusSpecificWindow: { _, windowId, _ in recorder.focusedWindowIds.append(windowId) },
-                raiseWindow: { _ in recorder.raiseCount += 1 }
-            )
-        )
-        let monitor = makeMonitor(CGMainDisplayID(), "Primary", CGRect(x: 0, y: 0, width: 1800, height: 1169))
-        controller.workspaceManager.applyMonitorConfigurationChange([monitor])
-        let workspaceId = try XCTUnwrap(
-            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
-        )
-
-        let pid: pid_t = 30_540
-        let handsOff = try XCTUnwrap(
-            controller.workspaceManager.addWindow(
-                axRef(pid, 940), pid: pid, windowId: 940, to: workspaceId, mode: .floating
-            )
-        )
-        controller.workspaceManager.setInteractionPolicy(.handsOffSurface, for: handsOff)
-        controller.performWindowFronting(pid: pid, windowId: 940, axRef: axRef(pid, 940))
-
-        XCTAssertTrue(recorder.activatedPids.isEmpty)
-        XCTAssertTrue(recorder.focusedWindowIds.isEmpty)
-        XCTAssertEqual(recorder.raiseCount, 0)
-
-        let managed = try XCTUnwrap(
-            controller.workspaceManager.addWindow(
-                axRef(pid, 941), pid: pid, windowId: 941, to: workspaceId
-            )
-        )
-        controller.workspaceManager.setInteractionPolicy(.full, for: managed)
-        controller.performWindowFronting(pid: pid, windowId: 941, axRef: axRef(pid, 941))
-
-        XCTAssertEqual(recorder.activatedPids, [pid])
-        XCTAssertEqual(recorder.focusedWindowIds, [941])
-        XCTAssertEqual(recorder.raiseCount, 1)
-    }
-
-    func testHandsOffSurfaceIsNeverReordered() throws {
-        final class OrderRecorder: @unchecked Sendable {
-            var orderedWindowIds: [UInt32] = []
-        }
-        let recorder = OrderRecorder()
-        let controller = WMController(
-            settings: makeSettings(),
-            windowFocusOperations: WindowFocusOperations(
-                activateApp: { _ in },
-                focusSpecificWindow: { _, _, _ in },
-                raiseWindow: { _ in },
-                orderWindow: { recorder.orderedWindowIds.append($0) }
-            )
-        )
-        let monitor = makeMonitor(CGMainDisplayID(), "Primary", CGRect(x: 0, y: 0, width: 1800, height: 1169))
-        controller.workspaceManager.applyMonitorConfigurationChange([monitor])
-        let workspaceId = try XCTUnwrap(
-            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
-        )
-
-        let pid: pid_t = 30_640
-        let handsOff = try XCTUnwrap(
-            controller.workspaceManager.addWindow(
-                axRef(pid, 960), pid: pid, windowId: 960, to: workspaceId, mode: .floating
-            )
-        )
-        controller.workspaceManager.setInteractionPolicy(.handsOffSurface, for: handsOff)
-        controller.performWindowOrdering(windowId: 960)
-        XCTAssertTrue(recorder.orderedWindowIds.isEmpty)
-
-        let managed = try XCTUnwrap(
-            controller.workspaceManager.addWindow(
-                axRef(pid, 961), pid: pid, windowId: 961, to: workspaceId
-            )
-        )
-        controller.workspaceManager.setInteractionPolicy(.full, for: managed)
-        controller.performWindowOrdering(windowId: 961)
-        XCTAssertEqual(recorder.orderedWindowIds, [961])
     }
 
     func testSkippedWorkspaceRuleRecordsWhyItWasSkipped() throws {
@@ -1597,8 +1577,7 @@ final class FloatingCreatePlacementTests: XCTestCase {
             lifecyclePhase: mode == .floating ? .floating : .tiled,
             observedState: .initial(workspaceId: workspaceId, monitorId: nil),
             desiredState: .initial(workspaceId: workspaceId, monitorId: nil, disposition: mode),
-            restoreIntent: nil,
-            interactionPolicy: .full
+            restoreIntent: nil
         )
     }
 

@@ -14,7 +14,6 @@ struct AeroSpaceAxDump: Equatable {
 
 struct AeroSpaceAxDumpCoverage: Equatable {
     var files: Int
-    var skippedNonWindowRole: Int
     var skippedMissingWindowLevel: Int
     var loaded: Int
 }
@@ -35,7 +34,6 @@ enum AeroSpaceAxDumpLoader {
     static func load() throws -> (dumps: [AeroSpaceAxDump], coverage: AeroSpaceAxDumpCoverage) {
         let urls = try dumpURLs()
         var dumps: [AeroSpaceAxDump] = []
-        var skippedNonWindowRole = 0
         var skippedMissingWindowLevel = 0
 
         for (index, url) in urls.enumerated() {
@@ -45,10 +43,6 @@ enum AeroSpaceAxDumpLoader {
             )
             guard let dump = object as? [String: Any] else {
                 throw AeroSpaceAxDumpError.malformed(url.lastPathComponent)
-            }
-            guard string(dump, "AXRole") == (kAXWindowRole as String) else {
-                skippedNonWindowRole += 1
-                continue
             }
             guard let level = windowLevel(dump) else {
                 skippedMissingWindowLevel += 1
@@ -67,7 +61,6 @@ enum AeroSpaceAxDumpLoader {
             dumps,
             AeroSpaceAxDumpCoverage(
                 files: urls.count,
-                skippedNonWindowRole: skippedNonWindowRole,
                 skippedMissingWindowLevel: skippedMissingWindowLevel,
                 loaded: dumps.count
             )
@@ -92,7 +85,9 @@ enum AeroSpaceAxDumpLoader {
             hasMinimizeButton: hasElement(dump, "AXMinimizeButton"),
             appPolicy: activationPolicy(string(dump, "Aero.App.nsApp.activationPolicy")),
             bundleId: bundleId,
-            attributeFetchSucceeded: true
+            attributeFetchSucceeded: true,
+            isMain: bool(dump, "AXMain"),
+            isModal: bool(dump, "AXModal")
         )
         let windowServer = WindowServerInfo(
             id: UInt32(windowId),
@@ -101,7 +96,7 @@ enum AeroSpaceAxDumpLoader {
             frame: .zero,
             tags: 0,
             attributes: 0,
-            parentId: 0,
+            parentId: uint32(dump, "Aero.windowServerParentId") ?? 0,
             title: nil
         )
         return WindowClassificationObservation(
@@ -158,6 +153,16 @@ enum AeroSpaceAxDumpLoader {
 
     private static func string(_ dump: [String: Any], _ key: String) -> String? {
         dump[key] as? String
+    }
+
+    private static func uint32(_ dump: [String: Any], _ key: String) -> UInt32? {
+        guard let value = dump[key] as? NSNumber else { return nil }
+        return UInt32(truncating: value)
+    }
+
+    private static func bool(_ dump: [String: Any], _ key: String) -> Bool? {
+        guard let value = dump[key] as? NSNumber else { return nil }
+        return value.boolValue
     }
 
     private static func hasElement(_ dump: [String: Any], _ key: String) -> Bool {

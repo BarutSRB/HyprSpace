@@ -12,12 +12,6 @@ final class WindowActionHandler {
         case requestReportedNotSent
     }
 
-    enum CreatedFloatingFocusResult: Equatable {
-        case focused
-        case systemModalBarrier
-        case rejected
-    }
-
     private enum RaisableSurfaceBatchKey: Hashable {
         case application(pid_t)
         case ownedApplication
@@ -26,15 +20,12 @@ final class WindowActionHandler {
     @MainActor
     private enum RaisableSurface {
         case managed(WindowState)
-        case external(pid: pid_t, windowId: Int, axRef: AXWindowRef)
         case owned(NSWindow)
 
         var windowId: Int {
             switch self {
             case let .managed(entry):
                 entry.windowId
-            case let .external(_, windowId, _):
-                windowId
             case let .owned(window):
                 window.windowNumber
             }
@@ -44,8 +35,6 @@ final class WindowActionHandler {
             switch self {
             case let .managed(entry):
                 entry.pid
-            case let .external(pid, _, _):
-                pid
             case .owned:
                 getpid()
             }
@@ -55,8 +44,6 @@ final class WindowActionHandler {
             switch self {
             case let .managed(entry):
                 .application(entry.pid)
-            case let .external(pid, _, _):
-                .application(pid)
             case .owned:
                 .ownedApplication
             }
@@ -68,7 +55,6 @@ final class WindowActionHandler {
     }
 
     weak var controller: WMController?
-    private let visibleWindowInfoProvider: () -> [WindowServerInfo]
     private let visibleOwnedWindowsProvider: () -> [NSWindow]
     private let frontOwnedWindow: (NSWindow) -> Void
     private let requestApplicationUnhide: (pid_t) -> AppUnhideRequestResult
@@ -93,9 +79,6 @@ final class WindowActionHandler {
 
     init(
         controller: WMController,
-        visibleWindowInfoProvider: @escaping () -> [WindowServerInfo] = {
-            SkyLight.shared.queryAllVisibleWindows()
-        },
         visibleOwnedWindowsProvider: @escaping () -> [NSWindow] = {
             OwnedWindowRegistry.shared.visibleWindows(kind: .utility)
         },
@@ -113,7 +96,6 @@ final class WindowActionHandler {
         }
     ) {
         self.controller = controller
-        self.visibleWindowInfoProvider = visibleWindowInfoProvider
         self.visibleOwnedWindowsProvider = visibleOwnedWindowsProvider
         self.frontOwnedWindow = frontOwnedWindow
         self.requestApplicationUnhide = requestApplicationUnhide
@@ -207,46 +189,6 @@ final class WindowActionHandler {
         makeRaiseAllFloatingPlan() != nil || controller?.hasVisibleWorkspaceInactiveFloatingWindows() == true
     }
 
-    @discardableResult
-    func focusCreatedFloatingWindow(_ token: WindowToken) -> CreatedFloatingFocusResult {
-        guard let controller,
-              !controller.isLockScreenActive
-        else {
-            return .rejected
-        }
-        if controller.hasStartedServices {
-            guard !controller.isFrontmostAppLockScreen() else { return .rejected }
-        }
-        guard !controller.isSystemModalFocusActive else { return .systemModalBarrier }
-
-        guard let entry = controller.workspaceManager.entry(for: token),
-              entry.mode == .floating,
-              entry.layoutReason == .standard,
-              entry.interactionPolicy.mayFocus,
-              !controller.workspaceManager.isAppHidden(pid: entry.pid),
-              !controller.workspaceManager.isHiddenInCorner(token),
-              controller.workspaceManager.visibleWorkspaceIds().contains(entry.workspaceId)
-        else {
-            return .rejected
-        }
-        if AXWindowService.isSystemModalSurface(
-            role: entry.managedReplacementMetadata?.role,
-            subrole: entry.managedReplacementMetadata?.subrole
-        ) {
-            return .systemModalBarrier
-        }
-
-        controller.focusPolicyEngine.beginLease(
-            owner: .ruleCreatedFloatingWindow,
-            reason: "floating_window_create",
-            suppressesFocusFollowsMouse: true,
-            duration: 0.35
-        )
-        controller.performWindowOrdering(windowId: entry.windowId)
-        controller.focusWindow(token)
-        return .focused
-    }
-
     private func makeRaiseAllFloatingPlan() -> FloatingWindowRaisePlan? {
         guard let controller else { return nil }
 
@@ -263,10 +205,7 @@ final class WindowActionHandler {
         let ownedSurfaces = visibleOwnedWindowsProvider()
             .filter { $0.windowNumber > 0 }
             .map(RaisableSurface.owned)
-        var excludedWindowIds = Set(managedSurfaces.map(\.windowId))
-        excludedWindowIds.formUnion(ownedSurfaces.map(\.windowId))
-        let externalSurfaces = visibleExternalFloatingSurfaces(excludingWindowIds: excludedWindowIds)
-        let surfaces = managedSurfaces + ownedSurfaces + externalSurfaces
+        let surfaces = managedSurfaces + ownedSurfaces
         guard !surfaces.isEmpty else { return nil }
 
         let preferredWindowId = preferredWindowId(in: surfaces)
@@ -306,32 +245,6 @@ final class WindowActionHandler {
         return FloatingWindowRaisePlan(batches: batches)
     }
 
-    private func visibleExternalFloatingSurfaces(excludingWindowIds: Set<Int>) -> [RaisableSurface] {
-        guard let controller else { return [] }
-
-        var seenWindowIds = excludingWindowIds
-        return visibleWindowInfoProvider().compactMap { windowInfo in
-            let windowId = Int(windowInfo.id)
-            guard seenWindowIds.insert(windowId).inserted else { return nil }
-            guard !controller.isOwnedWindow(windowNumber: windowId) else { return nil }
-
-            let pid = pid_t(windowInfo.pid)
-            guard controller.workspaceManager.entry(forPid: pid, windowId: windowId) == nil else { return nil }
-            guard let axRef = AXWindowService.axWindowRef(for: windowInfo.id, pid: pid) else { return nil }
-
-            let evaluation = controller.evaluateWindowDisposition(
-                axRef: axRef,
-                pid: pid,
-                windowInfo: windowInfo
-            )
-            guard evaluation.decision.trackedMode == .floating || isWindowServerModalFloating(windowInfo) else {
-                return nil
-            }
-
-            return .external(pid: pid, windowId: windowId, axRef: axRef)
-        }
-    }
-
     private func preferredWindowId(in surfaces: [RaisableSurface]) -> Int? {
         guard let controller else { return nil }
 
@@ -346,10 +259,8 @@ final class WindowActionHandler {
             return preferredOwnedWindowId
         }
 
-        if let focusedToken = controller.focusedOrFrontmostWindowTokenForAutomation(
-            preferFrontmostWhenNonManagedFocusActive: true
-        ),
-            candidateWindowIds.contains(focusedToken.windowId)
+        if let focusedToken = controller.workspaceManager.renderableFocusToken,
+           candidateWindowIds.contains(focusedToken.windowId)
         {
             return focusedToken.windowId
         }
@@ -366,12 +277,6 @@ final class WindowActionHandler {
         return lastFloatingFocusedToken.windowId
     }
 
-    private func isWindowServerModalFloating(_ windowInfo: WindowServerInfo) -> Bool {
-        let isFloating = (windowInfo.tags & 0x2) != 0
-        let isModal = (windowInfo.tags & 0x8000_0000) != 0
-        return isFloating && isModal
-    }
-
     private func front(surface: RaisableSurface) {
         guard let controller else { return }
 
@@ -381,12 +286,6 @@ final class WindowActionHandler {
                 pid: entry.pid,
                 windowId: entry.windowId,
                 axRef: entry.axRef
-            )
-        case let .external(pid, windowId, axRef):
-            controller.performWindowFronting(
-                pid: pid,
-                windowId: windowId,
-                axRef: axRef
             )
         case let .owned(window):
             frontOwnedWindow(window)
@@ -477,14 +376,6 @@ final class WindowActionHandler {
                 generation: controller.workspaceManager.appVisibilityGeneration(for: entry.pid)
             )
         }
-        guard entry.interactionPolicy.mayFocus else {
-            return reject(
-                .focusDisallowed,
-                workspaceId: entry.workspaceId,
-                generation: controller.workspaceManager.appVisibilityGeneration(for: entry.pid)
-            )
-        }
-
         let intent = controller.intentLedger.beginAppRevealFocus(
             token: entry.token,
             workspaceId: entry.workspaceId,
@@ -641,10 +532,6 @@ final class WindowActionHandler {
         else {
             return reject(.ineligibleLayout)
         }
-        guard entry.interactionPolicy.mayFocus else {
-            return reject(.focusDisallowed)
-        }
-
         guard controller.intentLedger.confirmAppRevealFocus(intentId: intentId) != nil else {
             record(.rejected, reason: .intentNotPending)
             return false
@@ -747,11 +634,10 @@ final class WindowActionHandler {
 
     private func appRevealFocusFingerprint(controller: WMController) -> AppRevealFocusFingerprint {
         AppRevealFocusFingerprint(
-            focusedToken: controller.workspaceManager.focusedToken,
+            selectedManagedToken: controller.workspaceManager.selectedManagedToken,
             pendingFocusedToken: controller.workspaceManager.pendingFocusedToken,
             pendingFocusedWorkspaceId: controller.workspaceManager.pendingFocusedWorkspaceId,
-            isNonManagedFocusActive: controller.workspaceManager.isNonManagedFocusActive,
-            nonManagedFocusToken: controller.workspaceManager.nonManagedFocusToken,
+            nativeFocusOwner: controller.workspaceManager.nativeFocusOwner,
             interactionMonitorId: controller.workspaceManager.interactionMonitorId,
             activeWorkspaceIdsByMonitor: Dictionary(
                 uniqueKeysWithValues: controller.workspaceManager.monitors.compactMap { monitor in
@@ -767,7 +653,7 @@ final class WindowActionHandler {
     func summonWindowRight(handle: WindowHandle) -> Bool {
         guard let controller,
               let currentWorkspace = controller.activeWorkspace(),
-              let focusedToken = controller.workspaceManager.focusedToken,
+              let focusedToken = controller.workspaceManager.selectedManagedToken,
               let focusedEntry = controller.workspaceManager.entry(for: focusedToken),
               focusedEntry.workspaceId == currentWorkspace.id
         else {

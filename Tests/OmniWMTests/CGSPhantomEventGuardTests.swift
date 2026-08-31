@@ -234,7 +234,7 @@ final class CGSPhantomEventGuardTests: XCTestCase {
                 .nativeFullscreenPlaceholders()
                 .contains(where: { $0.currentToken == targetToken })
         )
-        XCTAssertNotEqual(controller.workspaceManager.focusedToken, targetToken)
+        XCTAssertNotEqual(controller.workspaceManager.selectedManagedToken, targetToken)
         XCTAssertNotEqual(controller.workspaceManager.pendingFocusedToken, targetToken)
         XCTAssertNotNil(controller.workspaceManager.entry(for: peerToken))
         XCTAssertNotNil(engine.findNode(for: peerToken, in: workspaceId))
@@ -344,7 +344,7 @@ final class CGSPhantomEventGuardTests: XCTestCase {
                 .nativeFullscreenPlaceholders()
                 .contains(where: { $0.currentToken == targetToken })
         )
-        XCTAssertNotEqual(controller.workspaceManager.focusedToken, targetToken)
+        XCTAssertNotEqual(controller.workspaceManager.selectedManagedToken, targetToken)
         XCTAssertNotEqual(controller.workspaceManager.pendingFocusedToken, targetToken)
         XCTAssertNotNil(controller.workspaceManager.entry(for: peerToken))
         XCTAssertNotNil(engine.findNode(for: peerToken, in: workspaceId))
@@ -442,9 +442,7 @@ final class CGSPhantomEventGuardTests: XCTestCase {
                     ruleEffects: .none,
                     admissionHints: .none,
                     replacementMetadata: metadata,
-                    structuralReplacementMatch: nil,
-                    requiresPostCreateLifecycleVerification: false,
-                    interactionPolicy: .full
+                    structuralReplacementMatch: nil
                 )
             )
         }

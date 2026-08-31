@@ -405,7 +405,7 @@ final class CommandHandler {
             )
         }
 
-        if let token = controller.workspaceManager.focusedToken,
+        if let token = controller.workspaceManager.selectedManagedToken,
            let entry = controller.workspaceManager.entry(for: token),
            !controller.workspaceManager.isAppHidden(pid: entry.pid)
         {
@@ -764,7 +764,7 @@ final class CommandHandler {
             AXWindowService.isFullscreen(axRef)
         }
 
-        if let token = controller.workspaceManager.focusedToken,
+        if let token = controller.workspaceManager.selectedManagedToken,
            let entry = controller.workspaceManager.entry(for: token),
            !controller.workspaceManager.isAppHidden(pid: entry.pid)
         {

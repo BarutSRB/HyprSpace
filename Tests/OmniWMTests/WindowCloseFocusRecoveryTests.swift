@@ -102,7 +102,7 @@ final class WindowCloseFocusRecoveryTests: XCTestCase {
         fixture.controller.eventIntake.drainNow()
 
         XCTAssertEqual(fixture.controller.activeWorkspace()?.id, fixture.remoteWorkspaceId)
-        XCTAssertEqual(fixture.controller.workspaceManager.focusedToken, fixture.remoteToken)
+        XCTAssertEqual(fixture.controller.workspaceManager.selectedManagedToken, fixture.remoteToken)
         XCTAssertNil(fixture.controller.intentLedger.openSameAppCloseProbe())
     }
 
@@ -126,7 +126,7 @@ final class WindowCloseFocusRecoveryTests: XCTestCase {
         fixture.controller.eventIntake.drainNow()
 
         XCTAssertEqual(fixture.controller.activeWorkspace()?.id, fixture.remoteWorkspaceId)
-        XCTAssertEqual(fixture.controller.workspaceManager.focusedToken, fixture.remoteToken)
+        XCTAssertEqual(fixture.controller.workspaceManager.selectedManagedToken, fixture.remoteToken)
         XCTAssertNil(fixture.controller.intentLedger.openSameAppCloseProbe())
         await fixture.controller.axEventHandler.awaitPendingManagedReplacementBursts(for: [fixture.pid])
     }
@@ -145,7 +145,7 @@ final class WindowCloseFocusRecoveryTests: XCTestCase {
         fixture.controller.eventIntake.drainNow()
 
         XCTAssertEqual(fixture.controller.activeWorkspace()?.id, fixture.remoteWorkspaceId)
-        XCTAssertEqual(fixture.controller.workspaceManager.focusedToken, fixture.remoteToken)
+        XCTAssertEqual(fixture.controller.workspaceManager.selectedManagedToken, fixture.remoteToken)
         XCTAssertNil(fixture.controller.intentLedger.openSameAppCloseProbe())
         await fixture.controller.axEventHandler.awaitPendingManagedReplacementBursts(for: [fixture.pid])
     }
@@ -169,15 +169,13 @@ final class WindowCloseFocusRecoveryTests: XCTestCase {
                 ruleEffects: .none,
                 admissionHints: .none,
                 replacementMetadata: fixture.closingMetadata,
-                structuralReplacementMatch: nil,
-                requiresPostCreateLifecycleVerification: false,
-                interactionPolicy: .full
+                structuralReplacementMatch: nil
             )
         )
         fixture.controller.eventIntake.drainNow()
 
         XCTAssertEqual(fixture.controller.activeWorkspace()?.id, fixture.localWorkspaceId)
-        XCTAssertNotEqual(fixture.controller.workspaceManager.focusedToken, fixture.remoteToken)
+        XCTAssertNotEqual(fixture.controller.workspaceManager.selectedManagedToken, fixture.remoteToken)
         XCTAssertNotNil(fixture.controller.intentLedger.openSameAppCloseProbe())
         XCTAssertTrue(
             fixture.controller.axEventHandler.managedReplacementTraceDump()
@@ -191,7 +189,7 @@ final class WindowCloseFocusRecoveryTests: XCTestCase {
         fixture.controller.eventIntake.drainNow()
 
         XCTAssertEqual(fixture.controller.activeWorkspace()?.id, fixture.remoteWorkspaceId)
-        XCTAssertEqual(fixture.controller.workspaceManager.focusedToken, fixture.remoteToken)
+        XCTAssertEqual(fixture.controller.workspaceManager.selectedManagedToken, fixture.remoteToken)
         XCTAssertNil(fixture.controller.intentLedger.openSameAppCloseProbe())
     }
 
@@ -223,15 +221,13 @@ final class WindowCloseFocusRecoveryTests: XCTestCase {
                 ruleEffects: .none,
                 admissionHints: .none,
                 replacementMetadata: fixture.closingMetadata,
-                structuralReplacementMatch: nil,
-                requiresPostCreateLifecycleVerification: false,
-                interactionPolicy: .full
+                structuralReplacementMatch: nil
             )
         )
         fixture.controller.eventIntake.drainNow()
 
         XCTAssertEqual(fixture.controller.activeWorkspace()?.id, fixture.localWorkspaceId)
-        XCTAssertNotEqual(fixture.controller.workspaceManager.focusedToken, fixture.remoteToken)
+        XCTAssertNotEqual(fixture.controller.workspaceManager.selectedManagedToken, fixture.remoteToken)
         XCTAssertEqual(fixture.controller.intentLedger.activeManagedRequest?.token, fixture.rightToken)
         XCTAssertNotNil(fixture.controller.intentLedger.openSameAppCloseProbe())
         try await Self.waitForManagedReplacement(
@@ -242,7 +238,7 @@ final class WindowCloseFocusRecoveryTests: XCTestCase {
         fixture.controller.eventIntake.drainNow()
 
         XCTAssertEqual(fixture.controller.activeWorkspace()?.id, fixture.localWorkspaceId)
-        XCTAssertNotEqual(fixture.controller.workspaceManager.focusedToken, fixture.remoteToken)
+        XCTAssertNotEqual(fixture.controller.workspaceManager.selectedManagedToken, fixture.remoteToken)
         XCTAssertEqual(fixture.controller.intentLedger.activeManagedRequest?.token, fixture.rightToken)
         XCTAssertNil(fixture.controller.intentLedger.openSameAppCloseProbe())
     }
@@ -265,15 +261,13 @@ final class WindowCloseFocusRecoveryTests: XCTestCase {
                 ruleEffects: .none,
                 admissionHints: .none,
                 replacementMetadata: fixture.closingMetadata,
-                structuralReplacementMatch: nil,
-                requiresPostCreateLifecycleVerification: false,
-                interactionPolicy: .full
+                structuralReplacementMatch: nil
             )
         )
         fixture.controller.eventIntake.drainNow()
 
         XCTAssertEqual(fixture.controller.activeWorkspace()?.id, fixture.localWorkspaceId)
-        XCTAssertNotEqual(fixture.controller.workspaceManager.focusedToken, fixture.remoteToken)
+        XCTAssertNotEqual(fixture.controller.workspaceManager.selectedManagedToken, fixture.remoteToken)
         XCTAssertNotNil(fixture.controller.intentLedger.openSameAppCloseProbe())
         try await Self.waitForAdmissionRetryToFinish(
             windowId: UInt32(replacementToken.windowId),
@@ -282,7 +276,7 @@ final class WindowCloseFocusRecoveryTests: XCTestCase {
         fixture.controller.eventIntake.drainNow()
 
         XCTAssertEqual(fixture.controller.activeWorkspace()?.id, fixture.localWorkspaceId)
-        XCTAssertNotEqual(fixture.controller.workspaceManager.focusedToken, fixture.remoteToken)
+        XCTAssertNotEqual(fixture.controller.workspaceManager.selectedManagedToken, fixture.remoteToken)
         XCTAssertNil(fixture.controller.intentLedger.openSameAppCloseProbe())
     }
 
@@ -335,7 +329,7 @@ final class WindowCloseFocusRecoveryTests: XCTestCase {
             .token.windowId
         return CloseOutcome(
             activeWorkspaceIsLocal: controller.activeWorkspace()?.id == fixture.localWorkspaceId,
-            focusedWindowId: controller.workspaceManager.focusedToken?.windowId,
+            focusedWindowId: controller.workspaceManager.selectedManagedToken?.windowId,
             preferredWindowId: controller.workspaceManager.preferredFocusToken(
                 in: fixture.localWorkspaceId
             )?.windowId,
@@ -396,7 +390,7 @@ final class WindowCloseFocusRecoveryTests: XCTestCase {
         let viewport = controller.workspaceManager.niriViewportState(for: fixture.localWorkspaceId)
 
         XCTAssertEqual(controller.activeWorkspace()?.id, fixture.localWorkspaceId)
-        XCTAssertNotEqual(controller.workspaceManager.focusedToken, fixture.remoteToken)
+        XCTAssertNotEqual(controller.workspaceManager.selectedManagedToken, fixture.remoteToken)
         XCTAssertNil(controller.intentLedger.openSameAppCloseProbe())
         XCTAssertEqual(viewport.selectedNodeId, settledViewport.selectedNodeId)
         XCTAssertEqual(viewport.activeColumnIndex, settledViewport.activeColumnIndex)

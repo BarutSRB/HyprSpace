@@ -9,6 +9,11 @@ enum LayoutReason: Codable, Equatable {
     case nativeFullscreen
 }
 
+enum ManagedWindowLifetimeAuthority: Equatable, Sendable {
+    case axTopLevelInventory
+    case directLifecycle
+}
+
 enum HiddenReason: Equatable {
     case workspaceInactive
     case layoutTransient(HideSide)
@@ -112,7 +117,7 @@ struct WindowState: Equatable {
     var manualLayoutOverride: ManualWindowOverride?
     var ruleEffects: ManagedWindowRuleEffects = .none
     var admissionHints: ManagedWindowAdmissionHints = .none
-    var interactionPolicy: WindowInteractionPolicy = .full
+    var lifetimeAuthority: ManagedWindowLifetimeAuthority
     var hiddenState: HiddenState?
     var layoutReason: LayoutReason = .standard
 
@@ -132,7 +137,7 @@ struct WindowState: Equatable {
         managedReplacementMetadata: ManagedReplacementMetadata?,
         ruleEffects: ManagedWindowRuleEffects,
         admissionHints: ManagedWindowAdmissionHints,
-        interactionPolicy: WindowInteractionPolicy = .full
+        lifetimeAuthority: ManagedWindowLifetimeAuthority = .axTopLevelInventory
     ) {
         self.token = token
         self.axRef = axRef
@@ -151,6 +156,6 @@ struct WindowState: Equatable {
         self.managedReplacementMetadata = managedReplacementMetadata
         self.ruleEffects = ruleEffects
         self.admissionHints = admissionHints
-        self.interactionPolicy = interactionPolicy
+        self.lifetimeAuthority = lifetimeAuthority
     }
 }

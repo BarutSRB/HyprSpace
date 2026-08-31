@@ -113,64 +113,47 @@ enum SurfaceDerivation {
     ) -> DesiredBorderSurface? {
         let config = world.borderConfig
         guard config.enabled else { return nil }
-        guard let token = world.renderableFocusToken else { return nil }
-        guard !world.isOwnedWindow(windowId: token.windowId) else { return nil }
-        guard !world.hasPendingNativeFullscreenTransition(for: token) else { return nil }
-        guard world.systemModalFocusToken != token else { return nil }
-
-        if let entry = world.entry(for: token) {
-            guard world.suppressedFocusToken != token,
-                  !world.hasPendingNativeFullscreenTransition(in: entry.workspaceId),
-                  !world.isWindowFullscreenInLayout(token),
-                  world.isManagedWindowDisplayable(entry.token),
-                  world.isWorkspaceVisible(entry.workspaceId),
-                  entry.interactionPolicy.mayBorder
-            else {
-                return nil
-            }
-            guard let frame = borderFrame(
-                for: token,
-                entry: entry,
-                world: world,
-                policy: framePolicy
-            ),
-                frame.width > 0, frame.height > 0
-            else {
-                return nil
-            }
-            return DesiredBorderSurface(token: entry.token, frame: frame, config: config)
-        }
-
-        guard world.isNonManagedFocusActive else { return nil }
-        guard let frame = borderFrame(
-            for: token,
-            entry: nil,
-            world: world,
-            policy: framePolicy
-        ) else {
+        guard let token = world.renderableFocusToken,
+              let entry = world.entry(for: token)
+        else {
             return nil
         }
-        return DesiredBorderSurface(token: token, frame: frame, config: config)
+        guard !world.hasPendingNativeFullscreenTransition(for: token) else { return nil }
+        guard world.systemModalFocusToken != token else { return nil }
+        guard world.suppressedFocusToken != token,
+              !world.hasPendingNativeFullscreenTransition(in: entry.workspaceId),
+              !world.isWindowFullscreenInLayout(token),
+              world.isManagedWindowDisplayable(entry.token),
+              world.isWorkspaceVisible(entry.workspaceId)
+        else {
+            return nil
+        }
+        guard let frame = borderFrame(
+            for: entry,
+            world: world,
+            policy: framePolicy
+        ),
+            frame.width > 0, frame.height > 0
+        else {
+            return nil
+        }
+        return DesiredBorderSurface(token: entry.token, frame: frame, config: config)
     }
 
     @MainActor
     private static func borderFrame(
-        for token: WindowToken,
-        entry: WindowState?,
+        for entry: WindowState,
         world: WorldView,
         policy: BorderFramePolicy
     ) -> CGRect? {
         switch policy {
         case .complete:
-            if let entry {
-                return world.borderFrame(for: entry)
-            }
-            return world.observedWindowBounds(windowId: token.windowId)
+            return world.borderFrame(for: entry)
         case let .animation(previous):
-            if let entry, let cached = world.cachedBorderFrame(for: entry) {
+            if let cached = world.cachedBorderFrame(for: entry) {
                 return cached
             }
-            guard previous?.token == token else { return nil }
+            guard previous?.token == entry.token else { return nil }
             return previous?.frame
         }
     }
@@ -564,7 +547,7 @@ final class SurfaceReconciler {
         }
 
         let currentToken = record.currentToken
-        let selected = workspaceManager.focusedToken == currentToken
+        let selected = workspaceManager.selectedManagedToken == currentToken
             || workspaceManager.pendingFocusedToken == currentToken
         guard record.transition == .suspended else {
             return NativeFullscreenPlaceholderResolution(

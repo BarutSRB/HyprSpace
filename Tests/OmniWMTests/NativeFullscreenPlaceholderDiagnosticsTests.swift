@@ -471,8 +471,7 @@ final class NativeFullscreenPlaceholderDiagnosticsTests: XCTestCase {
                         displayShowingFullscreen: false
                     )
                 ],
-                isNonManagedFocusActive: false,
-                nonManagedFocusToken: nil,
+                nativeFocusOwner: .none,
                 activeFocusOwnerToken: nil,
                 renderableFocusToken: nil
             ),
@@ -553,8 +552,7 @@ final class NativeFullscreenPlaceholderDiagnosticsTests: XCTestCase {
                         displayShowingFullscreen: false
                     )
                 ],
-                isNonManagedFocusActive: false,
-                nonManagedFocusToken: nil,
+                nativeFocusOwner: .none,
                 activeFocusOwnerToken: nil,
                 renderableFocusToken: nil
             ),
@@ -634,7 +632,7 @@ final class NativeFullscreenPlaceholderDiagnosticsTests: XCTestCase {
         XCTAssertTrue(
             controller.workspaceManager.markNativeFullscreenSuspended(
                 token,
-                ownsNonManagedFocus: false
+                ownsNativeFocus: false
             )
         )
         return (controller, workspaceId, monitor, token)

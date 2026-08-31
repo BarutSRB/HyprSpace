@@ -7,7 +7,7 @@ import CoreGraphics
 import XCTest
 
 final class WindowModelTests: XCTestCase {
-    func testUpsertInstallsAndUpdatesInteractionPolicyAtomically() throws {
+    func testUpsertInstallsAndUpdatesLifetimeAuthorityAtomically() throws {
         let model = WindowModel()
         let workspaceId = WorkspaceDescriptor(name: "workspace").id
         let token = model.upsert(
@@ -15,20 +15,20 @@ final class WindowModelTests: XCTestCase {
             pid: 467_000,
             windowId: 467_000,
             workspace: workspaceId,
-            interactionPolicy: .handsOffSurface
+            lifetimeAuthority: .directLifecycle
         )
 
-        XCTAssertEqual(model.entry(for: token)?.interactionPolicy, .handsOffSurface)
+        XCTAssertEqual(model.entry(for: token)?.lifetimeAuthority, .directLifecycle)
 
         _ = model.upsert(
             window: AXWindowRef(element: AXUIElementCreateApplication(467_000), windowId: 467_000),
             pid: 467_000,
             windowId: 467_000,
             workspace: workspaceId,
-            interactionPolicy: .untracked
+            lifetimeAuthority: .axTopLevelInventory
         )
 
-        XCTAssertEqual(model.entry(for: token)?.interactionPolicy, .untracked)
+        XCTAssertEqual(model.entry(for: token)?.lifetimeAuthority, .axTopLevelInventory)
     }
 
     func testNestedIndexesRemainCoherentAcrossRemovalMoveModeAndRekey() throws {

@@ -29,8 +29,7 @@ extension WorkspaceManager {
     }
 
     var activeNativeFullscreenFocusOwnerToken: WindowToken? {
-        guard isNonManagedFocusActive,
-              let token = nonManagedFocusToken,
+        guard let token = externalFocusToken,
               let record = nativeFullscreenRecord(for: token),
               record.currentToken == token,
               record.transition != .enterRequested,

@@ -1,33 +1,34 @@
 {
   "observation": {
     "tokenPid": 1000,
-    "tokenWindowId": 6,
-    "appName": "Firefox",
-    "bundleId": "org.mozilla.firefox",
+    "tokenWindowId": 15,
+    "appName": "Finder",
+    "bundleId": "com.apple.finder",
     "rulesRevision": 1,
     "input": {
-      "appName": "Firefox",
+      "appName": "Finder",
       "ax": {
         "role": "AXWindow",
-        "subrole": "AXStandardWindow",
-        "title": "Picture-in-Picture",
+        "subrole": "Quick Look",
+        "title": "Quick Look",
         "hasCloseButton": true,
-        "hasFullscreenButton": true,
-        "fullscreenButtonEnabled": true,
-        "hasZoomButton": true,
-        "hasMinimizeButton": true,
+        "hasFullscreenButton": false,
+        "hasZoomButton": false,
+        "hasMinimizeButton": false,
         "appPolicy": "regular",
-        "bundleId": "org.mozilla.firefox",
-        "attributeFetchSucceeded": true
+        "bundleId": "com.apple.finder",
+        "attributeFetchSucceeded": true,
+        "isMain": false,
+        "isModal": false
       },
       "windowServer": {
-        "id": 6,
+        "id": 15,
         "pid": 1000,
         "level": 3,
         "frameX": 0,
         "frameY": 0,
-        "frameWidth": 480,
-        "frameHeight": 270,
+        "frameWidth": 720,
+        "frameHeight": 540,
         "tags": 0,
         "attributes": 0,
         "parentId": 0
@@ -36,7 +37,7 @@
     },
     "observedDecision": {
       "disposition": "floating",
-      "source": "builtInRule(browserPictureInPicture)",
+      "source": "builtInRule(finderQuickLook)",
       "heuristicReasons": [],
       "layoutDecisionKind": "explicitLayout"
     }
@@ -44,7 +45,7 @@
   "rules": [],
   "expectedDecision": {
     "disposition": "floating",
-    "source": "builtInRule(browserPictureInPicture)",
+    "source": "builtInRule(finderQuickLook)",
     "heuristicReasons": [],
     "layoutDecisionKind": "explicitLayout"
   }

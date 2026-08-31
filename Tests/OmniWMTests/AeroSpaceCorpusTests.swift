@@ -8,7 +8,6 @@ import XCTest
 struct AeroSpaceCorpusExpectation: Codable, Equatable {
     var aeroSpaceLabel: String
     var expectedDisposition: String
-    var expectedPolicy: String
     var note: String?
 }
 
@@ -27,7 +26,7 @@ final class AeroSpaceCorpusTests: XCTestCase {
         let (dumps, coverage) = try AeroSpaceAxDumpLoader.load()
         XCTAssertFalse(dumps.isEmpty, "AeroSpace corpus loaded no dumps")
         XCTAssertEqual(
-            coverage.loaded + coverage.skippedNonWindowRole + coverage.skippedMissingWindowLevel,
+            coverage.loaded + coverage.skippedMissingWindowLevel,
             coverage.files
         )
         let table = try expectations()
@@ -38,50 +37,66 @@ final class AeroSpaceCorpusTests: XCTestCase {
         )
     }
 
+    func testNonWindowRolesRemainInTheCorpusAndAreUntracked() throws {
+        let (dumps, _) = try AeroSpaceAxDumpLoader.load()
+        let nonWindowRoleDumps = dumps.filter {
+            $0.observation.input.ax.role != (kAXWindowRole as String)
+        }
+
+        XCTAssertFalse(nonWindowRoleDumps.isEmpty)
+        for dump in nonWindowRoleDumps {
+            let got = WindowClassificationReproducer.recompute(dump.observation, rules: [])
+            XCTAssertEqual(got.disposition, "unmanaged", dump.name)
+        }
+    }
+
+    func testReviewedPopupBoundaryPreservesRootProofFacts() throws {
+        let (dumps, _) = try AeroSpaceAxDumpLoader.load()
+        let table = Dictionary(uniqueKeysWithValues: dumps.map { ($0.name, $0) })
+        let expected: [String: (isMain: Bool, isModal: Bool)] = [
+            "emacs_child_frame_corfu": (false, false),
+            "emacs_child_frame_posframe": (false, false),
+            "macos_capslock_popup_safari": (false, false),
+            "macos_capslock_popup_textedit": (false, false),
+            "macos_share_window_purple_pill_sublime": (false, false),
+            "ghostty_check_for_updates_2_alert": (false, true),
+            "ghostty_quick_terminal": (true, false),
+            "intellij_native_open_window": (true, true)
+        ]
+
+        for (name, rootProof) in expected {
+            let dump = try XCTUnwrap(table[name], name)
+            XCTAssertEqual(dump.observation.input.ax.isMain, rootProof.isMain, name)
+            XCTAssertEqual(dump.observation.input.ax.isModal, rootProof.isModal, name)
+        }
+    }
+
     func testEveryDumpMatchesItsReviewedExpectation() throws {
         let (dumps, _) = try AeroSpaceAxDumpLoader.load()
         let table = try expectations()
         for dump in dumps {
             let expected = try XCTUnwrap(table[dump.name], "\(dump.name): no expectation")
-            let got = WindowClassificationReproducer.recomputeOutcome(dump.observation, rules: [])
-            XCTAssertEqual(got.decision.disposition, expected.expectedDisposition, "\(dump.name): disposition")
-            XCTAssertEqual(got.policy, expected.expectedPolicy, "\(dump.name): interaction policy")
+            let got = WindowClassificationReproducer.recompute(dump.observation, rules: [])
+            XCTAssertEqual(got.disposition, expected.expectedDisposition, "\(dump.name): disposition")
         }
     }
 
     func testDivergencesFromAeroSpaceCarryAReason() throws {
         let expectedForLabel = [
-            "popup": ("floating", "handsOffSurface"),
-            "dialog": ("floating", "full"),
-            "window": ("managed", "full")
+            "popup": "unmanaged",
+            "dialog": "floating",
+            "window": "managed"
         ]
         for (name, expectation) in try expectations() {
             let aero = try XCTUnwrap(
                 expectedForLabel[expectation.aeroSpaceLabel],
                 "\(name): unknown AeroSpace label \(expectation.aeroSpaceLabel)"
             )
-            let diverges = expectation.expectedDisposition != aero.0 || expectation.expectedPolicy != aero.1
+            let diverges = expectation.expectedDisposition != aero
             if diverges {
                 XCTAssertNotNil(
                     expectation.note,
                     "\(name): diverges from AeroSpace (\(expectation.aeroSpaceLabel)) without a note"
-                )
-            } else {
-                XCTAssertNil(expectation.note, "\(name): has a divergence note but does not diverge")
-            }
-        }
-    }
-
-    func testManagedWindowsAlwaysKeepFullRights() throws {
-        let (dumps, _) = try AeroSpaceAxDumpLoader.load()
-        for dump in dumps {
-            let got = WindowClassificationReproducer.recomputeOutcome(dump.observation, rules: [])
-            if got.decision.disposition == "managed" {
-                XCTAssertEqual(
-                    got.policy,
-                    "full",
-                    "\(dump.name): a tiled window must keep every capability, otherwise it occupies a "
-                        + "layout slot OmniWM may never frame-write"
                 )
             }
         }

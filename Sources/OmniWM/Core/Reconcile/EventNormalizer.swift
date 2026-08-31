@@ -18,7 +18,7 @@ enum EventNormalizer {
             axRef,
             ruleEffects,
             admissionHints,
-            interactionPolicy,
+            lifetimeAuthority,
             metadata,
             source
         ):
@@ -30,7 +30,7 @@ enum EventNormalizer {
                 axRef: axRef,
                 ruleEffects: ruleEffects,
                 admissionHints: admissionHints,
-                interactionPolicy: interactionPolicy,
+                lifetimeAuthority: lifetimeAuthority,
                 managedReplacementMetadata: metadata,
                 source: source
             )
@@ -145,12 +145,11 @@ enum EventNormalizer {
              .managedFocusCancelled,
              .managedFocusConfirmed,
              .managedFocusRequested,
+             .nativeFocusOwnerChanged,
              .manualLayoutOverrideChanged,
              .windowAdmissionHintsChanged,
              .nativeFullscreenPlaceholderSelected,
              .niriPlacementsResolved,
-             .nonManagedFocusChanged,
-             .nonManagedFocusTargetChanged,
              .scratchpadMembershipChanged,
              .scratchpadRevealChanged,
              .selectionChanged,

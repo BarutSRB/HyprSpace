@@ -1,0 +1,18 @@
+{
+  "AXCloseButton": {
+    "AXEnabled": 1
+  },
+  "AXFullScreenButton": null,
+  "AXMinimizeButton": {
+    "AXEnabled": 1
+  },
+  "AXRole": "AXToolbar",
+  "AXSubrole": "AXSystemDialog",
+  "AXTitle": null,
+  "AXZoomButton": null,
+  "Aero.App.appBundleId": "com.microsoft.Word",
+  "Aero.App.nsApp.activationPolicy": "regular",
+  "Aero.AxUiElementWindowType": "popup",
+  "Aero.windowLevel": "normalWindow",
+  "Aero.windowServerParentId": 2033
+}

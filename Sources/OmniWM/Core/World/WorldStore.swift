@@ -221,7 +221,7 @@ final class WorldStore {
             axRef,
             ruleEffects,
             admissionHints,
-            interactionPolicy,
+            lifetimeAuthority,
             metadata,
             _
         ):
@@ -237,7 +237,7 @@ final class WorldStore {
                 mode: mode,
                 ruleEffects: ruleEffects,
                 admissionHints: resolvedAdmissionHints,
-                interactionPolicy: interactionPolicy,
+                lifetimeAuthority: lifetimeAuthority,
                 managedReplacementMetadata: metadata
             )
             reconcileNiriMembership(
@@ -377,9 +377,8 @@ final class WorldStore {
              .managedFocusCancelled,
              .managedFocusConfirmed,
              .managedFocusRequested,
+             .nativeFocusOwnerChanged,
              .nativeFullscreenPlaceholderSelected,
-             .nonManagedFocusChanged,
-             .nonManagedFocusTargetChanged,
              .selectionChanged,
              .suppressedFocusChanged,
              .systemModalFocusChanged,
@@ -472,11 +471,10 @@ private extension WMEvent {
              .managedFocusRequested,
              .managedReplacementMetadataChanged,
              .manualLayoutOverrideChanged,
+             .nativeFocusOwnerChanged,
              .nativeFullscreenPlaceholderSelected,
              .nativeFullscreenTransition,
              .niriPlacementsResolved,
-             .nonManagedFocusChanged,
-             .nonManagedFocusTargetChanged,
              .scratchpadMembershipChanged,
              .scratchpadRevealChanged,
              .selectionChanged,
@@ -593,10 +591,6 @@ extension WorldStore {
 
     func admissionHints(for token: WindowToken) -> ManagedWindowAdmissionHints? {
         model.admissionHints(for: token)
-    }
-
-    func setInteractionPolicy(_ policy: WindowInteractionPolicy, for token: WindowToken) {
-        model.setInteractionPolicy(policy, for: token)
     }
 
     func hiddenState(for token: WindowToken) -> HiddenState? {

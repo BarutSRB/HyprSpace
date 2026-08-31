@@ -445,7 +445,7 @@ final class CommandPaletteController: NSObject, NSWindowDelegate {
     static func resolveSummonAnchor(for wmController: WMController) -> CommandPaletteSummonAnchor? {
         guard let activeWorkspace = wmController.activeWorkspace() else { return nil }
 
-        let anchorToken = if let focusedToken = wmController.workspaceManager.focusedToken,
+        let anchorToken = if let focusedToken = wmController.workspaceManager.selectedManagedToken,
                              let entry = wmController.workspaceManager.entry(for: focusedToken),
                              entry.workspaceId == activeWorkspace.id
         {
@@ -639,7 +639,6 @@ final class CommandPaletteController: NSObject, NSWindowDelegate {
 
         for entry in entries {
             guard entry.layoutReason == .standard,
-                  !entry.interactionPolicy.isHandsOff,
                   let handle = wmController.workspaceManager.handle(for: entry.token) else { continue }
 
             let title = AXWindowService.titlePreferFast(windowId: UInt32(entry.windowId)) ?? ""

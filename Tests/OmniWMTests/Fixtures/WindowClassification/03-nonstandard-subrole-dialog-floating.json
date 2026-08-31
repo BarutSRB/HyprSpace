@@ -17,7 +17,21 @@
         "hasMinimizeButton": false,
         "appPolicy": "regular",
         "bundleId": "com.example.dialog",
-        "attributeFetchSucceeded": true
+        "attributeFetchSucceeded": true,
+        "isMain": false,
+        "isModal": true
+      },
+      "windowServer": {
+        "id": 3,
+        "pid": 1000,
+        "level": 0,
+        "frameX": 0,
+        "frameY": 0,
+        "frameWidth": 520,
+        "frameHeight": 360,
+        "tags": 0,
+        "attributes": 0,
+        "parentId": 0
       },
       "appFullscreen": false
     },
@@ -38,6 +52,5 @@
       "nonStandardSubrole"
     ],
     "layoutDecisionKind": "fallbackLayout"
-  },
-  "expectedPolicy": "full"
+  }
 }

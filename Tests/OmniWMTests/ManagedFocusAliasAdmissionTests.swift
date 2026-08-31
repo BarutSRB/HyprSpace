@@ -52,7 +52,7 @@ final class ManagedFocusAliasAdmissionTests: XCTestCase {
         XCTAssertEqual(controller.intentLedger.activeManagedRequest?.token, token)
         XCTAssertEqual(controller.intentLedger.activeManagedRequest?.retryCount, 0)
         XCTAssertEqual(controller.workspaceManager.pendingFocusedToken, token)
-        XCTAssertFalse(controller.workspaceManager.isNonManagedFocusActive)
+        XCTAssertFalse(controller.workspaceManager.nativeFocusOwner.isExternal)
     }
 
     func testMissingFocusedWindowFromRetryConsumesManagedFocusAttempt() throws {
@@ -169,7 +169,43 @@ final class ManagedFocusAliasAdmissionTests: XCTestCase {
             )
         )
 
-        XCTAssertEqual(controller.workspaceManager.focusedToken, token)
-        XCTAssertFalse(controller.workspaceManager.isNonManagedFocusActive)
+        XCTAssertEqual(controller.workspaceManager.selectedManagedToken, token)
+        XCTAssertFalse(controller.workspaceManager.nativeFocusOwner.isExternal)
+    }
+
+    func testMissingFocusedWindowFromExactPIDPreservesSelectionAsExternalNativeFocus() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let token = WindowToken(pid: 467_949, windowId: 467_950)
+        _ = WindowAdmissionTestSupport.track(token, in: workspaceId, controller: controller)
+        XCTAssertTrue(
+            controller.workspaceManager.confirmManagedFocus(
+                token,
+                in: workspaceId,
+                activateWorkspaceOnMonitor: false
+            )
+        )
+        controller.factResolver.factProvider = { _ in nil }
+        controller.hasStartedServices = true
+        controller.axEventHandler.handleAppActivation(pid: token.pid, source: .focusedWindowChanged)
+
+        controller.axEventHandler.handleActivationFactsResolved(
+            ActivationFacts(
+                pid: token.pid,
+                source: .focusedWindowChanged,
+                origin: .external,
+                observationGeneration: 1,
+                requestedAtSeq: 0,
+                focusedWindow: nil
+            )
+        )
+
+        XCTAssertEqual(controller.workspaceManager.selectedManagedToken, token)
+        XCTAssertEqual(
+            controller.workspaceManager.nativeFocusOwner,
+            .external(pid: token.pid, windowId: nil)
+        )
     }
 }

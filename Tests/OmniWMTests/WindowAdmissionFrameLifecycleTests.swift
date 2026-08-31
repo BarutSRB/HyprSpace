@@ -1186,8 +1186,8 @@ final class WindowAdmissionFrameLifecycleTests: XCTestCase {
         XCTAssertNil(controller.workspaceManager.entry(for: token))
         XCTAssertTrue(controller.axEventHandler.isAdmissionQuarantined(windowId: windowId, axRef: axRef))
         XCTAssertTrue(controller.axEventHandler.isAdmissionQuarantined(windowId: windowId, axRef: proxyAXRef))
-        XCTAssertTrue(controller.workspaceManager.isNonManagedFocusActive)
-        XCTAssertEqual(controller.workspaceManager.nonManagedFocusToken, token)
+        XCTAssertTrue(controller.workspaceManager.nativeFocusOwner.isExternal)
+        XCTAssertEqual(controller.workspaceManager.externalFocusToken, token)
 
         let replacement = AXWindowRef(
             element: AXUIElementCreateApplication(pid + 2),
@@ -1246,11 +1246,11 @@ final class WindowAdmissionFrameLifecycleTests: XCTestCase {
         controller.axEventHandler.handleTerminalFrameRefusal(refusal)
 
         XCTAssertNil(controller.workspaceManager.entry(for: refusedToken))
-        XCTAssertEqual(controller.workspaceManager.focusedToken, focusedToken)
+        XCTAssertEqual(controller.workspaceManager.selectedManagedToken, focusedToken)
         XCTAssertEqual(controller.workspaceManager.renderableFocusToken, focusedToken)
         XCTAssertNil(controller.workspaceManager.pendingFocusedToken)
         XCTAssertNil(controller.intentLedger.activeManagedRequest)
-        XCTAssertFalse(controller.workspaceManager.isNonManagedFocusActive)
+        XCTAssertFalse(controller.workspaceManager.nativeFocusOwner.isExternal)
     }
 
     private func settleSizeConvergence(

@@ -88,9 +88,7 @@ extension WorkspaceManager {
         sourceMonitorId: Monitor.ID,
         visibleWorkspaces: [Monitor.ID: WorkspaceDescriptor.ID]
     ) -> Bool {
-        let managedFocusedEntry = isNonManagedFocusActive
-            ? nil
-            : focusedToken.flatMap { entry(for: $0) }
+        let managedFocusedEntry = nativeManagedFocusToken.flatMap { entry(for: $0) }
         let managedFocusedWorkspaceId = managedFocusedEntry?.workspaceId
         let transfersManagedFocus = managedFocusedWorkspaceId == workspaceId
         let pendingWorkspaceId = pendingFocusedWorkspaceId

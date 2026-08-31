@@ -57,7 +57,7 @@ final class PlacementResolver {
         {
             return monitor
         }
-        if let focusedToken = workspaceManager.focusedToken,
+        if let focusedToken = workspaceManager.nativeManagedFocusToken,
            let workspaceId = workspaceManager.workspace(for: focusedToken),
            let monitor = workspaceManager.monitor(for: workspaceId)
         {
@@ -168,7 +168,7 @@ final class PlacementResolver {
         let tiled = workspaceManager.entries(forPid: pid).filter { $0.mode == .tiling }
         guard !tiled.isEmpty else { return nil }
 
-        if let focused = workspaceManager.focusedToken,
+        if let focused = workspaceManager.selectedManagedToken,
            let entry = tiled.first(where: { $0.token == focused }),
            let monitorId = workspaceManager.monitorId(for: entry.workspaceId)
         {
@@ -400,8 +400,17 @@ final class PlacementResolver {
     }
 
     private func liveManagedFocusPlacementTarget() -> WorkspacePlacementTarget? {
-        guard !workspaceManager.isNonManagedFocusActive else { return nil }
-        for token in [workspaceManager.focusedToken, workspaceManager.lastTiledFocusedToken] {
+        let candidates: [WindowToken?]
+        switch workspaceManager.nativeFocusOwner {
+        case let .managed(token):
+            candidates = [token, workspaceManager.lastTiledFocusedToken]
+        case .external,
+             .ownedSurface:
+            return nil
+        case .none:
+            candidates = [workspaceManager.lastTiledFocusedToken]
+        }
+        for token in candidates {
             guard let token,
                   let entry = workspaceManager.entry(for: token),
                   let target = managedFocusPlacementTarget(entry.workspaceId, nil, rung: .liveManagedFocus)

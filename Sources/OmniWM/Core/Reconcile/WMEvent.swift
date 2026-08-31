@@ -107,7 +107,7 @@ enum WMEvent: Equatable {
         axRef: AXWindowRef,
         ruleEffects: ManagedWindowRuleEffects,
         admissionHints: ManagedWindowAdmissionHints,
-        interactionPolicy: WindowInteractionPolicy,
+        lifetimeAuthority: ManagedWindowLifetimeAuthority,
         managedReplacementMetadata: ManagedReplacementMetadata?,
         source: WMEventSource
     )
@@ -231,9 +231,8 @@ enum WMEvent: Equatable {
         requestId: UInt64?,
         source: WMEventSource
     )
-    case nonManagedFocusChanged(
-        active: Bool,
-        preserveFocusedToken: Bool,
+    case nativeFocusOwnerChanged(
+        owner: NativeFocusOwner,
         preservePendingManagedFocus: Bool,
         source: WMEventSource
     )
@@ -251,10 +250,6 @@ enum WMEvent: Equatable {
     )
     case focusForgotten(
         workspaceIds: Set<WorkspaceDescriptor.ID>,
-        source: WMEventSource
-    )
-    case nonManagedFocusTargetChanged(
-        target: WindowToken?,
         source: WMEventSource
     )
     case suppressedFocusChanged(
@@ -342,7 +337,7 @@ enum WMEvent: Equatable {
             axRef,
             ruleEffects,
             admissionHints,
-            interactionPolicy,
+            lifetimeAuthority,
             metadata,
             source
         ):
@@ -354,7 +349,7 @@ enum WMEvent: Equatable {
                 axRef: AXWindowRef(element: Self.placeholderAXElement, windowId: axRef.windowId),
                 ruleEffects: ruleEffects,
                 admissionHints: admissionHints,
-                interactionPolicy: interactionPolicy,
+                lifetimeAuthority: lifetimeAuthority,
                 managedReplacementMetadata: metadata,
                 source: source
             )
@@ -403,10 +398,9 @@ enum WMEvent: Equatable {
              .interactionMonitorChanged,
              .layoutOperationPerformed,
              .hiddenApplicationsChanged,
+             .nativeFocusOwnerChanged,
              .nativeFullscreenPlaceholderSelected,
              .niriPlacementsResolved,
-             .nonManagedFocusChanged,
-             .nonManagedFocusTargetChanged,
              .scratchpadMembershipChanged,
              .scratchpadRevealChanged,
              .selectionChanged,
@@ -470,16 +464,14 @@ enum WMEvent: Equatable {
             "managed_focus_confirmed token=\(token) workspace=\(workspaceId.uuidString) monitor=\(String(describing: monitorId)) request=\(requestId.map { String($0) } ?? "nil")"
         case let .managedFocusCancelled(token, workspaceId, requestId, _):
             "managed_focus_cancelled token=\(token.map(String.init(describing:)) ?? "nil") workspace=\(workspaceId?.uuidString ?? "nil") request=\(requestId.map { String($0) } ?? "nil")"
-        case let .nonManagedFocusChanged(active, preserveFocusedToken, preservePendingManagedFocus, _):
-            "non_managed_focus_changed active=\(active) preserve=\(preserveFocusedToken) preserve_pending=\(preservePendingManagedFocus)"
+        case let .nativeFocusOwnerChanged(owner, preservePendingManagedFocus, _):
+            "native_focus_owner_changed owner=\(owner) preserve_pending=\(preservePendingManagedFocus)"
         case let .focusRemembered(token, workspaceId, mode, _):
             "focus_remembered token=\(token) workspace=\(workspaceId.uuidString) mode=\(mode)"
         case let .focusFallbackRemembered(token, workspaceId, mode, _):
             "focus_fallback_remembered token=\(token) workspace=\(workspaceId.uuidString) mode=\(mode)"
         case let .focusForgotten(workspaceIds, _):
             "focus_forgotten workspaces=\(workspaceIds.count)"
-        case let .nonManagedFocusTargetChanged(target, _):
-            "non_managed_focus_target_changed target=\(target.map(String.init(describing:)) ?? "nil")"
         case let .suppressedFocusChanged(token, _):
             "suppressed_focus_changed token=\(token.map(String.init(describing:)) ?? "nil")"
         case let .systemModalFocusChanged(token, _):

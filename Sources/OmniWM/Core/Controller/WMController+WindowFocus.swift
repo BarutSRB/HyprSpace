@@ -27,36 +27,36 @@ extension WMController {
 
     var isSystemModalFocusActive: Bool {
         guard let systemModalFocusToken = workspaceManager.systemModalFocusToken else { return false }
-        return systemModalFocusToken == workspaceManager.focusedToken
+        return systemModalFocusToken == workspaceManager.nativeManagedFocusToken
     }
 
     var shouldSuppressManagedFocusRecovery: Bool {
         if isSystemModalFocusActive { return true }
-        guard workspaceManager.isNonManagedFocusActive else { return false }
-        return hasFrontmostOwnedWindow || workspaceManager.nonManagedFocusToken != nil
+        switch workspaceManager.nativeFocusOwner {
+        case .external,
+             .ownedSurface:
+            return true
+        case .managed,
+             .none:
+            return false
+        }
     }
 
-    private func windowFocusPolicy(
+    private func canFocusWindow(
         pid: pid_t,
         windowId: Int
-    ) -> WindowInteractionPolicy? {
-        guard !isLockScreenActive else { return nil }
+    ) -> Bool {
+        guard !isLockScreenActive else { return false }
         if hasStartedServices, isFrontmostAppLockScreen() {
-            return nil
+            return false
         }
-        guard !workspaceManager.isAppHidden(pid: pid) else { return nil }
+        guard !workspaceManager.isAppHidden(pid: pid) else { return false }
         if let entry = workspaceManager.entry(forWindowId: windowId),
            workspaceManager.isAppHidden(pid: entry.pid)
         {
-            return nil
+            return false
         }
-        let policy = workspaceManager.entry(forWindowId: windowId)?.interactionPolicy ?? .full
-        guard policy.mayFocus,
-              focusPolicyEngine.evaluate(.windowFronting).allowsFocusChange
-        else {
-            return nil
-        }
-        return policy
+        return focusPolicyEngine.evaluate(.windowFronting).allowsFocusChange
     }
 
     @discardableResult
@@ -65,14 +65,10 @@ extension WMController {
         windowId: Int,
         axRef: AXWindowRef
     ) -> Bool {
-        guard let policy = windowFocusPolicy(pid: pid, windowId: windowId) else { return false }
-        if policy.mayActivateApp {
-            windowFocusOperations.activateApp(pid)
-        }
+        guard canFocusWindow(pid: pid, windowId: windowId) else { return false }
+        windowFocusOperations.activateApp(pid)
         windowFocusOperations.focusSpecificWindow(pid, UInt32(windowId), axRef.element)
-        if policy.mayRaise {
-            windowFocusOperations.raiseWindow(axRef.element)
-        }
+        windowFocusOperations.raiseWindow(axRef.element)
         return true
     }
 
@@ -82,7 +78,7 @@ extension WMController {
         windowId: Int,
         axRef: AXWindowRef
     ) -> Bool {
-        guard windowFocusPolicy(pid: pid, windowId: windowId) != nil else { return false }
+        guard canFocusWindow(pid: pid, windowId: windowId) else { return false }
         windowFocusOperations.focusSpecificWindow(pid, UInt32(windowId), axRef.element)
         return true
     }
@@ -93,8 +89,6 @@ extension WMController {
         {
             return
         }
-        let policy = workspaceManager.entry(forWindowId: windowId)?.interactionPolicy ?? .full
-        guard policy.mayOrder else { return }
         windowFocusOperations.orderWindow(UInt32(windowId))
     }
 
@@ -177,7 +171,7 @@ extension WMController {
             }
             return applied
         }
-        guard windowFocusPolicy(pid: entry.pid, windowId: entry.windowId) != nil else {
+        guard canFocusWindow(pid: entry.pid, windowId: entry.windowId) else {
             cancelManagedFocusRequestAndRestoreSource(liveRequest)
             return false
         }
@@ -230,7 +224,7 @@ extension WMController {
               !mouseEventHandler.hasLatestFocusFollowsMouseSample
               || mouseEventHandler.latestFocusFollowsMouseToken() == liveRequest.token,
               focusPolicyEngine.evaluate(.focusFollowsMouse).allowsFocusChange,
-              let policy = windowFocusPolicy(pid: entry.pid, windowId: entry.windowId)
+              canFocusWindow(pid: entry.pid, windowId: entry.windowId)
         else {
             cancelManagedFocusRequestAndRestoreSource(
                 liveRequest,
@@ -239,7 +233,7 @@ extension WMController {
             return
         }
         let raisesWindow = settings.raiseOnMouseFocus
-        if raisesWindow, policy.mayActivateApp {
+        if raisesWindow {
             windowFocusOperations.activateApp(entry.pid)
         }
         guard windowFocusOperations.activateAndFocusSameAppWindow(
@@ -253,7 +247,7 @@ extension WMController {
             )
             return
         }
-        if raisesWindow, policy.mayRaise {
+        if raisesWindow {
             windowFocusOperations.raiseWindow(entry.axRef.element)
         }
         guard let confirmationRequest = intentLedger.completeSameAppActivationHandoff(
@@ -333,12 +327,11 @@ extension WMController {
         guard sourceToken.pid == canceledRequest.token.pid,
               sourceToken != canceledRequest.token,
               workspaceManager.renderableFocusToken == sourceToken,
-              !workspaceManager.isNonManagedFocusActive,
               !hasFrontmostOwnedWindow,
               let sourceEntry = workspaceManager.entry(for: sourceToken),
               isManagedWindowDisplayable(sourceToken),
               focusPolicyEngine.evaluate(.focusFollowsMouse).allowsFocusChange,
-              windowFocusPolicy(pid: sourceEntry.pid, windowId: sourceEntry.windowId) != nil
+              canFocusWindow(pid: sourceEntry.pid, windowId: sourceEntry.windowId)
         else {
             return
         }

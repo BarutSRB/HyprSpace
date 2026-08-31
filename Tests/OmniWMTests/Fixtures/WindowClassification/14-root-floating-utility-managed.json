@@ -1,32 +1,34 @@
 {
   "observation": {
     "tokenPid": 1000,
-    "tokenWindowId": 4,
+    "tokenWindowId": 14,
     "appName": "Utility App",
-    "bundleId": "com.example.nofullscreen",
+    "bundleId": "com.example.utility",
     "rulesRevision": 1,
     "input": {
       "appName": "Utility App",
       "ax": {
         "role": "AXWindow",
-        "subrole": "AXStandardWindow",
-        "title": "Inspector",
+        "subrole": "AXFloatingWindow",
+        "title": "Utility",
         "hasCloseButton": true,
         "hasFullscreenButton": false,
-        "hasZoomButton": true,
-        "hasMinimizeButton": true,
+        "hasZoomButton": false,
+        "hasMinimizeButton": false,
         "appPolicy": "regular",
-        "bundleId": "com.example.nofullscreen",
-        "attributeFetchSucceeded": true
+        "bundleId": "com.example.utility",
+        "attributeFetchSucceeded": true,
+        "isMain": true,
+        "isModal": false
       },
       "windowServer": {
-        "id": 4,
+        "id": 14,
         "pid": 1000,
-        "level": 0,
+        "level": 3,
         "frameX": 0,
         "frameY": 0,
-        "frameWidth": 720,
-        "frameHeight": 540,
+        "frameWidth": 480,
+        "frameHeight": 320,
         "tags": 0,
         "attributes": 0,
         "parentId": 0
@@ -37,7 +39,7 @@
       "disposition": "floating",
       "source": "heuristic",
       "heuristicReasons": [
-        "missingFullscreenButton"
+        "nonStandardSubrole"
       ],
       "layoutDecisionKind": "fallbackLayout"
     }
@@ -47,7 +49,7 @@
     "disposition": "floating",
     "source": "heuristic",
     "heuristicReasons": [
-      "missingFullscreenButton"
+      "nonStandardSubrole"
     ],
     "layoutDecisionKind": "fallbackLayout"
   }

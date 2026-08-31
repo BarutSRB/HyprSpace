@@ -24,8 +24,7 @@ struct NativeFullscreenLifecycleDiagnosticsSnapshot {
     }
 
     let records: [Record]
-    let isNonManagedFocusActive: Bool
-    let nonManagedFocusToken: WindowToken?
+    let nativeFocusOwner: NativeFocusOwner
     let activeFocusOwnerToken: WindowToken?
     let renderableFocusToken: WindowToken?
 }
@@ -159,8 +158,7 @@ struct NativeFullscreenPlaceholderDiagnosticsSnapshot {
                 + " acceptedSlots=\(surface.acceptedSlots.count) applied=\(applied.count) panels=\(panelMap.count)"
                 +
                 " appliedDuplicateStableIds=\(surface.appliedDuplicateOriginalTokens.map(token).joined(separator: ","))",
-            "nonManagedActive=\(lifecycle.isNonManagedFocusActive)"
-                + " nonManagedToken=\(token(lifecycle.nonManagedFocusToken))"
+            "nativeFocusOwner=\(nativeFocusOwner(lifecycle.nativeFocusOwner))"
                 + " focusOwner=\(token(lifecycle.activeFocusOwnerToken))"
                 + " renderableFocus=\(token(lifecycle.renderableFocusToken))"
         ]
@@ -300,6 +298,19 @@ struct NativeFullscreenPlaceholderDiagnosticsSnapshot {
 
     private func token(_ value: WindowToken) -> String {
         "\(value.pid):\(value.windowId)"
+    }
+
+    private func nativeFocusOwner(_ value: NativeFocusOwner) -> String {
+        switch value {
+        case let .managed(value):
+            return "managed:\(token(value))"
+        case let .external(pid, windowId):
+            return "external:\(pid.map(String.init) ?? "none"):\(windowId.map(String.init) ?? "none")"
+        case .ownedSurface:
+            return "owned-surface"
+        case .none:
+            return "none"
+        }
     }
 
     private func workspace(_ value: WorkspaceDescriptor.ID?) -> String {

@@ -8,15 +8,15 @@ import XCTest
 
 @MainActor
 final class WindowAdmissionPolicyTests: XCTestCase {
-    func testFirstObservableAdmissionCarriesResolvedInteractionPolicy() throws {
+    func testFirstObservableAdmissionCarriesLifetimeAuthority() throws {
         let controller = WindowAdmissionTestSupport.controller()
         let workspaceId = try XCTUnwrap(
             controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
         )
         let token = WindowToken(pid: 467_090, windowId: 467_091)
-        var observedPolicy: WindowInteractionPolicy?
+        var observedLifetimeAuthority: ManagedWindowLifetimeAuthority?
         controller.workspaceManager.onWindowPresenceObserved = { handle in
-            observedPolicy = controller.workspaceManager.entry(for: handle)?.interactionPolicy
+            observedLifetimeAuthority = controller.workspaceManager.entry(for: handle)?.lifetimeAuthority
         }
 
         _ = controller.workspaceManager.addWindow(
@@ -27,38 +27,42 @@ final class WindowAdmissionPolicyTests: XCTestCase {
             pid: token.pid,
             windowId: token.windowId,
             to: workspaceId,
-            interactionPolicy: .handsOffSurface
+            lifetimeAuthority: .directLifecycle
         )
 
-        XCTAssertEqual(observedPolicy, .handsOffSurface)
-        XCTAssertEqual(controller.workspaceManager.entry(for: token)?.interactionPolicy, .handsOffSurface)
+        XCTAssertEqual(observedLifetimeAuthority, .directLifecycle)
+        XCTAssertEqual(controller.workspaceManager.entry(for: token)?.lifetimeAuthority, .directLifecycle)
     }
 
-    func testAutomaticRuleReevaluationRefreshesInteractionPolicyWithoutReadmission() async throws {
-        let controller = WindowAdmissionTestSupport.controller()
-        let workspaceId = try XCTUnwrap(
-            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+    func testRuleReevaluationOnlyPromotesLifetimeAuthorityFromPositiveTopLevelInventoryEvidence() {
+        XCTAssertEqual(
+            WMController.ruleReevaluationLifetimeAuthority(
+                existing: .directLifecycle,
+                observedInTopLevelInventory: false
+            ),
+            .directLifecycle
         )
-        let token = WindowToken(pid: 467_092, windowId: 467_093)
-        let axRef = AXWindowRef(
-            element: AXUIElementCreateApplication(token.pid),
-            windowId: token.windowId
+        XCTAssertEqual(
+            WMController.ruleReevaluationLifetimeAuthority(
+                existing: .directLifecycle,
+                observedInTopLevelInventory: true
+            ),
+            .axTopLevelInventory
         )
-        _ = controller.workspaceManager.addWindow(
-            axRef,
-            pid: token.pid,
-            windowId: token.windowId,
-            to: workspaceId,
-            mode: .floating,
-            interactionPolicy: .handsOffSurface
+        XCTAssertEqual(
+            WMController.ruleReevaluationLifetimeAuthority(
+                existing: .axTopLevelInventory,
+                observedInTopLevelInventory: false
+            ),
+            .axTopLevelInventory
         )
-
-        let outcome = await controller.reevaluateWindowRules(for: [.window(token)])
-
-        XCTAssertTrue(outcome.evaluatedAnyWindow)
-        XCTAssertFalse(outcome.relayoutNeeded)
-        XCTAssertEqual(controller.workspaceManager.entry(for: token)?.mode, .floating)
-        XCTAssertEqual(controller.workspaceManager.entry(for: token)?.interactionPolicy, .untracked)
+        XCTAssertEqual(
+            WMController.ruleReevaluationLifetimeAuthority(
+                existing: nil,
+                observedInTopLevelInventory: false
+            ),
+            .directLifecycle
+        )
     }
 
     func testMeaningfulAdmissionFrameRejectsOneByOneProxyGeometry() {
@@ -226,11 +230,10 @@ final class WindowAdmissionPolicyTests: XCTestCase {
         controller.axEventHandler.cancelCreatedWindowRetry(windowId: UInt32(token.windowId))
     }
 
-    func testTraceSequenceThirteenRetriesDegenerateProxyThenRejectsMatureParentedSurface() throws {
+    func testTraceSequenceThirteenRejectsStructurallyExternalSurfaceBeforeGeometryRetry() throws {
         let controller = WindowAdmissionTestSupport.controller()
         let token = WindowToken(pid: 86_312, windowId: 7_916)
         let windowId = try XCTUnwrap(UInt32(exactly: token.windowId))
-        let axRef = AXWindowRef(element: AXUIElementCreateApplication(token.pid), windowId: token.windowId)
         let evidence = AXWindowDecisionEvidence(
             facts: AXWindowFacts(
                 role: kAXWindowRole as String,
@@ -271,24 +274,12 @@ final class WindowAdmissionPolicyTests: XCTestCase {
             )
         )
 
-        XCTAssertEqual(proxyEvaluation.decision.disposition, .floating)
-        XCTAssertTrue(
-            controller.axEventHandler.deferAdmissionIfNeeded(
-                evaluation: proxyEvaluation,
-                axRef: axRef,
-                token: token,
-                mode: .floating,
-                existingEntry: nil
-            )
+        XCTAssertEqual(proxyEvaluation.decision.disposition, .unmanaged)
+        XCTAssertEqual(
+            proxyEvaluation.decision.source,
+            .builtInRule(WindowRuleEngine.externalSurfaceRuleName)
         )
-        let retryState = try XCTUnwrap(controller.axEventHandler.admissionRetryStateByWindowId[windowId])
-        XCTAssertEqual(retryState.reason, .degenerateGeometry)
-        XCTAssertEqual(retryState.attempt, 1)
-        guard case let .candidate(retryToken, _, placementOrigin) = retryState.trigger else {
-            return XCTFail("Expected bounded candidate retry")
-        }
-        XCTAssertEqual(retryToken, token)
-        XCTAssertEqual(placementOrigin, .liveCreate)
+        XCTAssertNil(controller.axEventHandler.admissionRetryStateByWindowId[windowId])
 
         let matureFrame = CGRect(x: 2_128, y: 126, width: 320, height: 425)
         let matureEvaluation = controller.evaluateWindowDisposition(
@@ -313,16 +304,16 @@ final class WindowAdmissionPolicyTests: XCTestCase {
         XCTAssertEqual(matureEvaluation.decision.disposition, .unmanaged)
         XCTAssertEqual(
             matureEvaluation.decision.source,
-            .builtInRule(WindowRuleEngine.transientWidgetSurfaceRuleName)
+            .builtInRule(WindowRuleEngine.externalSurfaceRuleName)
         )
         XCTAssertNil(matureEvaluation.decision.deferredReason)
         XCTAssertNil(matureEvaluation.decision.trackedMode)
-        XCTAssertEqual(matureEvaluation.decision.admissionRejectionReason, .nonRenderableTransientSurface)
+        XCTAssertEqual(matureEvaluation.decision.admissionRejectionReason, .externalSurface)
         XCTAssertNil(controller.workspaceManager.entry(for: token))
         controller.axEventHandler.cancelCreatedWindowRetry(windowId: windowId)
     }
 
-    func testManualTilePromotionDefersUnmanageableFloatingWindow() throws {
+    func testManualTilePromotionPreservesExistingFloatingWindowWhenFactsAreUnavailable() throws {
         let controller = WindowAdmissionTestSupport.controller()
         let workspaceId = try XCTUnwrap(
             controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
@@ -348,12 +339,13 @@ final class WindowAdmissionPolicyTests: XCTestCase {
 
         XCTAssertEqual(controller.workspaceManager.entry(for: token)?.mode, .floating)
         XCTAssertEqual(controller.workspaceManager.manualLayoutOverride(for: token), .forceTile)
-        XCTAssertNotNil(controller.axEventHandler.admissionRetryStateByWindowId[UInt32(windowId)])
+        XCTAssertNil(controller.axEventHandler.admissionRetryStateByWindowId[UInt32(windowId)])
 
         XCTAssertEqual(controller.toggleFocusedWindowFloating(), .executed)
 
         XCTAssertEqual(controller.workspaceManager.entry(for: token)?.mode, .floating)
-        XCTAssertNil(controller.axEventHandler.admissionRetryStateByWindowId[UInt32(windowId)])
+        XCTAssertNil(controller.workspaceManager.manualLayoutOverride(for: token))
+        XCTAssertEqual(controller.workspaceManager.nativeFocusOwner, .managed(token))
         controller.axEventHandler.handleCGSEvent(.destroyed(windowId: UInt32(windowId), spaceId: 0))
     }
 

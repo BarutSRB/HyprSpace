@@ -25,6 +25,7 @@ enum WindowDecisionLayoutKind: String, Equatable, Sendable {
 
 enum WindowDecisionDeferredReason: String, Equatable, Sendable {
     case attributeFetchFailed
+    case independentRootEvidenceMissing
     case requiredTitleMissing
     case windowServerEvidenceMissing
 }
@@ -114,18 +115,8 @@ struct WindowDecision: Equatable, Sendable {
     }
 
     @MainActor
-    var isTransientWidgetSurfaceDecision: Bool {
-        source == .builtInRule(WindowRuleEngine.transientWidgetSurfaceRuleName)
-    }
-
-    @MainActor
-    var isHelpTagSurfaceDecision: Bool {
-        source == .builtInRule(WindowRuleEngine.helpTagSurfaceRuleName)
-    }
-
-    @MainActor
-    var isNonRenderableTransientSurfaceDecision: Bool {
-        isTransientWidgetSurfaceDecision || isHelpTagSurfaceDecision
+    var isUnprovenIndependentRootDecision: Bool {
+        source == .builtInRule(WindowRuleEngine.unprovenIndependentRootRuleName)
     }
 }
 
@@ -248,13 +239,21 @@ struct WindowDecisionDebugSnapshot: Equatable, Sendable {
 
 @MainActor
 final class WindowRuleEngine {
-    static let cleanShotBundleId = "pl.maketheweb.cleanshotx"
-    static let systemTextInputPanelRuleName = "systemTextInputPanel"
     static let ownedWindowRuleName = "ownedWindow"
-    nonisolated static let helpTagSurfaceRuleName = "helpTagSurface"
-    nonisolated static let transientWidgetSurfaceRuleName = "transientWidgetSurface"
+    nonisolated static let externalSurfaceRuleName = "externalSurface"
+    nonisolated static let unprovenIndependentRootRuleName = "unprovenIndependentRoot"
     nonisolated static let hiddenTitleBarWindowRuleName = "hiddenTitleBarWindow"
-    private static let cleanShotRecordingOverlayRuleName = "cleanShotRecordingOverlay"
+    private static let finderQuickLookSubrole = "Quick Look"
+    private static let nativeFullscreenSubrole = "AXFullScreenWindow"
+    private static let systemSurfaceLevelFloor = CGWindowLevelForKey(.statusWindow)
+
+    private enum StructuralEligibility {
+        case eligible
+        case requiresExplicitInclusion
+        case requiresIndependentRootInclusion
+        case external
+        case deferred(WindowDecisionDeferredReason)
+    }
 
     private enum RuleSource {
         case user
@@ -299,6 +298,12 @@ final class WindowRuleEngine {
                  .builtIn:
                 true
             }
+        }
+
+        var explicitlyIncludesNonstandardSurface: Bool {
+            rule.effectiveLayoutAction != .auto
+                && nonEmpty(rule.axRole) != nil
+                && nonEmpty(rule.axSubrole) != nil
         }
 
         func matches(_ facts: WindowRuleFacts) -> Bool {
@@ -404,7 +409,7 @@ final class WindowRuleEngine {
         _ decision: WindowDecision,
         manualOverride: ManualWindowOverride?
     ) -> WindowDecision {
-        guard let manualOverride, decision.disposition != .unmanaged else {
+        guard let manualOverride, decision.tracksWindow else {
             return decision
         }
         return WindowDecision(
@@ -419,51 +424,50 @@ final class WindowRuleEngine {
         )
     }
 
-    nonisolated static func isTransientWidgetAXCandidate(_ facts: AXWindowFacts) -> Bool {
-        facts.attributeFetchSucceeded
-            && facts.role == (kAXWindowRole as String)
-            && facts.subrole == (kAXUnknownSubrole as String)
-            && !facts.hasCloseButton
-            && !facts.hasFullscreenButton
-            && !facts.hasZoomButton
-            && !facts.hasMinimizeButton
-    }
-
     func decision(
         for facts: WindowRuleFacts,
         token: WindowToken?,
         appFullscreen: Bool
     ) -> WindowDecision {
         if facts.ax.role == (kAXHelpTagRole as String) {
-            return WindowDecision(
-                disposition: .unmanaged,
-                source: .builtInRule(Self.helpTagSurfaceRuleName),
-                layoutDecisionKind: .explicitLayout,
-                workspaceName: nil,
-                ruleEffects: .none,
-                admissionHints: .none,
-                heuristicReasons: [],
-                deferredReason: nil
-            )
+            return externalSurfaceDecision()
         }
 
         if let bundleId = facts.ax.bundleId?.lowercased(),
            inputMethodBundleIds.contains(bundleId)
         {
-            return WindowDecision(
-                disposition: .unmanaged,
-                source: .builtInRule(Self.systemTextInputPanelRuleName),
-                layoutDecisionKind: .explicitLayout,
-                workspaceName: nil,
-                ruleEffects: .none,
-                admissionHints: .none,
-                heuristicReasons: [],
-                deferredReason: nil
-            )
+            return externalSurfaceDecision()
         }
 
-        let userRule = bestMatch(in: compiledUserRules, facts: facts)
-        let builtInRule = bestMatch(in: builtInRules, facts: facts)
+        let structuralEligibility = structuralEligibility(
+            for: facts,
+            token: token,
+            appFullscreen: appFullscreen
+        )
+
+        let userRule: CompiledRule?
+        let builtInRule: CompiledRule?
+        switch structuralEligibility {
+        case .eligible:
+            userRule = bestMatch(in: compiledUserRules, facts: facts)
+            builtInRule = bestMatch(in: builtInRules, facts: facts)
+        case .requiresExplicitInclusion:
+            userRule = bestExplicitInclusionMatch(in: compiledUserRules, facts: facts)
+            builtInRule = bestExplicitInclusionMatch(in: builtInRules, facts: facts)
+            if userRule == nil, builtInRule == nil {
+                return externalSurfaceDecision()
+            }
+        case .requiresIndependentRootInclusion:
+            userRule = bestExplicitInclusionMatch(in: compiledUserRules, facts: facts)
+            builtInRule = bestExplicitInclusionMatch(in: builtInRules, facts: facts)
+            if userRule == nil, builtInRule == nil {
+                return unprovenIndependentRootDecision()
+            }
+        case .external:
+            return externalSurfaceDecision()
+        case let .deferred(reason):
+            return deferredStructuralDecision(reason: reason)
+        }
 
         let workspaceName = userRule?.rule.assignToWorkspace
         let effects = ManagedWindowRuleEffects(
@@ -500,15 +504,6 @@ final class WindowRuleEngine {
             return builtInDecision
         }
 
-        if let cleanShotDecision = cleanShotRecordingOverlayDecision(
-            for: facts,
-            workspaceName: workspaceName,
-            effects: effects,
-            admissionHints: admissionHints
-        ) {
-            return cleanShotDecision
-        }
-
         if facts.ax.title == nil,
            requiresTitle(for: facts.ax.bundleId, appName: facts.appName)
         {
@@ -539,38 +534,6 @@ final class WindowRuleEngine {
                 heuristicReasons: [],
                 deferredReason: nil
             )
-        }
-
-        if !facts.ax.attributeFetchSucceeded {
-            if let userRule, userRule.rule.effectiveLayoutAction == .float {
-                return fallbackDecisionForMatchedUserRule(
-                    userRule,
-                    workspaceName: workspaceName,
-                    effects: effects,
-                    admissionHints: admissionHints,
-                    heuristicReasons: [.attributeFetchFailed]
-                )
-            }
-            return WindowDecision(
-                disposition: .undecided,
-                source: userRule.map { .userRule($0.rule.id) } ?? .heuristic,
-                layoutDecisionKind: .fallbackLayout,
-                workspaceName: workspaceName,
-                ruleEffects: effects,
-                admissionHints: admissionHints,
-                heuristicReasons: [.attributeFetchFailed],
-                deferredReason: .attributeFetchFailed
-            )
-        }
-
-        if let transientWidgetDecision = transientWidgetSurfaceDecision(
-            for: facts,
-            token: token,
-            workspaceName: workspaceName,
-            effects: effects,
-            admissionHints: admissionHints
-        ) {
-            return transientWidgetDecision
         }
 
         if HiddenTitleBarRegistry.decision(
@@ -605,107 +568,134 @@ final class WindowRuleEngine {
         )
     }
 
-    private func transientWidgetSurfaceDecision(
+    private func structuralEligibility(
         for facts: WindowRuleFacts,
         token: WindowToken?,
-        workspaceName: String?,
-        effects: ManagedWindowRuleEffects,
-        admissionHints: ManagedWindowAdmissionHints
-    ) -> WindowDecision? {
-        guard Self.isTransientWidgetAXCandidate(facts.ax),
-              let token
-        else {
-            return nil
+        appFullscreen: Bool
+    ) -> StructuralEligibility {
+        guard facts.ax.attributeFetchSucceeded else {
+            return .deferred(.attributeFetchFailed)
         }
 
-        guard let windowServer = facts.windowServer,
-              let windowId = UInt32(exactly: token.windowId),
-              windowServer.id == windowId,
-              pid_t(windowServer.pid) == token.pid
+        guard let role = facts.ax.role,
+              let subrole = facts.ax.subrole
         else {
-            return WindowDecision(
-                disposition: .undecided,
-                source: .builtInRule(Self.transientWidgetSurfaceRuleName),
-                layoutDecisionKind: .fallbackLayout,
-                workspaceName: workspaceName,
-                ruleEffects: effects,
-                admissionHints: admissionHints,
-                heuristicReasons: [],
-                deferredReason: .windowServerEvidenceMissing
-            )
+            return .deferred(.attributeFetchFailed)
         }
 
-        guard windowServer.level == 0,
-              windowServer.parentId != 0,
-              windowServer.parentId != windowServer.id,
-              windowServer.hasFloatingTag,
-              !windowServer.hasDocumentTag,
-              !windowServer.hasModalTag
-        else {
-            return nil
+        let windowServerEvidence: WindowServerInfo?
+        if let token {
+            guard let windowServer = facts.windowServer,
+                  let windowId = UInt32(exactly: token.windowId),
+                  windowServer.id == windowId,
+                  pid_t(windowServer.pid) == token.pid
+            else {
+                return .deferred(.windowServerEvidenceMissing)
+            }
+            windowServerEvidence = windowServer
+        } else {
+            windowServerEvidence = facts.windowServer
         }
 
-        return WindowDecision(
+        if let windowServer = windowServerEvidence,
+           windowServer.parentId != 0,
+           windowServer.parentId != windowServer.id
+        {
+            return .external
+        }
+
+        if let windowServer = windowServerEvidence,
+           windowServer.level >= Self.systemSurfaceLevelFloor
+        {
+            return .external
+        }
+
+        if facts.ax.appPolicy == .accessory || facts.ax.appPolicy == .prohibited {
+            return .requiresExplicitInclusion
+        }
+
+        guard role == (kAXWindowRole as String) else {
+            return .requiresExplicitInclusion
+        }
+
+        if appFullscreen || Self.automaticRootSubroles.contains(subrole) {
+            return .eligible
+        }
+
+        if Self.independentRootSubroles.contains(subrole) {
+            if HiddenTitleBarRegistry.decision(
+                for: facts.ax,
+                windowServer: facts.windowServer,
+                fullscreenButtonOptionalBundleIds: hiddenTitleBarFullscreenButtonOptionalBundleIds,
+                nonStandardSubroleBundleIds: hiddenTitleBarNonStandardSubroleBundleIds
+            ) {
+                return .eligible
+            }
+
+            let hasWindowChrome = facts.ax.hasCloseButton
+                || facts.ax.hasFullscreenButton
+                || facts.ax.hasZoomButton
+                || facts.ax.hasMinimizeButton
+            if hasWindowChrome || facts.ax.isMain == true || facts.ax.isModal == true {
+                return .eligible
+            }
+            if facts.ax.isMain == nil || facts.ax.isModal == nil {
+                return .deferred(.independentRootEvidenceMissing)
+            }
+            return .requiresIndependentRootInclusion
+        }
+
+        return .requiresExplicitInclusion
+    }
+
+    private static let automaticRootSubroles: Set<String> = [
+        kAXStandardWindowSubrole as String,
+        nativeFullscreenSubrole
+    ]
+
+    private static let independentRootSubroles: Set<String> = [
+        kAXDialogSubrole as String,
+        kAXFloatingWindowSubrole as String
+    ]
+
+    private func externalSurfaceDecision() -> WindowDecision {
+        WindowDecision(
             disposition: .unmanaged,
-            source: .builtInRule(Self.transientWidgetSurfaceRuleName),
-            layoutDecisionKind: .fallbackLayout,
-            workspaceName: workspaceName,
-            ruleEffects: effects,
-            admissionHints: admissionHints,
-            heuristicReasons: [],
-            deferredReason: nil
-        )
-    }
-
-    private func fallbackDecisionForMatchedUserRule(
-        _ compiled: CompiledRule,
-        workspaceName: String?,
-        effects: ManagedWindowRuleEffects,
-        admissionHints: ManagedWindowAdmissionHints,
-        heuristicReasons: [AXWindowHeuristicReason]
-    ) -> WindowDecision {
-        let disposition: WindowDecisionDisposition = switch compiled.rule.effectiveLayoutAction {
-        case .float:
-            .floating
-        case .tile,
-             .auto:
-            .managed
-        }
-
-        return WindowDecision(
-            disposition: disposition,
-            source: .userRule(compiled.rule.id),
-            layoutDecisionKind: .fallbackLayout,
-            workspaceName: workspaceName,
-            ruleEffects: effects,
-            admissionHints: admissionHints,
-            heuristicReasons: heuristicReasons,
-            deferredReason: nil
-        )
-    }
-
-    private func cleanShotRecordingOverlayDecision(
-        for facts: WindowRuleFacts,
-        workspaceName: String?,
-        effects: ManagedWindowRuleEffects,
-        admissionHints: ManagedWindowAdmissionHints
-    ) -> WindowDecision? {
-        guard facts.ax.bundleId == Self.cleanShotBundleId,
-              facts.ax.subrole == (kAXStandardWindowSubrole as String),
-              facts.windowServer?.level == 103
-        else {
-            return nil
-        }
-
-        return WindowDecision(
-            disposition: .floating,
-            source: .builtInRule(Self.cleanShotRecordingOverlayRuleName),
+            source: .builtInRule(Self.externalSurfaceRuleName),
             layoutDecisionKind: .explicitLayout,
-            workspaceName: workspaceName,
-            ruleEffects: effects,
-            admissionHints: admissionHints,
+            workspaceName: nil,
+            ruleEffects: .none,
+            admissionHints: .none,
             heuristicReasons: [],
             deferredReason: nil
+        )
+    }
+
+    private func unprovenIndependentRootDecision() -> WindowDecision {
+        WindowDecision(
+            disposition: .unmanaged,
+            source: .builtInRule(Self.unprovenIndependentRootRuleName),
+            layoutDecisionKind: .explicitLayout,
+            workspaceName: nil,
+            ruleEffects: .none,
+            admissionHints: .none,
+            heuristicReasons: [],
+            deferredReason: nil
+        )
+    }
+
+    private func deferredStructuralDecision(
+        reason: WindowDecisionDeferredReason
+    ) -> WindowDecision {
+        WindowDecision(
+            disposition: .undecided,
+            source: .heuristic,
+            layoutDecisionKind: .fallbackLayout,
+            workspaceName: nil,
+            ruleEffects: .none,
+            admissionHints: .none,
+            heuristicReasons: reason == .attributeFetchFailed ? [.attributeFetchFailed] : [],
+            deferredReason: reason
         )
     }
 
@@ -753,10 +743,20 @@ final class WindowRuleEngine {
         }
     }
 
-    private func bestMatch(in rules: [CompiledRule], facts: WindowRuleFacts) -> CompiledRule? {
+    private func bestMatch(
+        in rules: [CompiledRule],
+        facts: WindowRuleFacts,
+        requireExplicitInclusion: Bool = false
+    ) -> CompiledRule? {
         var best: CompiledRule?
 
-        for candidate in rules where candidate.matches(facts) {
+        for candidate in rules {
+            if requireExplicitInclusion,
+               !candidate.explicitlyIncludesNonstandardSurface
+            {
+                continue
+            }
+            guard candidate.matches(facts) else { continue }
             guard let currentBest = best else {
                 best = candidate
                 continue
@@ -770,6 +770,17 @@ final class WindowRuleEngine {
         }
 
         return best
+    }
+
+    private func bestExplicitInclusionMatch(
+        in rules: [CompiledRule],
+        facts: WindowRuleFacts
+    ) -> CompiledRule? {
+        bestMatch(
+            in: rules,
+            facts: facts,
+            requireExplicitInclusion: true
+        )
     }
 
     private func compile(
@@ -820,11 +831,15 @@ final class WindowRuleEngine {
             AppRule(
                 bundleId: "org.mozilla.firefox",
                 titleRegex: "^Picture-in-Picture$",
+                axRole: kAXWindowRole as String,
+                axSubrole: kAXStandardWindowSubrole as String,
                 layout: .float
             ),
             AppRule(
                 bundleId: "app.zen-browser.zen",
                 titleRegex: "^Picture-in-Picture$",
+                axRole: kAXWindowRole as String,
+                axSubrole: kAXStandardWindowSubrole as String,
                 layout: .float
             )
         ]
@@ -841,13 +856,31 @@ final class WindowRuleEngine {
             )
         }
 
+        for subrole in [kAXStandardWindowSubrole as String, kAXUnknownSubrole as String] {
+            rules.append(
+                CompiledRule(
+                    rule: AppRule(
+                        bundleId: "com.valvesoftware.steam.helper",
+                        axRole: kAXWindowRole as String,
+                        axSubrole: subrole,
+                        layout: .tile
+                    ),
+                    source: .builtIn("steamClient"),
+                    titleRegex: nil,
+                    order: rules.count
+                )
+            )
+        }
+
         rules.append(
             CompiledRule(
                 rule: AppRule(
-                    bundleId: "com.valvesoftware.steam.helper",
-                    layout: .tile
+                    bundleId: "com.apple.finder",
+                    axRole: kAXWindowRole as String,
+                    axSubrole: finderQuickLookSubrole,
+                    layout: .float
                 ),
-                source: .builtIn("steamClient"),
+                source: .builtIn("finderQuickLook"),
                 titleRegex: nil,
                 order: rules.count
             )

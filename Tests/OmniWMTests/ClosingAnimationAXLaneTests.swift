@@ -7,42 +7,6 @@ import XCTest
 
 @MainActor
 final class ClosingAnimationAXLaneTests: XCTestCase {
-    func testHandsOffWindowDoesNotEnterClosingFrameLane() throws {
-        let controller = WindowAdmissionTestSupport.controller()
-        let workspaceId = try XCTUnwrap(
-            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
-        )
-        let displayId: CGDirectDisplayID = 91_000
-        let monitor = Monitor(
-            id: .init(displayId: displayId),
-            displayId: displayId,
-            frame: CGRect(x: 0, y: 0, width: 1440, height: 900),
-            visibleFrame: CGRect(x: 0, y: 0, width: 1440, height: 900),
-            hasNotch: false,
-            name: "Closing Lane"
-        )
-        let token = WindowToken(pid: 91_006, windowId: 91_007)
-        _ = controller.workspaceManager.addWindow(
-            WindowAdmissionTestSupport.axRef(for: token),
-            pid: token.pid,
-            windowId: token.windowId,
-            to: workspaceId,
-            interactionPolicy: .handsOffSurface
-        )
-        controller.layoutRefreshController.fastFrameProvider = { _, _ in
-            CGRect(x: 20, y: 20, width: 800, height: 600)
-        }
-
-        controller.layoutRefreshController.startWindowCloseAnimation(
-            entry: try XCTUnwrap(controller.workspaceManager.entry(for: token)),
-            monitor: monitor
-        )
-
-        XCTAssertNil(
-            controller.layoutRefreshController.layoutState.closingAnimationsByDisplay[displayId]
-        )
-    }
-
     func testFailedDisplayLinkCreationRollsBackClosingAnimationState() throws {
         let controller = WindowAdmissionTestSupport.controller()
         controller.setAnimationsEnabled(true, persist: false)

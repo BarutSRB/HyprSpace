@@ -408,7 +408,7 @@ final class IPCCommandRouter {
     }
 
     private func moveFocusedWindow(using command: HotkeyCommand) -> ExternalCommandResult {
-        guard let token = controller.workspaceManager.focusedToken else { return .notFound }
+        guard let token = controller.workspaceManager.selectedManagedToken else { return .notFound }
         let previousWorkspaceId = controller.workspaceManager.workspace(for: token)
         let result = controller.commandHandler.performCommand(command)
         guard result == .executed else { return result }
@@ -495,7 +495,7 @@ final class IPCCommandRouter {
         if let guardResult = validateControllerState() {
             return guardResult
         }
-        guard let token = controller.workspaceManager.focusedToken else { return .notFound }
+        guard let token = controller.workspaceManager.selectedManagedToken else { return .notFound }
         let rawWorkspaceID: String
         switch resolveWorkspaceTarget(target) {
         case let .failure(result):
@@ -516,7 +516,7 @@ final class IPCCommandRouter {
         if let guardResult = validateControllerState() {
             return guardResult
         }
-        guard let token = controller.workspaceManager.focusedToken else { return .notFound }
+        guard let token = controller.workspaceManager.selectedManagedToken else { return .notFound }
         let rawWorkspaceID: String
         switch resolveWorkspaceTarget(target) {
         case let .failure(result):

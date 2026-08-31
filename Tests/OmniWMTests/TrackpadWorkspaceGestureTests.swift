@@ -431,7 +431,7 @@ final class TrackpadWorkspaceGestureTests: XCTestCase {
     func testEmptyWorkspaceTargetClearsManagedFocusAfterLayout() throws {
         let fixture = try makeFixture()
         let manager = fixture.controller.workspaceManager
-        XCTAssertFalse(manager.isNonManagedFocusActive)
+        XCTAssertFalse(manager.nativeFocusOwner.isExternal)
 
         try withBlockedLayoutRefreshes(fixture) {
             fixture.controller.workspaceNavigationHandler.switchWorkspaceRelative(isNext: true)
@@ -442,7 +442,7 @@ final class TrackpadWorkspaceGestureTests: XCTestCase {
             action.runIfCurrent(using: manager)
 
             XCTAssertEqual(activeWorkspace(fixture), fixture.ws2)
-            XCTAssertTrue(manager.isNonManagedFocusActive)
+            XCTAssertEqual(manager.nativeFocusOwner, .none)
             XCTAssertNil(manager.pendingFocusedToken)
         }
     }

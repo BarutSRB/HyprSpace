@@ -929,7 +929,7 @@ final class WindowAdmissionRetryTests: XCTestCase {
         let current = try XCTUnwrap(controller.axEventHandler.admissionRetryStateByWindowId[windowId])
         XCTAssertEqual(current.generation, 85)
         XCTAssertEqual(current.executionPhase, .running(25))
-        XCTAssertFalse(controller.workspaceManager.isNonManagedFocusActive)
+        XCTAssertFalse(controller.workspaceManager.nativeFocusOwner.isExternal)
     }
 
     func testMatchingCollisionReplaysFocusedRetryAfterAuthoritativeTracking() {
@@ -1108,17 +1108,12 @@ final class WindowAdmissionRetryTests: XCTestCase {
                 .admissionRetryStateByWindowId[UInt32(modalToken.windowId)]?.executionPhase,
             replayExecutionPhase
         )
-        XCTAssertEqual(
-            controller.layoutRefreshController.focusFullRescanFloatingCandidate(nil),
-            .systemModalBarrier
-        )
-
         controller.eventIntake.drainNow()
 
         XCTAssertNil(
             controller.axEventHandler.admissionRetryStateByWindowId[UInt32(modalToken.windowId)]
         )
-        XCTAssertEqual(controller.workspaceManager.focusedToken, modalToken)
+        XCTAssertEqual(controller.workspaceManager.selectedManagedToken, modalToken)
     }
 
     func testCollisionRequiresMatchingTokenAndAXElement() {
@@ -1225,7 +1220,7 @@ final class WindowAdmissionRetryTests: XCTestCase {
 
         XCTAssertNil(controller.axEventHandler.admissionRetryStateByWindowId[windowId])
         XCTAssertNotNil(controller.axEventHandler.admissionRetryStateByWindowId[unrelatedWindowId])
-        XCTAssertFalse(controller.workspaceManager.isNonManagedFocusActive)
+        XCTAssertFalse(controller.workspaceManager.nativeFocusOwner.isExternal)
 
         controller.factResolver.stop()
         controller.eventIntake.close()
@@ -1356,9 +1351,7 @@ final class WindowAdmissionRetryTests: XCTestCase {
                     parentWindowId: nil,
                     frame: nil
                 ),
-                structuralReplacementMatch: nil,
-                requiresPostCreateLifecycleVerification: false,
-                interactionPolicy: .full
+                structuralReplacementMatch: nil
             )
         )
         XCTAssertNil(controller.axEventHandler.admissionRetryStateByWindowId[windowId])

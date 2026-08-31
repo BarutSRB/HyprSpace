@@ -134,9 +134,8 @@
   ],
   "expectedDecision": {
     "disposition": "unmanaged",
-    "source": "builtInRule(helpTagSurface)",
+    "source": "builtInRule(externalSurface)",
     "heuristicReasons": [],
     "layoutDecisionKind": "explicitLayout"
-  },
-  "expectedPolicy": "untracked"
+  }
 }

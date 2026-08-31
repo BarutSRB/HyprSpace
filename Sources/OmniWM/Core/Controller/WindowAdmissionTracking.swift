@@ -27,7 +27,7 @@ extension AXEventHandler {
             mode: candidate.mode,
             ruleEffects: candidate.ruleEffects,
             admissionHints: candidate.admissionHints,
-            interactionPolicy: candidate.interactionPolicy,
+            lifetimeAuthority: .directLifecycle,
             managedReplacementMetadata: candidate.replacementMetadata
         )
         guard let trackedEntry = controller.workspaceManager.entry(for: trackedToken) else {
@@ -105,8 +105,7 @@ extension AXEventHandler {
             controller.workspaceManager.entries(forPid: liveTrackedEntry.pid)
         )
         if let floatingTargetFrame,
-           shouldApplyFloatingCreateFrameImmediately(for: liveTrackedEntry.workspaceId),
-           candidate.interactionPolicy.mayWriteFrame
+           shouldApplyFloatingCreateFrameImmediately(for: liveTrackedEntry.workspaceId)
         {
             scheduleFloatingCreateFrameApplication(
                 floatingTargetFrame,
@@ -118,29 +117,10 @@ extension AXEventHandler {
         } else {
             scheduleAXContextWarmup(for: liveTrackedEntry.pid)
         }
-        let createdFloatingFocusResult = if liveTrackedEntry.mode == .floating,
-                                            candidate.interactionPolicy.mayFocus
-        {
-            controller.windowActionHandler.focusCreatedFloatingWindow(trackedToken)
-        } else {
-            WindowActionHandler.CreatedFloatingFocusResult.rejected
-        }
-        if candidate.requiresPostCreateLifecycleVerification {
-            schedulePostCreateLifecycleVerification(for: trackedToken)
-        }
-        if candidate.interactionPolicy.isHandsOff,
-           frontmostApplicationPIDProvider() == trackedToken.pid
-        {
-            controller.workspaceManager.enterNonManagedFocus(
-                preserveFocusedToken: true,
-                target: trackedToken
-            )
-        }
-
         controller.layoutRefreshController.requestRelayout(
             reason: .axWindowCreated,
             affectedWorkspaceIds: [trackedEntry.workspaceId],
-            suppressWindowActivation: createdFloatingFocusResult == .systemModalBarrier
+            suppressWindowActivation: false
         )
         scheduleWindowRuleReevaluationIfNeeded(targets: [.pid(trackedEntry.pid)])
         finishAdmissionRetryAfterTracking(windowId: candidate.windowId)
@@ -174,62 +154,6 @@ extension AXEventHandler {
               !Task.isCancelled
         else { return }
         controller.axManager.bindManagedWindows(controller.workspaceManager.entries(forPid: pid))
-    }
-
-    private func schedulePostCreateLifecycleVerification(for token: WindowToken) {
-        pendingPostCreateLifecycleVerificationTasks[token]?.cancel()
-        let owner = nextPostCreateLifecycleVerificationOwner
-        nextPostCreateLifecycleVerificationOwner &+= 1
-        pendingPostCreateLifecycleVerificationOwners[token] = owner
-        let task = Task { @MainActor [weak self] in
-            defer { self?.finishPostCreateLifecycleVerification(for: token, owner: owner) }
-            do {
-                try await Task.sleep(for: Self.postCreateLifecycleVerificationDelay)
-            } catch {
-                return
-            }
-            guard !Task.isCancelled,
-                  let self,
-                  let controller = self.controller,
-                  controller.workspaceManager.entry(for: token) != nil,
-                  let windowId = UInt32(exactly: token.windowId),
-                  self.resolveWindowInfo(windowId) == nil
-            else {
-                return
-            }
-            await self.warmAXContextIfNeeded(for: token.pid)
-            guard !Task.isCancelled,
-                  controller.workspaceManager.entry(for: token) != nil,
-                  self.resolveWindowInfo(windowId) == nil
-            else {
-                return
-            }
-            AXWindowService.invalidateCachedTitle(windowId: windowId)
-            self.cancelCreatedWindowRetry(windowId: windowId)
-            self.handleRemoved(token: token)
-        }
-        pendingPostCreateLifecycleVerificationTasks[token] = task
-    }
-
-    func cancelPostCreateLifecycleVerification(for token: WindowToken) {
-        pendingPostCreateLifecycleVerificationTasks[token]?.cancel()
-        pendingPostCreateLifecycleVerificationTasks[token] = nil
-        pendingPostCreateLifecycleVerificationOwners[token] = nil
-    }
-
-    func resetPostCreateLifecycleVerificationState() {
-        for (_, task) in pendingPostCreateLifecycleVerificationTasks {
-            task.cancel()
-        }
-        pendingPostCreateLifecycleVerificationTasks.removeAll()
-        pendingPostCreateLifecycleVerificationOwners.removeAll()
-        nextPostCreateLifecycleVerificationOwner = 1
-    }
-
-    private func finishPostCreateLifecycleVerification(for token: WindowToken, owner: UInt64) {
-        guard pendingPostCreateLifecycleVerificationOwners[token] == owner else { return }
-        pendingPostCreateLifecycleVerificationOwners[token] = nil
-        pendingPostCreateLifecycleVerificationTasks[token] = nil
     }
 
     private func scheduleFloatingCreateFrameApplication(

@@ -406,7 +406,7 @@ final class DwindleGroupFocusIntegrationTests: XCTestCase {
         )
 
         XCTAssertEqual(fixture.engine.activeToken(in: fixture.workspaceId), fixture.inactiveToken)
-        XCTAssertEqual(fixture.controller.workspaceManager.focusedToken, fixture.inactiveToken)
+        XCTAssertEqual(fixture.controller.workspaceManager.selectedManagedToken, fixture.inactiveToken)
         XCTAssertTrue(frontedTokens.isEmpty)
         XCTAssertNil(fixture.controller.intentLedger.activeManagedRequest)
         let pending = try XCTUnwrap(fixture.controller.layoutRefreshController.layoutState.pendingRefresh)
