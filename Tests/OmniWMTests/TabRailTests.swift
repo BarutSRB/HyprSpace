@@ -7,6 +7,33 @@ import Foundation
 import XCTest
 
 final class TabRailTests: XCTestCase {
+    func testPartialMetadataStillProducesOneIndicatorPerTab() {
+        let workspaceId = WorkspaceDescriptor.ID()
+        let info = TabRailInfo(
+            workspaceId: workspaceId,
+            owner: .niriColumn(NodeId()),
+            plannedSeq: 1,
+            tileFrame: CGRect(x: 0, y: 0, width: 400, height: 500),
+            tabCount: 2,
+            activeVisualIndex: 1,
+            activeWindowId: 42,
+            tabs: [
+                TabRailTabInfo(
+                    visualIndex: 1,
+                    token: nil,
+                    windowId: 42,
+                    appName: "Example",
+                    title: "Document",
+                    isActive: true
+                )
+            ]
+        )
+
+        XCTAssertEqual(info.tabCount, 2)
+        XCTAssertEqual(info.normalizedTabs.map(\.visualIndex), [0, 1])
+        XCTAssertEqual(info.normalizedTabs[1].title, "Document")
+    }
+
     func testKeyIncludesLayoutOwnerAndWorkspace() {
         let workspaceId = WorkspaceDescriptor.ID()
         let frame = CGRect(x: 20, y: 30, width: 400, height: 300)
@@ -50,7 +77,7 @@ final class TabRailTests: XCTestCase {
     }
 
     func testLayoutMaintainsVisualOrderWithinAvailableHeight() {
-        let layout = TabRailLayout(tabCount: 4, bounds: CGRect(x: 0, y: 0, width: 20, height: 80))
+        let layout = TabRailLayout(tabCount: 4, bounds: CGRect(x: 0, y: 0, width: 22, height: 80))
 
         XCTAssertEqual(layout.items.map(\.visualIndex), [0, 1, 2, 3])
         XCTAssertTrue(zip(layout.items, layout.items.dropFirst()).allSatisfy { pair in
@@ -335,5 +362,180 @@ final class TabRailTests: XCTestCase {
         XCTAssertEqual(manager.existingWindow(for: key)?.windowNumber, windowNumber)
         XCTAssertTrue(window.isVisible)
         XCTAssertTrue(SurfaceCoordinator.shared.contains(windowNumber: windowNumber))
+    }
+
+    func testIndicatorsAreCenteredInVisualBarWithoutShrinkingHitTargets() {
+        let layout = TabRailLayout(tabCount: 4, bounds: CGRect(x: 7, y: 0, width: 22, height: 80))
+
+        XCTAssertEqual(layout.items.count, 4)
+        XCTAssertEqual(layout.barRect.minX, 19)
+        XCTAssertEqual(layout.barRect.width, 10)
+        XCTAssertEqual(layout.items.map(\.pillRect.midX), [24, 24, 24, 24])
+        XCTAssertTrue(layout.items.allSatisfy { $0.hitRect.width > $0.pillRect.width })
+    }
+
+    func testSegmentsStayPixelAlignedAndCenteredAtEachBackingScale() throws {
+        let trackBounds = CGRect(x: 0, y: 0, width: 10, height: 60)
+        let sourceRect = CGRect(x: 0, y: 4, width: 10, height: 24)
+
+        for scale: CGFloat in [1, 2] {
+            let rect = TabRailSegmentGeometry.rect(
+                sourceRect: sourceRect,
+                trackBounds: trackBounds,
+                width: 3,
+                selected: true,
+                scale: scale
+            )
+            let centeredRect = try XCTUnwrap(
+                TabRailSegmentGeometry.equallyPaddedRects(
+                    sourceRects: [0: sourceRect],
+                    trackBounds: trackBounds,
+                    width: 3,
+                    selectedVisualIndex: 0,
+                    verticalMargin: 2,
+                    scale: scale
+                )[0]
+            )
+
+            for segmentRect in [rect, centeredRect] {
+                XCTAssertEqual(segmentRect.width, scale == 1 ? 4 : 3)
+                XCTAssertEqual(segmentRect.midX, trackBounds.midX)
+                XCTAssertEqual(segmentRect.minX * scale, (segmentRect.minX * scale).rounded())
+                XCTAssertEqual(segmentRect.maxX * scale, (segmentRect.maxX * scale).rounded())
+            }
+        }
+    }
+
+    func testInactiveSegmentUsesSixtySevenPercentHeightAndStaysCentered() {
+        let sourceRect = CGRect(x: 0, y: 4, width: 8, height: 24)
+        let trackBounds = CGRect(x: 0, y: 0, width: 8, height: 58)
+        let active = TabRailSegmentGeometry.rect(
+            sourceRect: sourceRect,
+            trackBounds: trackBounds,
+            width: 3,
+            selected: true,
+            scale: 2
+        )
+        let inactive = TabRailSegmentGeometry.rect(
+            sourceRect: sourceRect,
+            trackBounds: trackBounds,
+            width: 3,
+            selected: false,
+            scale: 2
+        )
+
+        XCTAssertEqual(active.width, inactive.width)
+        XCTAssertEqual(active.height, 24)
+        XCTAssertEqual(inactive.height, 16)
+        XCTAssertEqual(active.midY, inactive.midY)
+    }
+
+    func testActiveAndInactiveSegmentsKeepCompactSpacingAndEqualEndCaps() throws {
+        let sourceRects = [
+            0: CGRect(x: 0, y: 34, width: 8, height: 24),
+            1: CGRect(x: 0, y: 2, width: 8, height: 24)
+        ]
+        let trackHeight = TabRailSegmentGeometry.packedHeight(
+            sourceRects: sourceRects,
+            selectedVisualIndex: 0,
+            verticalMargin: 2,
+            endInset: 6,
+            scale: 2
+        )
+        let trackBounds = CGRect(x: 0, y: 0, width: 8, height: trackHeight)
+        let rects = TabRailSegmentGeometry.equallyPaddedRects(
+            sourceRects: sourceRects,
+            trackBounds: trackBounds,
+            width: 3,
+            selectedVisualIndex: 0,
+            verticalMargin: 2,
+            scale: 2
+        )
+
+        let active = try XCTUnwrap(rects[0])
+        let inactive = try XCTUnwrap(rects[1])
+        XCTAssertEqual(trackHeight, 60)
+        XCTAssertEqual(active.height, 24)
+        XCTAssertEqual(inactive.height, 16)
+        XCTAssertEqual(trackBounds.maxY - active.maxY, 6)
+        XCTAssertEqual(inactive.minY - trackBounds.minY, 6)
+        XCTAssertEqual(active.minY - inactive.maxY, 8)
+    }
+
+    func testInactiveEndCapsDoNotGrowWithTabCount() throws {
+        func endCaps(tabCount: Int, selectedVisualIndex: Int) throws -> (bottom: CGFloat, top: CGFloat) {
+            let slotHeight: CGFloat = 28
+            let slotGap: CGFloat = 4
+            let sourceRects = Dictionary(uniqueKeysWithValues: (0 ..< tabCount).map { visualIndex in
+                (
+                    visualIndex,
+                    CGRect(
+                        x: 0,
+                        y: CGFloat(visualIndex) * (slotHeight + slotGap) + 2,
+                        width: 8,
+                        height: slotHeight - 4
+                    )
+                )
+            })
+            let trackHeight = TabRailSegmentGeometry.packedHeight(
+                sourceRects: sourceRects,
+                selectedVisualIndex: selectedVisualIndex,
+                verticalMargin: 2,
+                endInset: 6,
+                scale: 2
+            )
+            let trackBounds = CGRect(x: 0, y: 0, width: 8, height: trackHeight)
+            let rects = TabRailSegmentGeometry.equallyPaddedRects(
+                sourceRects: sourceRects,
+                trackBounds: trackBounds,
+                width: 3,
+                selectedVisualIndex: selectedVisualIndex,
+                verticalMargin: 2,
+                scale: 2
+            )
+            let bottom = try XCTUnwrap(rects[0])
+            let top = try XCTUnwrap(rects[tabCount - 1])
+            return (bottom.minY - trackBounds.minY, trackBounds.maxY - top.maxY)
+        }
+
+        let threeTabs = try endCaps(tabCount: 3, selectedVisualIndex: 1)
+        let sixTabs = try endCaps(tabCount: 6, selectedVisualIndex: 2)
+        let threeTabsFirstSelected = try endCaps(tabCount: 3, selectedVisualIndex: 0)
+        let sixTabsFirstSelected = try endCaps(tabCount: 6, selectedVisualIndex: 0)
+
+        XCTAssertEqual(threeTabs.bottom, 6)
+        XCTAssertEqual(threeTabs.top, 6)
+        XCTAssertEqual(sixTabs.bottom, threeTabs.bottom)
+        XCTAssertEqual(sixTabs.top, threeTabs.top)
+        XCTAssertEqual(threeTabsFirstSelected.bottom, 6)
+        XCTAssertEqual(threeTabsFirstSelected.top, 6)
+        XCTAssertEqual(sixTabsFirstSelected.bottom, threeTabsFirstSelected.bottom)
+        XCTAssertEqual(sixTabsFirstSelected.top, threeTabsFirstSelected.top)
+    }
+
+    func testHoverCardPrefersLeftAndAlignsWithHoveredTab() {
+        let frame = TabRailHoverCardPlacement.frame(
+            railFrame: CGRect(x: 500, y: 200, width: 22, height: 100),
+            itemRect: CGRect(x: 0, y: 60, width: 22, height: 28),
+            cardSize: CGSize(width: 260, height: 52),
+            visibleFrame: CGRect(x: 0, y: 0, width: 1200, height: 800),
+            gap: 8
+        )
+
+        XCTAssertEqual(frame.minX, 232)
+        XCTAssertEqual(frame.midY, 274)
+    }
+
+    func testHoverCardFlipsRightAndClampsToVisibleFrame() {
+        let frame = TabRailHoverCardPlacement.frame(
+            railFrame: CGRect(x: 4, y: 2, width: 22, height: 80),
+            itemRect: CGRect(x: 0, y: 0, width: 22, height: 20),
+            cardSize: CGSize(width: 260, height: 52),
+            visibleFrame: CGRect(x: 0, y: 0, width: 800, height: 600),
+            gap: 8
+        )
+
+        XCTAssertEqual(frame.minX, 34)
+        XCTAssertEqual(frame.minY, 0)
     }
 }
