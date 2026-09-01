@@ -548,11 +548,11 @@ final class MultitouchLifecycleTests: XCTestCase {
         XCTAssertTrue(handler.installMultitouchSource(old.source))
         await runNext(old)
         handler.beginPerformanceCapture()
-        old.backend.emitEmptyFrame(registryId: 101, timestamp: 1)
+        old.backend.emitFrame(registryId: 101, touches: [], timestamp: 1)
 
         XCTAssertTrue(handler.installMultitouchSource(replacement.source))
         await runNext(replacement)
-        replacement.backend.emitEmptyFrame(registryId: 202, timestamp: 2)
+        replacement.backend.emitFrame(registryId: 202, touches: [], timestamp: 2)
 
         let liveSnapshot = try XCTUnwrap(handler.performanceSnapshot()?.multitouch)
         XCTAssertEqual(liveSnapshot.rawCallbacks, 2)
@@ -580,8 +580,8 @@ final class MultitouchLifecycleTests: XCTestCase {
         XCTAssertTrue(handler.installMultitouchSource(harness.source))
         await runNext(harness)
         handler.beginPerformanceCapture()
-        harness.backend.emitEmptyFrame(registryId: 101, timestamp: 1)
-        harness.backend.emitEmptyFrame(registryId: 101, timestamp: 2)
+        harness.backend.emitFrame(registryId: 101, touches: [], timestamp: 1)
+        harness.backend.emitFrame(registryId: 101, touches: [], timestamp: 2)
 
         controller.settings.scrollGestureEnabled = false
         handler.reconcileMultitouchSource()
@@ -749,6 +749,111 @@ final class MultitouchLifecycleTests: XCTestCase {
         XCTAssertTrue(formatted.contains("lastAcceptedCallbackTimestamp=nil"))
         XCTAssertFalse(formatted.contains("101"))
         await shutdown(harness)
+    }
+
+    func testTwoDevicesRegisterOneGenerationWithDistinctSlots() async throws {
+        let harness = makeHarness([FakeMultitouchBackend.enumeration([deviceA, deviceB])])
+        harness.source.startLifecycle()
+        await runNext(harness)
+
+        let generation = try XCTUnwrap(harness.source.diagnosticsSnapshot().activeGeneration)
+        XCTAssertEqual(harness.backend.registeredGenerations, [generation, generation])
+        XCTAssertEqual(harness.backend.registeredSlots, [0, 1])
+        await shutdown(harness)
+    }
+
+    func testInterleavedSecondDeviceCannotDisruptOwnerThroughCallbacks() async {
+        let harness = makeHarness([FakeMultitouchBackend.enumeration([deviceA, deviceB])])
+        var snapshots: [MouseEventHandler.GestureEventSnapshot] = []
+        harness.source.onSnapshot = { snapshots.append($0) }
+        harness.source.startLifecycle()
+        await runNext(harness)
+
+        harness.backend.emitFrame(registryId: 101, touches: contacts(3), timestamp: 1.00)
+        harness.backend.emitFrame(registryId: 202, touches: contacts(1), timestamp: 1.01)
+        harness.backend.emitFrame(registryId: 101, touches: contacts(3), timestamp: 1.02)
+        harness.backend.emitFrame(registryId: 202, touches: [], timestamp: 1.03)
+        harness.backend.emitFrame(registryId: 101, touches: [], timestamp: 1.04)
+        await drainMultitouchTasks()
+
+        XCTAssertEqual(
+            snapshots.map(\.phaseRawValue),
+            [NSEvent.Phase.began.rawValue, NSEvent.Phase.changed.rawValue, NSEvent.Phase.ended.rawValue]
+        )
+        XCTAssertEqual(snapshots.map(\.touches.count), [3, 3, 0])
+        XCTAssertEqual(harness.source.diagnosticsSnapshot().lastAcceptedCallbackTimestamp, 1.04)
+        await shutdown(harness)
+    }
+
+    func testSequentialGesturesFromTwoDevicesBothDeliver() async {
+        let harness = makeHarness([FakeMultitouchBackend.enumeration([deviceA, deviceB])])
+        var snapshots: [MouseEventHandler.GestureEventSnapshot] = []
+        harness.source.onSnapshot = { snapshots.append($0) }
+        harness.source.startLifecycle()
+        await runNext(harness)
+
+        harness.backend.emitFrame(registryId: 101, touches: contacts(3), timestamp: 1.00)
+        harness.backend.emitFrame(registryId: 101, touches: [], timestamp: 1.01)
+        harness.backend.emitFrame(registryId: 202, touches: contacts(1), timestamp: 1.02)
+        harness.backend.emitFrame(registryId: 202, touches: [], timestamp: 1.03)
+        await drainMultitouchTasks()
+
+        XCTAssertEqual(
+            snapshots.map(\.phaseRawValue),
+            [
+                NSEvent.Phase.began.rawValue,
+                NSEvent.Phase.ended.rawValue,
+                NSEvent.Phase.began.rawValue,
+                NSEvent.Phase.ended.rawValue
+            ]
+        )
+        XCTAssertEqual(snapshots.map(\.touches.count), [3, 0, 1, 0])
+        await shutdown(harness)
+    }
+
+    func testReplacementMidGestureClearsOwnerForNewGeneration() async throws {
+        let harness = makeHarness([
+            FakeMultitouchBackend.enumeration([deviceA, deviceB]),
+            FakeMultitouchBackend.enumeration([deviceA, deviceB])
+        ])
+        var snapshots: [MouseEventHandler.GestureEventSnapshot] = []
+        var replacementCount = 0
+        harness.source.onSnapshot = { snapshots.append($0) }
+        harness.source.onSourceWillReplace = { replacementCount += 1 }
+        harness.source.startLifecycle()
+        await runNext(harness)
+        let firstGeneration = try XCTUnwrap(harness.source.diagnosticsSnapshot().activeGeneration)
+
+        harness.backend.emitFrame(registryId: 101, touches: contacts(3), timestamp: 1.00)
+        await drainMultitouchTasks()
+        XCTAssertEqual(snapshots.map(\.phaseRawValue), [NSEvent.Phase.began.rawValue])
+
+        harness.source.requestRevalidation(.wake)
+        await runNext(harness)
+        XCTAssertEqual(replacementCount, 1)
+        XCTAssertNotEqual(harness.source.diagnosticsSnapshot().activeGeneration, firstGeneration)
+
+        harness.source.beginPerformanceCapture()
+        harness.backend.emitFrame(registryId: 202, touches: contacts(1), timestamp: 2.00)
+        harness.backend.emitFrame(
+            registryId: 101,
+            touches: contacts(3),
+            timestamp: 2.01,
+            refcon: MultitouchGestureSource.RegistrationToken(generation: firstGeneration, slot: 0).refcon
+        )
+        await drainMultitouchTasks()
+
+        XCTAssertEqual(
+            snapshots.map(\.phaseRawValue),
+            [NSEvent.Phase.began.rawValue, NSEvent.Phase.began.rawValue]
+        )
+        XCTAssertEqual(snapshots.last?.touches.count, 1)
+        XCTAssertEqual(harness.source.endPerformanceCapture()?.staleCallbacks, 1)
+        await shutdown(harness)
+    }
+
+    private func contacts(_ count: Int) -> [(x: Float, y: Float)] {
+        Array(repeating: (x: Float(0.5), y: Float(0.5)), count: count)
     }
 
     private func makeHarness(

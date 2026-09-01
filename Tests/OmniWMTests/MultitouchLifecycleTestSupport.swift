@@ -98,6 +98,7 @@ final class FakeMultitouchBackend {
     var unregisterResults: [UInt64: [Bool]] = [:]
     private(set) var calls: [Call] = []
     private(set) var registeredGenerations: [UInt] = []
+    private(set) var registeredSlots: [Int] = []
 
     private var enumerationIndex = 0
     private var registryIdByPointer: [UInt: UInt64] = [:]
@@ -143,15 +144,29 @@ final class FakeMultitouchBackend {
         calls.count(where: { $0 == expected })
     }
 
-    func emitEmptyFrame(registryId: UInt64, timestamp: Double) {
+    func emitFrame(
+        registryId: UInt64,
+        touches: [(x: Float, y: Float)],
+        timestamp: Double,
+        refcon: UnsafeMutableRawPointer? = nil
+    ) {
         guard let registration = callbackByRegistryId[registryId] else { return }
+        let stride = 96
+        let fingers = UnsafeMutableRawPointer.allocate(byteCount: max(touches.count, 1) * stride, alignment: 8)
+        defer { fingers.deallocate() }
+        for (index, touch) in touches.enumerated() {
+            let base = index * stride
+            fingers.storeBytes(of: Int32(4), toByteOffset: base + 20, as: Int32.self)
+            fingers.storeBytes(of: touch.x, toByteOffset: base + 32, as: Float.self)
+            fingers.storeBytes(of: touch.y, toByteOffset: base + 36, as: Float.self)
+        }
         _ = registration.callback(
             registration.device,
-            nil,
-            0,
+            touches.isEmpty ? nil : fingers,
+            Int32(touches.count),
             timestamp,
             0,
-            registration.refcon
+            refcon ?? registration.refcon
         )
     }
 
@@ -176,7 +191,9 @@ final class FakeMultitouchBackend {
     ) -> Bool {
         let registryId = registryId(for: ref)
         calls.append(.register(registryId))
-        registeredGenerations.append(UInt(bitPattern: refcon))
+        let token = MultitouchGestureSource.RegistrationToken(bitPattern: UInt(bitPattern: refcon))
+        registeredGenerations.append(token.generation)
+        registeredSlots.append(token.slot)
         let registered = nextResult(from: &registerResults, for: registryId) ?? true
         if registered {
             callbackByRegistryId[registryId] = (ref, callback, refcon)

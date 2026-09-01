@@ -67,7 +67,8 @@ final class MultitouchFrameMailbox: @unchecked Sendable {
 
     private struct State {
         var generation: UInt = 0
-        var hadTouches = false
+        var touchingSlots: UInt64 = 0
+        var ownerSlot: Int?
         var drainScheduled = false
         var pending: [Delivery] = []
         var spare: [Delivery] = []
@@ -84,7 +85,8 @@ final class MultitouchFrameMailbox: @unchecked Sendable {
     func activate(generation: UInt) {
         state.withLock { value in
             value.generation = generation
-            value.hadTouches = false
+            value.touchingSlots = 0
+            value.ownerSlot = nil
             value.drainScheduled = false
             value.pending.removeAll(keepingCapacity: true)
         }
@@ -94,7 +96,7 @@ final class MultitouchFrameMailbox: @unchecked Sendable {
         activate(generation: 0)
     }
 
-    func offer(_ frame: MultitouchGestureSource.RawFrame, generation: UInt) -> Bool {
+    func offer(_ frame: MultitouchGestureSource.RawFrame, generation: UInt, slot: Int) -> Bool {
         state.withLock { value in
             if let counters = value.performanceCounters {
                 _ = counters.rawCallbacks.wrappingAdd(1, ordering: .relaxed)
@@ -106,48 +108,62 @@ final class MultitouchFrameMailbox: @unchecked Sendable {
                 return false
             }
             let hasTouches = !frame.touches.isEmpty
-            let kind: Kind
-            switch (value.hadTouches, hasTouches) {
-            case (false, false):
-                return false
-            case (false, true):
-                kind = .began
+            let slotMask: UInt64 = 1 << UInt64(slot)
+            let wasTouching = value.touchingSlots & slotMask != 0
+            if hasTouches {
+                value.touchingSlots |= slotMask
+            } else {
+                value.touchingSlots &= ~slotMask
+            }
+            guard let owner = value.ownerSlot else {
+                guard hasTouches, !wasTouching else { return false }
+                value.ownerSlot = slot
                 makeRoomForGesture(in: &value)
-            case (true, true):
-                kind = .changed
-                if value.pending.last?.kind == .changed {
-                    value.pending[value.pending.count - 1] = Delivery(
-                        frame: frame,
-                        generation: generation,
-                        kind: kind
-                    )
-                    if let counters = value.performanceCounters {
-                        _ = counters.overwrittenChanges.wrappingAdd(1, ordering: .relaxed)
-                    }
-                    return scheduleDrainIfNeeded(in: &value)
+                return enqueue(.began, frame, generation: generation, in: &value)
+            }
+            guard owner == slot else { return false }
+            guard hasTouches else {
+                value.ownerSlot = nil
+                return enqueue(.ended, frame, generation: generation, in: &value)
+            }
+            if value.pending.last?.kind == .changed {
+                value.pending[value.pending.count - 1] = Delivery(
+                    frame: frame,
+                    generation: generation,
+                    kind: .changed
+                )
+                if let counters = value.performanceCounters {
+                    _ = counters.overwrittenChanges.wrappingAdd(1, ordering: .relaxed)
                 }
-            case (true, false):
-                kind = .ended
+                return scheduleDrainIfNeeded(in: &value)
             }
-            value.hadTouches = hasTouches
-            if value.pending.count == capacity,
-               let changedIndex = value.pending.firstIndex(where: { $0.kind == .changed })
-            {
-                value.pending.remove(at: changedIndex)
-            }
-            if kind == .ended {
-                makeRoomForEnd(in: &value)
-            }
-            guard value.pending.count < capacity else { return scheduleDrainIfNeeded(in: &value) }
-            value.pending.append(Delivery(frame: frame, generation: generation, kind: kind))
-            if let counters = value.performanceCounters {
-                if kind != .changed {
-                    _ = counters.transitionsQueued.wrappingAdd(1, ordering: .relaxed)
-                }
-                counters.maximumPendingFrames = max(counters.maximumPendingFrames, value.pending.count)
-            }
-            return scheduleDrainIfNeeded(in: &value)
+            return enqueue(.changed, frame, generation: generation, in: &value)
         }
+    }
+
+    private func enqueue(
+        _ kind: Kind,
+        _ frame: MultitouchGestureSource.RawFrame,
+        generation: UInt,
+        in value: inout State
+    ) -> Bool {
+        if value.pending.count == capacity,
+           let changedIndex = value.pending.firstIndex(where: { $0.kind == .changed })
+        {
+            value.pending.remove(at: changedIndex)
+        }
+        if kind == .ended {
+            makeRoomForEnd(in: &value)
+        }
+        guard value.pending.count < capacity else { return scheduleDrainIfNeeded(in: &value) }
+        value.pending.append(Delivery(frame: frame, generation: generation, kind: kind))
+        if let counters = value.performanceCounters {
+            if kind != .changed {
+                _ = counters.transitionsQueued.wrappingAdd(1, ordering: .relaxed)
+            }
+            counters.maximumPendingFrames = max(counters.maximumPendingFrames, value.pending.count)
+        }
+        return scheduleDrainIfNeeded(in: &value)
     }
 
     func take() -> [Delivery] {
@@ -279,6 +295,28 @@ final class MultitouchGestureSource {
         init(touches: consuming RawTouchBuffer, timestamp: Double) {
             self.touches = consume touches
             self.timestamp = timestamp
+        }
+    }
+
+    struct RegistrationToken: Equatable, Sendable {
+        static let slotCapacity = 64
+        private static let slotBits: UInt = 6
+
+        let generation: UInt
+        let slot: Int
+
+        init(generation: UInt, slot: Int) {
+            self.generation = generation
+            self.slot = slot
+        }
+
+        init(bitPattern: UInt) {
+            generation = bitPattern >> Self.slotBits
+            slot = Int(bitPattern & UInt(Self.slotCapacity - 1))
+        }
+
+        var refcon: UnsafeMutableRawPointer? {
+            UnsafeMutableRawPointer(bitPattern: generation << Self.slotBits | UInt(slot))
         }
     }
 
@@ -841,15 +879,16 @@ final class MultitouchGestureSource {
     private func register(enumeration: MultitouchBinding.Enumeration) -> Bool {
         guard let operations else { return false }
         let generation = Self.allocateRegistrationGeneration()
-        guard let refcon = UnsafeMutableRawPointer(bitPattern: generation) else {
+        guard enumeration.devices.count <= RegistrationToken.slotCapacity else {
             lastRegister = .rejected
             return false
         }
 
         var candidates: [Registration] = []
         candidates.reserveCapacity(enumeration.devices.count)
-        for device in enumeration.devices {
-            let registered = operations.register(device.ref, Self.contactCallback, refcon)
+        for (slot, device) in enumeration.devices.enumerated() {
+            let refcon = RegistrationToken(generation: generation, slot: slot).refcon
+            let registered = refcon.map { operations.register(device.ref, Self.contactCallback, $0) } ?? false
             lastRegister = registered ? .success : .rejected
             guard registered else {
                 _ = cleanup(&candidates)
@@ -1069,15 +1108,15 @@ final class MultitouchGestureSource {
     }
 
     private static let contactCallback: MultitouchBinding.ContactCallback = { _, fingers, count, timestamp, _, refcon in
-        let generation = refcon.map(UInt.init(bitPattern:)) ?? 0
+        let token = RegistrationToken(bitPattern: refcon.map(UInt.init(bitPattern:)) ?? 0)
         let frame = MultitouchGestureSource.buildRawFrame(fingers: fingers, count: count, timestamp: timestamp)
         guard let source = MultitouchGestureSource.shared else { return 0 }
-        source.enqueueRawFrame(frame, generation: generation)
+        source.enqueueRawFrame(frame, token: token)
         return 0
     }
 
-    private nonisolated func enqueueRawFrame(_ frame: RawFrame, generation: UInt) {
-        guard rawFrameMailbox.offer(frame, generation: generation) else { return }
+    private nonisolated func enqueueRawFrame(_ frame: RawFrame, token: RegistrationToken) {
+        guard rawFrameMailbox.offer(frame, generation: token.generation, slot: token.slot) else { return }
         DispatchQueue.main.async { [weak self] in
             MainActor.assumeIsolated {
                 self?.drainRawFrameMailbox()
