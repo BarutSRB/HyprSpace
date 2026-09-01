@@ -73,12 +73,18 @@ final class WorkspaceBarRevealSettingsTests: XCTestCase {
         )
 
         XCTAssertFalse(controller.isWorkspaceBarVisible(on: monitor))
-        XCTAssertEqual(controller.insetWorkingFrame(for: monitor), monitor.visibleFrame)
+        XCTAssertEqual(
+            controller.insetWorkingFrame(for: monitor),
+            CGRect(x: 5, y: 5, width: 1430, height: 850)
+        )
         XCTAssertEqual(controller.fullscreenLayoutFrame(for: monitor), monitor.visibleFrame)
 
         controller.setWorkspaceBarRevealHeld(true)
         XCTAssertTrue(controller.isWorkspaceBarVisible(on: monitor))
-        XCTAssertEqual(controller.insetWorkingFrame(for: monitor), monitor.visibleFrame)
+        XCTAssertEqual(
+            controller.insetWorkingFrame(for: monitor),
+            CGRect(x: 5, y: 5, width: 1430, height: 850)
+        )
         XCTAssertEqual(controller.fullscreenLayoutFrame(for: monitor), monitor.visibleFrame)
 
         settings.workspaceBarRevealModifier = .off
@@ -86,7 +92,7 @@ final class WorkspaceBarRevealSettingsTests: XCTestCase {
         XCTAssertTrue(controller.isWorkspaceBarVisible(on: monitor))
         XCTAssertEqual(
             controller.insetWorkingFrame(for: monitor),
-            CGRect(x: 0, y: 0, width: 1440, height: 836)
+            CGRect(x: 5, y: 5, width: 1430, height: 831)
         )
         XCTAssertEqual(
             controller.fullscreenLayoutFrame(for: monitor),

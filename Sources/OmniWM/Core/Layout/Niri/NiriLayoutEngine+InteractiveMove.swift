@@ -38,6 +38,7 @@ extension NiriLayoutEngine {
             originalFrame: windowNode.renderedFrame ?? windowNode.frame ?? .zero,
             isInsertMode: isInsertMode,
             orientation: orientation,
+            gaps: gaps,
             currentHoverTarget: nil
         )
 

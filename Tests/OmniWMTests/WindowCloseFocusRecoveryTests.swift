@@ -161,6 +161,9 @@ final class WindowCloseFocusRecoveryTests: XCTestCase {
         _ = try Self.observeRemoteFocus(in: fixture)
 
         let replacementToken = WindowToken(pid: fixture.pid, windowId: 951_105)
+        fixture.controller.axEventHandler.retainPreparedWindowSubscription(
+            UInt32(replacementToken.windowId)
+        )
         fixture.controller.axEventHandler.enqueueManagedReplacementCreate(
             .init(
                 windowId: UInt32(replacementToken.windowId),
@@ -214,6 +217,9 @@ final class WindowCloseFocusRecoveryTests: XCTestCase {
         )
 
         let replacementToken = WindowToken(pid: fixture.pid, windowId: 951_106)
+        fixture.controller.axEventHandler.retainPreparedWindowSubscription(
+            UInt32(replacementToken.windowId)
+        )
         fixture.controller.axEventHandler.enqueueManagedReplacementCreate(
             .init(
                 windowId: UInt32(replacementToken.windowId),
@@ -255,6 +261,9 @@ final class WindowCloseFocusRecoveryTests: XCTestCase {
         _ = try Self.observeRemoteFocus(in: fixture)
 
         let replacementToken = WindowToken(pid: fixture.pid, windowId: 951_107)
+        fixture.controller.axEventHandler.retainPreparedWindowSubscription(
+            UInt32(replacementToken.windowId)
+        )
         fixture.controller.axEventHandler.enqueueManagedReplacementCreate(
             .init(
                 windowId: UInt32(replacementToken.windowId),

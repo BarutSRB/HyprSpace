@@ -494,6 +494,7 @@ import QuartzCore
             frame: monitor.frame,
             visibleFrame: monitor.visibleFrame,
             workingFrame: layoutFrames?.workingFrame ?? monitor.visibleFrame,
+            borderSafeFillFrame: layoutFrames?.borderSafeFillFrame ?? monitor.visibleFrame,
             fullscreenLayoutFrame: layoutFrames?.fullscreenLayoutFrame ?? monitor.visibleFrame,
             scale: scale,
             orientation: orientation ?? monitor.autoOrientation

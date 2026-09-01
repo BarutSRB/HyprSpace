@@ -170,20 +170,22 @@ final class SurfacePresentationLiveTests: XCTestCase {
             backgroundColor: NSColor(srgbRed: 0.25, green: 0.25, blue: 0.25, alpha: 1)
         )
         let operationRecorder = LiveBorderOperationsRecorder()
+        let borderWidth: CGFloat = 12
+        let cornerRadii = WindowCornerRadii(uniform: 12)
         let redConfig = BorderConfig(
             enabled: true,
-            width: 12,
-            color: NSColor(srgbRed: 1, green: 0, blue: 0, alpha: 1)
+            width: borderWidth,
+            color: SettingsColor(red: 1, green: 0, blue: 0, alpha: 1)
         )
         let blueConfig = BorderConfig(
             enabled: true,
-            width: 12,
-            color: NSColor(srgbRed: 0, green: 0, blue: 1, alpha: 1)
+            width: borderWidth,
+            color: SettingsColor(red: 0, green: 0, blue: 1, alpha: 1)
         )
         let greenConfig = BorderConfig(
             enabled: true,
-            width: 12,
-            color: NSColor(srgbRed: 0, green: 1, blue: 0, alpha: 1)
+            width: borderWidth,
+            color: SettingsColor(red: 0, green: 1, blue: 0, alpha: 1)
         )
         let borderWindow = BorderWindow(config: redConfig, operations: operationRecorder.operations())
         defer {
@@ -198,7 +200,9 @@ final class SurfacePresentationLiveTests: XCTestCase {
         guard let display = shareable.displays.first(where: { $0.displayID == displayId }) else {
             throw XCTSkip("ScreenCaptureKit did not expose the target display")
         }
-        let captureRegion = ScreenCoordinateSpace.toWindowServer(rect: largeFrame).intersection(display.frame)
+        let captureRegion = ScreenCoordinateSpace.toWindowServer(
+            rect: largeFrame.insetBy(dx: -borderWidth, dy: -borderWidth)
+        ).intersection(display.frame)
         let filter = SCContentFilter(display: display, excludingWindows: [])
         let configuration = SCStreamConfiguration()
         configuration.sourceRect = captureRegion.offsetBy(dx: -display.frame.minX, dy: -display.frame.minY)
@@ -209,12 +213,19 @@ final class SurfacePresentationLiveTests: XCTestCase {
         configuration.capturesAudio = false
         configuration.ignoreShadowsDisplay = true
         configuration.shouldBeOpaque = true
+        let targetToken = WindowToken(pid: getpid(), windowId: clientWindow.windowNumber)
+        let baselineClientColor = try await capturedBorderPresentationColor(
+            at: smallFrame.center,
+            captureRegion: captureRegion,
+            filter: filter,
+            configuration: configuration
+        )
 
         XCTAssertTrue(
             borderWindow.update(
                 frame: smallFrame,
-                targetWid: UInt32(clientWindow.windowNumber),
-                cornerRadii: WindowCornerRadii(uniform: 12),
+                targetToken: targetToken,
+                cornerRadii: cornerRadii,
                 forceOrdering: true
             )
         )
@@ -225,6 +236,10 @@ final class SurfacePresentationLiveTests: XCTestCase {
         try await assertBorderPresentation(
             borderWindow,
             expected: BorderPresentationRGB(red: 255, green: 0, blue: 0),
+            expectedClient: baselineClientColor,
+            targetFrame: smallFrame,
+            borderWidth: borderWidth,
+            cornerRadii: cornerRadii,
             captureRegion: captureRegion,
             filter: filter,
             configuration: configuration,
@@ -237,8 +252,8 @@ final class SurfacePresentationLiveTests: XCTestCase {
         XCTAssertTrue(
             borderWindow.update(
                 frame: smallFrame,
-                targetWid: UInt32(clientWindow.windowNumber),
-                cornerRadii: WindowCornerRadii(uniform: 12)
+                targetToken: targetToken,
+                cornerRadii: cornerRadii
             )
         )
         XCTAssertEqual(operationRecorder.flushCount, flushesBeforeBlue + 1)
@@ -246,6 +261,10 @@ final class SurfacePresentationLiveTests: XCTestCase {
         try await assertBorderPresentation(
             borderWindow,
             expected: BorderPresentationRGB(red: 0, green: 0, blue: 255),
+            expectedClient: baselineClientColor,
+            targetFrame: smallFrame,
+            borderWidth: borderWidth,
+            cornerRadii: cornerRadii,
             captureRegion: captureRegion,
             filter: filter,
             configuration: configuration,
@@ -256,8 +275,8 @@ final class SurfacePresentationLiveTests: XCTestCase {
         XCTAssertTrue(
             borderWindow.update(
                 frame: smallFrame,
-                targetWid: UInt32(clientWindow.windowNumber),
-                cornerRadii: WindowCornerRadii(uniform: 12)
+                targetToken: targetToken,
+                cornerRadii: cornerRadii
             )
         )
         XCTAssertEqual(operationRecorder.flushCount, flushesBeforeIdenticalUpdate)
@@ -268,8 +287,8 @@ final class SurfacePresentationLiveTests: XCTestCase {
         XCTAssertTrue(
             borderWindow.update(
                 frame: largeFrame,
-                targetWid: UInt32(clientWindow.windowNumber),
-                cornerRadii: WindowCornerRadii(uniform: 12)
+                targetToken: targetToken,
+                cornerRadii: cornerRadii
             )
         )
         XCTAssertEqual(operationRecorder.flushCount, flushesBeforeGrowth + 1)
@@ -278,6 +297,10 @@ final class SurfacePresentationLiveTests: XCTestCase {
         try await assertBorderPresentation(
             borderWindow,
             expected: BorderPresentationRGB(red: 0, green: 0, blue: 255),
+            expectedClient: baselineClientColor,
+            targetFrame: largeFrame,
+            borderWidth: borderWidth,
+            cornerRadii: cornerRadii,
             captureRegion: captureRegion,
             filter: filter,
             configuration: configuration,
@@ -289,14 +312,18 @@ final class SurfacePresentationLiveTests: XCTestCase {
         XCTAssertTrue(
             borderWindow.update(
                 frame: largeFrame,
-                targetWid: UInt32(clientWindow.windowNumber),
-                cornerRadii: WindowCornerRadii(uniform: 12)
+                targetToken: targetToken,
+                cornerRadii: cornerRadii
             )
         )
         XCTAssertEqual(operationRecorder.flushCount, flushesBeforeGreen + 1)
         try await assertBorderPresentation(
             borderWindow,
             expected: BorderPresentationRGB(red: 0, green: 255, blue: 0),
+            expectedClient: baselineClientColor,
+            targetFrame: largeFrame,
+            borderWidth: borderWidth,
+            cornerRadii: cornerRadii,
             captureRegion: captureRegion,
             filter: filter,
             configuration: configuration,
@@ -309,16 +336,16 @@ final class SurfacePresentationLiveTests: XCTestCase {
         XCTAssertTrue(
             borderWindow.update(
                 frame: smallFrame,
-                targetWid: UInt32(clientWindow.windowNumber),
-                cornerRadii: WindowCornerRadii(uniform: 12)
+                targetToken: targetToken,
+                cornerRadii: cornerRadii
             )
         )
         clientWindow.setFrame(largeFrame, display: true)
         XCTAssertTrue(
             borderWindow.update(
                 frame: largeFrame,
-                targetWid: UInt32(clientWindow.windowNumber),
-                cornerRadii: WindowCornerRadii(uniform: 12)
+                targetToken: targetToken,
+                cornerRadii: cornerRadii
             )
         )
         XCTAssertEqual(operationRecorder.flushCount, flushesBeforeResizeCycle + 2)
@@ -329,6 +356,10 @@ final class SurfacePresentationLiveTests: XCTestCase {
         try await assertBorderPresentation(
             borderWindow,
             expected: BorderPresentationRGB(red: 0, green: 255, blue: 0),
+            expectedClient: baselineClientColor,
+            targetFrame: largeFrame,
+            borderWidth: borderWidth,
+            cornerRadii: cornerRadii,
             captureRegion: captureRegion,
             filter: filter,
             configuration: configuration,
@@ -630,53 +661,167 @@ final class SurfacePresentationLiveTests: XCTestCase {
         window.hidesOnDeactivate = false
         window.isReleasedWhenClosed = false
         window.sharingType = .readOnly
-        window.level = NSWindow.Level(rawValue: NSWindow.Level.normal.rawValue - 1)
+        window.level = .normal
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         return window
     }
 
-    private func borderPresentationSamples(
-        for borderWindow: BorderWindow
-    ) throws -> [BorderPresentationSample] {
-        let frame = try XCTUnwrap(borderWindow.frameOnScreen)
-        let edgeInset: CGFloat = 6
-        let outerCornerRadius: CGFloat = 24
-        let annulusRadius: CGFloat = 18
-        let diagonalOffset = annulusRadius / sqrt(2)
-        let cornerInset = outerCornerRadius - diagonalOffset
+    private func exteriorBorderPresentationSamples(
+        targetFrame: CGRect,
+        borderWidth: CGFloat,
+        cornerRadii: WindowCornerRadii
+    ) -> [BorderPresentationSample] {
+        let edgeOffset = borderWidth / 2
+
+        func cornerPoint(center: CGPoint, radius: CGFloat, xSign: CGFloat, ySign: CGFloat) -> CGPoint {
+            let offset = (radius + edgeOffset) / sqrt(2)
+            return CGPoint(x: center.x + xSign * offset, y: center.y + ySign * offset)
+        }
+
         return [
-            BorderPresentationSample(label: "top", point: CGPoint(x: frame.midX, y: frame.maxY - edgeInset)),
-            BorderPresentationSample(label: "bottom", point: CGPoint(x: frame.midX, y: frame.minY + edgeInset)),
-            BorderPresentationSample(label: "left", point: CGPoint(x: frame.minX + edgeInset, y: frame.midY)),
-            BorderPresentationSample(label: "right", point: CGPoint(x: frame.maxX - edgeInset, y: frame.midY)),
             BorderPresentationSample(
-                label: "top-left",
-                point: CGPoint(x: frame.minX + cornerInset, y: frame.maxY - cornerInset)
+                label: "top-exterior",
+                point: CGPoint(x: targetFrame.midX, y: targetFrame.maxY + edgeOffset)
             ),
             BorderPresentationSample(
-                label: "top-right",
-                point: CGPoint(x: frame.maxX - cornerInset, y: frame.maxY - cornerInset)
+                label: "bottom-exterior",
+                point: CGPoint(x: targetFrame.midX, y: targetFrame.minY - edgeOffset)
             ),
             BorderPresentationSample(
-                label: "bottom-left",
-                point: CGPoint(x: frame.minX + cornerInset, y: frame.minY + cornerInset)
+                label: "left-exterior",
+                point: CGPoint(x: targetFrame.minX - edgeOffset, y: targetFrame.midY)
             ),
             BorderPresentationSample(
-                label: "bottom-right",
-                point: CGPoint(x: frame.maxX - cornerInset, y: frame.minY + cornerInset)
+                label: "right-exterior",
+                point: CGPoint(x: targetFrame.maxX + edgeOffset, y: targetFrame.midY)
+            ),
+            BorderPresentationSample(
+                label: "top-left-exterior",
+                point: cornerPoint(
+                    center: CGPoint(
+                        x: targetFrame.minX + cornerRadii.topLeft,
+                        y: targetFrame.maxY - cornerRadii.topLeft
+                    ),
+                    radius: cornerRadii.topLeft,
+                    xSign: -1,
+                    ySign: 1
+                )
+            ),
+            BorderPresentationSample(
+                label: "top-right-exterior",
+                point: cornerPoint(
+                    center: CGPoint(
+                        x: targetFrame.maxX - cornerRadii.topRight,
+                        y: targetFrame.maxY - cornerRadii.topRight
+                    ),
+                    radius: cornerRadii.topRight,
+                    xSign: 1,
+                    ySign: 1
+                )
+            ),
+            BorderPresentationSample(
+                label: "bottom-left-exterior",
+                point: cornerPoint(
+                    center: CGPoint(
+                        x: targetFrame.minX + cornerRadii.bottomLeft,
+                        y: targetFrame.minY + cornerRadii.bottomLeft
+                    ),
+                    radius: cornerRadii.bottomLeft,
+                    xSign: -1,
+                    ySign: -1
+                )
+            ),
+            BorderPresentationSample(
+                label: "bottom-right-exterior",
+                point: cornerPoint(
+                    center: CGPoint(
+                        x: targetFrame.maxX - cornerRadii.bottomRight,
+                        y: targetFrame.minY + cornerRadii.bottomRight
+                    ),
+                    radius: cornerRadii.bottomRight,
+                    xSign: 1,
+                    ySign: -1
+                )
             )
         ]
+    }
+
+    private func interiorClientPresentationSamples(
+        targetFrame: CGRect,
+        borderWidth: CGFloat
+    ) -> [BorderPresentationSample] {
+        let edgeInset = borderWidth / 2
+        return [
+            BorderPresentationSample(
+                label: "top-client",
+                point: CGPoint(x: targetFrame.midX, y: targetFrame.maxY - edgeInset)
+            ),
+            BorderPresentationSample(
+                label: "bottom-client",
+                point: CGPoint(x: targetFrame.midX, y: targetFrame.minY + edgeInset)
+            ),
+            BorderPresentationSample(
+                label: "left-client",
+                point: CGPoint(x: targetFrame.minX + edgeInset, y: targetFrame.midY)
+            ),
+            BorderPresentationSample(
+                label: "right-client",
+                point: CGPoint(x: targetFrame.maxX - edgeInset, y: targetFrame.midY)
+            )
+        ]
+    }
+
+    private func capturedBorderPresentationColor(
+        at appKitPoint: CGPoint,
+        captureRegion: CGRect,
+        filter: SCContentFilter,
+        configuration: SCStreamConfiguration
+    ) async throws -> BorderPresentationRGB {
+        let image = try await SCScreenshotManager.captureImage(
+            contentFilter: filter,
+            configuration: configuration
+        )
+        let bitmap = try XCTUnwrap(BorderPresentationBitmap(image: image))
+        let pixelPoint = borderPresentationPixelPoint(
+            for: appKitPoint,
+            captureRegion: captureRegion,
+            bitmap: bitmap
+        )
+        return try XCTUnwrap(bitmap.medianColor(at: pixelPoint))
     }
 
     private func assertBorderPresentation(
         _ borderWindow: BorderWindow,
         expected: BorderPresentationRGB,
+        expectedClient: BorderPresentationRGB,
+        targetFrame: CGRect,
+        borderWidth: CGFloat,
+        cornerRadii: WindowCornerRadii,
         captureRegion: CGRect,
         filter: SCContentFilter,
         configuration: SCStreamConfiguration,
         label: String
     ) async throws {
-        let samples = try borderPresentationSamples(for: borderWindow)
+        XCTAssertTrue(
+            try XCTUnwrap(borderWindow.targetFrameOnScreen)
+                .approximatelyEqual(to: targetFrame, tolerance: 0.5)
+        )
+        XCTAssertTrue(
+            try XCTUnwrap(borderWindow.frameOnScreen)
+                .approximatelyEqual(
+                    to: targetFrame.insetBy(dx: -borderWidth, dy: -borderWidth),
+                    tolerance: 0.5
+                )
+        )
+        let borderSamples = exteriorBorderPresentationSamples(
+            targetFrame: targetFrame,
+            borderWidth: borderWidth,
+            cornerRadii: cornerRadii
+        )
+        let clientSamples = interiorClientPresentationSamples(
+            targetFrame: targetFrame,
+            borderWidth: borderWidth
+        )
         let clock = ContinuousClock()
         let deadline = clock.now.advanced(by: .seconds(2))
         var lastImage: CGImage?
@@ -689,7 +834,7 @@ final class SurfacePresentationLiveTests: XCTestCase {
                 let bitmap = BorderPresentationBitmap(image: image)
             {
                 lastImage = image
-                lastMismatches = samples.compactMap { sample in
+                let borderMismatches = borderSamples.compactMap { sample in
                     let point = borderPresentationPixelPoint(
                         for: sample.point,
                         captureRegion: captureRegion,
@@ -703,6 +848,21 @@ final class SurfacePresentationLiveTests: XCTestCase {
                     }
                     return nil
                 }
+                let clientMismatches = clientSamples.compactMap { sample in
+                    let point = borderPresentationPixelPoint(
+                        for: sample.point,
+                        captureRegion: captureRegion,
+                        bitmap: bitmap
+                    )
+                    guard let actual = bitmap.medianColor(at: point) else {
+                        return "\(sample.label)=out-of-bounds"
+                    }
+                    guard borderPresentationColor(actual, matches: expectedClient) else {
+                        return "\(sample.label)=\(actual.red),\(actual.green),\(actual.blue)"
+                    }
+                    return nil
+                }
+                lastMismatches = borderMismatches + clientMismatches
                 if lastMismatches.isEmpty {
                     try writeBorderPresentationImage(image, label: label)
                     return

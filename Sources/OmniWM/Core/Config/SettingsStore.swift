@@ -183,20 +183,49 @@ final class SettingsStore {
         didSet { scheduleSave() }
     }
 
-    var borderColorRed = SettingsStore.defaultExport.borderColorRed {
+    var borderColor = SettingsColor(
+        red: SettingsStore.defaultExport.borderColorRed,
+        green: SettingsStore.defaultExport.borderColorGreen,
+        blue: SettingsStore.defaultExport.borderColorBlue,
+        alpha: SettingsStore.defaultExport.borderColorAlpha
+    ) {
         didSet { scheduleSave() }
     }
 
-    var borderColorGreen = SettingsStore.defaultExport.borderColorGreen {
-        didSet { scheduleSave() }
+    var borderColorRed: Double {
+        get { borderColor.red }
+        set {
+            var color = borderColor
+            color.red = newValue
+            borderColor = color
+        }
     }
 
-    var borderColorBlue = SettingsStore.defaultExport.borderColorBlue {
-        didSet { scheduleSave() }
+    var borderColorGreen: Double {
+        get { borderColor.green }
+        set {
+            var color = borderColor
+            color.green = newValue
+            borderColor = color
+        }
     }
 
-    var borderColorAlpha = SettingsStore.defaultExport.borderColorAlpha {
-        didSet { scheduleSave() }
+    var borderColorBlue: Double {
+        get { borderColor.blue }
+        set {
+            var color = borderColor
+            color.blue = newValue
+            borderColor = color
+        }
+    }
+
+    var borderColorAlpha: Double {
+        get { borderColor.alpha }
+        set {
+            var color = borderColor
+            color.alpha = newValue
+            borderColor = color
+        }
     }
 
     var overviewZoom = SettingsStore.defaultExport.overviewZoom {
@@ -916,10 +945,12 @@ final class SettingsStore {
 
         bordersEnabled = export.bordersEnabled
         borderWidth = SettingsStore.validatedBorderWidth(export.borderWidth)
-        borderColorRed = SettingsStore.validatedColorComponent(export.borderColorRed)
-        borderColorGreen = SettingsStore.validatedColorComponent(export.borderColorGreen)
-        borderColorBlue = SettingsStore.validatedColorComponent(export.borderColorBlue)
-        borderColorAlpha = SettingsStore.validatedColorComponent(export.borderColorAlpha)
+        borderColor = SettingsColor(
+            red: SettingsStore.validatedColorComponent(export.borderColorRed),
+            green: SettingsStore.validatedColorComponent(export.borderColorGreen),
+            blue: SettingsStore.validatedColorComponent(export.borderColorBlue),
+            alpha: SettingsStore.validatedColorComponent(export.borderColorAlpha)
+        )
 
         overviewZoom = SettingsStore.validatedOverviewZoom(export.overviewZoom)
         overviewBackdropColor = SettingsStore.validatedOverviewColor(

@@ -65,6 +65,44 @@ enum InvariantChecks {
             }
         }
 
+        if case let .external(identity) = snapshot.focusSession.nativeFocusOwner,
+           let parentToken = identity.verifiedManagedParentToken
+        {
+            if identity.exactToken == parentToken {
+                violations.append(
+                    .init(
+                        code: "external_focus_parent_matches_child",
+                        message: "Verified external-focus parent \(parentToken) matches the external child."
+                    )
+                )
+            }
+            if snapshot.focusSession.selectedManagedToken != parentToken {
+                violations.append(
+                    .init(
+                        code: "external_focus_parent_selection_mismatch",
+                        message: "Verified external-focus parent \(parentToken) does not match managed selection."
+                    )
+                )
+            }
+            if let parentWindow = windowByToken[parentToken] {
+                if parentWindow.lifecyclePhase == .destroyed {
+                    violations.append(
+                        .init(
+                            code: "external_focus_parent_destroyed",
+                            message: "Verified external-focus parent \(parentToken) points to a destroyed window."
+                        )
+                    )
+                }
+            } else {
+                violations.append(
+                    .init(
+                        code: "external_focus_parent_missing",
+                        message: "Verified external-focus parent \(parentToken) is missing from the runtime snapshot."
+                    )
+                )
+            }
+        }
+
         if let pendingToken = snapshot.focusSession.pendingManagedFocus.token,
            windowByToken[pendingToken] == nil
         {

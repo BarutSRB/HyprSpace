@@ -780,6 +780,38 @@ final class NativeTitleBarDragTests: NiriInteractionTestCase {
         XCTAssertNil(fixture.controller.workspaceManager.entry(for: fixture.token))
     }
 
+    func testStaleReusedWindowIdFrameEventCannotAdvanceNativeDrag() throws {
+        let fixture = try makeFixture(pid: 561_027)
+        beginPlainDrag(fixture)
+        var frameReadCount = 0
+        fixture.handler.nativeWindowFrameProvider = { _ in
+            frameReadCount += 1
+            return fixture.frame.offsetBy(dx: 12, dy: 0)
+        }
+        fixture.controller.axEventHandler.windowInfoProvider = { windowId in
+            WindowServerInfo(
+                id: windowId,
+                pid: fixture.token.pid + 1,
+                level: 0,
+                frame: fixture.frame.offsetBy(dx: 12, dy: 0)
+            )
+        }
+        let worldSeq = fixture.controller.workspaceManager.worldSeq
+
+        fixture.controller.axEventHandler.handleCGSEvent(
+            .frameChanged(windowId: UInt32(fixture.token.windowId))
+        )
+
+        XCTAssertEqual(frameReadCount, 0)
+        XCTAssertEqual(fixture.controller.workspaceManager.worldSeq, worldSeq)
+        XCTAssertNil(fixture.controller.layoutRefreshController.layoutState.pendingRefresh)
+        XCTAssertEqual(fixture.handler.state.nativeTitleBarDrag?.token, fixture.token)
+        if case .dragging? = fixture.handler.state.nativeTitleBarDrag?.phase {
+        } else {
+            XCTFail("a stale reused-window event cannot advance the active drag")
+        }
+    }
+
     func testServiceCleanupCannotRestoreStaleAppliedFrameDeduplication() throws {
         let fixture = try makeFixture(pid: 561_012)
         beginPlainDrag(fixture)
@@ -915,6 +947,22 @@ final class NativeTitleBarDragTests: NiriInteractionTestCase {
             orientation: .horizontal
         )
         let frame = try XCTUnwrap(frames[token])
+        controller.axEventHandler.windowInfoProvider = { windowId in
+            let resolvedToken: WindowToken
+            if Int(windowId) == token.windowId {
+                resolvedToken = token
+            } else if Int(windowId) == otherToken.windowId {
+                resolvedToken = otherToken
+            } else {
+                return nil
+            }
+            return WindowServerInfo(
+                id: windowId,
+                pid: resolvedToken.pid,
+                level: 0,
+                frame: frames[resolvedToken] ?? .zero
+            )
+        }
         controller.axManager.confirmFrameWrite(for: token.windowId, frame: frame)
         controller.layoutRefreshController.resetState()
         controller.hasStartedServices = true

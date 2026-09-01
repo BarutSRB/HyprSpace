@@ -79,6 +79,15 @@ private struct DeferredScratchpadStacking {
 
 @MainActor @Observable
 final class WMController {
+    private struct BorderLayoutConfig: Equatable {
+        let enabled: Bool
+        let width: CGFloat
+
+        func clearance(scale: CGFloat) -> CGFloat {
+            BorderConfig.layoutClearance(enabled: enabled, width: width, scale: scale)
+        }
+    }
+
     struct StatusBarWorkspaceSummary: Equatable {
         let monitorId: Monitor.ID
         let workspaceLabel: String
@@ -108,6 +117,8 @@ final class WMController {
     var diagnosticsIssues: [DiagnosticsIssue] = []
 
     let settings: SettingsStore
+    @ObservationIgnored
+    private var appliedBorderLayoutConfig: BorderLayoutConfig
     let workspaceManager: WorkspaceManager
     let hotkeys = HotkeyCenter()
     private(set) var hotkeyRegistrationFailures: [HotkeyCommand: HotkeyRegistrationFailureReason] = [:]
@@ -319,6 +330,10 @@ final class WMController {
         workspaceBarIconResolver: WorkspaceBarIconResolver? = nil
     ) {
         self.settings = settings
+        appliedBorderLayoutConfig = BorderLayoutConfig(
+            enabled: settings.bordersEnabled,
+            width: CGFloat(settings.borderWidth)
+        )
         self.workspaceBarIconResolver = workspaceBarIconResolver
             ?? WorkspaceBarIconResolver(settingsFileURL: settings.settingsFileURL)
         motionPolicy = MotionPolicy(animationsEnabled: settings.animationsEnabled)
@@ -368,11 +383,15 @@ final class WMController {
                 )
             }
         }
-        workspaceManager.onSessionStateChanged = { [weak self] in
-            self?.handleSessionStateChanged()
+        workspaceManager.onSessionStateChanged = { [weak self] surfaceScope in
+            self?.handleSessionStateChanged(surfaceScope: surfaceScope)
         }
-        workspaceManager.onRuntimeInvalidation = { [weak self] workspaceId, domains in
-            self?.handleRuntimeInvalidation(workspaceId: workspaceId, domains: domains)
+        workspaceManager.onRuntimeInvalidation = { [weak self] workspaceId, domains, surfaceScope in
+            self?.handleRuntimeInvalidation(
+                workspaceId: workspaceId,
+                domains: domains,
+                surfaceScope: surfaceScope
+            )
         }
         workspaceManager.onWindowPresenceObserved = { [weak self] handle in
             self?.layoutRefreshController.recordWindowPresence(handle)
@@ -603,7 +622,23 @@ final class WMController {
     }
 
     func borderSettingsChanged() {
-        surfaceReconciler.noteWorldChanged()
+        let current = BorderLayoutConfig(
+            enabled: settings.bordersEnabled,
+            width: CGFloat(settings.borderWidth)
+        )
+        let previous = appliedBorderLayoutConfig
+        appliedBorderLayoutConfig = current
+        let clearanceChanged = workspaceManager.monitors.contains { monitor in
+            let scale = backingScaleFactor(for: monitor)
+            return previous.clearance(scale: scale) != current.clearance(scale: scale)
+        }
+        if clearanceChanged {
+            workspaceManager.invalidateAllLayouts()
+            layoutRefreshController.requestRelayout(reason: .layoutConfigChanged)
+            surfaceReconciler.noteWorldChanged()
+        } else {
+            surfaceReconciler.noteBorderChanged()
+        }
     }
 
     func setWorkspaceBarEnabled(_ enabled: Bool) {
@@ -1040,10 +1075,14 @@ final class WMController {
     }
 
     func innerGap(for monitor: Monitor) -> CGFloat {
-        guard settings.gapSettings(for: monitor)?.innerGap != nil else {
-            return CGFloat(workspaceManager.gaps)
-        }
-        return settings.resolvedGapSettings(for: monitor).innerGap
+        innerGap(for: monitor, scale: backingScaleFactor(for: monitor))
+    }
+
+    func innerGap(for monitor: Monitor, scale: CGFloat) -> CGFloat {
+        let rawGap = settings.gapSettings(for: monitor)?.innerGap == nil
+            ? CGFloat(workspaceManager.gaps)
+            : settings.resolvedGapSettings(for: monitor).innerGap
+        return max(rawGap, borderClearance(scale: scale))
     }
 
     func innerGap(for workspaceId: WorkspaceDescriptor.ID) -> CGFloat {
@@ -1053,45 +1092,121 @@ final class WMController {
         return innerGap(for: monitor)
     }
 
+    func resolvedDwindleSettings(for monitor: Monitor) -> ResolvedDwindleSettings {
+        resolvedDwindleSettings(for: monitor, scale: backingScaleFactor(for: monitor))
+    }
+
+    func resolvedDwindleSettings(for monitor: Monitor, scale: CGFloat) -> ResolvedDwindleSettings {
+        let resolved = settings.resolvedDwindleSettings(for: monitor)
+        return ResolvedDwindleSettings(
+            smartSplit: resolved.smartSplit,
+            defaultSplitRatio: resolved.defaultSplitRatio,
+            splitWidthMultiplier: resolved.splitWidthMultiplier,
+            singleWindowFit: resolved.singleWindowFit,
+            useGlobalGaps: resolved.useGlobalGaps,
+            innerGap: max(resolved.innerGap, borderClearance(scale: scale))
+        )
+    }
+
     func layoutFrames(
         for monitor: Monitor,
         scale: CGFloat
-    ) -> (workingFrame: CGRect, fullscreenLayoutFrame: CGRect) {
+    ) -> (workingFrame: CGRect, borderSafeFillFrame: CGRect, fullscreenLayoutFrame: CGRect) {
         let reservedTopInset = workspaceBarReservedTopInset(for: monitor)
         let gaps = settings.resolvedGapSettings(for: monitor)
         let menuBarInset = max(0, monitor.frame.maxY - monitor.visibleFrame.maxY)
-        let struts = Struts(
+        let normalizedTop = normalizedTopStrut(
+            top: gaps.outerGapTop,
+            menuBarInset: menuBarInset,
+            reservedTopInset: reservedTopInset
+        )
+        let rawStruts = Struts(
             left: gaps.outerGapLeft,
             right: gaps.outerGapRight,
-            top: normalizedTopStrut(
-                top: gaps.outerGapTop,
-                menuBarInset: menuBarInset,
-                reservedTopInset: reservedTopInset
-            ),
+            top: normalizedTop,
             bottom: gaps.outerGapBottom
         )
-        let workingFrame = computeWorkingArea(parentArea: monitor.visibleFrame, scale: scale, struts: struts)
+        let clearance = borderClearance(scale: scale)
+        let effectiveStruts = Struts(
+            left: max(rawStruts.left, clearance),
+            right: max(rawStruts.right, clearance),
+            top: max(rawStruts.top, clearance),
+            bottom: max(rawStruts.bottom, clearance)
+        )
+        let rawWorkingFrame = computeWorkingArea(
+            parentArea: monitor.visibleFrame,
+            scale: scale,
+            struts: rawStruts
+        )
+        let workingFrame = computeWorkingArea(
+            parentArea: monitor.visibleFrame,
+            scale: scale,
+            struts: effectiveStruts
+        )
         let fullscreenLayoutFrame: CGRect
+        let borderSafeFillFrame: CGRect
         if gaps.fullscreenUsesOuterGaps {
-            fullscreenLayoutFrame = workingFrame
+            fullscreenLayoutFrame = rawWorkingFrame
+            borderSafeFillFrame = workingFrame
         } else {
             fullscreenLayoutFrame = computeWorkingArea(
                 parentArea: monitor.visibleFrame,
                 scale: scale,
                 struts: Struts(top: reservedTopInset)
             )
+            borderSafeFillFrame = computeWorkingArea(
+                parentArea: monitor.visibleFrame,
+                scale: scale,
+                struts: Struts(
+                    left: clearance,
+                    right: clearance,
+                    top: max(reservedTopInset, clearance),
+                    bottom: clearance
+                )
+            )
         }
-        return (workingFrame, fullscreenLayoutFrame)
+        return (workingFrame, borderSafeFillFrame, fullscreenLayoutFrame)
+    }
+
+    func niriInteractionGeometry(
+        for monitor: Monitor
+    ) -> (workingFrame: CGRect, innerGap: CGFloat, scale: CGFloat) {
+        niriInteractionGeometry(for: monitor, scale: backingScaleFactor(for: monitor))
+    }
+
+    func niriInteractionGeometry(
+        for monitor: Monitor,
+        scale: CGFloat
+    ) -> (workingFrame: CGRect, innerGap: CGFloat, scale: CGFloat) {
+        let workingFrame = layoutFrames(for: monitor, scale: scale).workingFrame
+        return (workingFrame, innerGap(for: monitor, scale: scale), scale)
     }
 
     func insetWorkingFrame(for monitor: Monitor) -> CGRect {
-        let scale = NSScreen.screens.first(where: { $0.displayId == monitor.displayId })?.backingScaleFactor ?? 2.0
+        let scale = backingScaleFactor(for: monitor)
         return layoutFrames(for: monitor, scale: scale).workingFrame
     }
 
     func fullscreenLayoutFrame(for monitor: Monitor) -> CGRect {
-        let scale = NSScreen.screens.first(where: { $0.displayId == monitor.displayId })?.backingScaleFactor ?? 2.0
+        let scale = backingScaleFactor(for: monitor)
         return layoutFrames(for: monitor, scale: scale).fullscreenLayoutFrame
+    }
+
+    func borderSafeFillFrame(for monitor: Monitor) -> CGRect {
+        let scale = backingScaleFactor(for: monitor)
+        return layoutFrames(for: monitor, scale: scale).borderSafeFillFrame
+    }
+
+    func backingScaleFactor(for monitor: Monitor) -> CGFloat {
+        NSScreen.screens.first(where: { $0.displayId == monitor.displayId })?.backingScaleFactor ?? 2.0
+    }
+
+    private func borderClearance(scale: CGFloat) -> CGFloat {
+        BorderConfig.layoutClearance(
+            enabled: settings.bordersEnabled,
+            width: CGFloat(settings.borderWidth),
+            scale: scale
+        )
     }
 
     private func workspaceBarReservedTopInset(for monitor: Monitor) -> CGFloat {
@@ -1250,8 +1365,13 @@ final class WMController {
         placementResolver.monitorForInteraction()
     }
 
-    private func handleSessionStateChanged() {
-        surfaceReconciler.noteWorldChanged()
+    private func handleSessionStateChanged(surfaceScope: SessionSurfaceInvalidationScope) {
+        switch surfaceScope {
+        case .full:
+            surfaceReconciler.noteWorldChanged()
+        case .border:
+            surfaceReconciler.noteBorderChanged()
+        }
         let changeSet = focusNotificationDispatcher.notifyFocusChangesIfNeeded()
         if statusBarRefreshIsEnabled {
             refreshStatusBar()
@@ -1274,9 +1394,15 @@ final class WMController {
 
     private func handleRuntimeInvalidation(
         workspaceId: WorkspaceDescriptor.ID?,
-        domains: InvalidationDomain
+        domains: InvalidationDomain,
+        surfaceScope: SessionSurfaceInvalidationScope
     ) {
-        surfaceReconciler.noteWorldChanged()
+        switch surfaceScope {
+        case .full:
+            surfaceReconciler.noteWorldChanged()
+        case .border:
+            surfaceReconciler.noteBorderChanged()
+        }
         guard domains.contains(.workspace) || domains.contains(.fullscreen) else { return }
         guard runtimeFrameJobCancellationSuppressionDepth == 0 else { return }
         cancelPendingFrameJobsForInvalidation(workspaceId: workspaceId)
@@ -3068,7 +3194,10 @@ final class WMController {
             if workspaceManager.entry(for: token) != nil,
                let windowId = UInt32(exactly: token.windowId)
             {
-                axEventHandler.finishAdmissionRetryAfterTracking(windowId: windowId)
+                axEventHandler.finishRuleReevaluationAfterTracking(
+                    windowId: windowId,
+                    wasNewlyManaged: existingEntry == nil
+                )
             }
         }
 

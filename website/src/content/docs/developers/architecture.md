@@ -419,14 +419,16 @@ Scoped reconciliation reduces application-root enumeration and full AX-fact work
 
 **Plan-building runs inside a commit.** `buildRelayoutEffectPlan` calls `NiriLayoutHandler.layoutWithNiriEngine` (and the Dwindle equivalent), which run `syncWindows`/`removeWindows`/`restoreInitialPlacements` on the engines inside `workspaceManager.withBatchedLayoutBuild` — a single synchronous `layout_build` commit that also stamps each plan's `plannedSeq`. The layout engines return raw `[WindowToken: CGRect]` frame maps; the handlers wrap those into a `WorkspaceLayoutPlan` → `WorkspaceLayoutDiff` → `EffectPlan` (`Core/Layout/LayoutBoundary.swift`).
 
+**Monitor geometry has three explicit frames.** `LayoutMonitorSnapshot` carries a normal `workingFrame`, a `borderSafeFillFrame`, and a `fullscreenLayoutFrame`. When focus borders are enabled, `WMController` rounds the configured border width upward to a physical pixel and floors the runtime inner gap plus each final normalized outer strut to that clearance. Raw global and per-monitor settings are not rewritten; Dwindle's monitor-local `useGlobalGaps = false` path passes through the same runtime resolver. Normal tiled and valid custom-fit windows use `workingFrame`; Niri maximized windows and Niri/Dwindle single-window fill use `borderSafeFillFrame`; true layout fullscreen remains borderless and uses `fullscreenLayoutFrame` unchanged.
+
 **Frame application.** `executeEffectPlan` hands each plan's diff to `LayoutDiffExecutor`, which calls `AXManager.applyFramesParallel`. Only after the plan's sequence is accepted, its workspace-scoped `nativeFullscreenSlots` projection is handed directly to `SurfaceReconciler`; settled plans also schedule the normal Stage 4 scene reconciliation.
 
 ### 3.6 Stage 4 — Surface Reconciliation
 
 Auxiliary UI — the focus border, per-monitor workspace bars, shared Niri/Dwindle tab rails, native-fullscreen placeholder panels, and parking-edge masks — is no longer pushed ad hoc by individual managers. `SurfaceReconciler` (`Core/Surface/SurfaceReconciler.swift`) derives all of it in one place:
 
-1. State-mutating paths call `surfaceReconciler.noteWorldChanged()` (or `noteRestackOccurred()`). These are coalesced into a single `CFRunLoopPerformBlock` drain on the main run loop.
-2. On drain, `runFullReconcile` builds a fresh `WorldView` (a read-only facade over the world), and `SurfaceDerivation.derive` produces a `DesiredSurfaceScene` (optional border, tab rails, placeholders, bars, and `parkingEdgeMasks`).
+1. State-mutating paths request either a full-scene reconcile or a border-only reconcile. External focus-owner projection, floating border geometry, suppression, system-modal state, restack, color, and display-scale changes take the border-only route. Managed selection changes remain full-scene because workspace bars and native-fullscreen placeholders also consume that state. A coalesced full-scene request always wins. Both scopes drain through one `CFRunLoopPerformBlock` on the main run loop.
+2. On a full drain, `runFullReconcile` builds a fresh `WorldView` (a read-only facade over the world), and `SurfaceDerivation.derive` produces a `DesiredSurfaceScene` (optional border, tab rails, placeholders, bars, and `parkingEdgeMasks`). The border-only route derives and applies only the border while retaining the other applied surfaces. A forced restack additionally re-applies ordering to the already-derived tab rails and native-fullscreen placeholders without rebuilding their desired state.
 3. The desired scene is diffed (by value equality) against the last applied scene; only changed surfaces are touched, routed to `BorderSurfaceApplier`, `WorkspaceBarManager.apply(_:)`, `TabRailManager`, `NativeFullscreenPlaceholderManager`, and `ParkingEdgeMaskManager`.
 
 Native-fullscreen placeholders have a split projection. `WorldView` derives stable lifecycle/content descriptors from every fullscreen record, including hidden descriptors retained through workspace switches and temporary entry loss. Niri and Dwindle attach exact rendered slot frames and layout visibility to each accepted `WorkspaceLayoutDiff`: Niri uses its current frame map plus `hiddenHandles`; Dwindle uses its interpolated frame map and active group member. `SurfaceReconciler` joins the two by `record.originalToken`, validates the current token, and uses the geometry-only move path only when token, workspace, selection, and visibility state are unchanged. This avoids rereading engine side effects, keeps rejected plans away from AppKit, and prevents the applied scene from advancing beyond the actual panel state.
@@ -668,6 +670,8 @@ Focus-only switching between key windows inside one application requires a stage
 
 `FocusPolicyEngine` (`Core/Reconcile/`) is a separate concern: time-bounded `FocusPolicyLease`s that suppress focus-follows-mouse during menus and app-switch transitions, scheduled on the same `DeadlineWheel`.
 
+Native focus ownership and border projection are intentionally separate. `renderableFocusToken` remains managed-native-only for focus consumers and IPC. An exact external owner is stored as `ExternalFocusIdentity`; it may carry a `verifiedManagedParentToken` only after WindowServer confirms both the child's PID/WID and the parent's PID/WID. `borderFocusToken` projects that parent only while it is still the live `selectedManagedToken`. The child remains unmanaged and unsubscribed, selection is not rewritten, and PID-only, independent external, owned-surface, mismatched, or stale evidence produces no border.
+
 ### 4.6 Input Handling
 
 **Hotkeys** (`Sources/OmniWM/Core/Input/`)
@@ -695,6 +699,8 @@ enum CGSWindowEvent {
 ```
 
 Window create/move/front-app events originate here; AX *destroy/miniaturize/focused-window-changed* come from the per-app AX observers.
+
+`AXEventHandler` is the sole owner of WindowServer movement subscriptions. The private subscription call replaces the complete set, so each update submits one sorted, deduplicated, nonempty array containing every managed entry, including hidden, parked, and native-fullscreen entries, plus exact prepared admissions. An identity revision forces resubmission across create, destroy, retirement, rekey, and prepared-admission transitions even when the WID set is unchanged. OmniWM retains the last successful set after a failure and retries on the next lifecycle transition. It deliberately does not make a count-zero call; when the desired set is empty, exact PID/WID and lifecycle checks reject stale events locally. External children are never added to this subscription set.
 
 ### 4.7 Window Rules Engine
 
@@ -744,9 +750,11 @@ struct WindowDecision: Equatable, Sendable {
 
 The disposition is the ownership boundary, not a capability flag applied after tracking. `.unmanaged` decisions
 contribute no rule effects or admission hints and never enter the authoritative `WindowModel`, layout engines,
-Overview, managed-focus navigation, or auxiliary surfaces. The high-level user escape hatch bypasses only the
-level gate: exact WindowServer identity and the parent, help-tag, and input-method exclusions still apply. Broad
-app/title rules and Automatic layout cannot cross any precise-inclusion gate.
+Overview, managed-focus navigation, or become an auxiliary-surface target. An exactly verified external child may
+retain the border on its already-selected managed parent, but the child itself remains unmanaged and no selection
+is inferred or changed. The high-level user escape hatch bypasses only the level gate: exact WindowServer identity
+and the parent, help-tag, and input-method exclusions still apply. Broad app/title rules and Automatic layout
+cannot cross any precise-inclusion gate.
 
 Per-app `initialContainerPrimarySpan` is an admission hint, not an ongoing `ManagedWindowRuleEffects` constraint.
 `WindowRuleEngine` takes it only from the single winning rule, and Niri consumes it once when a resizable
@@ -827,11 +835,13 @@ When management is suspended, `NativeFullscreenPlaceholderManager` retains one n
 
 **Directories:** `Sources/OmniWM/Core/Surface/`, `Sources/OmniWM/Core/Border/`
 
-`WorldView` is a read-only `@MainActor` facade wrapping a single `WMController`. It exposes exactly the state `SurfaceDerivation` needs (renderable focus token, scoped fullscreen-transition queries, monitors, space topology, border config, per-window observed/pending frames) plus helpers that build tab-rail infos, bar surfaces, and native-fullscreen descriptors. It holds no mutable state and is constructed fresh per reconcile pass.
+`WorldView` is a read-only `@MainActor` facade wrapping a single `WMController`. It exposes exactly the state `SurfaceDerivation` needs (managed-only renderable focus, border focus projection, scoped fullscreen-transition queries, monitors, space topology, border config, per-window observed/pending frames) plus helpers that build tab-rail infos, bar surfaces, and native-fullscreen descriptors. It holds no mutable state and is constructed fresh per reconcile pass.
 
-`SurfaceDerivation.derive(world:)` is a pure transform `WorldView → DesiredSurfaceScene`. The border-eligibility gate in `deriveBorder` is the load-bearing logic: border config enabled, target not an owned OmniWM surface, no native-fullscreen transition for the target workspace, not suppressed/fullscreen, workspace visible, valid frame. Unrelated fullscreen records no longer suppress borders or focus recovery on other workspaces.
+`SurfaceDerivation.derive(world:)` is a pure transform `WorldView → DesiredSurfaceScene`. The border-eligibility gate in `deriveBorder` starts from `borderFocusToken`, resolves that projection back to a live managed entry, and retains the existing visibility, suppression, system-modal, layout-fullscreen, and native-fullscreen-transition checks. Unrelated fullscreen records no longer suppress borders or focus recovery on other workspaces.
 
-**The focus border** is no longer an `NSWindow` managed by a dedicated controller. It is a derived surface applied by `BorderSurfaceApplier`, which drives a `BorderWindow` — a private **SkyLight/CGS server-side window** (created via `SkyLight.createBorderWindow`, drawn into a `CGContext`), positioned one level *below* the target window via `transactionMoveAndOrder(.below)`, and registered with `SurfaceCoordinator` by CGS window *number*. Because that ordering is applied at CGS level 3, the border window sits above the level-0 app window it rings, and its shape is the full target rect (only the ring is painted) — so at creation it opts out of the screenshot window picker by setting the `IgnoreForScreencaptureWindowSelection` CGS property, which `/usr/sbin/screencapture` reads to skip a window and select the one beneath it. Without it, `Cmd+Shift+4` ▸ `Space` selects the border instead of the focused window and captures an empty ring (#544, #150). The property is invisible to full-screen captures and screen recording.
+**The focus border** is no longer an `NSWindow` managed by a dedicated controller. It is a derived surface applied by `BorderSurfaceApplier`, which drives one persistent private **SkyLight/CGS server-side window** created through `SkyLight.createBorderWindow` and drawn into a `CGContext`. `BorderWindow` queries the target through the existing WindowServer iterator, accepts the level only when both PID and WID match, and orders the border at that level with `transactionMoveAndOrder(.below)`. A transient lookup failure may reuse only the same target token's cached level; otherwise it falls back to level 0 and schedules one later border-only retry. Translation-only updates move the existing surface without a level or scale query, reshape, or redraw.
+
+The target frame is rounded once to physical pixels and the server surface expands outward by the configured width. Drawing uses an even-odd clip with a transparent rounded target cutout and an outer radius equal to the sampled target radius plus the border width, so no border pixel intentionally enters the target silhouette. `targetFrameOnScreen` records the rounded target while `frameOnScreen` reports the expanded surface. The surface remains registered with `SurfaceCoordinator` by CGS window number and opts out of the screenshot window picker through `IgnoreForScreencaptureWindowSelection`; that property is invisible to full-screen captures and screen recording.
 
 **`SurfaceCoordinator`** (a `.shared` singleton) is the registry of OmniWM-owned surfaces, backed by `SurfaceScene`. Beyond "exclude from tiling" it answers hit-testing (`containsInteractive`), ScreenCaptureKit capture-eligibility (`isCaptureEligible`), and focus-recovery suppression (`hasFrontmostSuppressingWindow`). The vocabulary lives in `SurfaceScene.swift`: `SurfaceKind` (`border`, `parkingEdgeMask`, `workspaceBar`, `overview`, `nativeFullscreenPlaceholder`, `tabRail`, `dragGhost`, `utility`, `quake`, `launchOverlay`, `secureInputIndicator`, `systemStats`, `hiddenBarPanel`), `HitTestPolicy`, `CapturePolicy`, and `SurfacePolicy` (which bundles them plus `suppressesManagedFocusRecovery`). `OwnedWindowRegistry` (in `App/`) is now a thin facade over `SurfaceCoordinator.shared`.
 
@@ -932,7 +942,7 @@ WorkspaceManager.confirmManagedFocus → WorldStore.commit(.managedFocusConfirme
     │  IntentLedger.confirmManagedRequest cancels the deadline
     v
 WMController.handleSessionStateChanged → SurfaceReconciler.noteWorldChanged   [STAGE 4]
-    │  SurfaceDerivation.deriveBorder reads WorldView.renderableFocusToken
+    │  SurfaceDerivation.deriveBorder reads WorldView.borderFocusToken
     v
 BorderSurfaceApplier moves the focus border to the newly focused window
 ```

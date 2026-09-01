@@ -24,17 +24,20 @@ enum CenterFocusedColumn: String, CaseIterable, Codable, Identifiable {
 
 struct WorkingAreaContext {
     var workingFrame: CGRect
+    var borderSafeFillFrame: CGRect
     var fullscreenLayoutFrame: CGRect
     var viewFrame: CGRect
     var scale: CGFloat
 
     init(
         workingFrame: CGRect,
+        borderSafeFillFrame: CGRect? = nil,
         fullscreenLayoutFrame: CGRect? = nil,
         viewFrame: CGRect,
         scale: CGFloat
     ) {
         self.workingFrame = workingFrame
+        self.borderSafeFillFrame = borderSafeFillFrame ?? fullscreenLayoutFrame ?? workingFrame
         self.fullscreenLayoutFrame = fullscreenLayoutFrame ?? workingFrame
         self.viewFrame = viewFrame
         self.scale = scale

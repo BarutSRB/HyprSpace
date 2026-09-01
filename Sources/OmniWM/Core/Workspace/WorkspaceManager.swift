@@ -57,8 +57,9 @@ final class WorkspaceManager {
     private var _cachedMonitorIdByVisibleWorkspace: [WorkspaceDescriptor.ID: Monitor.ID]?
 
     var onGapsChanged: (() -> Void)?
-    var onSessionStateChanged: (() -> Void)?
-    var onRuntimeInvalidation: ((WorkspaceDescriptor.ID?, InvalidationDomain) -> Void)?
+    var onSessionStateChanged: ((SessionSurfaceInvalidationScope) -> Void)?
+    var onRuntimeInvalidation:
+        ((WorkspaceDescriptor.ID?, InvalidationDomain, SessionSurfaceInvalidationScope) -> Void)?
     var onWindowPresenceObserved: ((WindowHandle) -> Void)?
     var onWindowRemoved: ((WindowState) -> Void)?
     var onDeferredWorkspaceMonitorMove: ((WorkspaceMonitorMoveOutcome) -> Void)?
@@ -304,7 +305,11 @@ final class WorkspaceManager {
              .systemModalFocusChanged:
             guard plan.focusSession != nil else { return }
             let workspaceId = focusInvalidationWorkspaceId(for: world.focus)
-            noteFocusInvalidation(previousWorkspaceId: workspaceId, currentWorkspaceId: workspaceId)
+            noteFocusInvalidation(
+                previousWorkspaceId: workspaceId,
+                currentWorkspaceId: workspaceId,
+                surfaceScope: .border
+            )
         case .nativeFullscreenPlaceholderSelected,
              .workspaceFocusCleared:
             guard plan.focusSession != nil else { return }
@@ -1096,7 +1101,7 @@ final class WorkspaceManager {
             )
         )
         if changed {
-            notifySessionStateChanged()
+            notifySessionStateChanged(surfaceScope: .border)
         }
         return changed
     }
@@ -1480,50 +1485,6 @@ final class WorkspaceManager {
         return nil
     }
 
-    @discardableResult
-    func recordExternalFocus(
-        pid: pid_t? = nil,
-        windowId: Int? = nil,
-        preservePendingManagedFocus: Bool = false
-    ) -> Bool {
-        let changed = applyFocusReconcileEvent(
-            .nativeFocusOwnerChanged(
-                owner: .external(pid: pid, windowId: windowId),
-                preservePendingManagedFocus: preservePendingManagedFocus,
-                source: .workspaceManager
-            )
-        )
-        if changed {
-            notifySessionStateChanged()
-        }
-        return changed
-    }
-
-    @discardableResult
-    func externalizeNativeFocus(matching token: WindowToken) -> Bool {
-        guard nativeManagedFocusToken == token else { return false }
-        return recordExternalFocus(pid: token.pid, windowId: token.windowId)
-    }
-
-    @discardableResult
-    func recordOwnedSurfaceFocus() -> Bool {
-        let changed = applyFocusReconcileEvent(
-            .nativeFocusOwnerChanged(
-                owner: .ownedSurface,
-                preservePendingManagedFocus: false,
-                source: .workspaceManager
-            )
-        )
-        if changed {
-            notifySessionStateChanged()
-        }
-        return changed
-    }
-
-    var externalFocusToken: WindowToken? {
-        world.focus.nativeFocusOwner.externalToken
-    }
-
     var suppressedFocusToken: WindowToken? {
         world.focus.suppressedFocusToken
     }
@@ -1536,41 +1497,6 @@ final class WorkspaceManager {
         nativeManagedFocusToken
     }
 
-    func clearExternalFocusIdentity(matching token: WindowToken? = nil, pid: pid_t? = nil) {
-        guard let current = externalFocusToken else { return }
-        if let token, current != token { return }
-        if let pid, current.pid != pid { return }
-        let clearsNativeFullscreenOwner = activeNativeFullscreenFocusOwnerToken == current
-        if applyFocusReconcileEvent(
-            .nativeFocusOwnerChanged(
-                owner: .external(pid: current.pid, windowId: nil),
-                preservePendingManagedFocus: true,
-                source: .workspaceManager
-            )
-        ) {
-            notifySessionStateChanged()
-        }
-        if clearsNativeFullscreenOwner {
-            _ = clearNativeFocusOwner()
-        }
-    }
-
-    func suppressFocusBorder(for token: WindowToken) {
-        guard world.focus.suppressedFocusToken != token else { return }
-        if applyFocusReconcileEvent(.suppressedFocusChanged(token: token, source: .workspaceManager)) {
-            notifySessionStateChanged()
-        }
-    }
-
-    func setSystemModalFocus(_ token: WindowToken?) {
-        guard world.focus.systemModalFocusToken != token else { return }
-        if applyFocusReconcileEvent(
-            .systemModalFocusChanged(token: token, source: .workspaceManager)
-        ) {
-            notifySessionStateChanged()
-        }
-    }
-
     private func focusInvalidationWorkspaceId(for focus: FocusSessionSnapshot) -> WorkspaceDescriptor.ID? {
         focus.pendingManagedFocus.workspaceId
             ?? focus.selectedManagedToken.flatMap { world.entry(for: $0)?.workspaceId }
@@ -1578,16 +1504,25 @@ final class WorkspaceManager {
 
     private func noteFocusInvalidation(
         previousWorkspaceId: WorkspaceDescriptor.ID?,
-        currentWorkspaceId: WorkspaceDescriptor.ID?
+        currentWorkspaceId: WorkspaceDescriptor.ID?,
+        surfaceScope: SessionSurfaceInvalidationScope = .full
     ) {
         if let currentWorkspaceId {
-            noteInvalidation(workspaceId: currentWorkspaceId, domains: .focus)
+            noteInvalidation(
+                workspaceId: currentWorkspaceId,
+                domains: .focus,
+                surfaceScope: surfaceScope
+            )
         }
         if let previousWorkspaceId, previousWorkspaceId != currentWorkspaceId {
-            noteInvalidation(workspaceId: previousWorkspaceId, domains: .focus)
+            noteInvalidation(
+                workspaceId: previousWorkspaceId,
+                domains: .focus,
+                surfaceScope: surfaceScope
+            )
         }
         if previousWorkspaceId == nil, currentWorkspaceId == nil {
-            noteInvalidation(workspaceId: nil, domains: .focus)
+            noteInvalidation(workspaceId: nil, domains: .focus, surfaceScope: surfaceScope)
         }
     }
 
@@ -3867,8 +3802,8 @@ final class WorkspaceManager {
         }
     }
 
-    func notifySessionStateChanged() {
-        onSessionStateChanged?()
+    func notifySessionStateChanged(surfaceScope: SessionSurfaceInvalidationScope = .full) {
+        onSessionStateChanged?(surfaceScope)
     }
 }
 
@@ -3882,7 +3817,11 @@ extension WorkspaceManager {
             noteInvalidation(workspaceId: workspaceId, domains: [.workspace, .layout, .focus])
 
         case let .floatingGeometryUpdated(_, workspaceId, _, _, _, _, _):
-            noteInvalidation(workspaceId: workspaceId, domains: [.workspace, .layout])
+            noteInvalidation(
+                workspaceId: workspaceId,
+                domains: [.workspace, .layout],
+                surfaceScope: .border
+            )
 
         case let .floatingStateChanged(_, workspaceId, _, _),
              let .manualLayoutOverrideChanged(_, workspaceId, _, _),
@@ -3956,9 +3895,11 @@ extension WorkspaceManager {
              .workspaceFocusCleared:
             break
 
-        case .focusLeaseChanged,
-             .nativeFocusOwnerChanged:
+        case .focusLeaseChanged:
             noteInvalidation(workspaceId: nil, domains: .focus)
+
+        case .nativeFocusOwnerChanged:
+            noteInvalidation(workspaceId: nil, domains: .focus, surfaceScope: .border)
 
         case .topologyChanged,
              .activeSpaceChanged,
@@ -3970,19 +3911,21 @@ extension WorkspaceManager {
 
     private func noteInvalidation(
         workspaceId: WorkspaceDescriptor.ID?,
-        domains: InvalidationDomain
+        domains: InvalidationDomain,
+        surfaceScope: SessionSurfaceInvalidationScope = .full
     ) {
         world.noteInvalidation(workspaceId: workspaceId, domains: domains)
-        onRuntimeInvalidation?(workspaceId, domains)
+        onRuntimeInvalidation?(workspaceId, domains, surfaceScope)
     }
 
     private func noteInvalidation(
         workspaceIds: Set<WorkspaceDescriptor.ID>,
-        domains: InvalidationDomain
+        domains: InvalidationDomain,
+        surfaceScope: SessionSurfaceInvalidationScope = .full
     ) {
         world.noteInvalidation(workspaceIds: workspaceIds, domains: domains)
         for workspaceId in workspaceIds {
-            onRuntimeInvalidation?(workspaceId, domains)
+            onRuntimeInvalidation?(workspaceId, domains, surfaceScope)
         }
     }
 }

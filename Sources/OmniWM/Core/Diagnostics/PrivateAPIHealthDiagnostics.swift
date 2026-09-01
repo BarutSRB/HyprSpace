@@ -65,6 +65,7 @@ struct PrivateAPIHealthSnapshot: Sendable {
     let displayUUIDResolved: Bool
     let multitouchSymbols: [(name: String, resolved: Bool)]
     let cgsRegistration: String
+    let cgsWindowSubscription: String
     let fallbackDump: String
     let lastProbe: PrivateAPIProbeReport?
 
@@ -76,6 +77,7 @@ struct PrivateAPIHealthSnapshot: Sendable {
             "displayUUID=\(displayUUIDResolved ? "resolved" : "MISSING")",
             "multitouchSymbols: \(trackpad)",
             "cgsEventRegistration=\(cgsRegistration)",
+            "cgsWindowSubscription=\(cgsWindowSubscription)",
             "",
             "Fallback / failure firings since launch (by subsystem):",
             fallbackDump,
@@ -119,6 +121,7 @@ enum PrivateAPIHealthDiagnostics {
             displayUUIDResolved: SkyLight.displayUUIDResolved,
             multitouchSymbols: MultitouchBinding.resolvedSymbols(),
             cgsRegistration: CGSEventObserver.shared.lastRegistrationSummary,
+            cgsWindowSubscription: CGSEventObserver.shared.lastWindowSubscriptionSummary,
             fallbackDump: FallbackFiringRecorder.shared.dump(),
             lastProbe: PrivateAPIProbeStore.shared.last
         )

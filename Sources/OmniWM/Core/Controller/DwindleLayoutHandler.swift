@@ -54,7 +54,7 @@ import QuartzCore
                   let currentMonitor = controller.workspaceManager.monitor(byId: monitor.monitorId),
                   let currentGeometry = geometryContext(
                       monitor: currentMonitor,
-                      settings: controller.settings.resolvedDwindleSettings(for: currentMonitor)
+                      settings: controller.resolvedDwindleSettings(for: currentMonitor)
                   )
             else {
                 return false
@@ -68,7 +68,7 @@ import QuartzCore
                   let currentMonitor = controller.workspaceManager.monitor(byId: monitor.monitorId),
                   let currentGeometry = geometryContext(
                       monitor: currentMonitor,
-                      settings: controller.settings.resolvedDwindleSettings(for: currentMonitor)
+                      settings: controller.resolvedDwindleSettings(for: currentMonitor)
                   ),
                   candidate.workspaceId == workspaceId,
                   candidate.engineIdentifier == ObjectIdentifier(engine),
@@ -1358,7 +1358,7 @@ import QuartzCore
               let monitor = controller.workspaceManager.monitor(for: wsId)
         else { return }
         controller.workspaceManager.withEngineMutationScope {
-            applyResolvedSettings(controller.settings.resolvedDwindleSettings(for: monitor), to: engine)
+            applyResolvedSettings(controller.resolvedDwindleSettings(for: monitor), to: engine)
             perform(engine, wsId)
         }
     }
@@ -1387,7 +1387,7 @@ import QuartzCore
             plannedSeq: refreshInput.plannedSeq,
             preferredFocusToken: controller.workspaceManager.preferredFocusToken(in: wsId),
             preferredHideSide: controller.layoutRefreshController.preferredHideSide(for: monitor),
-            settings: controller.settings.resolvedDwindleSettings(for: monitor),
+            settings: controller.resolvedDwindleSettings(for: monitor, scale: refreshInput.monitor.scale),
             isActiveWorkspace: refreshInput.isActiveWorkspace
         )
     }
@@ -1417,6 +1417,7 @@ import QuartzCore
             in: snapshot.workspaceId,
             focusedToken: snapshot.preferredFocusToken,
             bootstrapScreen: snapshot.monitor.workingFrame,
+            bootstrapBorderSafeFillScreen: snapshot.monitor.borderSafeFillFrame,
             bootstrapFullscreenScreen: snapshot.monitor.fullscreenLayoutFrame
         )
 
@@ -1427,6 +1428,7 @@ import QuartzCore
         let newFrames = engine.calculateLayout(
             for: snapshot.workspaceId,
             screen: snapshot.monitor.workingFrame,
+            borderSafeFillScreen: snapshot.monitor.borderSafeFillFrame,
             fullscreenScreen: snapshot.monitor.fullscreenLayoutFrame
         )
         if !removedTokens.isEmpty {
@@ -1505,6 +1507,7 @@ import QuartzCore
         let frames = engine.calculateLayout(
             for: snapshot.workspaceId,
             screen: snapshot.monitor.workingFrame,
+            borderSafeFillScreen: snapshot.monitor.borderSafeFillFrame,
             fullscreenScreen: snapshot.monitor.fullscreenLayoutFrame,
             calculationSettings: calculationSettings(snapshot.settings, from: engine)
         )
@@ -1688,6 +1691,7 @@ import QuartzCore
             monitorId: monitor.monitorId,
             displayId: monitor.displayId,
             workingFrame: monitor.workingFrame,
+            borderSafeFillFrame: monitor.borderSafeFillFrame,
             fullscreenLayoutFrame: monitor.fullscreenLayoutFrame,
             scale: monitor.scale,
             settings: settings,

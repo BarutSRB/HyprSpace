@@ -434,6 +434,7 @@ final class CGSPhantomEventGuardTests: XCTestCase {
         let createTask = Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(20))
             createDelivered = true
+            controller.axEventHandler.retainPreparedWindowSubscription(UInt32(newToken.windowId))
             controller.axEventHandler.enqueueManagedReplacementCreate(
                 .init(
                     windowId: UInt32(newToken.windowId),

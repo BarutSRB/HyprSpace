@@ -82,13 +82,15 @@ final class WorkspaceBarNativeFullscreenSettingsTests: XCTestCase {
         controller.workspaceManager.applyMonitorConfigurationChange([builtIn])
 
         commitTopology(on: controller, fullscreenDisplayUUID: nil)
-        let reservedBefore = controller.insetWorkingFrame(for: builtIn)
-        XCTAssertEqual(reservedBefore, CGRect(x: 0, y: 0, width: 1_440, height: 836))
+        let reservedWorkingBefore = controller.insetWorkingFrame(for: builtIn)
+        let reservedFullscreenBefore = controller.fullscreenLayoutFrame(for: builtIn)
+        XCTAssertEqual(reservedWorkingBefore, CGRect(x: 5, y: 5, width: 1_430, height: 831))
+        XCTAssertEqual(reservedFullscreenBefore, CGRect(x: 0, y: 0, width: 1_440, height: 836))
 
         commitTopology(on: controller, fullscreenDisplayUUID: Self.builtInUUID)
         XCTAssertFalse(controller.isWorkspaceBarVisible(on: builtIn))
-        XCTAssertEqual(controller.insetWorkingFrame(for: builtIn), reservedBefore)
-        XCTAssertEqual(controller.fullscreenLayoutFrame(for: builtIn), reservedBefore)
+        XCTAssertEqual(controller.insetWorkingFrame(for: builtIn), reservedWorkingBefore)
+        XCTAssertEqual(controller.fullscreenLayoutFrame(for: builtIn), reservedFullscreenBefore)
     }
 
     @MainActor

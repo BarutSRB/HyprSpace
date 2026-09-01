@@ -67,6 +67,7 @@ extension AXEventHandler {
         }
         controller.mouseEventHandler.discardNativeTitleBarDrag(for: token)
         _ = controller.workspaceManager.removeWindow(pid: token.pid, windowId: token.windowId)
+        noteManagedWindowSubscriptionIdentityChanged()
         finishDeferredReplacementAfterTracking(windowId: token.windowId)
         controller.axManager.removeWindowState(pid: token.pid, expectedWindow: entry.axRef)
         if removesScratchpadResources {

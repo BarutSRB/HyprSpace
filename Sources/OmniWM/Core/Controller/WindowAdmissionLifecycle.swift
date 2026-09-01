@@ -218,6 +218,7 @@ struct AdmissionRetryState {
     var exhausted: Bool
     var executionPhase: AdmissionRetryExecutionPhase = .waiting
     var identityRebindTargetDestroyed = false
+    var preparedSubscriptionRetainCount = 0
     var focusedAdmissionReplayExecutionOwner: UInt64? = nil
     var task: Task<Void, Never>?
 }
@@ -233,6 +234,7 @@ struct AdmissionRetrySchedule {
     let reason: WindowAdmissionPendingReason
     let trigger: AdmissionRetryTrigger
     let focusedAdmissionContinuation: FocusedAdmissionRetryContinuation?
+    let preparedSubscriptionRetainCount: Int
 }
 
 struct DeferredReplacementProtection {

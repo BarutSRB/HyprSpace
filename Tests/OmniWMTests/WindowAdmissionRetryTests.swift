@@ -977,6 +977,7 @@ final class WindowAdmissionRetryTests: XCTestCase {
         let oldToken = WindowToken(pid: 467_328, windowId: 467_428)
         let newToken = WindowToken(pid: oldToken.pid, windowId: 467_429)
         let newRef = WindowAdmissionTestSupport.axRef(for: newToken)
+        let windowId = UInt32(newToken.windowId)
         var resolvedPIDs: [pid_t] = []
         controller.factResolver.factProvider = { pid in
             resolvedPIDs.append(pid)
@@ -985,7 +986,7 @@ final class WindowAdmissionRetryTests: XCTestCase {
         controller.hasStartedServices = true
         XCTAssertTrue(
             controller.axEventHandler.scheduleAdmissionRetry(
-                windowId: UInt32(newToken.windowId),
+                windowId: windowId,
                 expectedToken: newToken,
                 axRef: newRef,
                 reason: .degenerateGeometry,
@@ -997,9 +998,10 @@ final class WindowAdmissionRetryTests: XCTestCase {
                 )
             )
         )
+        controller.axEventHandler.retainPreparedWindowSubscription(windowId)
         XCTAssertTrue(
             controller.axEventHandler.scheduleAdmissionRetry(
-                windowId: UInt32(newToken.windowId),
+                windowId: windowId,
                 expectedToken: newToken,
                 axRef: newRef,
                 reason: .factsDeferred,
@@ -1012,7 +1014,8 @@ final class WindowAdmissionRetryTests: XCTestCase {
                     managedReplacementMetadata: nil,
                     admissionHints: nil,
                     sizeConstraints: nil
-                )
+                ),
+                preparedSubscriptionRetainContribution: 1
             )
         )
         _ = controller.workspaceManager.addWindow(
@@ -1022,14 +1025,12 @@ final class WindowAdmissionRetryTests: XCTestCase {
             to: workspaceId,
             mode: .floating
         )
-
         controller.axEventHandler.finishAdmissionRetryAfterTracking(
-            windowId: UInt32(newToken.windowId)
+            windowId: windowId
         )
 
-        XCTAssertNil(
-            controller.axEventHandler.admissionRetryStateByWindowId[UInt32(newToken.windowId)]
-        )
+        XCTAssertNil(controller.axEventHandler.admissionRetryStateByWindowId[windowId])
+        XCTAssertNil(controller.axEventHandler.preparedWindowSubscriptionRetainCounts[windowId])
         XCTAssertEqual(resolvedPIDs, [newToken.pid])
     }
 

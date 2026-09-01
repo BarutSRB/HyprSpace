@@ -13,6 +13,7 @@ struct InteractiveMove {
     let originalFrame: CGRect
     let isInsertMode: Bool
     let orientation: Monitor.Orientation
+    let gaps: CGFloat
 
     var currentHoverTarget: MoveHoverTarget?
 }

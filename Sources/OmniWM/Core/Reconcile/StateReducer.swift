@@ -154,8 +154,11 @@ enum StateReducer {
             switch focusSession.nativeFocusOwner {
             case let .managed(token) where pids.contains(token.pid):
                 focusSession.nativeFocusOwner = .external(pid: nil, windowId: nil)
-            case let .external(pid?, _) where pids.contains(pid):
-                focusSession.nativeFocusOwner = .external(pid: pid, windowId: nil)
+            case let .external(identity) where identity.pid.map(pids.contains) == true:
+                focusSession.nativeFocusOwner = .external(identity.downgradingToPIDOnly())
+            case let .external(identity)
+                where identity.verifiedManagedParentToken.map({ pids.contains($0.pid) }) == true:
+                focusSession.nativeFocusOwner = .external(identity.clearingVerifiedManagedParent())
             case .managed,
                  .external,
                  .ownedSurface,
@@ -335,6 +338,10 @@ enum StateReducer {
                 focusSession.selectedManagedToken = nil
                 if case .managed(focusedToken) = focusSession.nativeFocusOwner {
                     focusSession.nativeFocusOwner = .none
+                } else if case let .external(identity) = focusSession.nativeFocusOwner,
+                          identity.verifiedManagedParentToken == focusedToken
+                {
+                    focusSession.nativeFocusOwner = .external(identity.clearingVerifiedManagedParent())
                 }
             }
             setFocusSession(focusSession, current: currentSnapshot.focusSession, plan: &plan)
@@ -604,8 +611,8 @@ enum StateReducer {
             focusSession.pendingManagedFocus.token = newToken
         }
         focusSession.replaceRememberedFocus(from: oldToken, to: newToken)
-        if focusSession.nativeFocusOwner.externalToken == oldToken {
-            focusSession.nativeFocusOwner = .external(pid: newToken.pid, windowId: newToken.windowId)
+        if case let .external(identity) = focusSession.nativeFocusOwner {
+            focusSession.nativeFocusOwner = .external(identity.rekeying(from: oldToken, to: newToken))
         }
         if focusSession.suppressedFocusToken == oldToken {
             focusSession.suppressedFocusToken = newToken
@@ -627,6 +634,8 @@ enum StateReducer {
         }
         if case .managed(token) = focusSession.nativeFocusOwner {
             focusSession.nativeFocusOwner = .none
+        } else if case let .external(identity) = focusSession.nativeFocusOwner {
+            focusSession.nativeFocusOwner = .external(identity.removingManagedToken(token))
         }
         if focusSession.pendingManagedFocus.token == token {
             focusSession.pendingManagedFocus = .empty

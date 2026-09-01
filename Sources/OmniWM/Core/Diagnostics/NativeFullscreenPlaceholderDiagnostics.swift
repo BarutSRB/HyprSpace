@@ -304,8 +304,8 @@ struct NativeFullscreenPlaceholderDiagnosticsSnapshot {
         switch value {
         case let .managed(value):
             return "managed:\(token(value))"
-        case let .external(pid, windowId):
-            return "external:\(pid.map(String.init) ?? "none"):\(windowId.map(String.init) ?? "none")"
+        case let .external(identity):
+            return "external:\(identity.pid.map(String.init) ?? "none"):\(identity.windowId.map(String.init) ?? "none")"
         case .ownedSurface:
             return "owned-surface"
         case .none:

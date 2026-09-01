@@ -813,6 +813,7 @@ final class DwindleLayoutEngine {
         in workspaceId: WorkspaceDescriptor.ID,
         focusedToken: WindowToken?,
         bootstrapScreen: CGRect? = nil,
+        bootstrapBorderSafeFillScreen: CGRect? = nil,
         bootstrapFullscreenScreen: CGRect? = nil
     ) -> Set<WindowToken> {
         assertSanctionedMutation()
@@ -846,6 +847,7 @@ final class DwindleLayoutEngine {
             _ = calculateLayout(
                 for: workspaceId,
                 screen: bootstrapScreen,
+                borderSafeFillScreen: bootstrapBorderSafeFillScreen ?? bootstrapFullscreenScreen ?? bootstrapScreen,
                 fullscreenScreen: bootstrapFullscreenScreen ?? bootstrapScreen
             )
         }
@@ -865,6 +867,7 @@ final class DwindleLayoutEngine {
                 let frames = calculateLayout(
                     for: workspaceId,
                     screen: bootstrapScreen,
+                    borderSafeFillScreen: bootstrapBorderSafeFillScreen ?? bootstrapFullscreenScreen ?? bootstrapScreen,
                     fullscreenScreen: bootstrapFullscreenScreen ?? bootstrapScreen
                 )
                 activeFrame = frames[token]
@@ -883,6 +886,7 @@ final class DwindleLayoutEngine {
     func calculateLayout(
         for workspaceId: WorkspaceDescriptor.ID,
         screen: CGRect,
+        borderSafeFillScreen: CGRect? = nil,
         fullscreenScreen: CGRect? = nil,
         calculationSettings: DwindleSettings? = nil
     ) -> [WindowToken: CGRect] {
@@ -899,6 +903,7 @@ final class DwindleLayoutEngine {
 
         var output: [WindowToken: CGRect] = [:]
         let tilingArea = screen
+        let borderSafeFillArea = borderSafeFillScreen ?? fullscreenScreen ?? screen
         let fullscreenArea = fullscreenScreen ?? screen
 
         if state.root.projectedVisibleLeafCount == 1 {
@@ -912,7 +917,7 @@ final class DwindleLayoutEngine {
                 } else {
                     rect = singleWindowRect(
                         screen: tilingArea,
-                        fullscreenScreen: fullscreenArea,
+                        borderSafeFillScreen: borderSafeFillArea,
                         minSize: minimumSize(for: tile, excluding: excludedTokens),
                         settings: calculationSettings
                     )
@@ -1645,11 +1650,11 @@ final class DwindleLayoutEngine {
 
     private func singleWindowRect(
         screen: CGRect,
-        fullscreenScreen: CGRect,
+        borderSafeFillScreen: CGRect,
         minSize: CGSize,
         settings: DwindleSettings
     ) -> CGRect {
-        let baseFrame = settings.singleWindowFit.usesFullscreenLayoutFrame ? fullscreenScreen : screen
+        let baseFrame = settings.singleWindowFit.usesFullscreenLayoutFrame ? borderSafeFillScreen : screen
         let fit = settings.singleWindowFit.frame(in: baseFrame)
         var rect = fit
         rect.size.width = min(max(fit.width, minSize.width), baseFrame.width)

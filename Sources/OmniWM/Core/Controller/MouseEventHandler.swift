@@ -996,14 +996,13 @@ final class MouseEventHandler {
             engine.clearInteractiveResize()
             return
         }
-        let workingFrame = controller.insetWorkingFrame(for: monitor)
-        let gaps = controller.innerGap(for: monitor)
+        let geometry = controller.niriInteractionGeometry(for: monitor)
         controller.workspaceManager.withNiriViewportState(for: workspaceId) { viewportState in
             engine.interactiveResizeEnd(
                 motion: controller.motionPolicy.snapshot(),
                 state: &viewportState,
-                workingFrame: workingFrame,
-                gaps: gaps
+                workingFrame: geometry.workingFrame,
+                gaps: geometry.innerGap
             )
         }
         controller.workspaceManager.recordLayoutOperation(
@@ -1163,8 +1162,7 @@ final class MouseEventHandler {
             if let tiledWindow = engine.hitTestTiled(point: location, in: wsId),
                let monitor = controller.workspaceManager.monitor(for: wsId)
             {
-                let workingFrame = controller.insetWorkingFrame(for: monitor)
-                let gaps = controller.innerGap(for: monitor)
+                let geometry = controller.niriInteractionGeometry(for: monitor)
                 let orientation = resolvedNiriOrientation(
                     engine: engine,
                     workspaceId: wsId,
@@ -1182,8 +1180,8 @@ final class MouseEventHandler {
                         in: wsId,
                         motion: controller.motionPolicy.snapshot(),
                         state: &vstate,
-                        workingFrame: workingFrame,
-                        gaps: gaps,
+                        workingFrame: geometry.workingFrame,
+                        gaps: geometry.innerGap,
                         orientation: orientation
                     ) {
                         moveStarted = true
@@ -1217,9 +1215,16 @@ final class MouseEventHandler {
               Self.modifierFlagsMatch(modifiers, required: controller.settings.mouseResizeModifierKey.cgEventFlag)
         else { return false }
 
-        guard let tiledWindow = engine.hitTestTiled(point: location, in: wsId),
-              let frame = tiledWindow.renderedFrame ?? tiledWindow.frame,
-              let monitor = controller.workspaceManager.monitor(for: wsId)
+        guard let monitor = controller.workspaceManager.monitor(for: wsId) else { return false }
+        let tiledWindow = engine.hitTestTiled(point: location, in: wsId)
+            ?? focusedBorderResizeToken(
+                at: location,
+                in: wsId,
+                scale: controller.backingScaleFactor(for: monitor),
+                appliedBorder: controller.surfaceReconciler.appliedScene.border
+            ).flatMap { engine.findNode(for: $0, in: wsId) }
+        guard let tiledWindow,
+              let frame = tiledWindow.renderedFrame ?? tiledWindow.frame
         else { return false }
 
         let edges = resizeEdges(for: location, in: frame)
@@ -1259,16 +1264,23 @@ final class MouseEventHandler {
               Self.modifierFlagsMatch(modifiers, required: controller.settings.mouseResizeModifierKey.cgEventFlag)
         else { return false }
 
+        guard let monitor = controller.workspaceManager.monitor(for: wsId) else { return false }
         let now = controller.animationClock.now()
-        guard let token = engine.hitTestFocusableWindow(point: location, in: wsId, at: now),
+        let token = engine.hitTestFocusableWindow(point: location, in: wsId, at: now)
+            ?? focusedBorderResizeToken(
+                at: location,
+                in: wsId,
+                scale: controller.backingScaleFactor(for: monitor),
+                appliedBorder: controller.surfaceReconciler.appliedScene.border
+            )
+        guard let token,
               let node = engine.findNode(for: token, in: wsId),
               let frame = node.presentedFrame(at: now)
         else { return false }
 
         let edges = resizeEdges(for: location, in: frame)
-        guard let monitor = controller.workspaceManager.monitor(for: wsId) else { return false }
         controller.dwindleLayoutHandler.refreshEngineConstraints(workspaceId: wsId, monitor: monitor)
-        let innerGap = controller.settings.resolvedDwindleSettings(for: monitor).innerGap
+        let innerGap = controller.resolvedDwindleSettings(for: monitor).innerGap
         guard engine.interactiveResizeBegin(
             token: token,
             edges: edges,
@@ -1288,6 +1300,31 @@ final class MouseEventHandler {
         state.resizeLayout = .dwindle
         edges.cursor.set()
         return true
+    }
+
+    func focusedBorderResizeToken(
+        at location: CGPoint,
+        in workspaceId: WorkspaceDescriptor.ID,
+        scale: CGFloat,
+        appliedBorder: DesiredBorderSurface?
+    ) -> WindowToken? {
+        guard let controller,
+              let appliedBorder,
+              appliedBorder.token == controller.workspaceManager.borderFocusToken,
+              let entry = controller.workspaceManager.entry(for: appliedBorder.token),
+              entry.workspaceId == workspaceId,
+              entry.mode == .tiling
+        else {
+            return nil
+        }
+        let geometry = appliedBorder.config.resolvedGeometry(for: appliedBorder.frame, scale: scale)
+        guard geometry.width > 0,
+              geometry.surfaceFrame.contains(location),
+              !geometry.targetFrame.contains(location)
+        else {
+            return nil
+        }
+        return appliedBorder.token
     }
 
     private func resizeEdges(for location: CGPoint, in frame: CGRect) -> ResizeEdge {
@@ -1351,7 +1388,7 @@ final class MouseEventHandler {
                         targetWindowId: nodeId,
                         position: insertPosition,
                         in: wsId,
-                        gaps: controller.innerGap(for: wsId),
+                        gaps: move.gaps,
                         orientation: move.orientation
                     ) {
                         state.dragGhostController?.showSwapTarget(frame: dropFrame)
@@ -1389,17 +1426,17 @@ final class MouseEventHandler {
             return
         }
 
+        let geometry = controller.niriInteractionGeometry(for: monitor)
         let gaps = LayoutGaps(
-            horizontal: controller.innerGap(for: monitor),
-            vertical: controller.innerGap(for: monitor),
+            horizontal: geometry.innerGap,
+            vertical: geometry.innerGap,
             outer: controller.workspaceManager.outerGaps
         )
-        let insetFrame = controller.insetWorkingFrame(for: monitor)
         let wsId = resize.workspaceId
 
         if engine.interactiveResizeUpdate(
             currentLocation: location,
-            monitorFrame: insetFrame,
+            monitorFrame: geometry.workingFrame,
             gaps: gaps,
             viewportState: { mutate in
                 controller.workspaceManager.withNiriViewportState(for: wsId, mutate)
@@ -1878,8 +1915,7 @@ final class MouseEventHandler {
             {
                 let wsId = move.workspaceId
                 if let monitor = controller.workspaceManager.monitor(for: wsId) {
-                    let workingFrame = controller.insetWorkingFrame(for: monitor)
-                    let gaps = controller.innerGap(for: monitor)
+                    let geometry = controller.niriInteractionGeometry(for: monitor)
                     let movedToken = move.windowToken
                     var didEnd = false
                     controller.workspaceManager.withNiriViewportState(for: wsId) { vstate in
@@ -1887,8 +1923,8 @@ final class MouseEventHandler {
                             at: location,
                             motion: controller.motionPolicy.snapshot(),
                             state: &vstate,
-                            workingFrame: workingFrame,
-                            gaps: gaps
+                            workingFrame: geometry.workingFrame,
+                            gaps: geometry.innerGap
                         )
                     }
                     if didEnd {
@@ -2575,8 +2611,7 @@ final class MouseEventHandler {
         monitor: Monitor
     ) {
         guard let controller else { return }
-        let insetFrame = controller.insetWorkingFrame(for: monitor)
-        let gap = controller.innerGap(for: monitor)
+        let geometry = controller.niriInteractionGeometry(for: monitor)
         let step = ticks > 0 ? 1 : -1
         let motion = controller.motionPolicy.snapshot()
         let orientation = resolvedNiriOrientation(
@@ -2613,8 +2648,8 @@ final class MouseEventHandler {
                           in: wsId,
                           motion: motion,
                           state: &vstate,
-                          workingFrame: insetFrame,
-                          gaps: gap,
+                          workingFrame: geometry.workingFrame,
+                          gaps: geometry.innerGap,
                           orientation: orientation
                       )
                 else {
@@ -2660,14 +2695,13 @@ final class MouseEventHandler {
             return
         }
 
-        let insetFrame = controller.insetWorkingFrame(for: monitor)
-        let gap = controller.innerGap(for: monitor)
-        let scale = NSScreen.screens.first(where: { $0.displayId == monitor.displayId })?
-            .backingScaleFactor ?? 2.0
+        let geometry = controller.niriInteractionGeometry(for: monitor)
         let orientation: Monitor.Orientation = lockedContext.columnScrollAxis == .horizontal
             ? .horizontal
             : .vertical
-        let viewportSpan = orientation == .horizontal ? insetFrame.width : insetFrame.height
+        let viewportSpan = orientation == .horizontal
+            ? geometry.workingFrame.width
+            : geometry.workingFrame.height
 
         guard let sample = controller.workspaceManager.animationDriver.sampleGestureEnd(
             in: wsId,
@@ -2685,16 +2719,16 @@ final class MouseEventHandler {
                 in: wsId,
                 currentOffset: baseOffset + sample.relativeOffset,
                 projectedOffset: baseOffset + sample.relativeProjectedOffset,
-                gap: gap,
+                gap: geometry.innerGap,
                 viewportSpan: viewportSpan,
                 orientation: orientation,
                 motion: controller.motionPolicy.snapshot(),
                 snapToColumn: controller.settings.trackpadScrollStyle == .snap,
                 centerMode: engine.centerFocusedColumn,
                 alwaysCenterSingleColumn: engine.alwaysCenterSingleColumn,
-                workingArea: insetFrame,
+                workingArea: geometry.workingFrame,
                 viewFrame: monitor.frame,
-                scale: scale
+                scale: geometry.scale
             )
         }
         if let selectedWindow {

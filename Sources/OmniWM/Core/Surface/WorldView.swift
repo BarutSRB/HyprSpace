@@ -26,6 +26,10 @@ struct WorldView {
         controller.workspaceManager.renderableFocusToken
     }
 
+    var borderFocusToken: WindowToken? {
+        controller.workspaceManager.borderFocusToken
+    }
+
     var suppressedFocusToken: WindowToken? {
         controller.workspaceManager.suppressedFocusToken
     }
@@ -162,9 +166,17 @@ struct WorldView {
         if let pending = controller.axManager.pendingFrameWrite(for: entry.windowId) {
             return pending
         }
-        if entry.mode == .tiling,
-           let applied = controller.axManager.lastAppliedFrame(for: entry.windowId)
-        {
+        if entry.mode == .floating {
+            if let observed = entry.observedState.frame {
+                return observed
+            }
+            if let desired = entry.desiredState.floatingFrame {
+                return desired
+            }
+            if let lastFloatingFrame = entry.floatingState?.lastFrame {
+                return lastFloatingFrame
+            }
+        } else if let applied = controller.axManager.lastAppliedFrame(for: entry.windowId) {
             return applied
         }
         return nil

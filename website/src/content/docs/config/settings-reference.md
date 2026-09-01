@@ -85,7 +85,7 @@ Gaps between tiled windows and screen edges (points).
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
-| `size` | float | `16.0` | Inner gap between tiled windows. |
+| `size` | float | `16.0` | Stored inner gap between tiled windows. An enabled focus border may raise the runtime-effective gap without rewriting this value. |
 | `fullscreenUsesOuterGaps` | boolean | `false` | Fullscreen layout frames keep the outer gaps. |
 | `outer.left` | float | `0.0` | Outer gap at the left screen edge. |
 | `outer.right` | float | `0.0` | Outer gap at the right screen edge. |
@@ -102,7 +102,7 @@ Options for the scrolling (Niri) layout.
 | `infiniteLoop` | boolean | `false` | Treats the column strip as a loop instead of a bounded row. |
 | `centerFocusedColumn` | string | `"never"` | When to center the focused column: `never`, `always`, `onOverflow`. |
 | `alwaysCenterSingleColumn` | boolean | `false` | Centers the column when a workspace holds only one. |
-| `singleWindowFit` | string | `"fill"` | Size of a lone window: `fill`, `container_primary_span`, or `WIDTHxHEIGHT`. |
+| `singleWindowFit` | string | `"fill"` | Size of a lone window: border-safe `fill`, `container_primary_span`, or `WIDTHxHEIGHT`. |
 | `containerPrimarySpanPresets` *(optional)* | float array | `[1/3, 1/2, 2/3]` | Span fractions the span-cycling actions step through. |
 | `defaultContainerPrimarySpan` *(optional)* | float | `0.5` | Primary-axis span fraction for new containers. |
 
@@ -115,7 +115,7 @@ Options for the Dwindle (BSP) layout.
 | `smartSplit` | boolean | `false` | Automatically chooses the split direction based on cursor position. |
 | `defaultSplitRatio` | float | `1.0` | `1.0` = equal split, `<1.0` = first window smaller, `>1.0` = first window larger. |
 | `splitWidthMultiplier` | float | `1.0` | Biases when vertical vs. horizontal splits are preferred. |
-| `singleWindowFit` | string | `"fill"` | Size of a lone window: `fill` or `WIDTHxHEIGHT` (no span mode in Dwindle). |
+| `singleWindowFit` | string | `"fill"` | Size of a lone window: border-safe `fill` or `WIDTHxHEIGHT` (no span mode in Dwindle). |
 | `useGlobalGaps` | boolean | `true` | Uses the [`gaps`](#gaps) values; when `false`, the inner gap comes from a per-monitor `innerGap` override (falling back to `gaps.size`). |
 | `moveToRootStable` | boolean | `true` | Keeps a window on the same screen side when moving it to the root. |
 
@@ -126,7 +126,7 @@ Border drawn around the focused window.
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
 | `enabled` | boolean | `true` | Draws the focused-window border. |
-| `width` | float | `5.0` | Border width in points. |
+| `width` | float | `5.0` | Exterior border width in points. Managed layout frames use its physical-pixel ceiling as the minimum runtime inner and outer clearance while borders are enabled; stored gap values are unchanged. |
 | `color` | color table | red ≈ `0.0846`, green `1.0`, blue ≈ `0.9793`, alpha `1.0` | Border color (default is a cyan accent). |
 
 ## overview

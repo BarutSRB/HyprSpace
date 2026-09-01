@@ -489,6 +489,9 @@ final class ServiceLifecycleManager {
                 : nil
         })
         let affectedWorkspaces = controller.workspaceManager.removeWindowsForApp(pid: pid)
+        if !removedEntries.isEmpty {
+            controller.axEventHandler.noteManagedWindowSubscriptionIdentityChanged()
+        }
         if wasHidden {
             controller.axManager.setMacOSAppHidden(
                 false,

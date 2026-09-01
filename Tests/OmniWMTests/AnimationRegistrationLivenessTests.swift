@@ -814,9 +814,10 @@ final class AnimationRegistrationLivenessTests: XCTestCase {
                 monitorId: monitorSnapshot.monitorId,
                 displayId: monitorSnapshot.displayId,
                 workingFrame: monitorSnapshot.workingFrame,
+                borderSafeFillFrame: monitorSnapshot.borderSafeFillFrame,
                 fullscreenLayoutFrame: monitorSnapshot.fullscreenLayoutFrame,
                 scale: monitorSnapshot.scale,
-                settings: controller.settings.resolvedDwindleSettings(for: monitor),
+                settings: controller.resolvedDwindleSettings(for: monitor),
                 tabRailWidth: TabRailManager.tabIndicatorWidth
             ),
             targetFrames: targetFrames

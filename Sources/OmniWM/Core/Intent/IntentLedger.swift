@@ -123,11 +123,9 @@ struct AppRevealFocusFingerprint: Equatable, Sendable {
         switch nativeFocusOwner {
         case let .managed(token) where token == oldToken:
             nativeFocusOwner = .managed(newToken)
-        case let .external(pid, windowId)
-            where pid == oldToken.pid && windowId == oldToken.windowId:
-            nativeFocusOwner = .external(pid: newToken.pid, windowId: newToken.windowId)
+        case let .external(identity):
+            nativeFocusOwner = .external(identity.rekeying(from: oldToken, to: newToken))
         case .managed,
-             .external,
              .ownedSurface,
              .none:
             break

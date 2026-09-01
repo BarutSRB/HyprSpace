@@ -8,6 +8,22 @@ import XCTest
 
 @MainActor
 final class ManagedFocusAdmissionTests: XCTestCase {
+    func testFocusOnlySessionChangesRequestBorderSurfaceInvalidation() {
+        let controller = WindowAdmissionTestSupport.controller()
+        let manager = controller.workspaceManager
+        let token = WindowToken(pid: 467_001, windowId: 467_002)
+        var scopes: [SessionSurfaceInvalidationScope] = []
+        manager.onSessionStateChanged = { scopes.append($0) }
+
+        XCTAssertTrue(manager.recordExternalFocus(pid: token.pid, windowId: token.windowId))
+        manager.suppressFocusBorder(for: token)
+        manager.setSystemModalFocus(token)
+        XCTAssertTrue(manager.recordOwnedSurfaceFocus())
+        XCTAssertTrue(manager.clearNativeFocusOwner())
+
+        XCTAssertEqual(scopes, [.border, .border, .border, .border, .border])
+    }
+
     func testUnexpectedActivationPreservesManagedSelectionBeforeFactResolution() throws {
         let controller = WindowAdmissionTestSupport.controller()
         let workspaceId = try XCTUnwrap(
@@ -370,16 +386,16 @@ final class ManagedFocusAdmissionTests: XCTestCase {
         XCTAssertNil(controller.workspaceManager.pendingFocusedToken)
     }
 
-    func testTraceShapedExternalDecisionPreservesManagedSelectionWithoutRenderableBorder() throws {
+    func testTraceShapedExternalDecisionPreservesSelectedParentBorderTarget() throws {
         let controller = WindowAdmissionTestSupport.controller()
         let workspaceId = try XCTUnwrap(
             controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
         )
         _ = controller.workspaceManager.focusWorkspace(named: "1")
         let parentToken = controller.workspaceManager.addWindow(
-            AXWindowRef(element: AXUIElementCreateApplication(86_312), windowId: 7_905),
-            pid: 86_312,
-            windowId: 7_905,
+            AXWindowRef(element: AXUIElementCreateApplication(10_763), windowId: 3_128),
+            pid: 10_763,
+            windowId: 3_128,
             to: workspaceId
         )
         XCTAssertTrue(
@@ -389,30 +405,28 @@ final class ManagedFocusAdmissionTests: XCTestCase {
                 activateWorkspaceOnMonitor: false
             )
         )
-        controller.workspaceManager.setSystemModalFocus(parentToken)
-        XCTAssertTrue(controller.isSystemModalFocusActive)
         let parentFrame = CGRect(x: 1_280, y: 70, width: 1_200, height: 1_350)
         let managedWorld = WorldView(controller: controller, borderFrameResolver: { windowId in
             windowId == parentToken.windowId ? parentFrame : nil
         })
-        XCTAssertNil(SurfaceDerivation.deriveBorder(world: managedWorld))
+        XCTAssertEqual(SurfaceDerivation.deriveBorder(world: managedWorld)?.token, parentToken)
 
-        let token = WindowToken(pid: 86_312, windowId: 7_916)
-        let popupFrame = CGRect(x: 2_128, y: 126, width: 320, height: 425)
+        let token = WindowToken(pid: 10_763, windowId: 3_260)
+        let popupFrame = CGRect(x: 2_128, y: 126, width: 280, height: 40)
         let evaluation = controller.evaluateWindowDisposition(
             token: token,
             evidence: AXWindowDecisionEvidence(
                 facts: AXWindowFacts(
-                    role: kAXWindowRole as String,
+                    role: "AXPopover",
                     subrole: kAXUnknownSubrole as String,
-                    title: "Extension",
+                    title: "Firefox transient",
                     hasCloseButton: false,
                     hasFullscreenButton: false,
                     fullscreenButtonEnabled: false,
                     hasZoomButton: false,
                     hasMinimizeButton: false,
                     appPolicy: .regular,
-                    bundleId: "com.google.Chrome",
+                    bundleId: "org.mozilla.firefox",
                     attributeFetchSucceeded: true
                 ),
                 sizeConstraints: WindowSizeConstraints(
@@ -443,18 +457,249 @@ final class ManagedFocusAdmissionTests: XCTestCase {
         XCTAssertFalse(WindowAdmissionPendingReason.windowServerEvidenceMissing.hasVerifiedExternalWindowIdentity)
         XCTAssertTrue(WindowAdmissionPendingReason.factsDeferred.hasVerifiedExternalWindowIdentity)
 
-        XCTAssertTrue(controller.workspaceManager.recordExternalFocus(pid: token.pid, windowId: token.windowId))
+        XCTAssertTrue(
+            controller.workspaceManager.recordExternalFocus(
+                pid: token.pid,
+                windowId: token.windowId,
+                verifiedManagedParentToken: parentToken
+            )
+        )
         XCTAssertTrue(controller.workspaceManager.nativeFocusOwner.isExternal)
         XCTAssertEqual(controller.workspaceManager.externalFocusToken, token)
+        XCTAssertEqual(
+            controller.workspaceManager.externalFocusIdentity?.verifiedManagedParentToken,
+            parentToken
+        )
         XCTAssertEqual(controller.workspaceManager.selectedManagedToken, parentToken)
         XCTAssertEqual(
             controller.workspaceManager.nativeFocusOwner,
-            .external(pid: token.pid, windowId: token.windowId)
+            .external(
+                pid: token.pid,
+                windowId: token.windowId,
+                verifiedManagedParentToken: parentToken
+            )
         )
         XCTAssertNil(controller.workspaceManager.renderableFocusToken)
+        XCTAssertEqual(controller.workspaceManager.borderFocusToken, parentToken)
         XCTAssertFalse(controller.isSystemModalFocusActive)
-        let externalWorld = WorldView(controller: controller, borderFrameResolver: { _ in popupFrame })
-        XCTAssertNil(SurfaceDerivation.deriveBorder(world: externalWorld))
+        let externalWorld = WorldView(controller: controller, borderFrameResolver: { windowId in
+            windowId == parentToken.windowId ? parentFrame : nil
+        })
+        XCTAssertEqual(SurfaceDerivation.deriveBorder(world: externalWorld)?.token, parentToken)
+    }
+
+    func testExternalFocusRejectsManagedParentThatDoesNotMatchSelection() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let selectedToken = WindowToken(pid: 468_101, windowId: 468_102)
+        let otherToken = WindowToken(pid: 468_103, windowId: 468_104)
+        _ = WindowAdmissionTestSupport.track(selectedToken, in: workspaceId, controller: controller)
+        _ = WindowAdmissionTestSupport.track(otherToken, in: workspaceId, controller: controller)
+        XCTAssertTrue(
+            controller.workspaceManager.confirmManagedFocus(
+                selectedToken,
+                in: workspaceId,
+                activateWorkspaceOnMonitor: false
+            )
+        )
+        let externalToken = WindowToken(pid: 468_105, windowId: 468_106)
+
+        XCTAssertTrue(
+            controller.workspaceManager.recordExternalFocus(
+                pid: externalToken.pid,
+                windowId: externalToken.windowId,
+                verifiedManagedParentToken: otherToken
+            )
+        )
+
+        XCTAssertEqual(controller.workspaceManager.selectedManagedToken, selectedToken)
+        XCTAssertEqual(controller.workspaceManager.externalFocusToken, externalToken)
+        XCTAssertNil(controller.workspaceManager.externalFocusIdentity?.verifiedManagedParentToken)
+        XCTAssertNil(controller.workspaceManager.renderableFocusToken)
+        XCTAssertNil(controller.workspaceManager.borderFocusToken)
+    }
+
+    func testPIDOnlyExternalFocusDowngradeClearsParentContinuity() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let parentToken = WindowToken(pid: 468_111, windowId: 468_112)
+        _ = WindowAdmissionTestSupport.track(parentToken, in: workspaceId, controller: controller)
+        XCTAssertTrue(
+            controller.workspaceManager.confirmManagedFocus(
+                parentToken,
+                in: workspaceId,
+                activateWorkspaceOnMonitor: false
+            )
+        )
+        let externalToken = WindowToken(pid: 468_111, windowId: 468_113)
+        XCTAssertTrue(
+            controller.workspaceManager.recordExternalFocus(
+                pid: externalToken.pid,
+                windowId: externalToken.windowId,
+                verifiedManagedParentToken: parentToken
+            )
+        )
+        XCTAssertEqual(controller.workspaceManager.borderFocusToken, parentToken)
+
+        controller.workspaceManager.clearExternalFocusIdentity(matching: externalToken)
+
+        XCTAssertNil(controller.workspaceManager.externalFocusToken)
+        XCTAssertEqual(controller.workspaceManager.externalFocusIdentity?.pid, externalToken.pid)
+        XCTAssertNil(controller.workspaceManager.externalFocusIdentity?.verifiedManagedParentToken)
+        XCTAssertNil(controller.workspaceManager.borderFocusToken)
+    }
+
+    func testParentRemovalClearsExternalFocusContinuity() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let parentToken = WindowToken(pid: 468_121, windowId: 468_122)
+        _ = WindowAdmissionTestSupport.track(parentToken, in: workspaceId, controller: controller)
+        XCTAssertTrue(
+            controller.workspaceManager.confirmManagedFocus(
+                parentToken,
+                in: workspaceId,
+                activateWorkspaceOnMonitor: false
+            )
+        )
+        let externalToken = WindowToken(pid: 468_121, windowId: 468_123)
+        XCTAssertTrue(
+            controller.workspaceManager.recordExternalFocus(
+                pid: externalToken.pid,
+                windowId: externalToken.windowId,
+                verifiedManagedParentToken: parentToken
+            )
+        )
+
+        XCTAssertNotNil(
+            controller.workspaceManager.removeWindow(
+                pid: parentToken.pid,
+                windowId: parentToken.windowId
+            )
+        )
+
+        XCTAssertNil(controller.workspaceManager.selectedManagedToken)
+        XCTAssertEqual(controller.workspaceManager.externalFocusToken, externalToken)
+        XCTAssertNil(controller.workspaceManager.externalFocusIdentity?.verifiedManagedParentToken)
+        XCTAssertNil(controller.workspaceManager.borderFocusToken)
+    }
+
+    func testParentRekeyClearsExternalFocusContinuityUntilFreshEvidence() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let parentToken = WindowToken(pid: 468_131, windowId: 468_132)
+        let replacementToken = WindowToken(pid: 468_131, windowId: 468_133)
+        _ = WindowAdmissionTestSupport.track(parentToken, in: workspaceId, controller: controller)
+        XCTAssertTrue(
+            controller.workspaceManager.confirmManagedFocus(
+                parentToken,
+                in: workspaceId,
+                activateWorkspaceOnMonitor: false
+            )
+        )
+        let externalToken = WindowToken(pid: 468_131, windowId: 468_134)
+        XCTAssertTrue(
+            controller.workspaceManager.recordExternalFocus(
+                pid: externalToken.pid,
+                windowId: externalToken.windowId,
+                verifiedManagedParentToken: parentToken
+            )
+        )
+
+        XCTAssertNotNil(
+            controller.workspaceManager.rekeyWindow(
+                from: parentToken,
+                to: replacementToken,
+                newAXRef: WindowAdmissionTestSupport.axRef(for: replacementToken)
+            )
+        )
+
+        XCTAssertEqual(controller.workspaceManager.selectedManagedToken, replacementToken)
+        XCTAssertEqual(controller.workspaceManager.externalFocusToken, externalToken)
+        XCTAssertNil(controller.workspaceManager.externalFocusIdentity?.verifiedManagedParentToken)
+        XCTAssertNil(controller.workspaceManager.borderFocusToken)
+    }
+
+    func testUnverifiedAndOwnedExternalFocusRemainBorderless() {
+        let controller = WindowAdmissionTestSupport.controller()
+        let world = WorldView(controller: controller, borderFrameResolver: { _ in
+            CGRect(x: 40, y: 40, width: 800, height: 600)
+        })
+
+        XCTAssertTrue(controller.workspaceManager.recordExternalFocus(pid: 468_201, windowId: 468_202))
+        XCTAssertNil(controller.workspaceManager.borderFocusToken)
+        XCTAssertNil(SurfaceDerivation.deriveBorder(world: world))
+
+        XCTAssertTrue(controller.workspaceManager.recordOwnedSurfaceFocus())
+        XCTAssertNil(controller.workspaceManager.borderFocusToken)
+        XCTAssertNil(SurfaceDerivation.deriveBorder(world: world))
+    }
+
+    func testVerifiedParentContinuityRetainsSuppressionModalAndHiddenGates() throws {
+        let suppressed = try makeParentContinuityFixture(pid: 468_210)
+        suppressed.controller.workspaceManager.suppressFocusBorder(for: suppressed.parent)
+        XCTAssertNil(SurfaceDerivation.deriveBorder(world: parentContinuityWorld(suppressed)))
+
+        let modal = try makeParentContinuityFixture(pid: 468_220)
+        modal.controller.workspaceManager.setSystemModalFocus(modal.parent)
+        XCTAssertNil(SurfaceDerivation.deriveBorder(world: parentContinuityWorld(modal)))
+
+        let hidden = try makeParentContinuityFixture(pid: 468_230)
+        hidden.controller.workspaceManager.setHiddenState(
+            HiddenState(proportionalPosition: .zero, referenceMonitorId: nil, reason: .scratchpad),
+            for: hidden.parent
+        )
+        XCTAssertNil(SurfaceDerivation.deriveBorder(world: parentContinuityWorld(hidden)))
+    }
+
+    func testVerifiedParentContinuityRemainsBorderlessOnInactiveWorkspace() throws {
+        let fixture = try makeParentContinuityFixture(pid: 468_240)
+        _ = fixture.controller.workspaceManager.workspaceId(for: "2", createIfMissing: true)
+        _ = fixture.controller.workspaceManager.focusWorkspace(named: "2")
+        XCTAssertTrue(
+            fixture.controller.workspaceManager.confirmManagedFocus(
+                fixture.parent,
+                in: fixture.workspaceId,
+                activateWorkspaceOnMonitor: false
+            )
+        )
+        XCTAssertTrue(
+            fixture.controller.workspaceManager.recordExternalFocus(
+                pid: fixture.child.pid,
+                windowId: fixture.child.windowId,
+                verifiedManagedParentToken: fixture.parent
+            )
+        )
+
+        XCTAssertEqual(fixture.controller.workspaceManager.borderFocusToken, fixture.parent)
+        XCTAssertFalse(fixture.controller.workspaceManager.visibleWorkspaceIds().contains(fixture.workspaceId))
+        XCTAssertNil(SurfaceDerivation.deriveBorder(world: parentContinuityWorld(fixture)))
+    }
+
+    func testVerifiedParentContinuityRemainsBorderlessInLayoutFullscreen() throws {
+        let fixture = try makeParentContinuityFixture(pid: 468_250)
+        fixture.controller.niriLayoutHandler.enableNiriLayout()
+        let engine = try XCTUnwrap(fixture.controller.niriEngine)
+        fixture.controller.workspaceManager.withEngineMutationScope {
+            let node = engine.addWindow(
+                token: fixture.parent,
+                to: fixture.workspaceId,
+                afterSelection: nil
+            )
+            var state = ViewportState()
+            engine.toggleFullscreen(node, motion: .disabled, state: &state)
+        }
+
+        XCTAssertTrue(engine.isWindowFullscreen(fixture.parent, in: fixture.workspaceId))
+        XCTAssertEqual(fixture.controller.workspaceManager.borderFocusToken, fixture.parent)
+        XCTAssertNil(SurfaceDerivation.deriveBorder(world: parentContinuityWorld(fixture)))
     }
 
     func testBackgroundFocusedWindowChangeRequiresMouseAuthorityBeforeMutation() throws {
@@ -669,5 +914,53 @@ final class ManagedFocusAdmissionTests: XCTestCase {
         XCTAssertEqual(controller.workspaceManager.selectedManagedToken, requestedToken)
         XCTAssertNil(controller.intentLedger.activeManagedRequest)
         XCTAssertNil(controller.workspaceManager.pendingFocusedToken)
+    }
+
+    private typealias ParentContinuityFixture = (
+        controller: WMController,
+        workspaceId: WorkspaceDescriptor.ID,
+        parent: WindowToken,
+        child: WindowToken,
+        frame: CGRect
+    )
+
+    private func makeParentContinuityFixture(pid: pid_t) throws -> ParentContinuityFixture {
+        let controller = WindowAdmissionTestSupport.controller()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        _ = controller.workspaceManager.focusWorkspace(named: "1")
+        let parent = WindowToken(pid: pid, windowId: Int(pid) + 1)
+        let child = WindowToken(pid: pid, windowId: Int(pid) + 2)
+        _ = WindowAdmissionTestSupport.track(parent, in: workspaceId, controller: controller)
+        XCTAssertTrue(
+            controller.workspaceManager.confirmManagedFocus(
+                parent,
+                in: workspaceId,
+                activateWorkspaceOnMonitor: false
+            )
+        )
+        XCTAssertTrue(
+            controller.workspaceManager.recordExternalFocus(
+                pid: child.pid,
+                windowId: child.windowId,
+                verifiedManagedParentToken: parent
+            )
+        )
+        let fixture = (
+            controller: controller,
+            workspaceId: workspaceId,
+            parent: parent,
+            child: child,
+            frame: CGRect(x: 80, y: 90, width: 900, height: 640)
+        )
+        XCTAssertNotNil(SurfaceDerivation.deriveBorder(world: parentContinuityWorld(fixture)))
+        return fixture
+    }
+
+    private func parentContinuityWorld(_ fixture: ParentContinuityFixture) -> WorldView {
+        WorldView(controller: fixture.controller, borderFrameResolver: { windowId in
+            windowId == fixture.parent.windowId ? fixture.frame : nil
+        })
     }
 }

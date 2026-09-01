@@ -63,7 +63,7 @@ final class FloatingMonitorRebindFocusTests: XCTestCase {
         controller.layoutRefreshController.resetState()
         fixture.focusRecorder.focusedTokens.removeAll()
         let sessionRecorder = SessionRecorder()
-        manager.onSessionStateChanged = {
+        manager.onSessionStateChanged = { _ in
             sessionRecorder.changeCount += 1
         }
 
@@ -287,7 +287,7 @@ final class FloatingMonitorRebindFocusTests: XCTestCase {
         )] = []
         var injectedNewerRequest = false
         var newerRequest: ManagedFocusRequest?
-        manager.onSessionStateChanged = {
+        manager.onSessionStateChanged = { _ in
             notificationStates.append((
                 interactionMonitorId: manager.interactionMonitorId,
                 pendingToken: manager.pendingFocusedToken,

@@ -6,6 +6,7 @@ import Foundation
 
 extension AXEventHandler {
     func trackPreparedCreate(_ candidate: PreparedCreate) {
+        defer { releasePreparedWindowSubscription(candidate.windowId) }
         guard let controller else { return }
         discardCreatePlacementContext(windowId: candidate.windowId)
         let axPid = AXWindowService.processIdentifier(candidate.axRef)

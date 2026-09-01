@@ -134,38 +134,49 @@ extension NiriCreateFocusTraceEvent: CustomStringConvertible {
 
 private enum FocusedAdmissionAttempt: Equatable {
     case handled
-    case admissionPending(WindowAdmissionPendingReason)
-    case admissionRejected(WindowAdmissionRejectionReason)
-    case rejected
+    case admissionPending(WindowAdmissionPendingReason, verifiedManagedParentToken: WindowToken?)
+    case admissionRejected(WindowAdmissionRejectionReason, verifiedManagedParentToken: WindowToken?)
+    case rejected(verifiedManagedParentToken: WindowToken?)
+
+    var verifiedManagedParentToken: WindowToken? {
+        switch self {
+        case .handled:
+            nil
+        case let .admissionPending(_, token),
+             let .admissionRejected(_, token),
+             let .rejected(token):
+            token
+        }
+    }
+}
+
+private struct ManagedReplacementTraceEvent: Equatable {
+    enum Kind: Equatable {
+        case enqueued(
+            policy: String,
+            createCount: Int,
+            destroyCount: Int,
+            holdCount: Int,
+            deadlineReset: Bool
+        )
+        case flushed(
+            policy: String,
+            createCount: Int,
+            destroyCount: Int,
+            holdCount: Int,
+            elapsedMillis: Int
+        )
+        case matched(policy: String, elapsedMillis: Int)
+    }
+
+    let timestamp: TimeInterval
+    let pid: pid_t
+    let workspaceId: WorkspaceDescriptor.ID
+    let kind: Kind
 }
 
 @MainActor
 final class AXEventHandler {
-    struct ManagedReplacementTraceEvent: Equatable {
-        enum Kind: Equatable {
-            case enqueued(
-                policy: String,
-                createCount: Int,
-                destroyCount: Int,
-                holdCount: Int,
-                deadlineReset: Bool
-            )
-            case flushed(
-                policy: String,
-                createCount: Int,
-                destroyCount: Int,
-                holdCount: Int,
-                elapsedMillis: Int
-            )
-            case matched(policy: String, elapsedMillis: Int)
-        }
-
-        let timestamp: TimeInterval
-        let pid: pid_t
-        let workspaceId: WorkspaceDescriptor.ID
-        let kind: Kind
-    }
-
     struct PreparedCreate {
         let windowId: UInt32
         let token: WindowToken
@@ -268,9 +279,11 @@ final class AXEventHandler {
         var creates: [PendingManagedCreate] = []
         var destroys: [PendingManagedDestroy] = []
 
-        mutating func append(create: PendingManagedCreate) {
-            guard !creates.contains(where: { $0.candidate.token == create.candidate.token }) else { return }
+        @discardableResult
+        mutating func append(create: PendingManagedCreate) -> Bool {
+            guard !creates.contains(where: { $0.candidate.token == create.candidate.token }) else { return false }
             creates.append(create)
+            return true
         }
 
         mutating func append(destroy: PendingManagedDestroy) {
@@ -363,6 +376,12 @@ final class AXEventHandler {
     var visibleWindowInfoProvider: () -> [WindowServerInfo]
     var windowInfoProvider: (UInt32) -> WindowServerInfo?
     var windowInfoBatchProvider: (Set<UInt32>) -> [UInt32: WindowServerInfo]?
+    var windowSubscriptionProvider: ([UInt32]) -> Bool
+    var preparedWindowSubscriptionRetainCounts: [UInt32: Int] = [:]
+    var windowSubscriptionIdentityRevision: UInt64 = 0
+    var lastSuccessfulWindowSubscriptionIds: [UInt32] = []
+    var lastSuccessfulWindowSubscriptionRevision: UInt64?
+    var lastWindowSubscriptionFailureRevision: UInt64?
     var managedWindowIdentityRebindAcknowledgementProvider:
         ((AXManagedWindowIdentity, AXManagedWindowIdentity) async -> Bool)?
     var managedWindowIdentityRebindFinalizationProvider:
@@ -392,12 +411,16 @@ final class AXEventHandler {
         },
         windowInfoBatchProvider: @escaping (Set<UInt32>) -> [UInt32: WindowServerInfo]? = {
             SkyLight.shared.queryWindowInfo(windowIds: $0)
+        },
+        windowSubscriptionProvider: @escaping ([UInt32]) -> Bool = {
+            CGSEventObserver.shared.subscribeToWindows($0)
         }
     ) {
         self.controller = controller
         self.visibleWindowInfoProvider = visibleWindowInfoProvider
         self.windowInfoProvider = windowInfoProvider
         self.windowInfoBatchProvider = windowInfoBatchProvider
+        self.windowSubscriptionProvider = windowSubscriptionProvider
     }
 
     func cleanup() {
@@ -413,6 +436,8 @@ final class AXEventHandler {
         pendingWindowRuleReevaluationTask = nil
         pendingWindowRuleReevaluationTargets.removeAll()
         pendingWindowRuleReevaluationGeneration &+= 1
+        preparedWindowSubscriptionRetainCounts.removeAll()
+        windowSubscriptionIdentityRevision &+= 1
         CGSEventObserver.shared.stop()
     }
 
@@ -421,23 +446,29 @@ final class AXEventHandler {
 
         switch event {
         case let .created(windowId, spaceId):
+            beginWindowSubscriptionIdentityTransition()
             WindowAdmissionTrace.record(
                 .init(action: .cgsCreated, windowId: Int(windowId))
             )
             handleCGSWindowCreated(windowId: windowId, spaceId: spaceId)
             controller.spaceTracker.noteWindowSpace(windowId: Int(windowId), spaceId: spaceId)
+            refreshWindowSubscriptions()
 
         case let .destroyed(windowId, _):
+            beginWindowSubscriptionIdentityTransition()
             WindowAdmissionTrace.record(
                 .init(action: .cgsDestroyed, windowId: Int(windowId), reason: "destroyed")
             )
             handleCGSSpaceWindowDestroyed(windowId: windowId)
+            refreshWindowSubscriptions()
 
         case let .closed(windowId):
+            beginWindowSubscriptionIdentityTransition()
             WindowAdmissionTrace.record(
                 .init(action: .cgsDestroyed, windowId: Int(windowId), reason: "closed")
             )
             handleCGSWindowDestroyed(windowId: windowId, evidence: .windowClosed)
+            refreshWindowSubscriptions()
 
         case let .frameChanged(windowId):
             handleFrameChanged(windowId: windowId)
@@ -458,18 +489,26 @@ final class AXEventHandler {
             handleWindowOrderChanged(windowId: windowId)
 
         case let .titleChanged(windowId):
+            guard case let .exact(token, windowInfo) = resolveWindowServerIdentity(windowId),
+                  controller.workspaceManager.entry(for: token) != nil
+            else {
+                return
+            }
             AXWindowService.invalidateCachedTitle(windowId: windowId)
             controller.requestWorkspaceBarRefresh()
-            if let token = resolveTrackedToken(windowId) ?? resolveWindowToken(windowId) {
-                updateManagedReplacementTitle(windowId: windowId, token: token)
-                scheduleWindowRuleReevaluationIfNeeded(targets: [.window(token)])
-            }
+            updateManagedReplacementTitle(windowInfo: windowInfo, token: token)
+            scheduleWindowRuleReevaluationIfNeeded(targets: [.window(token)])
         }
     }
 
     private func handleWindowOrderChanged(windowId: UInt32) {
         guard let controller else { return }
         guard !controller.isOwnedWindow(windowNumber: Int(windowId)) else { return }
+        guard case let .exact(token, _) = resolveWindowServerIdentity(windowId),
+              controller.workspaceManager.entry(for: token) != nil
+        else {
+            return
+        }
         controller.surfaceReconciler.noteRestackOccurred()
     }
 
@@ -932,28 +971,30 @@ final class AXEventHandler {
     private func handleFrameChanged(windowId: UInt32) {
         guard let controller else { return }
         guard !controller.isOwnedWindow(windowNumber: Int(windowId)) else { return }
-        if retryAdmissionAfterFrameChangeRequiresEarlyReturn(windowId: windowId) { return }
         if let trackedEntry = controller.workspaceManager.entry(forWindowId: Int(windowId)),
            trackedEntry.mode == .tiling,
-           controller.mouseEventHandler.handleNativeTitleBarDragFrameChanged(for: trackedEntry)
-           || controller.niriLayoutHandler.hasScrollAnimation(for: trackedEntry.workspaceId)
+           controller.niriLayoutHandler.hasScrollAnimation(for: trackedEntry.workspaceId)
         {
             return
         }
-        let windowServerToken = resolveWindowToken(windowId)
-        let resolvedToken = resolveTrackedToken(
-            windowId,
-            resolvedWindowToken: windowServerToken
-        )
+        guard case let .exact(windowServerToken, _) = resolveWindowServerIdentity(windowId) else { return }
+        if let retryState = admissionRetryStateByWindowId[windowId] {
+            guard retryState.expectedToken.map({ $0 == windowServerToken }) ?? true else { return }
+            if retryAdmissionAfterFrameChangeRequiresEarlyReturn(windowId: windowId) { return }
+        }
+        guard let entry = controller.workspaceManager.entry(for: windowServerToken) else { return }
+        if entry.mode == .tiling,
+           controller.mouseEventHandler.handleNativeTitleBarDragFrameChanged(for: entry)
+        {
+            return
+        }
         let focusedObservedFrame = observedFrameForFocusedFrameChange(
             windowId: windowId,
             windowServerToken: windowServerToken,
-            resolvedToken: resolvedToken
+            resolvedToken: windowServerToken
         )
-        guard let token = resolvedToken else { return }
-        guard let entry = controller.workspaceManager.entry(for: token) else { return }
 
-        guard isWindowDisplayable(token: token) else { return }
+        guard isWindowDisplayable(token: windowServerToken) else { return }
 
         if entry.mode == .floating {
             if let frame = focusedObservedFrame ?? observedFrame(for: entry),
@@ -1064,11 +1105,7 @@ final class AXEventHandler {
     }
 
     func subscribeToManagedWindows() {
-        guard let controller else { return }
-        let windowIds = controller.workspaceManager.allEntries().compactMap { entry -> UInt32? in
-            UInt32(entry.windowId)
-        }
-        subscribeToWindows(windowIds)
+        refreshWindowSubscriptions()
     }
 
     func drainDeferredCreatedWindows(
@@ -1844,6 +1881,7 @@ final class AXEventHandler {
             observationGeneration: facts.observationGeneration,
             requestDisposition: requestDisposition,
             appFullscreen: appFullscreen,
+            allowsSelectedParentBorderContinuity: !focusedWindow.isSystemModalSurface,
             callbackGeneration: facts.callbackGeneration
         )
         if admissionAttempt == .handled {
@@ -1892,7 +1930,7 @@ final class AXEventHandler {
             break
         }
 
-        if case let .admissionPending(reason) = admissionAttempt {
+        if case let .admissionPending(reason, verifiedManagedParentToken) = admissionAttempt {
             let ownsProvisionalFocus = origin == .external
                 || controller.workspaceManager.externalFocusToken == token
                 || frontmostApplicationPIDProvider() == token.pid
@@ -1900,7 +1938,10 @@ final class AXEventHandler {
                 let provisionalTarget: WindowToken? = reason.hasVerifiedExternalWindowIdentity ? token : nil
                 _ = controller.workspaceManager.recordExternalFocus(
                     pid: pid,
-                    windowId: provisionalTarget?.windowId
+                    windowId: provisionalTarget?.windowId,
+                    verifiedManagedParentToken: provisionalTarget == nil
+                        ? nil
+                        : verifiedManagedParentToken
                 )
                 controller.surfaceReconciler.noteRestackOccurred()
                 recordNiriCreateFocusTrace(
@@ -1920,7 +1961,8 @@ final class AXEventHandler {
 
         _ = controller.workspaceManager.recordExternalFocus(
             pid: pid,
-            windowId: token.windowId
+            windowId: token.windowId,
+            verifiedManagedParentToken: admissionAttempt.verifiedManagedParentToken
         )
         controller.surfaceReconciler.noteRestackOccurred()
 
@@ -1942,15 +1984,19 @@ final class AXEventHandler {
         observationGeneration: UInt64,
         requestDisposition: ActivationRequestDisposition,
         appFullscreen: Bool,
+        allowsSelectedParentBorderContinuity: Bool,
         callbackGeneration: UInt64?
     ) -> FocusedAdmissionAttempt {
         guard let controller,
               let windowId = UInt32(exactly: token.windowId)
         else {
-            return .rejected
+            return .rejected(verifiedManagedParentToken: nil)
         }
 
         let windowInfo = resolveWindowInfo(windowId)
+        let verifiedManagedParentToken = allowsSelectedParentBorderContinuity
+            ? verifiedSelectedManagedParentToken(for: token, childWindowInfo: windowInfo)
+            : nil
         let createPlacementContext = retainedCreatePlacementContext(
             windowId: windowId,
             controller: controller
@@ -1967,8 +2013,11 @@ final class AXEventHandler {
         case let .prepared(prepared):
             candidate = prepared
         case let .alreadyTracked(trackedToken):
+            noteManagedWindowSubscriptionIdentityChanged()
             discardCreatePlacementContext(windowId: windowId)
-            return controller.workspaceManager.entry(for: trackedToken) == nil ? .rejected : .handled
+            return controller.workspaceManager.entry(for: trackedToken) == nil
+                ? .rejected(verifiedManagedParentToken: verifiedManagedParentToken)
+                : .handled
         case .identityRebindPending:
             return .handled
         case let .pending(pendingToken, pendingAXRef, reason):
@@ -1983,7 +2032,7 @@ final class AXEventHandler {
                     axRef: pendingAXRef
                 )
             )
-            return .admissionPending(reason)
+            return .admissionPending(reason, verifiedManagedParentToken: verifiedManagedParentToken)
         case let .ignored(ignoredToken, reason):
             WindowAdmissionTrace.record(
                 .init(
@@ -1996,7 +2045,7 @@ final class AXEventHandler {
                 )
             )
             discardCreatePlacementContext(windowId: windowId)
-            return .admissionRejected(reason)
+            return .admissionRejected(reason, verifiedManagedParentToken: verifiedManagedParentToken)
         }
         guard candidate.token == token else {
             WindowAdmissionTrace.record(
@@ -2011,8 +2060,9 @@ final class AXEventHandler {
                     axRef: candidate.axRef
                 )
             )
+            releasePreparedWindowSubscription(windowId)
             discardCreatePlacementContext(windowId: windowId)
-            return .rejected
+            return .rejected(verifiedManagedParentToken: nil)
         }
 
         cancelCreatedWindowRetry(windowId: windowId)
@@ -2040,7 +2090,7 @@ final class AXEventHandler {
                 isWorkspaceActive: isWorkspaceActive,
                 activation: focusedActivation,
                 requestDisposition: requestDisposition
-            ) ? .handled : .rejected
+            ) ? .handled : .rejected(verifiedManagedParentToken: verifiedManagedParentToken)
         }
         if shouldDelayManagedReplacementCreate(candidate) {
             enqueueManagedReplacementCreate(
@@ -2065,7 +2115,7 @@ final class AXEventHandler {
             isWorkspaceActive: isWorkspaceActive,
             activation: focusedActivation,
             requestDisposition: requestDisposition
-        ) ? .handled : .rejected
+        ) ? .handled : .rejected(verifiedManagedParentToken: verifiedManagedParentToken)
     }
 
     private func scheduleFocusedAdmissionReadmit(
@@ -2489,11 +2539,16 @@ final class AXEventHandler {
                 reason: "managed_replacement_reset"
             )
         }
+        let preparedWindowIds =
+            pendingManagedReplacementBursts.values.flatMap { burst in
+                burst.creates.map(\.candidate.windowId)
+            }
         for (_, task) in pendingManagedReplacementTasks {
             task.cancel()
         }
         pendingManagedReplacementTasks.removeAll()
         pendingManagedReplacementBursts.removeAll()
+        releasePreparedWindowSubscriptions(preparedWindowIds)
         if let controller {
             for intent in controller.intentLedger.openReplacementFocusIntents() {
                 _ = controller.intentLedger.cancel(id: intent.id)
@@ -2631,8 +2686,6 @@ final class AXEventHandler {
         ) {
             return .pending(token: token, axRef: axRef, reason: .degenerateGeometry)
         }
-        subscribeToWindows([windowId])
-
         let resolvedBundleId = bundleId ?? evaluation.facts.ax.bundleId
         let replacementMatch = structuralReplacementMatch(
             token: token,
@@ -2694,6 +2747,7 @@ final class AXEventHandler {
                 axRef: axRef
             )
         )
+        retainPreparedWindowSubscription(windowId)
         return .prepared(prepared)
     }
 
@@ -2706,6 +2760,7 @@ final class AXEventHandler {
         case let .prepared(candidate):
             return candidate
         case .alreadyTracked:
+            noteManagedWindowSubscriptionIdentityChanged()
             discardCreatePlacementContext(windowId: windowId)
             finishAdmissionRetryAfterTracking(windowId: windowId)
         case .identityRebindPending:
@@ -2756,27 +2811,18 @@ final class AXEventHandler {
 
     private func prepareDestroyCandidate(
         windowId: UInt32,
-        pidHint: pid_t?,
+        token: WindowToken?,
         evidence: WindowDestroyEvidence
     ) -> PreparedDestroy? {
         guard let controller else { return nil }
-
-        let hintedToken = pidHint.flatMap { hintedPid -> WindowToken? in
-            let token = WindowToken(pid: hintedPid, windowId: Int(windowId))
-            return controller.workspaceManager.entry(for: token) != nil ? token : nil
-        }
-        let resolvedToken = hintedToken
-            ?? resolveTrackedToken(windowId)
-            ?? pidHint.map { WindowToken(pid: $0, windowId: Int(windowId)) }
-
-        guard let token = resolvedToken,
+        guard let token,
               let entry = controller.workspaceManager.entry(for: token)
         else {
             return nil
         }
 
         let bundleId = resolveBundleId(token.pid) ?? entry.managedReplacementMetadata?.bundleId
-        let windowInfo = resolveWindowInfo(windowId)
+        let windowInfo = WMController.exactWindowServerInfo(resolveWindowInfo(windowId), for: token)
         let cachedMetadata = overlayWindowServerInfo(
             windowInfo,
             onto: cachedManagedReplacementMetadata(
@@ -2818,9 +2864,14 @@ final class AXEventHandler {
         callbackGeneration: UInt64? = nil,
         evidence: WindowDestroyEvidence
     ) {
-        let observedToken = resolveWindowToken(windowId)
-        let resolvedToken = resolveTrackedToken(windowId, resolvedWindowToken: observedToken)
-            ?? observedToken
+        let identityResolution = resolveWindowServerIdentity(windowId)
+        let trackedToken = resolveTrackedTokenForDestruction(
+            windowId,
+            pidHint: pidHint,
+            identityResolution: identityResolution
+        )
+        let resolvedToken = trackedToken
+            ?? identityResolution.token
             ?? pidHint.map { WindowToken(pid: $0, windowId: Int(windowId)) }
         WindowAdmissionTrace.record(
             .init(
@@ -2838,7 +2889,7 @@ final class AXEventHandler {
 
         guard let candidate = prepareDestroyCandidate(
             windowId: windowId,
-            pidHint: pidHint,
+            token: trackedToken,
             evidence: evidence
         ) else {
             discardUnmanagedDestroyedWindowState(windowId: windowId, resolvedToken: resolvedToken)
@@ -2854,7 +2905,8 @@ final class AXEventHandler {
             clearFocusedTargetForDestroyedWindow(
                 windowId: windowId,
                 resolvedToken: resolvedToken,
-                pidHint: pidHint
+                pidHint: pidHint,
+                identityResolution: identityResolution
             )
             if let controller,
                controller.workspaceManager.entry(forWindowId: Int(windowId)) == nil
@@ -2911,7 +2963,8 @@ final class AXEventHandler {
     private func clearFocusedTargetForDestroyedWindow(
         windowId: UInt32,
         resolvedToken: WindowToken?,
-        pidHint: pid_t?
+        pidHint: pid_t?,
+        identityResolution: WindowServerIdentityResolution
     ) {
         guard let controller,
               let target = controller.workspaceManager.externalFocusToken
@@ -2919,7 +2972,11 @@ final class AXEventHandler {
 
         let matchesResolvedToken = resolvedToken.map { $0 == target } ?? false
         let matchesPidHint = pidHint.map { $0 == target.pid && target.windowId == Int(windowId) } ?? false
-        let matchesWindowId = target.windowId == Int(windowId)
+        let matchesWindowId = if case .unavailable = identityResolution {
+            target.windowId == Int(windowId)
+        } else {
+            false
+        }
         guard matchesResolvedToken || matchesPidHint || matchesWindowId else { return }
 
         controller.workspaceManager.clearExternalFocusIdentity(matching: target)
@@ -3005,7 +3062,10 @@ final class AXEventHandler {
             candidate: candidate,
             focusedActivation: focusedActivation
         )
-        burst.append(create: pendingCreate)
+        guard burst.append(create: pendingCreate) else {
+            releasePreparedWindowSubscription(candidate.windowId)
+            return
+        }
         pendingManagedReplacementBursts[key] = burst
         let resetExistingDeadline = isNewBurst
         recordManagedReplacementTrace(
@@ -3203,6 +3263,7 @@ final class AXEventHandler {
             axRef: create.axRef,
             managedReplacementMetadata: create.replacementMetadata,
             admissionHints: create.admissionHints,
+            preparedSubscriptionRetainContribution: 1,
             focusedAdmissionContinuation: focusedAdmissionContinuation
         )
     }
@@ -3672,10 +3733,10 @@ final class AXEventHandler {
         return nextManagedReplacementEventSequence
     }
 
-    private func updateManagedReplacementTitle(windowId: UInt32, token: WindowToken) {
+    private func updateManagedReplacementTitle(windowInfo: WindowServerInfo, token: WindowToken) {
         guard let controller,
               let entry = controller.workspaceManager.entry(for: token),
-              let title = resolveWindowInfo(windowId)?.title ?? AXWindowService.titlePreferFast(windowId: windowId)
+              let title = windowInfo.title ?? AXWindowService.titlePreferFast(windowId: windowInfo.id)
         else {
             return
         }
@@ -3888,36 +3949,6 @@ final class AXEventHandler {
 }
 
 extension AXEventHandler {
-    func clearManagedFocusState(
-        matching token: WindowToken,
-        workspaceId: WorkspaceDescriptor.ID?,
-        preservesExternalFocusIdentity: Bool = false
-    ) {
-        guard let controller else { return }
-
-        controller.intentLedger.discardPendingFocus(token)
-        let canceledRequest = controller.intentLedger.cancelManagedRequest(
-            matching: token,
-            workspaceId: workspaceId
-        )
-        if let canceledRequest {
-            _ = controller.workspaceManager.cancelManagedFocusRequest(
-                matching: token,
-                workspaceId: workspaceId,
-                requestId: canceledRequest.requestId
-            )
-            controller.abortScratchpadStacking(matching: canceledRequest.requestId)
-        } else {
-            _ = controller.workspaceManager.cancelCurrentManagedFocusRequest(
-                matching: token,
-                workspaceId: workspaceId
-            )
-        }
-        if !preservesExternalFocusIdentity {
-            controller.workspaceManager.clearExternalFocusIdentity(matching: token)
-        }
-    }
-
     private func liveCreateSpace(
         for windowId: UInt32,
         spaceIdsForWindow: (UInt32) -> [UInt64] = { SkyLight.shared.spacesForWindow($0) }
@@ -3932,7 +3963,10 @@ extension AXEventHandler {
         evidence: WindowDestroyEvidence
     ) {
         AXWindowService.invalidateCachedTitle(windowId: windowId)
-        cancelCreatedWindowRetry(windowId: windowId)
+        let retryRetainCount = cancelCreatedWindowRetry(windowId: windowId)
+        if retryRetainCount == 0 {
+            releasePreparedWindowSubscription(windowId)
+        }
         discardCreatePlacementContext(windowId: windowId)
         removeDeferredCreatedWindow(windowId)
         rejectDeferredReplacement(windowId: windowId)

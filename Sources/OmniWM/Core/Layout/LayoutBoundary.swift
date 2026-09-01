@@ -36,9 +36,32 @@ struct LayoutMonitorSnapshot {
     let frame: CGRect
     let visibleFrame: CGRect
     let workingFrame: CGRect
+    let borderSafeFillFrame: CGRect
     let fullscreenLayoutFrame: CGRect
     let scale: CGFloat
     let orientation: Monitor.Orientation
+
+    init(
+        monitorId: Monitor.ID,
+        displayId: CGDirectDisplayID,
+        frame: CGRect,
+        visibleFrame: CGRect,
+        workingFrame: CGRect,
+        borderSafeFillFrame: CGRect? = nil,
+        fullscreenLayoutFrame: CGRect,
+        scale: CGFloat,
+        orientation: Monitor.Orientation
+    ) {
+        self.monitorId = monitorId
+        self.displayId = displayId
+        self.frame = frame
+        self.visibleFrame = visibleFrame
+        self.workingFrame = workingFrame
+        self.borderSafeFillFrame = borderSafeFillFrame ?? fullscreenLayoutFrame
+        self.fullscreenLayoutFrame = fullscreenLayoutFrame
+        self.scale = scale
+        self.orientation = orientation
+    }
 }
 
 struct WorkspaceRefreshInput {
@@ -89,10 +112,31 @@ struct DwindleAnimationGeometryContext: Equatable {
     let monitorId: Monitor.ID
     let displayId: CGDirectDisplayID
     let workingFrame: CGRect
+    let borderSafeFillFrame: CGRect
     let fullscreenLayoutFrame: CGRect
     let scale: CGFloat
     let settings: ResolvedDwindleSettings
     let tabRailWidth: CGFloat
+
+    init(
+        monitorId: Monitor.ID,
+        displayId: CGDirectDisplayID,
+        workingFrame: CGRect,
+        borderSafeFillFrame: CGRect? = nil,
+        fullscreenLayoutFrame: CGRect,
+        scale: CGFloat,
+        settings: ResolvedDwindleSettings,
+        tabRailWidth: CGFloat
+    ) {
+        self.monitorId = monitorId
+        self.displayId = displayId
+        self.workingFrame = workingFrame
+        self.borderSafeFillFrame = borderSafeFillFrame ?? fullscreenLayoutFrame
+        self.fullscreenLayoutFrame = fullscreenLayoutFrame
+        self.scale = scale
+        self.settings = settings
+        self.tabRailWidth = tabRailWidth
+    }
 }
 
 struct DwindleAnimationTargetCandidate {

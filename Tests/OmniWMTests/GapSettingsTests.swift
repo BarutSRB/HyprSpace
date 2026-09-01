@@ -210,6 +210,8 @@ final class GapSettingsTests: XCTestCase {
     func testDwindleGeneralGapUsesDisplayOverrideWithoutChangingSpecificGapPrecedence() {
         let settings = makeSettingsStore()
         let monitor = makeMonitor(displayId: 1, name: "Built-in")
+        settings.bordersEnabled = true
+        settings.borderWidth = 8
         settings.gapSize = 16
         settings.dwindleUseGlobalGaps = true
         settings.updateGapSettings(
@@ -238,6 +240,10 @@ final class GapSettingsTests: XCTestCase {
             for: monitor
         )
         XCTAssertEqual(settings.resolvedDwindleSettings(for: monitor).innerGap, 6)
+        XCTAssertEqual(controller.resolvedDwindleSettings(for: monitor).innerGap, 8)
+        controller.dwindleLayoutHandler.withDwindleContext { engine, _ in
+            XCTAssertEqual(engine.settings.innerGap, 8)
+        }
     }
 
     @MainActor
@@ -293,6 +299,7 @@ final class GapSettingsTests: XCTestCase {
     @MainActor
     private func assertLayoutRoutesInnerGapByWorkspaceDisplay(_ layout: LayoutType) throws {
         let settings = makeSettingsStore()
+        settings.bordersEnabled = false
         let left = makeMonitor(displayId: 1, name: "Left", originX: 0)
         let right = makeMonitor(displayId: 2, name: "Right", originX: 1440)
         settings.workspaceConfigurations = [
@@ -359,6 +366,133 @@ final class GapSettingsTests: XCTestCase {
 
         XCTAssertEqual(separation(between: leftFrames[0], and: leftFrames[1]), 4, accuracy: 0.5)
         XCTAssertEqual(separation(between: rightFrames[0], and: rightFrames[1]), 24, accuracy: 0.5)
+    }
+
+    @MainActor
+    func testBorderClearanceFloorsRuntimeGapsWithoutMutatingStoredValues() {
+        let settings = makeSettingsStore()
+        let monitor = makeMonitor(displayId: 1, name: "Built-in")
+        settings.bordersEnabled = true
+        settings.borderWidth = 5.2
+        settings.gapSize = 0
+        settings.outerGapLeft = 0
+        settings.outerGapRight = 0
+        settings.outerGapTop = 0
+        settings.outerGapBottom = 0
+        settings.workspaceBarEnabled = false
+        settings.updateGapSettings(
+            MonitorGapSettings(
+                monitorName: monitor.name,
+                monitorDisplayId: monitor.displayId,
+                innerGap: 0
+            ),
+            for: monitor
+        )
+        settings.updateDwindleSettings(
+            MonitorDwindleSettings(
+                monitorName: monitor.name,
+                monitorDisplayId: monitor.displayId,
+                useGlobalGaps: false,
+                innerGap: 0
+            ),
+            for: monitor
+        )
+        let controller = WMController(settings: settings)
+        let frames = controller.layoutFrames(for: monitor, scale: 2)
+
+        XCTAssertEqual(settings.resolvedGapSettings(for: monitor).innerGap, 0)
+        XCTAssertEqual(settings.resolvedDwindleSettings(for: monitor).innerGap, 0)
+        XCTAssertEqual(controller.innerGap(for: monitor, scale: 2), 5.5)
+        XCTAssertEqual(controller.resolvedDwindleSettings(for: monitor).innerGap, 5.5)
+        XCTAssertEqual(frames.workingFrame, CGRect(x: 5.5, y: 5.5, width: 1429, height: 889))
+        XCTAssertEqual(frames.borderSafeFillFrame, frames.workingFrame)
+        XCTAssertEqual(frames.fullscreenLayoutFrame, monitor.visibleFrame)
+    }
+
+    @MainActor
+    func testNiriInteractionGeometryUsesOneResolvedScaleForFrameAndGap() {
+        let settings = makeSettingsStore()
+        let monitor = makeMonitor(displayId: 1, name: "Built-in")
+        settings.bordersEnabled = true
+        settings.borderWidth = 5.2
+        settings.gapSize = 0
+        settings.outerGapLeft = 0
+        settings.outerGapRight = 0
+        settings.outerGapTop = 0
+        settings.outerGapBottom = 0
+        settings.workspaceBarEnabled = false
+        settings.updateGapSettings(
+            MonitorGapSettings(
+                monitorName: monitor.name,
+                monitorDisplayId: monitor.displayId,
+                innerGap: 0
+            ),
+            for: monitor
+        )
+        let controller = WMController(settings: settings)
+
+        let oneX = controller.niriInteractionGeometry(for: monitor, scale: 1)
+        let twoX = controller.niriInteractionGeometry(for: monitor, scale: 2)
+
+        XCTAssertEqual(oneX.scale, 1)
+        XCTAssertEqual(oneX.innerGap, 6)
+        XCTAssertEqual(oneX.workingFrame, CGRect(x: 6, y: 6, width: 1428, height: 888))
+        XCTAssertEqual(twoX.scale, 2)
+        XCTAssertEqual(twoX.innerGap, 5.5)
+        XCTAssertEqual(twoX.workingFrame, CGRect(x: 5.5, y: 5.5, width: 1429, height: 889))
+    }
+
+    @MainActor
+    func testDisabledBordersPreserveZeroGapGeometry() {
+        let settings = makeSettingsStore()
+        let monitor = makeMonitor(displayId: 1, name: "Built-in")
+        settings.bordersEnabled = false
+        settings.gapSize = 0
+        settings.outerGapLeft = 0
+        settings.outerGapRight = 0
+        settings.outerGapTop = 0
+        settings.outerGapBottom = 0
+        settings.workspaceBarEnabled = false
+        settings.updateGapSettings(
+            MonitorGapSettings(
+                monitorName: monitor.name,
+                monitorDisplayId: monitor.displayId,
+                innerGap: 0
+            ),
+            for: monitor
+        )
+        let controller = WMController(settings: settings)
+        let frames = controller.layoutFrames(for: monitor, scale: 2)
+
+        XCTAssertEqual(controller.innerGap(for: monitor, scale: 2), 0)
+        XCTAssertEqual(frames.workingFrame, monitor.visibleFrame)
+        XCTAssertEqual(frames.borderSafeFillFrame, monitor.visibleFrame)
+        XCTAssertEqual(frames.fullscreenLayoutFrame, monitor.visibleFrame)
+    }
+
+    @MainActor
+    func testBorderClearanceFloorsTopAfterMenuBarNormalization() {
+        let settings = makeSettingsStore()
+        settings.bordersEnabled = true
+        settings.borderWidth = 8
+        settings.outerGapLeft = 0
+        settings.outerGapRight = 0
+        settings.outerGapTop = 46
+        settings.outerGapBottom = 0
+        settings.workspaceBarEnabled = false
+        let monitor = Monitor(
+            id: .init(displayId: 1),
+            displayId: 1,
+            frame: CGRect(x: 0, y: 0, width: 1440, height: 900),
+            visibleFrame: CGRect(x: 0, y: 0, width: 1440, height: 860),
+            hasNotch: false,
+            name: "Built-in"
+        )
+        let controller = WMController(settings: settings)
+        let frames = controller.layoutFrames(for: monitor, scale: 2)
+
+        XCTAssertEqual(frames.workingFrame, CGRect(x: 8, y: 8, width: 1424, height: 844))
+        XCTAssertEqual(frames.fullscreenLayoutFrame, monitor.visibleFrame)
     }
 
     func testDwindleApplyGapsEdgesAreFlush() {

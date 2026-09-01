@@ -557,7 +557,7 @@ enum StructuralMutationOutcome: Equatable {
             hasCompletedInitialRefresh: controller.layoutRefreshController.layoutState.hasCompletedInitialRefresh,
             useScrollAnimationPath: useScrollAnimationPath,
             removalSeed: removalSeed,
-            gap: controller.innerGap(for: monitor),
+            gap: controller.innerGap(for: monitor, scale: refreshInput.monitor.scale),
             outerGaps: controller.workspaceManager.outerGaps,
             displayRefreshRate: controller.layoutRefreshController.layoutState
                 .refreshRateByDisplay[monitor.displayId] ?? 60.0,
@@ -581,6 +581,7 @@ enum StructuralMutationOutcome: Equatable {
 
         let area = WorkingAreaContext(
             workingFrame: snapshot.monitor.workingFrame,
+            borderSafeFillFrame: snapshot.monitor.borderSafeFillFrame,
             fullscreenLayoutFrame: snapshot.monitor.fullscreenLayoutFrame,
             viewFrame: snapshot.monitor.frame,
             scale: snapshot.monitor.scale
@@ -1239,6 +1240,7 @@ enum StructuralMutationOutcome: Equatable {
 
         let area = WorkingAreaContext(
             workingFrame: pass.insetFrame,
+            borderSafeFillFrame: snapshot.monitor.borderSafeFillFrame,
             fullscreenLayoutFrame: snapshot.monitor.fullscreenLayoutFrame,
             viewFrame: snapshot.monitor.frame,
             scale: snapshot.monitor.scale
@@ -3003,9 +3005,11 @@ struct NodeActivationOptions {
     ) {
         let scale = NSScreen.screens.first(where: { $0.displayId == monitor.displayId })?
             .backingScaleFactor ?? 2.0
+        let layoutFrames = controller.layoutFrames(for: monitor, scale: scale)
         let workingArea = WorkingAreaContext(
             workingFrame: workingFrame,
-            fullscreenLayoutFrame: controller.fullscreenLayoutFrame(for: monitor),
+            borderSafeFillFrame: layoutFrames.borderSafeFillFrame,
+            fullscreenLayoutFrame: layoutFrames.fullscreenLayoutFrame,
             viewFrame: monitor.frame,
             scale: scale
         )

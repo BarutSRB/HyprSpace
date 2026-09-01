@@ -215,7 +215,9 @@ final class WindowAdmissionPolicyTests: XCTestCase {
 
         var invalidations: [(WorkspaceDescriptor.ID?, InvalidationDomain)] = []
         var presenceObservations = 0
-        controller.workspaceManager.onRuntimeInvalidation = { invalidations.append(($0, $1)) }
+        controller.workspaceManager.onRuntimeInvalidation = { workspaceId, domains, _ in
+            invalidations.append((workspaceId, domains))
+        }
         controller.workspaceManager.onWindowPresenceObserved = { _ in presenceObservations += 1 }
         let seq = controller.workspaceManager.worldSeq
         let conflictingToken = WindowToken(pid: 467_098, windowId: unobservedDirectToken.windowId)

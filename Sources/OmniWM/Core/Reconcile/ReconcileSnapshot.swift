@@ -160,11 +160,77 @@ struct MonitorSession: Equatable {
     var previousVisibleWorkspaceId: WorkspaceDescriptor.ID?
 }
 
+struct ExternalFocusIdentity: Equatable, Sendable {
+    let pid: pid_t?
+    let windowId: Int?
+    let verifiedManagedParentToken: WindowToken?
+
+    init(
+        pid: pid_t?,
+        windowId: Int?,
+        verifiedManagedParentToken: WindowToken? = nil
+    ) {
+        self.pid = pid
+        self.windowId = windowId
+        self.verifiedManagedParentToken = if pid != nil, windowId != nil {
+            verifiedManagedParentToken
+        } else {
+            nil
+        }
+    }
+
+    var exactToken: WindowToken? {
+        guard let pid, let windowId else { return nil }
+        return WindowToken(pid: pid, windowId: windowId)
+    }
+
+    func downgradingToPIDOnly() -> ExternalFocusIdentity {
+        ExternalFocusIdentity(pid: pid, windowId: nil)
+    }
+
+    func clearingVerifiedManagedParent() -> ExternalFocusIdentity {
+        guard verifiedManagedParentToken != nil else { return self }
+        return ExternalFocusIdentity(pid: pid, windowId: windowId)
+    }
+
+    func rekeying(from oldToken: WindowToken, to newToken: WindowToken) -> ExternalFocusIdentity {
+        let rekeysExternalToken = exactToken == oldToken
+        return ExternalFocusIdentity(
+            pid: rekeysExternalToken ? newToken.pid : pid,
+            windowId: rekeysExternalToken ? newToken.windowId : windowId,
+            verifiedManagedParentToken: rekeysExternalToken || verifiedManagedParentToken == oldToken
+                ? nil
+                : verifiedManagedParentToken
+        )
+    }
+
+    func removingManagedToken(_ token: WindowToken) -> ExternalFocusIdentity {
+        if exactToken == token || verifiedManagedParentToken == token {
+            return clearingVerifiedManagedParent()
+        }
+        return self
+    }
+}
+
 enum NativeFocusOwner: Equatable, Sendable {
     case managed(WindowToken)
-    case external(pid: pid_t?, windowId: Int?)
+    case external(ExternalFocusIdentity)
     case ownedSurface
     case none
+
+    static func external(
+        pid: pid_t?,
+        windowId: Int?,
+        verifiedManagedParentToken: WindowToken? = nil
+    ) -> NativeFocusOwner {
+        .external(
+            ExternalFocusIdentity(
+                pid: pid,
+                windowId: windowId,
+                verifiedManagedParentToken: verifiedManagedParentToken
+            )
+        )
+    }
 
     var managedToken: WindowToken? {
         guard case let .managed(token) = self else { return nil }
@@ -172,13 +238,12 @@ enum NativeFocusOwner: Equatable, Sendable {
     }
 
     var externalToken: WindowToken? {
-        guard case let .external(pid, windowId) = self,
-              let pid,
-              let windowId
-        else {
-            return nil
-        }
-        return WindowToken(pid: pid, windowId: windowId)
+        externalIdentity?.exactToken
+    }
+
+    var externalIdentity: ExternalFocusIdentity? {
+        guard case let .external(identity) = self else { return nil }
+        return identity
     }
 
     var isExternal: Bool {

@@ -137,6 +137,7 @@ extension NiriLayoutEngine {
         guard !projectedColumns.isEmpty else { return }
 
         let workingFrame = workingArea?.workingFrame ?? monitorFrame
+        let borderSafeFillFrame = workingArea?.borderSafeFillFrame ?? workingFrame
         let fullscreenLayoutFrame = workingArea?.fullscreenLayoutFrame ?? workingFrame
         let viewFrame = workingArea?.viewFrame ?? screenFrame ?? monitorFrame
         let effectiveScale = workingArea?.scale ?? scale
@@ -154,6 +155,10 @@ extension NiriLayoutEngine {
 
         let time = animationTime ?? CACurrentMediaTime()
         let workspaceOffset: CGFloat = 0
+        let canonicalMaximizedRect = borderSafeFillFrame.roundedToPhysicalPixels(scale: effectiveScale)
+        let renderedMaximizedRect = canonicalMaximizedRect
+            .offsetBy(dx: workspaceOffset, dy: 0)
+            .roundedToPhysicalPixels(scale: effectiveScale)
         let canonicalFullscreenRect = fullscreenLayoutFrame.roundedToPhysicalPixels(scale: effectiveScale)
         let renderedFullscreenRect = canonicalFullscreenRect
             .offsetBy(dx: workspaceOffset, dy: 0)
@@ -175,7 +180,10 @@ extension NiriLayoutEngine {
             layoutSingleWindowWorkspace(
                 singleWindowContext,
                 workingFrame: workingFrame,
+                borderSafeFillFrame: borderSafeFillFrame,
                 fullscreenLayoutFrame: fullscreenLayoutFrame,
+                maximizedRect: canonicalMaximizedRect,
+                renderedMaximizedRect: renderedMaximizedRect,
                 fullscreenRect: canonicalFullscreenRect,
                 renderedFullscreenRect: renderedFullscreenRect,
                 workspaceOffset: workspaceOffset,
@@ -334,6 +342,8 @@ extension NiriLayoutEngine {
                 windows: projectedColumn.windows,
                 canonicalContainerRect: canonicalContainerRect,
                 renderedContainerRect: renderedContainerRect,
+                maximizedRect: canonicalMaximizedRect,
+                renderedMaximizedRect: renderedMaximizedRect,
                 fullscreenRect: canonicalFullscreenRect,
                 renderedFullscreenRect: renderedFullscreenRect,
                 secondaryGap: secondaryGap,
@@ -608,6 +618,7 @@ extension NiriLayoutEngine {
     func resolvedSingleWindowRect(
         for context: SingleWindowLayoutContext,
         in workingFrame: CGRect,
+        borderSafeFillFrame: CGRect? = nil,
         fullscreenLayoutFrame: CGRect? = nil,
         scale: CGFloat,
         primaryGap: CGFloat,
@@ -623,7 +634,9 @@ extension NiriLayoutEngine {
         }
         let hasManualSecondaryOverride = orientation == .vertical && context.window.windowWidth != .default
         guard hasManualPrimaryOverride || hasManualSecondaryOverride else {
-            let baseFrame = context.fit.usesFullscreenLayoutFrame ? fullscreenLayoutFrame ?? workingFrame : workingFrame
+            let baseFrame = context.fit.usesFullscreenLayoutFrame
+                ? borderSafeFillFrame ?? fullscreenLayoutFrame ?? workingFrame
+                : workingFrame
             return rectExpandedToMinimum(context.fit.frame(in: baseFrame), minSize: minSize)
                 .roundedToPhysicalPixels(scale: scale)
         }
@@ -685,7 +698,10 @@ extension NiriLayoutEngine {
     private func layoutSingleWindowWorkspace(
         _ context: SingleWindowLayoutContext,
         workingFrame: CGRect,
+        borderSafeFillFrame: CGRect,
         fullscreenLayoutFrame: CGRect,
+        maximizedRect: CGRect,
+        renderedMaximizedRect: CGRect,
         fullscreenRect: CGRect,
         renderedFullscreenRect: CGRect,
         workspaceOffset: CGFloat,
@@ -700,6 +716,7 @@ extension NiriLayoutEngine {
         let canonicalRect = resolvedSingleWindowRect(
             for: context,
             in: workingFrame,
+            borderSafeFillFrame: borderSafeFillFrame,
             fullscreenLayoutFrame: fullscreenLayoutFrame,
             scale: scale,
             primaryGap: primaryGap,
@@ -724,6 +741,8 @@ extension NiriLayoutEngine {
             windows: [context.window],
             canonicalContainerRect: canonicalRect,
             renderedContainerRect: renderedRect,
+            maximizedRect: maximizedRect,
+            renderedMaximizedRect: renderedMaximizedRect,
             fullscreenRect: fullscreenRect,
             renderedFullscreenRect: renderedFullscreenRect,
             secondaryGap: 0,
@@ -741,6 +760,8 @@ extension NiriLayoutEngine {
         windows: [NiriWindow],
         canonicalContainerRect: CGRect,
         renderedContainerRect: CGRect,
+        maximizedRect: CGRect,
+        renderedMaximizedRect: CGRect,
         fullscreenRect: CGRect,
         renderedFullscreenRect: CGRect,
         secondaryGap: CGFloat,
@@ -800,10 +821,16 @@ extension NiriLayoutEngine {
             let renderedBaseFrame: CGRect
             let resolvedSpan: CGFloat
             switch sizingMode {
-            case .fullscreen,
-                 .maximized:
+            case .fullscreen:
                 frame = fullscreenRect.roundedToPhysicalPixels(scale: scale)
                 renderedBaseFrame = renderedFullscreenRect
+                resolvedSpan = switch orientation {
+                case .horizontal: frame.height
+                case .vertical: frame.width
+                }
+            case .maximized:
+                frame = maximizedRect.roundedToPhysicalPixels(scale: scale)
+                renderedBaseFrame = renderedMaximizedRect
                 resolvedSpan = switch orientation {
                 case .horizontal: frame.height
                 case .vertical: frame.width
@@ -843,8 +870,9 @@ extension NiriLayoutEngine {
 
             var animatedFrame: CGRect
             switch sizingMode {
-            case .fullscreen,
-                 .maximized:
+            case .fullscreen:
+                animatedFrame = renderedBaseFrame
+            case .maximized:
                 animatedFrame = renderedBaseFrame
             case .normal:
                 let windowOffset = window.renderOffset(at: time)

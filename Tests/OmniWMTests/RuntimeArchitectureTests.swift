@@ -5586,7 +5586,7 @@ final class RuntimeArchitectureTests: XCTestCase {
         _ = controller.niriEngine?.addWindow(token: token, to: workspaceId, afterSelection: nil)
         XCTAssertTrue(controller.workspaceManager.markNativeFullscreenSuspended(token))
         var publishedOwnerLoss = false
-        controller.workspaceManager.onSessionStateChanged = {
+        controller.workspaceManager.onSessionStateChanged = { _ in
             if !controller.workspaceManager.nativeFocusOwner.isExternal
                 || controller.workspaceManager.externalFocusToken != token
             {

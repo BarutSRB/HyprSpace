@@ -22,6 +22,7 @@ final class CGSEventObserver {
     private var isRegistered = false
     private var isWindowClosedNotifyRegistered = false
     private(set) var lastRegistrationSummary = "not started"
+    private(set) var lastWindowSubscriptionSummary = "not requested"
 
     private init() {}
 
@@ -116,7 +117,15 @@ final class CGSEventObserver {
 
     @discardableResult
     func subscribeToWindows(_ windowIds: [UInt32]) -> Bool {
-        SkyLight.shared.subscribeToWindowNotifications(windowIds)
+        guard !windowIds.isEmpty else {
+            lastWindowSubscriptionSummary = "empty set skipped"
+            return false
+        }
+        let success = SkyLight.shared.subscribeToWindowNotifications(windowIds)
+        lastWindowSubscriptionSummary = success
+            ? "\(windowIds.count) windows subscribed"
+            : "\(windowIds.count) window subscription failed"
+        return success
     }
 }
 

@@ -4,6 +4,17 @@
 import AppKit
 import Foundation
 
+enum WindowServerIdentityResolution {
+    case exact(token: WindowToken, info: WindowServerInfo)
+    case mismatched
+    case unavailable
+
+    var token: WindowToken? {
+        guard case let .exact(token, _) = self else { return nil }
+        return token
+    }
+}
+
 @MainActor
 extension AXEventHandler {
     func setup() {
@@ -224,30 +235,53 @@ extension AXEventHandler {
         return windowInfoBatchProvider(windowIds) ?? [:]
     }
 
-    func resolveWindowToken(_ windowId: UInt32) -> WindowToken? {
-        guard let windowInfo = resolveWindowInfo(windowId) else { return nil }
-        return .init(pid: windowInfo.pid, windowId: Int(windowId))
+    func resolveWindowServerIdentity(_ windowId: UInt32) -> WindowServerIdentityResolution {
+        guard let windowInfo = resolveWindowInfo(windowId) else { return .unavailable }
+        guard windowInfo.id == windowId else { return .mismatched }
+        return .exact(
+            token: WindowToken(pid: windowInfo.pid, windowId: Int(windowId)),
+            info: windowInfo
+        )
     }
 
-    func resolveTrackedToken(
+    func resolveWindowToken(_ windowId: UInt32) -> WindowToken? {
+        resolveWindowServerIdentity(windowId).token
+    }
+
+    func resolveTrackedToken(_ windowId: UInt32) -> WindowToken? {
+        guard let controller,
+              let token = resolveWindowToken(windowId)
+        else { return nil }
+        return controller.workspaceManager.entry(for: token)?.token
+    }
+
+    func resolveTrackedTokenForDestruction(
         _ windowId: UInt32,
-        resolvedWindowToken: WindowToken? = nil
+        pidHint: pid_t?,
+        identityResolution: WindowServerIdentityResolution
     ) -> WindowToken? {
         guard let controller else { return nil }
-        if let token = resolvedWindowToken ?? resolveWindowToken(windowId),
-           controller.workspaceManager.entry(for: token) != nil
+        if let hintedToken = pidHint.map({ WindowToken(pid: $0, windowId: Int(windowId)) }),
+           controller.workspaceManager.entry(for: hintedToken) != nil
         {
-            return token
+            return hintedToken
         }
-        return controller.workspaceManager.entry(forWindowId: Int(windowId))?.token
+        switch identityResolution {
+        case let .exact(token, _):
+            return controller.workspaceManager.entry(for: token)?.token
+        case .mismatched:
+            return nil
+        case .unavailable:
+            return controller.workspaceManager.entry(forWindowId: Int(windowId))?.token
+        }
     }
 
     func resolveAXWindowRef(windowId: UInt32, pid: pid_t) -> AXWindowRef? {
         AXWindowService.axWindowRef(for: windowId, pid: pid)
     }
 
-    func subscribeToWindows(_ windowIds: [UInt32]) {
-        CGSEventObserver.shared.subscribeToWindows(windowIds)
+    func subscribeToWindows(_ windowIds: [UInt32]) -> Bool {
+        windowSubscriptionProvider(windowIds)
     }
 
     func resolveBundleId(_ pid: pid_t) -> String? {

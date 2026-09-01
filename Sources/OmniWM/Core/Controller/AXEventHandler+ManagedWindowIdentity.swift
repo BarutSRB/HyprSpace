@@ -15,8 +15,10 @@ extension AXEventHandler {
         managedReplacementMetadata: ManagedReplacementMetadata? = nil,
         admissionHints: ManagedWindowAdmissionHints? = nil,
         sizeConstraints: WindowSizeConstraints? = nil,
+        preparedSubscriptionRetainContribution: Int = 0,
         focusedAdmissionContinuation: FocusedAdmissionRetryContinuation? = nil
     ) -> ManagedWindowIdentityRebindResult {
+        assert(preparedSubscriptionRetainContribution >= 0)
         guard let controller else { return .rejected }
         guard let oldEntry = controller.workspaceManager.entry(for: oldToken),
               oldToken == newToken || controller.workspaceManager.entry(for: newToken) == nil
@@ -41,6 +43,7 @@ extension AXEventHandler {
                 managedReplacementMetadata: managedReplacementMetadata,
                 admissionHints: admissionHints,
                 sizeConstraints: sizeConstraints,
+                preparedSubscriptionRetainContribution: preparedSubscriptionRetainContribution,
                 focusedAdmissionContinuation: focusedAdmissionContinuation
             )
             return scheduled ? .pending : .rejected
@@ -72,7 +75,8 @@ extension AXEventHandler {
             entry: entry,
             windowId: windowId,
             managedReplacementMetadata: managedReplacementMetadata,
-            admissionHints: admissionHints
+            admissionHints: admissionHints,
+            directPreparedSubscriptionRetainCount: preparedSubscriptionRetainContribution
         )
         return .committed(entry)
     }
@@ -263,7 +267,8 @@ extension AXEventHandler {
             entry: currentEntry,
             windowId: windowId,
             managedReplacementMetadata: managedReplacementMetadata,
-            admissionHints: admissionHints
+            admissionHints: admissionHints,
+            directPreparedSubscriptionRetainCount: nil
         )
     }
 
@@ -410,7 +415,8 @@ extension AXEventHandler {
             to: newWindow,
             managedReplacementMetadata: managedReplacementMetadata,
             admissionHints: admissionHints,
-            sizeConstraints: sizeConstraints
+            sizeConstraints: sizeConstraints,
+            preparedSubscriptionRetainContribution: 0
         )
     }
 
@@ -442,7 +448,8 @@ extension AXEventHandler {
         entry: WindowState,
         windowId: UInt32,
         managedReplacementMetadata: ManagedReplacementMetadata?,
-        admissionHints: ManagedWindowAdmissionHints?
+        admissionHints: ManagedWindowAdmissionHints?,
+        directPreparedSubscriptionRetainCount: Int?
     ) {
         guard let controller else { return }
         let completesPendingManagedReplacement = admissionRetryStateByWindowId[windowId].map { state in
@@ -466,8 +473,20 @@ extension AXEventHandler {
             )
         }
 
-        finishAdmissionRetryAfterTracking(windowId: windowId)
+        let completedStateSubscriptionIdentityTransition = finishAdmissionRetryAfterTracking(
+            windowId: windowId
+        )
         discardCreatePlacementContext(windowId: windowId)
+        if let directPreparedSubscriptionRetainCount {
+            if directPreparedSubscriptionRetainCount > 0 {
+                releasePreparedWindowSubscriptions(
+                    windowId,
+                    count: directPreparedSubscriptionRetainCount
+                )
+            } else if !completedStateSubscriptionIdentityTransition {
+                noteManagedWindowSubscriptionIdentityChanged()
+            }
+        }
         let closeProbe = cancelSameAppCloseProbe(
             matchingFocusedToken: oldWindow.token,
             reason: "identity_rebind"
@@ -555,6 +574,7 @@ extension AXEventHandler {
         managedReplacementMetadata: ManagedReplacementMetadata?,
         admissionHints: ManagedWindowAdmissionHints?,
         sizeConstraints: WindowSizeConstraints?,
+        preparedSubscriptionRetainContribution: Int,
         focusedAdmissionContinuation: FocusedAdmissionRetryContinuation? = nil
     ) -> Bool {
         guard let windowId = UInt32(exactly: newWindow.token.windowId) else { return false }
@@ -569,7 +589,8 @@ extension AXEventHandler {
                 managedReplacementMetadata: managedReplacementMetadata,
                 admissionHints: admissionHints,
                 sizeConstraints: sizeConstraints
-            )
+            ),
+            preparedSubscriptionRetainContribution: preparedSubscriptionRetainContribution
         )
         if scheduled, let focusedAdmissionContinuation {
             _ = retainFocusedAdmissionContinuation(

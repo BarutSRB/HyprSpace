@@ -7,6 +7,7 @@ import Foundation
 struct BorderSurfaceApplyResult: Equatable {
     let didApply: Bool
     let needsCornerRadiiRetry: Bool
+    let needsWindowLevelRetry: Bool
 }
 
 @MainActor
@@ -45,6 +46,8 @@ final class BorderSurfaceApplier {
     private let defaultCornerRadii = WindowCornerRadii(uniform: 9.0)
     private let surfaceID = "border-surface"
     private var screenParametersObserver: NSObjectProtocol?
+    private var scaleInvalidated = false
+    var onDisplayScaleInvalidated: (@MainActor () -> Void)?
 
     init(
         borderWindowOperations: BorderWindow.Operations = .live,
@@ -65,10 +68,16 @@ final class BorderSurfaceApplier {
             queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated {
-                self?.borderWindow?.invalidateScaleCache()
-                self?.clearCornerState()
+                self?.invalidateDisplayScale()
+                self?.onDisplayScaleInvalidated?()
             }
         }
+    }
+
+    func invalidateDisplayScale() {
+        borderWindow?.invalidateScaleCache()
+        clearCornerState()
+        scaleInvalidated = true
     }
 
     @discardableResult
@@ -79,7 +88,11 @@ final class BorderSurfaceApplier {
     ) -> BorderSurfaceApplyResult {
         guard let desired else {
             hide()
-            return BorderSurfaceApplyResult(didApply: true, needsCornerRadiiRetry: false)
+            return BorderSurfaceApplyResult(
+                didApply: true,
+                needsCornerRadiiRetry: false,
+                needsWindowLevelRetry: false
+            )
         }
 
         installScreenParametersObserverIfNeeded()
@@ -98,6 +111,8 @@ final class BorderSurfaceApplier {
             refresh: refreshCornerRadii
         )
         if let applied,
+           !scaleInvalidated,
+           borderWindow?.needsWindowLevelRetry != true,
            applied.token == desired.token,
            applied.config == desired.config,
            appliedCornerRadii == cornerResolution.radii,
@@ -105,17 +120,18 @@ final class BorderSurfaceApplier {
         {
             BorderOpMetricsRecorder.shared.noteShortCircuit()
             if forceOrdering {
-                borderWindow?.reorder(relativeTo: UInt32(desired.windowId))
+                borderWindow?.reorder(relativeTo: desired.token)
             }
             return BorderSurfaceApplyResult(
                 didApply: true,
-                needsCornerRadiiRetry: cornerResolution.needsRetry
+                needsCornerRadiiRetry: cornerResolution.needsRetry,
+                needsWindowLevelRetry: borderWindow?.needsWindowLevelRetry == true
             )
         }
 
         guard borderWindow?.update(
             frame: desired.frame,
-            targetWid: UInt32(desired.windowId),
+            targetToken: desired.token,
             cornerRadii: cornerResolution.radii,
             forceOrdering: forceOrdering
         ) == true else {
@@ -123,14 +139,20 @@ final class BorderSurfaceApplier {
             appliedCornerRadii = nil
             clearCornerState()
             unregisterSurface()
-            return BorderSurfaceApplyResult(didApply: false, needsCornerRadiiRetry: false)
+            return BorderSurfaceApplyResult(
+                didApply: false,
+                needsCornerRadiiRetry: false,
+                needsWindowLevelRetry: false
+            )
         }
+        scaleInvalidated = false
         applied = desired
         appliedCornerRadii = cornerResolution.radii
         syncSurfaceRegistration()
         return BorderSurfaceApplyResult(
             didApply: true,
-            needsCornerRadiiRetry: cornerResolution.needsRetry
+            needsCornerRadiiRetry: cornerResolution.needsRetry,
+            needsWindowLevelRetry: borderWindow?.needsWindowLevelRetry == true
         )
     }
 
@@ -151,6 +173,7 @@ final class BorderSurfaceApplier {
         }
         applied = nil
         appliedCornerRadii = nil
+        scaleInvalidated = false
         clearCornerState()
     }
 
@@ -274,7 +297,7 @@ final class BorderSurfaceApplier {
             id: surfaceID,
             windowNumber: windowNumber,
             frameProvider: { [weak self] in
-                self?.borderWindow?.frameOnScreen ?? self?.applied?.frame
+                self?.borderWindow?.frameOnScreen
             },
             visibilityProvider: { [weak self] in
                 self?.applied != nil

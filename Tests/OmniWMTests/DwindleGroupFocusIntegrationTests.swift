@@ -590,9 +590,10 @@ final class DwindleGroupFocusIntegrationTests: XCTestCase {
                         monitorId: monitor.id,
                         displayId: monitor.displayId,
                         workingFrame: monitorSnapshot.workingFrame,
+                        borderSafeFillFrame: monitorSnapshot.borderSafeFillFrame,
                         fullscreenLayoutFrame: monitorSnapshot.fullscreenLayoutFrame,
                         scale: monitorSnapshot.scale,
-                        settings: fixture.controller.settings.resolvedDwindleSettings(for: monitor),
+                        settings: fixture.controller.resolvedDwindleSettings(for: monitor),
                         tabRailWidth: TabRailManager.tabIndicatorWidth
                     ),
                     targetFrames: [:]

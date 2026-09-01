@@ -465,6 +465,7 @@ final class TrackpadWorkspaceGestureTests: XCTestCase {
     func testSharedCountHorizontalSwipeAppliesAndFinalizesNiriViewport() throws {
         var finalOffsets: [TrackpadScrollStyle: CGFloat] = [:]
         var finalIndexes: [TrackpadScrollStyle: Int] = [:]
+        var momentumViewportScale: CGFloat?
 
         for style in TrackpadScrollStyle.allCases {
             var focusedWindowIds: [UInt32] = []
@@ -481,6 +482,10 @@ final class TrackpadWorkspaceGestureTests: XCTestCase {
             let manager = fixture.controller.workspaceManager
             let driver = manager.animationDriver
             let semanticOffset = manager.niriViewportState(for: fixture.ws1).viewOffset
+            if style == .momentum {
+                let geometry = fixture.controller.niriInteractionGeometry(for: fixture.monitor, scale: 2)
+                momentumViewportScale = geometry.workingFrame.width / fixture.monitor.visibleFrame.width
+            }
 
             var time = beginCommittedColumnGesture(fixture)
 
@@ -508,7 +513,7 @@ final class TrackpadWorkspaceGestureTests: XCTestCase {
         XCTAssertEqual(finalIndexes[.snap], 2)
         XCTAssertEqual(finalIndexes[.momentum], 0)
         XCTAssertLessThan(snapOffset, 0)
-        XCTAssertEqual(momentumOffset, 300, accuracy: 0.001)
+        XCTAssertEqual(momentumOffset, 300 * (try XCTUnwrap(momentumViewportScale)), accuracy: 0.001)
         XCTAssertNotEqual(snapOffset, momentumOffset)
     }
 

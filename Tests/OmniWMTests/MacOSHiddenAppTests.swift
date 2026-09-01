@@ -315,7 +315,7 @@ final class MacOSHiddenAppTests: XCTestCase {
             )
         )
         var changes = 0
-        controller.workspaceManager.onSessionStateChanged = { changes += 1 }
+        controller.workspaceManager.onSessionStateChanged = { _ in changes += 1 }
 
         controller.workspaceManager.setAppHidden(true, pid: token.pid, source: .ax)
 

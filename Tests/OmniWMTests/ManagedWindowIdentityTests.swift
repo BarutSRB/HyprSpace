@@ -670,7 +670,11 @@ final class ManagedWindowIdentityTests: XCTestCase {
 
     func testReplacementIncarnationDisplacesStaleIdentityRebindRetry() throws {
         let controller = WindowAdmissionTestSupport.controller()
-        let pending = try makePendingRebind(controller: controller, suffix: 6)
+        let pending = try makePendingRebind(
+            controller: controller,
+            suffix: 6,
+            preparedSubscriptionRetainCount: 1
+        )
         let replacementRef = AXWindowRef(
             element: AXUIElementCreateApplication(pending.newWindow.token.pid + 1),
             windowId: pending.newWindow.token.windowId
@@ -691,6 +695,10 @@ final class ManagedWindowIdentityTests: XCTestCase {
             return XCTFail("Expected replacement candidate retry")
         }
         XCTAssertNotEqual(state.generation, pending.state.generation)
+        XCTAssertEqual(state.preparedSubscriptionRetainCount, 0)
+        XCTAssertNil(
+            controller.axEventHandler.preparedWindowSubscriptionRetainCounts[pending.windowId]
+        )
         controller.axEventHandler.cancelCreatedWindowRetry(windowId: pending.windowId)
     }
 
@@ -893,6 +901,15 @@ final class ManagedWindowIdentityTests: XCTestCase {
     func testFailedAcknowledgementForTerminatedTargetRetiresRetry() async throws {
         let controller = WindowAdmissionTestSupport.controller()
         let pending = try makePendingRebind(controller: controller, suffix: 21)
+        let handler = controller.axEventHandler
+        XCTAssertNil(handler.preparedWindowSubscriptionRetainCounts[pending.windowId])
+        var subscriptionAttempts = 0
+        handler.windowSubscriptionProvider = { _ in
+            subscriptionAttempts += 1
+            return subscriptionAttempts > 1
+        }
+        handler.refreshWindowSubscriptions()
+        let failedSubscriptionRevision = handler.windowSubscriptionIdentityRevision
         controller.axEventHandler.managedWindowIdentityRebindTargetIsAliveProvider = { _ in false }
         controller.axEventHandler.managedWindowIdentityRebindAcknowledgementProvider = { _, _ in false }
 
@@ -908,6 +925,346 @@ final class ManagedWindowIdentityTests: XCTestCase {
         XCTAssertNotNil(controller.workspaceManager.entry(for: pending.oldWindow.token))
         XCTAssertNil(controller.workspaceManager.entry(for: pending.newWindow.token))
         XCTAssertNil(controller.axEventHandler.admissionRetryStateByWindowId[pending.windowId])
+        XCTAssertEqual(subscriptionAttempts, 2)
+        XCTAssertEqual(handler.windowSubscriptionIdentityRevision, failedSubscriptionRevision + 1)
+        XCTAssertEqual(
+            handler.lastSuccessfulWindowSubscriptionIds,
+            [UInt32(pending.oldWindow.token.windowId)]
+        )
+        XCTAssertNil(handler.lastWindowSubscriptionFailureRevision)
+    }
+
+    func testNonPreparedRebindFailurePreservesOverlappingPreparedSubscriptionRetain() async throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let pending = try makePendingRebind(controller: controller, suffix: 23)
+        let handler = controller.axEventHandler
+        var submissions: [[UInt32]] = []
+        handler.windowSubscriptionProvider = {
+            submissions.append($0)
+            return true
+        }
+        handler.retainPreparedWindowSubscription(pending.windowId)
+        defer { handler.releasePreparedWindowSubscription(pending.windowId) }
+        let revisionBeforeFailure = handler.windowSubscriptionIdentityRevision
+        controller.axEventHandler.managedWindowIdentityRebindTargetIsAliveProvider = { _ in false }
+        controller.axEventHandler.managedWindowIdentityRebindAcknowledgementProvider = { _, _ in false }
+
+        await controller.axEventHandler.completeManagedWindowIdentityRebind(
+            from: pending.oldWindow,
+            to: pending.newWindow,
+            windowId: pending.windowId,
+            retryGeneration: pending.state.generation,
+            managedReplacementMetadata: nil,
+            admissionHints: nil
+        )
+
+        XCTAssertNil(handler.admissionRetryStateByWindowId[pending.windowId])
+        XCTAssertEqual(handler.preparedWindowSubscriptionRetainCounts[pending.windowId], 1)
+        XCTAssertEqual(handler.windowSubscriptionIdentityRevision, revisionBeforeFailure + 1)
+        XCTAssertEqual(submissions, [
+            [UInt32(pending.oldWindow.token.windowId), pending.windowId],
+            [UInt32(pending.oldWindow.token.windowId), pending.windowId]
+        ])
+    }
+
+    func testPreparedRebindFailureReleasesOnlyItsOwnedOverlappingRetain() async throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        controller.axEventHandler.windowSubscriptionProvider = { _ in true }
+        let pending = try makePendingRebind(
+            controller: controller,
+            suffix: 24,
+            preparedSubscriptionRetainCount: 1
+        )
+        let handler = controller.axEventHandler
+        handler.retainPreparedWindowSubscription(pending.windowId)
+        defer { handler.releasePreparedWindowSubscription(pending.windowId) }
+        XCTAssertEqual(handler.preparedWindowSubscriptionRetainCounts[pending.windowId], 2)
+        controller.axEventHandler.managedWindowIdentityRebindTargetIsAliveProvider = { _ in false }
+        controller.axEventHandler.managedWindowIdentityRebindAcknowledgementProvider = { _, _ in false }
+
+        await controller.axEventHandler.completeManagedWindowIdentityRebind(
+            from: pending.oldWindow,
+            to: pending.newWindow,
+            windowId: pending.windowId,
+            retryGeneration: pending.state.generation,
+            managedReplacementMetadata: nil,
+            admissionHints: nil
+        )
+
+        XCTAssertNil(handler.admissionRetryStateByWindowId[pending.windowId])
+        XCTAssertEqual(handler.preparedWindowSubscriptionRetainCounts[pending.windowId], 1)
+    }
+
+    func testNonPreparedRebindSuccessPreservesOverlappingPreparedSubscriptionRetain() async throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let pending = try makePendingRebind(controller: controller, suffix: 25)
+        let handler = controller.axEventHandler
+        handler.windowSubscriptionProvider = { _ in true }
+        handler.retainPreparedWindowSubscription(pending.windowId)
+        defer { handler.releasePreparedWindowSubscription(pending.windowId) }
+        let revisionBeforeCompletion = handler.windowSubscriptionIdentityRevision
+        controller.axEventHandler.managedWindowIdentityRebindAcknowledgementProvider = { _, _ in true }
+        controller.axEventHandler.managedWindowIdentityRebindFinalizationProvider = { _, _ in true }
+
+        await controller.axEventHandler.completeManagedWindowIdentityRebind(
+            from: pending.oldWindow,
+            to: pending.newWindow,
+            windowId: pending.windowId,
+            retryGeneration: pending.state.generation,
+            managedReplacementMetadata: nil,
+            admissionHints: nil
+        )
+
+        XCTAssertNil(handler.admissionRetryStateByWindowId[pending.windowId])
+        XCTAssertNil(controller.workspaceManager.entry(for: pending.oldWindow.token))
+        XCTAssertNotNil(controller.workspaceManager.entry(for: pending.newWindow.token))
+        XCTAssertEqual(handler.preparedWindowSubscriptionRetainCounts[pending.windowId], 1)
+        XCTAssertEqual(handler.windowSubscriptionIdentityRevision, revisionBeforeCompletion + 1)
+    }
+
+    func testWaitingPreparedRebindRetainsOwnershipAcrossDirectCoalescingAndCancellation() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let pending = try makePendingRebind(
+            controller: controller,
+            suffix: 26,
+            preparedSubscriptionRetainCount: 1
+        )
+        let handler = controller.axEventHandler
+        var waitingState = pending.state
+        waitingState.executionPhase = .waiting
+        waitingState.task = nil
+        handler.admissionRetryStateByWindowId[pending.windowId] = waitingState
+
+        guard case .pending = handler.rekeyManagedWindowIdentity(
+            from: pending.oldWindow.token,
+            to: pending.newWindow.token,
+            windowId: pending.windowId,
+            axRef: pending.newWindow.axRef
+        ) else {
+            return XCTFail("Expected direct rebind to coalesce into the prepared retry")
+        }
+
+        XCTAssertEqual(
+            handler.admissionRetryStateByWindowId[pending.windowId]?
+                .preparedSubscriptionRetainCount,
+            1
+        )
+        XCTAssertEqual(handler.preparedWindowSubscriptionRetainCounts[pending.windowId], 1)
+        handler.cancelCreatedWindowRetry(windowId: pending.windowId)
+        XCTAssertNil(handler.preparedWindowSubscriptionRetainCounts[pending.windowId])
+    }
+
+    func testRunningPreparedRebindRetainsOwnershipAcrossDirectRebuildAndCancellation() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let pending = try makePendingRebind(
+            controller: controller,
+            suffix: 27,
+            preparedSubscriptionRetainCount: 1
+        )
+        let handler = controller.axEventHandler
+
+        guard case .pending = handler.rekeyManagedWindowIdentity(
+            from: pending.oldWindow.token,
+            to: pending.newWindow.token,
+            windowId: pending.windowId,
+            axRef: pending.newWindow.axRef
+        ) else {
+            return XCTFail("Expected direct rebind to rebuild the running prepared retry")
+        }
+
+        XCTAssertEqual(
+            handler.admissionRetryStateByWindowId[pending.windowId]?
+                .preparedSubscriptionRetainCount,
+            1
+        )
+        XCTAssertEqual(handler.preparedWindowSubscriptionRetainCounts[pending.windowId], 1)
+        handler.cancelCreatedWindowRetry(windowId: pending.windowId)
+        XCTAssertNil(handler.preparedWindowSubscriptionRetainCounts[pending.windowId])
+    }
+
+    func testWaitingPreparedRebindsMergeRetainOwnershipAndCancelTogether() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let pending = try makePendingRebind(
+            controller: controller,
+            suffix: 28,
+            preparedSubscriptionRetainCount: 1
+        )
+        let handler = controller.axEventHandler
+        var waitingState = pending.state
+        waitingState.executionPhase = .waiting
+        waitingState.task = nil
+        handler.admissionRetryStateByWindowId[pending.windowId] = waitingState
+        handler.retainPreparedWindowSubscription(pending.windowId)
+
+        guard case .pending = handler.rekeyManagedWindowIdentity(
+            from: pending.oldWindow.token,
+            to: pending.newWindow.token,
+            windowId: pending.windowId,
+            axRef: pending.newWindow.axRef,
+            preparedSubscriptionRetainContribution: 1
+        ) else {
+            return XCTFail("Expected prepared rebinds to coalesce")
+        }
+
+        XCTAssertEqual(
+            handler.admissionRetryStateByWindowId[pending.windowId]?
+                .preparedSubscriptionRetainCount,
+            2
+        )
+        XCTAssertEqual(handler.preparedWindowSubscriptionRetainCounts[pending.windowId], 2)
+        handler.cancelCreatedWindowRetry(windowId: pending.windowId)
+        XCTAssertNil(handler.preparedWindowSubscriptionRetainCounts[pending.windowId])
+    }
+
+    func testRunningPreparedRebindsMergeRetainOwnershipAndReleaseOnTerminalFailure() async throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let pending = try makePendingRebind(
+            controller: controller,
+            suffix: 29,
+            preparedSubscriptionRetainCount: 1
+        )
+        let handler = controller.axEventHandler
+        handler.retainPreparedWindowSubscription(pending.windowId)
+
+        guard case .pending = handler.rekeyManagedWindowIdentity(
+            from: pending.oldWindow.token,
+            to: pending.newWindow.token,
+            windowId: pending.windowId,
+            axRef: pending.newWindow.axRef,
+            preparedSubscriptionRetainContribution: 1
+        ) else {
+            return XCTFail("Expected prepared rebinds to rebuild together")
+        }
+        var runningState = try XCTUnwrap(handler.admissionRetryStateByWindowId[pending.windowId])
+        runningState.task?.cancel()
+        runningState.task = nil
+        runningState.executionPhase = .running(500_029)
+        handler.admissionRetryStateByWindowId[pending.windowId] = runningState
+        handler.managedWindowIdentityRebindTargetIsAliveProvider = { _ in false }
+        handler.managedWindowIdentityRebindAcknowledgementProvider = { _, _ in false }
+        let revisionBeforeTerminalFailure = handler.windowSubscriptionIdentityRevision
+
+        await handler.completeManagedWindowIdentityRebind(
+            from: pending.oldWindow,
+            to: pending.newWindow,
+            windowId: pending.windowId,
+            retryGeneration: runningState.generation,
+            managedReplacementMetadata: nil,
+            admissionHints: nil
+        )
+
+        XCTAssertNil(handler.admissionRetryStateByWindowId[pending.windowId])
+        XCTAssertNil(handler.preparedWindowSubscriptionRetainCounts[pending.windowId])
+        XCTAssertEqual(
+            handler.windowSubscriptionIdentityRevision,
+            revisionBeforeTerminalFailure + 1
+        )
+    }
+
+    func testResetBatchReleasesMergedPreparedRebindOwnership() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let pending = try makePendingRebind(
+            controller: controller,
+            suffix: 31,
+            preparedSubscriptionRetainCount: 1
+        )
+        let handler = controller.axEventHandler
+        handler.retainPreparedWindowSubscription(pending.windowId)
+
+        guard case .pending = handler.rekeyManagedWindowIdentity(
+            from: pending.oldWindow.token,
+            to: pending.newWindow.token,
+            windowId: pending.windowId,
+            axRef: pending.newWindow.axRef,
+            preparedSubscriptionRetainContribution: 1
+        ) else {
+            return XCTFail("Expected prepared rebinds to coalesce before reset")
+        }
+        let revisionBeforeReset = handler.windowSubscriptionIdentityRevision
+
+        handler.resetCreatedWindowRetryState()
+
+        XCTAssertNil(handler.admissionRetryStateByWindowId[pending.windowId])
+        XCTAssertNil(handler.preparedWindowSubscriptionRetainCounts[pending.windowId])
+        XCTAssertEqual(handler.windowSubscriptionIdentityRevision, revisionBeforeReset + 1)
+    }
+
+    func testPreparedRebindExhaustionReleasesOnlyAcceptedStateOwnership() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let pending = try makePendingRebind(
+            controller: controller,
+            suffix: 30,
+            preparedSubscriptionRetainCount: 1
+        )
+        let handler = controller.axEventHandler
+        var runningState = pending.state
+        runningState.attempt = AXEventHandler.createdWindowRetryLimit
+        handler.admissionRetryStateByWindowId[pending.windowId] = runningState
+        handler.retainPreparedWindowSubscription(pending.windowId)
+
+        guard case .rejected = handler.rekeyManagedWindowIdentity(
+            from: pending.oldWindow.token,
+            to: pending.newWindow.token,
+            windowId: pending.windowId,
+            axRef: pending.newWindow.axRef,
+            preparedSubscriptionRetainContribution: 1
+        ) else {
+            return XCTFail("Expected the running identity rebind to exhaust")
+        }
+
+        let exhaustedState = try XCTUnwrap(handler.admissionRetryStateByWindowId[pending.windowId])
+        XCTAssertTrue(exhaustedState.exhausted)
+        XCTAssertEqual(exhaustedState.preparedSubscriptionRetainCount, 0)
+        XCTAssertEqual(handler.preparedWindowSubscriptionRetainCounts[pending.windowId], 1)
+        handler.releasePreparedWindowSubscription(pending.windowId)
+        handler.retainPreparedWindowSubscription(pending.windowId)
+
+        guard case .rejected = handler.rekeyManagedWindowIdentity(
+            from: pending.oldWindow.token,
+            to: pending.newWindow.token,
+            windowId: pending.windowId,
+            axRef: pending.newWindow.axRef,
+            preparedSubscriptionRetainContribution: 1
+        ) else {
+            return XCTFail("Expected an exhausted retry to reject the caller-owned retain")
+        }
+        XCTAssertEqual(handler.preparedWindowSubscriptionRetainCounts[pending.windowId], 1)
+        handler.releasePreparedWindowSubscription(pending.windowId)
+        handler.cancelCreatedWindowRetry(windowId: pending.windowId)
+        XCTAssertNil(handler.preparedWindowSubscriptionRetainCounts[pending.windowId])
+    }
+
+    func testIneligiblePreparedRebindLeavesIncomingRetainCallerOwned() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let oldToken = WindowToken(pid: 468_031, windowId: 468_131)
+        _ = WindowAdmissionTestSupport.track(oldToken, in: workspaceId, controller: controller)
+        let newToken = WindowToken(
+            pid: pid_t(ProcessInfo.processInfo.processIdentifier),
+            windowId: 468_231
+        )
+        let newRef = WindowAdmissionTestSupport.axRef(for: newToken)
+        let windowId = UInt32(newToken.windowId)
+        let handler = controller.axEventHandler
+        controller.hasStartedServices = true
+        handler.retainPreparedWindowSubscription(windowId)
+
+        guard case .rejected = handler.rekeyManagedWindowIdentity(
+            from: oldToken,
+            to: newToken,
+            windowId: windowId,
+            axRef: newRef,
+            preparedSubscriptionRetainContribution: 1
+        ) else {
+            return XCTFail("Expected an own-process target to be ineligible for retry")
+        }
+
+        XCTAssertNil(handler.admissionRetryStateByWindowId[windowId])
+        XCTAssertEqual(handler.preparedWindowSubscriptionRetainCounts[windowId], 1)
+        handler.releasePreparedWindowSubscription(windowId)
+        XCTAssertNil(handler.preparedWindowSubscriptionRetainCounts[windowId])
     }
 
     func testCapturedConstraintsSurvivePendingIdentityRebind() async throws {
@@ -1240,7 +1597,8 @@ final class ManagedWindowIdentityTests: XCTestCase {
         controller: WMController,
         suffix: Int,
         sizeConstraints: WindowSizeConstraints? = nil,
-        sameTokenReplacement: Bool = false
+        sameTokenReplacement: Bool = false,
+        preparedSubscriptionRetainCount: Int = 0
     ) throws -> (
         workspaceId: WorkspaceDescriptor.ID,
         windowId: UInt32,
@@ -1262,13 +1620,17 @@ final class ManagedWindowIdentityTests: XCTestCase {
         )
         controller.hasStartedServices = true
         controller.axEventHandler.managedWindowIdentityRebindTargetIsAliveProvider = { _ in true }
+        for _ in 0 ..< preparedSubscriptionRetainCount {
+            controller.axEventHandler.retainPreparedWindowSubscription(UInt32(newToken.windowId))
+        }
 
         guard case .pending = controller.axEventHandler.rekeyManagedWindowIdentity(
             from: oldToken,
             to: newToken,
             windowId: UInt32(newToken.windowId),
             axRef: newRef,
-            sizeConstraints: sizeConstraints
+            sizeConstraints: sizeConstraints,
+            preparedSubscriptionRetainContribution: preparedSubscriptionRetainCount
         ) else {
             XCTFail("Expected identity rebind to enter the retry lifecycle")
             throw NSError(domain: "ManagedWindowIdentityTests", code: 1)

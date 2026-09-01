@@ -9,6 +9,8 @@ final class MouseMoveModifierTests: NiriInteractionTestCase {
     private struct Fixture {
         let controller: WMController
         let engine: NiriLayoutEngine
+        let workspaceId: WorkspaceDescriptor.ID
+        let token: WindowToken
         let windowFrame: CGRect
 
         @MainActor var handler: MouseEventHandler {
@@ -163,6 +165,63 @@ final class MouseMoveModifierTests: NiriInteractionTestCase {
     }
 
     @MainActor
+    func testNiriResizeTargetIncludesOnlyTheFocusedExteriorBorder() throws {
+        let fixture = try makeFixture(pid: 1_105)
+        let border = DesiredBorderSurface(
+            token: fixture.token,
+            frame: fixture.windowFrame,
+            config: borderConfig(width: 5)
+        )
+        let surfaceFrame = border.config.resolvedGeometry(for: border.frame, scale: 1).surfaceFrame
+        let exteriorPoints = [
+            CGPoint(x: fixture.windowFrame.maxX, y: fixture.windowFrame.midY),
+            CGPoint(x: fixture.windowFrame.maxX + 4, y: fixture.windowFrame.midY),
+            CGPoint(x: fixture.windowFrame.maxX + 4, y: fixture.windowFrame.maxY + 4)
+        ]
+
+        XCTAssertNil(fixture.engine.hitTestTiled(point: exteriorPoints[1], in: fixture.workspaceId))
+        for point in exteriorPoints {
+            let token = fixture.handler.focusedBorderResizeToken(
+                at: point,
+                in: fixture.workspaceId,
+                scale: 1,
+                appliedBorder: border
+            )
+            XCTAssertEqual(token, fixture.token)
+        }
+
+        XCTAssertNil(
+            fixture.handler.focusedBorderResizeToken(
+                at: CGPoint(x: surfaceFrame.maxX, y: surfaceFrame.midY),
+                in: fixture.workspaceId,
+                scale: 1,
+                appliedBorder: border
+            )
+        )
+        XCTAssertNil(
+            fixture.handler.focusedBorderResizeToken(
+                at: CGPoint(x: fixture.windowFrame.maxX + 1, y: fixture.windowFrame.midY),
+                in: fixture.workspaceId,
+                scale: 1,
+                appliedBorder: DesiredBorderSurface(
+                    token: fixture.token,
+                    frame: fixture.windowFrame,
+                    config: borderConfig(enabled: false, width: 5)
+                )
+            )
+        )
+        XCTAssertTrue(fixture.controller.workspaceManager.recordExternalFocus(pid: 1_108, windowId: 3))
+        XCTAssertNil(
+            fixture.handler.focusedBorderResizeToken(
+                at: exteriorPoints[1],
+                in: fixture.workspaceId,
+                scale: 1,
+                appliedBorder: border
+            )
+        )
+    }
+
+    @MainActor
     func testDwindleLeftDragRemainsUnchanged() throws {
         let controller = makeController()
         controller.settings.defaultLayoutType = .dwindle
@@ -201,6 +260,19 @@ final class MouseMoveModifierTests: NiriInteractionTestCase {
         controller.enableNiriLayout()
         let engine = try XCTUnwrap(controller.niriEngine)
         let window = addWindow(engine, pid: pid, to: workspaceId)
+        _ = controller.workspaceManager.addWindow(
+            WindowAdmissionTestSupport.axRef(for: window.token),
+            pid: window.token.pid,
+            windowId: window.token.windowId,
+            to: workspaceId
+        )
+        XCTAssertTrue(
+            controller.workspaceManager.confirmManagedFocus(
+                window.token,
+                in: workspaceId,
+                activateWorkspaceOnMonitor: false
+            )
+        )
         let gap = controller.innerGap(for: monitor)
         let frames = engine.calculateLayout(
             state: controller.workspaceManager.niriViewportState(for: workspaceId),
@@ -213,7 +285,17 @@ final class MouseMoveModifierTests: NiriInteractionTestCase {
         return Fixture(
             controller: controller,
             engine: engine,
+            workspaceId: workspaceId,
+            token: window.token,
             windowFrame: try XCTUnwrap(frames[window.token])
+        )
+    }
+
+    private func borderConfig(enabled: Bool = true, width: CGFloat) -> BorderConfig {
+        BorderConfig(
+            enabled: enabled,
+            width: width,
+            color: SettingsColor(red: 1, green: 0, blue: 0, alpha: 1)
         )
     }
 

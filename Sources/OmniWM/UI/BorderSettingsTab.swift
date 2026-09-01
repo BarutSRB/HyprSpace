@@ -6,7 +6,6 @@ import SwiftUI
 struct BorderSettingsTab: View {
     @Bindable var settings: SettingsStore
     @Bindable var controller: WMController
-    @State private var pendingColorSync: Task<Void, Never>?
 
     var body: some View {
         Form {
@@ -26,14 +25,10 @@ struct BorderSettingsTab: View {
                         valueWidth: 56
                     )
                     .onChange(of: settings.borderWidth) { _, _ in
-                        syncBorderConfig()
+                        controller.borderSettingsChanged()
                     }
 
                     ColorPicker("Border Color", selection: colorBinding, supportsOpacity: true)
-                        .onChange(of: settings.borderColorRed) { _, _ in debouncedColorSync() }
-                        .onChange(of: settings.borderColorGreen) { _, _ in debouncedColorSync() }
-                        .onChange(of: settings.borderColorBlue) { _, _ in debouncedColorSync() }
-                        .onChange(of: settings.borderColorAlpha) { _, _ in debouncedColorSync() }
                 }
             }
 
@@ -58,24 +53,9 @@ struct BorderSettingsTab: View {
             },
             set: { newColor in
                 guard let converted = SettingsColor(color: newColor) else { return }
-                settings.borderColorRed = converted.red
-                settings.borderColorGreen = converted.green
-                settings.borderColorBlue = converted.blue
-                settings.borderColorAlpha = converted.alpha
+                settings.borderColor = converted
+                controller.borderSettingsChanged()
             }
         )
-    }
-
-    private func syncBorderConfig() {
-        controller.borderSettingsChanged()
-    }
-
-    private func debouncedColorSync() {
-        pendingColorSync?.cancel()
-        pendingColorSync = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(16))
-            guard !Task.isCancelled else { return }
-            syncBorderConfig()
-        }
     }
 }

@@ -11,11 +11,18 @@ final class BorderOpMetricsRecorder: RuntimeTraceRecording, @unchecked Sendable 
     let sectionTitle = "Border Op Metrics"
 
     private struct Counters {
+        var fullScenePasses = 0
+        var borderOnlyPasses = 0
         var applyCalls = 0
         var shortCircuited = 0
         var updateCalls = 0
+        var windowCreations = 0
+        var levelQueries = 0
+        var levelFallbacks = 0
+        var levelRetries = 0
         var cornerRadiusHits = 0
         var cornerRadiusQueries = 0
+        var scaleReconfigurations = 0
         var redraws = 0
         var flushes = 0
         var rasterizedPointArea: UInt64 = 0
@@ -45,6 +52,14 @@ final class BorderOpMetricsRecorder: RuntimeTraceRecording, @unchecked Sendable 
         bump { $0.applyCalls += 1 }
     }
 
+    func noteFullScenePass() {
+        bump { $0.fullScenePasses += 1 }
+    }
+
+    func noteBorderOnlyPass() {
+        bump { $0.borderOnlyPasses += 1 }
+    }
+
     func noteShortCircuit() {
         bump { $0.shortCircuited += 1 }
     }
@@ -53,12 +68,32 @@ final class BorderOpMetricsRecorder: RuntimeTraceRecording, @unchecked Sendable 
         bump { $0.updateCalls += 1 }
     }
 
+    func noteWindowCreation() {
+        bump { $0.windowCreations += 1 }
+    }
+
+    func noteLevelQuery() {
+        bump { $0.levelQueries += 1 }
+    }
+
+    func noteLevelFallback() {
+        bump { $0.levelFallbacks += 1 }
+    }
+
+    func noteLevelRetry() {
+        bump { $0.levelRetries += 1 }
+    }
+
     func noteCornerRadiusHit() {
         bump { $0.cornerRadiusHits += 1 }
     }
 
     func noteCornerRadiusQuery() {
         bump { $0.cornerRadiusQueries += 1 }
+    }
+
+    func noteScaleReconfiguration() {
+        bump { $0.scaleReconfigurations += 1 }
     }
 
     func noteRedraw(rasterizedArea: CGFloat = 0) {
@@ -109,15 +144,25 @@ final class BorderOpMetricsRecorder: RuntimeTraceRecording, @unchecked Sendable 
 
     func dump() -> String {
         let snapshot = counters.withLock { $0 }
-        guard snapshot.applyCalls > 0 || snapshot.updateCalls > 0 else { return "none" }
+        guard snapshot.fullScenePasses > 0
+            || snapshot.borderOnlyPasses > 0
+            || snapshot.applyCalls > 0
+            || snapshot.updateCalls > 0
+        else {
+            return "none"
+        }
         return [
+            "fullScenePasses=\(snapshot.fullScenePasses) borderOnlyPasses=\(snapshot.borderOnlyPasses)",
             "applyCalls=\(snapshot.applyCalls) shortCircuited=\(snapshot.shortCircuited)"
                 + " updateCalls=\(snapshot.updateCalls)",
+            "windowCreations=\(snapshot.windowCreations) levelQueries=\(snapshot.levelQueries)"
+                + " levelFallbacks=\(snapshot.levelFallbacks) levelRetries=\(snapshot.levelRetries)",
             "cornerRadius hits=\(snapshot.cornerRadiusHits) queries=\(snapshot.cornerRadiusQueries)",
             "redraws=\(snapshot.redraws) flushes=\(snapshot.flushes)"
                 + " rasterizedPointArea=\(snapshot.rasterizedPointArea) reshapes=\(snapshot.reshapes)"
                 + " moveOnly=\(snapshot.moveOnly) moveAndOrder=\(snapshot.moveAndOrder)",
-            "hides=\(snapshot.hides) boundsQueryFallbacks=\(snapshot.boundsQueryFallbacks)"
+            "hides=\(snapshot.hides) scaleReconfigurations=\(snapshot.scaleReconfigurations)"
+                + " boundsQueryFallbacks=\(snapshot.boundsQueryFallbacks)"
         ].joined(separator: "\n")
     }
 }

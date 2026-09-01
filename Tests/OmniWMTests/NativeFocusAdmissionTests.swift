@@ -26,7 +26,7 @@ final class NativeFocusAdmissionTests: XCTestCase {
         XCTAssertTrue(manager.recordExternalFocus(pid: token.pid, windowId: token.windowId))
         manager.suppressFocusBorder(for: token)
         var sessionChangeCount = 0
-        manager.onSessionStateChanged = { sessionChangeCount += 1 }
+        manager.onSessionStateChanged = { _ in sessionChangeCount += 1 }
 
         _ = manager.addWindow(
             WindowAdmissionTestSupport.axRef(for: token),
