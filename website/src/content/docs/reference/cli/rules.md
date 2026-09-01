@@ -11,7 +11,7 @@ vertical orientation.
 Rule add, replace, and config reload trigger automatic reevaluation. A valid workspace assignment applies as
 the initial default whenever the matching app currently has no tracked windows. Additional windows use the
 workspace active when creation began. Automatic reevaluation preserves existing managed windows' workspaces, while
-readmission, structural replacements, tracked transient children, and unique persisted boot-restore matches
+readmission, structural replacements, and unique persisted boot-restore matches
 preserve placement continuity. `rule apply` is the explicit path that may move existing managed windows.
 Initial container primary span is a one-shot Niri admission hint and never resizes an existing container.
 
@@ -42,6 +42,18 @@ or wrapper apps) are matched by app name and/or title. AX role/subrole refine an
 identify a rule on their own. Title substring and title regex are mutually exclusive, and a supplied regex
 must compile. Every rule also needs at least one effect: a layout other than `auto`, a workspace assignment,
 an initial container primary span, or a minimum width or height. Minimum sizes must be positive and finite.
+
+## Structural Admission
+
+Structural admission runs before ordinary rule matching. Help tags, input-method surfaces, and WindowServer
+children of another window stay unmanaged; rules cannot opt them in. At ordinary WindowServer levels, a
+closeable, parentless accessory-app `AXWindow` proceeds through normal classification.
+
+Buttonless accessory roots, prohibited-app roots, non-`AXWindow` roles, and otherwise unsupported AX subroles
+need a precise inclusion rule: an ordinary app/window identifier, both `--ax-role` and `--ax-subrole`, and
+`--layout tile` or `--layout float`. Parentless roots at status-window level or higher use the same precise
+shape, but only a user-authored rule can opt them in. A broad bundle/title rule or `--layout auto` does not cross
+either precise inclusion gate.
 
 `initialContainerPrimarySpan` is stored and returned over IPC as a proportion. `omniwmctl query rules` renders
 it as a percentage in human-readable table or text output. It applies only when a matching resizable window
@@ -119,6 +131,9 @@ omniwmctl rule add --bundle-id com.apple.Safari --title-substring Preferences --
 
 # Float an app that has no runtime bundle ID, matched by app name
 omniwmctl rule add --app-name-substring VMD --layout float
+
+# Opt a parentless, high-level standard root into ownership and float it
+omniwmctl rule add --bundle-id com.example.overlay --ax-role AXWindow --ax-subrole AXStandardWindow --layout float
 
 # Remove a rule
 omniwmctl rule remove 550e8400-e29b-41d4-a716-446655440000

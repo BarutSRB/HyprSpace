@@ -108,7 +108,12 @@ enum WMEvent: Equatable {
         ruleEffects: ManagedWindowRuleEffects,
         admissionHints: ManagedWindowAdmissionHints,
         lifetimeAuthority: ManagedWindowLifetimeAuthority,
+        adoptNativeFocus: Bool,
         managedReplacementMetadata: ManagedReplacementMetadata?,
+        source: WMEventSource
+    )
+    case topLevelInventoryObserved(
+        tokens: Set<WindowToken>,
         source: WMEventSource
     )
     case windowRekeyed(
@@ -338,6 +343,7 @@ enum WMEvent: Equatable {
             ruleEffects,
             admissionHints,
             lifetimeAuthority,
+            adoptNativeFocus,
             metadata,
             source
         ):
@@ -350,6 +356,7 @@ enum WMEvent: Equatable {
                 ruleEffects: ruleEffects,
                 admissionHints: admissionHints,
                 lifetimeAuthority: lifetimeAuthority,
+                adoptNativeFocus: adoptNativeFocus,
                 managedReplacementMetadata: metadata,
                 source: source
             )
@@ -371,7 +378,7 @@ enum WMEvent: Equatable {
 
     var token: WindowToken? {
         switch self {
-        case let .windowAdmitted(token, _, _, _, _, _, _, _, _, _),
+        case let .windowAdmitted(token, _, _, _, _, _, _, _, _, _, _),
              let .windowRemoved(token, _, _),
              let .workspaceAssigned(token, _, _, _, _),
              let .windowModeChanged(token, _, _, _, _),
@@ -409,6 +416,7 @@ enum WMEvent: Equatable {
              .systemModalFocusChanged,
              .systemSleep,
              .systemWake,
+             .topLevelInventoryObserved,
              .topologyChanged,
              .userCommand,
              .viewportChanged,
@@ -422,8 +430,10 @@ enum WMEvent: Equatable {
 
     var summary: String {
         switch self {
-        case let .windowAdmitted(token, workspaceId, _, mode, _, _, _, _, _, _):
+        case let .windowAdmitted(token, workspaceId, _, mode, _, _, _, _, _, _, _):
             "window_admitted token=\(token) workspace=\(workspaceId.uuidString) mode=\(mode)"
+        case let .topLevelInventoryObserved(tokens, _):
+            "top_level_inventory_observed count=\(tokens.count)"
         case let .windowRekeyed(from, to, workspaceId, _, reason, _, _, _):
             "window_rekeyed from=\(from) to=\(to) workspace=\(workspaceId.uuidString) reason=\(reason.rawValue)"
         case let .windowRemoved(token, workspaceId, _):

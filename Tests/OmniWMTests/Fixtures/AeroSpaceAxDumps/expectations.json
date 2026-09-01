@@ -15,8 +15,7 @@
   },
   "about_this_mac": {
     "aeroSpaceLabel": "dialog",
-    "expectedDisposition": "unmanaged",
-    "note": "AeroSpace manages this as a floating dialog; OmniWM deliberately excludes it because its AX role, app policy, or WindowServer level does not establish an eligible root window."
+    "expectedDisposition": "floating"
   },
   "alacritty_decorations_buttonless": {
     "aeroSpaceLabel": "window",
@@ -115,7 +114,7 @@
   "codex_pet_window": {
     "aeroSpaceLabel": "popup",
     "expectedDisposition": "floating",
-    "note": "Desktop pet at kCGFloatingWindowLevel. Level 3 is not a usable hands-off signal -- the corpus has it on four throwaway overlays and five legitimate utility windows -- so OmniWM leaves it floating with full rights."
+    "note": "Desktop pet at kCGFloatingWindowLevel. Level 3 is not a usable ownership signal -- the corpus has it on four throwaway overlays and five legitimate utility windows -- so OmniWM leaves it floating with full rights."
   },
   "drracket": {
     "aeroSpaceLabel": "window",
@@ -285,8 +284,7 @@
   },
   "macos_join_network": {
     "aeroSpaceLabel": "dialog",
-    "expectedDisposition": "unmanaged",
-    "note": "AeroSpace manages this as a floating dialog; OmniWM deliberately excludes it because its AX role, app policy, or WindowServer level does not establish an eligible root window."
+    "expectedDisposition": "floating"
   },
   "macos_share_window_purple_pill_sublime": {
     "aeroSpaceLabel": "popup",
@@ -326,8 +324,7 @@
   },
   "nomachine_session_2": {
     "aeroSpaceLabel": "dialog",
-    "expectedDisposition": "unmanaged",
-    "note": "AeroSpace manages this as a floating dialog; OmniWM deliberately excludes it because its AX role, app policy, or WindowServer level does not establish an eligible root window."
+    "expectedDisposition": "floating"
   },
   "nomachine_welcome_window_1": {
     "aeroSpaceLabel": "popup",
@@ -336,8 +333,7 @@
   },
   "nomachine_welcome_window_2": {
     "aeroSpaceLabel": "dialog",
-    "expectedDisposition": "unmanaged",
-    "note": "AeroSpace manages this as a floating dialog; OmniWM deliberately excludes it because its AX role, app policy, or WindowServer level does not establish an eligible root window."
+    "expectedDisposition": "floating"
   },
   "outlook_reminder": {
     "aeroSpaceLabel": "popup",

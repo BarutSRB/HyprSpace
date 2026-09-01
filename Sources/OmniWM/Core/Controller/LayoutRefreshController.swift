@@ -170,6 +170,7 @@ import QuartzCore
     var displayLinkActivationForTests: ((CGDirectDisplayID) -> Bool)?
     var displayLinkCreationAllowedForTests: ((CGDirectDisplayID) -> Bool)?
     var activeDisplayLinkCountForTests: (() -> Int)?
+    var fullRescanEnumerationSnapshotForTests: AXManager.FullRescanEnumerationSnapshot?
     private var activeFrameContext: RefreshFrameContext?
     private var nextPendingRevealTransactionId: UInt64 = 1
     private var nextScratchpadRevealGroupId: UInt64 = 1
@@ -560,6 +561,12 @@ import QuartzCore
                       !controller.workspaceManager.hasPendingNativeFullscreenTransition(in: workspaceId),
                       focusSeqAccepted
                 else { continue }
+                if controller.workspaceManager.nativeManagedFocusToken == token,
+                   controller.workspaceManager.pendingFocusedToken == nil,
+                   controller.intentLedger.activeManagedRequest == nil
+                {
+                    continue
+                }
                 if let workspaceId = controller.workspaceManager.workspace(for: token) {
                     controller.recordNiriCreateFocusTrace(
                         .relayoutActivatedWindow(
@@ -1225,22 +1232,27 @@ import QuartzCore
             }
         }
         let nativeSpaceEvidence = try resolveNativeSpaceRescanEvidence(scope: scope)
-        let enumerationSnapshot = try await controller.axManager.fullRescanEnumerationSnapshot(
-            scope: scope,
-            resolvedTargetPIDs: nativeSpaceEvidence.resolvedPIDs.union(
-                scope.nativeSpaceWindowIdsByPID.keys
-            ),
-            resolvedTargetWindowIds: nativeSpaceEvidence.windowIds.union(
-                scope.nativeSpaceWindowIds
-            ),
-            supplementalWindowServerInfoByWindowId: nativeSpaceEvidence.windowServerInfoByWindowId,
-            preservingPIDsByWindowId: preservingPIDsByWindowId,
-            identityDependencyPIDsByWindowId: controller.axEventHandler
-                .fullRescanIdentityDependencyPIDsByWindowId(entries: entriesAtStart),
-            requiresTitleForApp: {
-                controller.windowRuleEngine.requiresTitle(for: $0, appName: $1)
-            }
-        )
+        let enumerationSnapshot: AXManager.FullRescanEnumerationSnapshot
+        if let snapshot = fullRescanEnumerationSnapshotForTests {
+            enumerationSnapshot = snapshot
+        } else {
+            enumerationSnapshot = try await controller.axManager.fullRescanEnumerationSnapshot(
+                scope: scope,
+                resolvedTargetPIDs: nativeSpaceEvidence.resolvedPIDs.union(
+                    scope.nativeSpaceWindowIdsByPID.keys
+                ),
+                resolvedTargetWindowIds: nativeSpaceEvidence.windowIds.union(
+                    scope.nativeSpaceWindowIds
+                ),
+                supplementalWindowServerInfoByWindowId: nativeSpaceEvidence.windowServerInfoByWindowId,
+                preservingPIDsByWindowId: preservingPIDsByWindowId,
+                identityDependencyPIDsByWindowId: controller.axEventHandler
+                    .fullRescanIdentityDependencyPIDsByWindowId(entries: entriesAtStart),
+                requiresTitleForApp: {
+                    controller.windowRuleEngine.requiresTitle(for: $0, appName: $1)
+                }
+            )
+        }
         try Task.checkCancellation()
         guard controller.workspaceManager.isSeqEpochCurrent(rescanSeq, domains: .layoutCommit) else {
             throw CancellationError()
@@ -1248,6 +1260,8 @@ import QuartzCore
         let postLayoutActionWorkspacesCurrentAtMutation = postLayoutActions.map {
             $0.currentWorkspaces(using: controller.workspaceManager)
         }
+        var observedTopLevelInventoryTokens: Set<WindowToken> = []
+        observedTopLevelInventoryTokens.reserveCapacity(enumerationSnapshot.windows.count)
         var seenKeys: Set<WindowToken> = []
         var decisionBasedRemovals: [WindowToken] = []
         let focusedWorkspaceId = controller.activeWorkspace()?.id
@@ -1258,6 +1272,7 @@ import QuartzCore
             let pid = candidate.pid
             let winId = candidate.windowId
             let token = WindowToken(pid: pid, windowId: winId)
+            observedTopLevelInventoryTokens.insert(token)
             let existingEntry: WindowState?
             switch controller.axEventHandler.resolveFullRescanIdentity(
                 axRef: ax,
@@ -1302,6 +1317,9 @@ import QuartzCore
                 admissionGeometry: candidate.enumeratedWindow.admissionGeometry
             )
             let decision = evaluation.decision
+            let deferredTrackedEntry = decision.disposition == .undecided
+                ? existingEntry
+                : nil
             let createPlacementContext = existingEntry == nil
                 ? controller.axEventHandler.pendingCreatePlacementContext(for: winId)
                 : nil
@@ -1449,9 +1467,15 @@ import QuartzCore
                         ownsNativeFocus: false
                     )
                     let existingAssignment = controller.workspaceAssignment(pid: pid, windowId: winId)
-                    wsForWindow = existingAssignment ?? defaultWorkspace
-                    ruleEffects = decision.ruleEffects
-                    admissionHints = decision.admissionHints
+                    wsForWindow = deferredTrackedEntry?.workspaceId
+                        ?? existingAssignment
+                        ?? defaultWorkspace
+                    ruleEffects = deferredTrackedEntry?.ruleEffects ?? decision.ruleEffects
+                    admissionHints = deferredTrackedEntry?.admissionHints ?? decision.admissionHints
+                } else if let deferredTrackedEntry {
+                    wsForWindow = deferredTrackedEntry.workspaceId
+                    ruleEffects = deferredTrackedEntry.ruleEffects
+                    admissionHints = deferredTrackedEntry.admissionHints
                 } else {
                     let existingAssignment = controller.workspaceAssignment(pid: pid, windowId: winId)
                     wsForWindow = existingAssignment ?? defaultWorkspace
@@ -1506,25 +1530,11 @@ import QuartzCore
                    appFullscreen: appFullscreen
                )
             {
-                if refreshedEntry.lifetimeAuthority == .directLifecycle {
-                    admittedToken = controller.workspaceManager.addWindow(
-                        ax,
-                        pid: pid,
-                        windowId: winId,
-                        to: wsForWindow,
-                        mode: admittedMode,
-                        ruleEffects: ruleEffects,
-                        admissionHints: admissionHints,
-                        lifetimeAuthority: .axTopLevelInventory,
-                        managedReplacementMetadata: managedReplacementMetadata
-                    )
-                } else {
-                    _ = controller.workspaceManager.setManagedReplacementMetadata(
-                        managedReplacementMetadata,
-                        for: refreshedEntry.token
-                    )
-                    admittedToken = refreshedEntry.token
-                }
+                _ = controller.workspaceManager.setManagedReplacementMetadata(
+                    managedReplacementMetadata,
+                    for: refreshedEntry.token
+                )
+                admittedToken = refreshedEntry.token
             } else {
                 admittedToken = controller.workspaceManager.addWindow(
                     ax,
@@ -1534,6 +1544,7 @@ import QuartzCore
                     mode: admittedMode,
                     ruleEffects: ruleEffects,
                     admissionHints: admissionHints,
+                    allowsNativeFocusAdoption: !appFullscreen,
                     managedReplacementMetadata: managedReplacementMetadata
                 )
             }
@@ -1601,6 +1612,10 @@ import QuartzCore
             guard let entry = controller.workspaceManager.entry(for: token) else { continue }
             controller.axEventHandler.retireManagedWindowAfterDecisionRejection(entry)
         }
+
+        controller.workspaceManager.promoteLifetimeAuthorityForObservedTopLevelWindows(
+            observedTopLevelInventoryTokens
+        )
 
         let shouldPreserveMissingWindows = hadNativeFullscreenLifecycleContextAtStart
             || controller.workspaceManager.hasNativeFullscreenLifecycleContext

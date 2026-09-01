@@ -1209,7 +1209,7 @@ final class AXFullRescanBoundaryTests: XCTestCase {
         XCTAssertNil(controller.workspaceManager.cachedConstraints(for: token))
     }
 
-    func testCapturedParentedTransientWidgetEvidenceNeverUsesLiveWindowServerProvider() {
+    func testCapturedParentedEvidenceNeverUsesLiveWindowServerProvider() {
         let controller = WindowAdmissionTestSupport.controller()
         let token = WindowToken(pid: 86_312, windowId: 7_916)
         let evidence = AXWindowDecisionEvidence(
@@ -1741,6 +1741,149 @@ final class AXFullRescanBoundaryTests: XCTestCase {
 
         XCTAssertEqual(output, inputs)
         XCTAssertEqual(probe.maximum, 4)
+    }
+
+    func testGlobalFullRescanBatchesTrackedOffCensusEvidenceBeforeEnumeration() async {
+        let manager = AXManager()
+        defer { manager.cleanup() }
+        let firstTrackedWindowId = Int(UInt32.max - 100)
+        let secondTrackedWindowId = Int(UInt32.max - 101)
+        let firstPID: pid_t = 2_147_483_500
+        let secondPID: pid_t = 2_147_483_499
+        var batches: [Set<UInt32>] = []
+        manager.fullRescanWindowInfoProvider = { windowIds in
+            batches.append(windowIds)
+            withUnsafeCurrentTask { task in
+                task?.cancel()
+            }
+            return [
+                UInt32(firstTrackedWindowId): WindowServerInfo(
+                    id: UInt32(firstTrackedWindowId),
+                    pid: firstPID,
+                    level: 101,
+                    frame: CGRect(x: 20, y: 30, width: 480, height: 302)
+                ),
+                UInt32(secondTrackedWindowId): WindowServerInfo(
+                    id: UInt32(secondTrackedWindowId),
+                    pid: secondPID,
+                    level: 8,
+                    frame: CGRect(x: 40, y: 50, width: 520, height: 320)
+                )
+            ]
+        }
+
+        let scan = Task { @MainActor in
+            try await manager.fullRescanEnumerationSnapshot(
+                scope: .all,
+                preservingPIDsByWindowId: [
+                    firstTrackedWindowId: firstPID,
+                    secondTrackedWindowId: secondPID
+                ]
+            )
+        }
+
+        do {
+            _ = try await scan.value
+            XCTFail("Expected cancellation after exact evidence capture")
+        } catch is CancellationError {
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        XCTAssertEqual(
+            batches,
+            [[UInt32(firstTrackedWindowId), UInt32(secondTrackedWindowId)]]
+        )
+    }
+
+    func testExactFullRescanWindowServerEvidenceRejectsPIDReuseAndQueryFailure() throws {
+        let manager = AXManager()
+        defer { manager.cleanup() }
+        let exactWindowId = 72_310
+        let missingWindowId = 72_311
+        let mismatchedWindowId = 72_312
+        let exactPID: pid_t = 72_313
+        let mismatchedPID: pid_t = 72_314
+        var queryCount = 0
+        manager.fullRescanWindowInfoProvider = { windowIds in
+            queryCount += 1
+            XCTAssertEqual(
+                windowIds,
+                [UInt32(exactWindowId), UInt32(missingWindowId), UInt32(mismatchedWindowId)]
+            )
+            return [
+                UInt32(exactWindowId): WindowServerInfo(
+                    id: UInt32(exactWindowId),
+                    pid: exactPID,
+                    level: 101,
+                    frame: CGRect(x: 20, y: 30, width: 480, height: 302)
+                ),
+                UInt32(mismatchedWindowId): WindowServerInfo(
+                    id: UInt32(mismatchedWindowId),
+                    pid: mismatchedPID,
+                    level: 101,
+                    frame: CGRect(x: 40, y: 50, width: 520, height: 320)
+                )
+            ]
+        }
+
+        let partial = try XCTUnwrap(
+            manager.queryFullRescanWindowServerEvidence(
+                windowIds: [exactWindowId, missingWindowId, mismatchedWindowId],
+                excludingWindowIds: [],
+                expectedPIDsByWindowId: [
+                    exactWindowId: exactPID,
+                    missingWindowId: exactPID,
+                    mismatchedWindowId: exactPID
+                ]
+            )
+        )
+
+        XCTAssertEqual(Set(partial.keys), [exactWindowId])
+        manager.fullRescanWindowInfoProvider = { _ in
+            queryCount += 1
+            return nil
+        }
+        XCTAssertNil(
+            manager.queryFullRescanWindowServerEvidence(
+                windowIds: [exactWindowId],
+                excludingWindowIds: [],
+                expectedPIDsByWindowId: [exactWindowId: exactPID]
+            )
+        )
+        XCTAssertEqual(queryCount, 2)
+    }
+
+    func testTargetedFullRescanTreatsDistinctWindowServerOwnerAsDependency() async throws {
+        let manager = AXManager()
+        defer { manager.cleanup() }
+        let logicalPID: pid_t = 2_147_483_498
+        let ownerPID: pid_t = 2_147_483_497
+        let windowId = 72_320
+        var batches: [Set<UInt32>] = []
+        manager.fullRescanWindowInfoProvider = { windowIds in
+            batches.append(windowIds)
+            return [
+                UInt32(windowId): WindowServerInfo(
+                    id: UInt32(windowId),
+                    pid: ownerPID,
+                    level: 0,
+                    frame: CGRect(x: 20, y: 30, width: 480, height: 302)
+                )
+            ]
+        }
+
+        let snapshot = try await manager.fullRescanEnumerationSnapshot(
+            scope: .targeted(appPIDs: [logicalPID], nativeSpaceIds: []),
+            preservingPIDsByWindowId: [windowId: logicalPID],
+            identityDependencyPIDsByWindowId: [:]
+        )
+
+        XCTAssertEqual(batches, [[UInt32(windowId)]])
+        XCTAssertEqual(snapshot.failedPIDs, [logicalPID, ownerPID])
+        XCTAssertEqual(snapshot.exactWindowIds, [windowId])
+        XCTAssertEqual(snapshot.windowServerInfoByWindowId[windowId]?.pid, ownerPID)
+        XCTAssertTrue(snapshot.authoritativeTargetPIDs.isEmpty)
     }
 
     func testBoundedAsyncMapStopsEnqueueingAfterCancellation() async {

@@ -134,6 +134,7 @@ struct RestorePlanner {
              .spaceTopologyChanged,
              .suppressedFocusChanged,
              .systemModalFocusChanged,
+             .topLevelInventoryObserved,
              .userCommand,
              .viewportChanged,
              .viewportCommitted,

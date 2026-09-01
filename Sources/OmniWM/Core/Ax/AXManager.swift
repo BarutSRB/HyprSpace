@@ -212,6 +212,10 @@ final class AXManager {
         AXManager.managedWindowBindingRetryDelay(afterFailure: $0)
     }
 
+    var fullRescanWindowInfoProvider: (Set<UInt32>) -> [UInt32: WindowServerInfo]? = {
+        SkyLight.shared.queryWindowInfo(windowIds: $0)
+    }
+
     private let frameLedger = AXFrameApplicationLedger()
     private var framesByPidBuffer: [pid_t: [AXFrameApplicationRequest]] = [:]
     private var frameApplicationBufferInUse = false
@@ -1091,6 +1095,11 @@ final class AXManager {
         switch scope {
         case .all:
             discoveryEvidence = fullRescanDiscoveryEvidence()
+            _ = mergeFullRescanWindowServerEvidence(
+                windowIds: Set(preservingPIDsByWindowId.keys),
+                expectedPIDsByWindowId: preservingPIDsByWindowId,
+                into: &discoveryEvidence
+            )
             let runningApplications = NSWorkspace.shared.runningApplications
             appTargets = fullRescanAppTargets(
                 runningApplications,
@@ -1174,7 +1183,7 @@ final class AXManager {
                     : nil
             }
         )
-        var windowServerEvidenceSucceeded = mergeTargetedWindowServerEvidence(
+        var windowServerEvidenceSucceeded = mergeFullRescanWindowServerEvidence(
             windowIds: preservedTargetWindowIds,
             into: &discoveryEvidence
         )
@@ -1237,7 +1246,7 @@ final class AXManager {
                 callbackGeneration: result.callbackGeneration
             )
         }
-        if !mergeTargetedWindowServerEvidence(
+        if !mergeFullRescanWindowServerEvidence(
             for: results,
             into: &discoveryEvidence
         ) {
@@ -1287,7 +1296,7 @@ final class AXManager {
                     callbackGeneration: result.callbackGeneration
                 )
             }
-            if !mergeTargetedWindowServerEvidence(
+            if !mergeFullRescanWindowServerEvidence(
                 for: dependencyResults,
                 into: &discoveryEvidence
             ) {
@@ -1338,34 +1347,58 @@ final class AXManager {
     }
 
     @discardableResult
-    private func mergeTargetedWindowServerEvidence(
+    private func mergeFullRescanWindowServerEvidence(
         for results: [FullRescanAppEnumerationResult],
         into evidence: inout FullRescanDiscoveryEvidence
     ) -> Bool {
         let windowIds = Set(results.lazy.flatMap(\.windows).map(\.axRef.windowId))
-        return mergeTargetedWindowServerEvidence(windowIds: windowIds, into: &evidence)
+        return mergeFullRescanWindowServerEvidence(windowIds: windowIds, into: &evidence)
     }
 
     @discardableResult
-    private func mergeTargetedWindowServerEvidence(
+    private func mergeFullRescanWindowServerEvidence(
         windowIds: Set<Int>,
+        expectedPIDsByWindowId: [Int: pid_t]? = nil,
         into evidence: inout FullRescanDiscoveryEvidence
     ) -> Bool {
-        let existingWindowIds = Set(evidence.windowServerInfoByWindowId.keys)
-        let missingWindowIds = Set(
-            windowIds.subtracting(existingWindowIds).compactMap(UInt32.init(exactly:))
-        )
-        guard !missingWindowIds.isEmpty else { return true }
-        guard let windowInfoById = SkyLight.shared.queryWindowInfo(windowIds: missingWindowIds) else {
+        guard let windowInfoById = queryFullRescanWindowServerEvidence(
+            windowIds: windowIds,
+            excludingWindowIds: Set(evidence.windowServerInfoByWindowId.keys),
+            expectedPIDsByWindowId: expectedPIDsByWindowId
+        ) else {
             return false
         }
-        for (windowId, info) in windowInfoById {
-            let key = Int(windowId)
+        for (key, info) in windowInfoById {
             evidence.pidsWithWindows.insert(info.pid)
             evidence.windowServerInfoByWindowId[key] = info
             evidence.ownerPIDByWindowId[key] = info.pid
         }
         return true
+    }
+
+    func queryFullRescanWindowServerEvidence(
+        windowIds: Set<Int>,
+        excludingWindowIds: Set<Int>,
+        expectedPIDsByWindowId: [Int: pid_t]? = nil
+    ) -> [Int: WindowServerInfo]? {
+        let missingWindowIds = Set(
+            windowIds.subtracting(excludingWindowIds).compactMap(UInt32.init(exactly:))
+        )
+        guard !missingWindowIds.isEmpty else { return [:] }
+        guard let queriedInfoById = fullRescanWindowInfoProvider(missingWindowIds) else {
+            return nil
+        }
+        return Dictionary(
+            uniqueKeysWithValues: queriedInfoById.compactMap { windowId, info in
+                let key = Int(windowId)
+                if let expectedPIDsByWindowId,
+                   expectedPIDsByWindowId[key] != info.pid
+                {
+                    return nil
+                }
+                return (key, info)
+            }
+        )
     }
 
     private func fullRescanRunningApplications(

@@ -104,6 +104,11 @@ final class WorldStore {
         }
         seq &+= 1
 
+        let windowExistedBeforeMutation = if case .windowAdmitted = event {
+            event.token.flatMap { model.entry(for: $0) } != nil
+        } else {
+            false
+        }
         preMutate()
         applyWindowMutation(event, phase: .beforePlan, monitors: monitors)
         let existingEntry = event.token.flatMap { model.entry(for: $0) }
@@ -117,7 +122,8 @@ final class WorldStore {
             event: normalizedEvent,
             existingEntry: existingEntry,
             currentSnapshot: reducerSnapshot,
-            monitors: monitors
+            monitors: monitors,
+            windowExistedBeforeMutation: windowExistedBeforeMutation
         )
         let resolvedPlan = resolvePlan(plan, normalizedEvent.token, reducerSnapshot)
         applyWindowMutation(event, phase: .afterPlan, monitors: monitors)
@@ -222,6 +228,7 @@ final class WorldStore {
             ruleEffects,
             admissionHints,
             lifetimeAuthority,
+            _,
             metadata,
             _
         ):
@@ -246,6 +253,12 @@ final class WorldStore {
                 monitors: monitors
             )
             refreshProjectionExclusions(in: [workspaceId])
+
+        case let .topLevelInventoryObserved(tokens, _):
+            guard phase == .beforePlan else { return }
+            for token in tokens where model.entry(for: token)?.lifetimeAuthority == .directLifecycle {
+                model.setLifetimeAuthority(.axTopLevelInventory, for: token)
+            }
 
         case let .windowRekeyed(from, to, workspaceId, _, _, newAXRef, metadata, _):
             guard phase == .beforePlan else { return }
@@ -483,6 +496,7 @@ private extension WMEvent {
              .systemModalFocusChanged,
              .systemSleep,
              .systemWake,
+             .topLevelInventoryObserved,
              .topologyChanged,
              .userCommand,
              .viewportChanged,

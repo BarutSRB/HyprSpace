@@ -894,9 +894,17 @@ Open **App Rules** from OmniWM's status-bar menu to configure window-matching be
 app-name substring, title substring or regex, and AX role/subrole. More-specific matches win; ties follow list order.
 
 - **Layout (Automatic / Tile / Float)** - Leave classification automatic, or force matching windows to tile or float
-- **Assign to Workspace** - Use a valid workspace assignment as the initial default whenever the matching app currently has no tracked windows. Additional windows open on the workspace active when creation began. Automatic rule reevaluation leaves managed windows in place, while explicit rule application can move them. Readmission, structural replacements, tracked transient children, and unique persisted boot-restore matches preserve their existing placement continuity.
+- **Assign to Workspace** - Use a valid workspace assignment as the initial default whenever the matching app currently has no tracked windows. Additional windows open on the workspace active when creation began. Automatic rule reevaluation leaves managed windows in place, while explicit rule application can move them. Readmission, structural replacements, and unique persisted boot-restore matches preserve their existing placement continuity.
 - **Initial Container Primary Span (Niri)** - Start matching resizable windows at 5–100% when they create or claim a new container; the container remains freely resizable afterward
 - **Minimum Size** - Prevent the layout engine from sizing windows below a threshold
+
+Structural admission runs before ordinary rule ranking. Help tags, input-method surfaces, and WindowServer
+children of another window stay unmanaged. At ordinary WindowServer levels, a closeable, parentless
+accessory-app `AXWindow` is eligible for normal classification. Buttonless accessory roots, prohibited-app
+roots, non-`AXWindow` roles, and otherwise unsupported AX subroles require an identifying rule with exact
+`axRole` and `axSubrole` values plus a Tile or Float layout. Parentless roots at status-window level or higher
+use the same precise shape, but only a user rule can opt them in; built-in rules cannot. A broad bundle/title
+rule or Automatic layout does not cross these gates.
 
 Initial container primary span is a one-time seed. It controls width in horizontal orientation and height in
 vertical orientation. Niri's Single Window Fit still takes visual precedence for a lone window, and physical

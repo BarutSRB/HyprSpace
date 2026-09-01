@@ -441,6 +441,7 @@ final class CGSPhantomEventGuardTests: XCTestCase {
                     axRef: newAXRef,
                     ruleEffects: .none,
                     admissionHints: .none,
+                    appFullscreen: false,
                     replacementMetadata: metadata,
                     structuralReplacementMatch: nil
                 )

@@ -219,6 +219,11 @@ extension AXEventHandler {
         windowInfoProvider(windowId)
     }
 
+    func resolveWindowInfo(_ windowIds: Set<UInt32>) -> [UInt32: WindowServerInfo] {
+        guard !windowIds.isEmpty else { return [:] }
+        return windowInfoBatchProvider(windowIds) ?? [:]
+    }
+
     func resolveWindowToken(_ windowId: UInt32) -> WindowToken? {
         guard let windowInfo = resolveWindowInfo(windowId) else { return nil }
         return .init(pid: windowInfo.pid, windowId: Int(windowId))

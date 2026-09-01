@@ -68,6 +68,7 @@ final class WorldStoreCommitTests: XCTestCase {
                 ruleEffects: .none,
                 admissionHints: .none,
                 lifetimeAuthority: .axTopLevelInventory,
+                adoptNativeFocus: false,
                 managedReplacementMetadata: nil,
                 source: .workspaceManager
             ),
@@ -95,6 +96,50 @@ final class WorldStoreCommitTests: XCTestCase {
         XCTAssertEqual(snapshotCount, 2)
         XCTAssertNil(world.entry(for: token))
         XCTAssertFalse(transaction.snapshot.windows.contains { $0.token == token })
+    }
+
+    func testTopLevelInventoryObservationPromotesBeforeOneReducerSnapshot() {
+        let world = WorldStore()
+        let workspaceId = WorkspaceDescriptor.ID()
+        let token = WindowToken(pid: 30, windowId: 40)
+        let axRef = AXWindowRef(
+            element: AXUIElementCreateApplication(token.pid),
+            windowId: token.windowId
+        )
+        _ = world.commit(
+            .windowAdmitted(
+                token: token,
+                workspaceId: workspaceId,
+                monitorId: nil,
+                mode: .tiling,
+                axRef: axRef,
+                ruleEffects: .none,
+                admissionHints: .none,
+                lifetimeAuthority: .directLifecycle,
+                adoptNativeFocus: false,
+                managedReplacementMetadata: nil,
+                source: .workspaceManager
+            ),
+            monitors: [],
+            snapshot: { Self.snapshot(world: world) },
+            resolvePlan: { plan, _, _ in plan }
+        )
+
+        var snapshotCount = 0
+        let transaction = world.commit(
+            .topLevelInventoryObserved(tokens: [token], source: .workspaceManager),
+            monitors: [],
+            snapshot: {
+                snapshotCount += 1
+                return Self.snapshot(world: world)
+            },
+            resolvePlan: { plan, _, _ in plan }
+        )
+
+        XCTAssertEqual(snapshotCount, 1)
+        XCTAssertTrue(transaction.plan.isEmpty)
+        XCTAssertEqual(world.entry(for: token)?.lifetimeAuthority, .axTopLevelInventory)
+        XCTAssertEqual(transaction.snapshot.windows.first?.lifetimeAuthority, .axTopLevelInventory)
     }
 
     private static func snapshot(world: WorldStore) -> ReconcileSnapshot {

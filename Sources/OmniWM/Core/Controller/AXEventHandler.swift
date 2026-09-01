@@ -172,6 +172,7 @@ final class AXEventHandler {
         let axRef: AXWindowRef
         let ruleEffects: ManagedWindowRuleEffects
         let admissionHints: ManagedWindowAdmissionHints
+        let appFullscreen: Bool
         let replacementMetadata: ManagedReplacementMetadata
         let structuralReplacementMatch: StructuralReplacementMatch?
 
@@ -361,6 +362,7 @@ final class AXEventHandler {
     private var nextManagedReplacementEventSequence: UInt64 = 0
     var visibleWindowInfoProvider: () -> [WindowServerInfo]
     var windowInfoProvider: (UInt32) -> WindowServerInfo?
+    var windowInfoBatchProvider: (Set<UInt32>) -> [UInt32: WindowServerInfo]?
     var managedWindowIdentityRebindAcknowledgementProvider:
         ((AXManagedWindowIdentity, AXManagedWindowIdentity) async -> Bool)?
     var managedWindowIdentityRebindFinalizationProvider:
@@ -387,11 +389,15 @@ final class AXEventHandler {
         },
         windowInfoProvider: @escaping (UInt32) -> WindowServerInfo? = {
             SkyLight.shared.queryWindowInfo($0)
+        },
+        windowInfoBatchProvider: @escaping (Set<UInt32>) -> [UInt32: WindowServerInfo]? = {
+            SkyLight.shared.queryWindowInfo(windowIds: $0)
         }
     ) {
         self.controller = controller
         self.visibleWindowInfoProvider = visibleWindowInfoProvider
         self.windowInfoProvider = windowInfoProvider
+        self.windowInfoBatchProvider = windowInfoBatchProvider
     }
 
     func cleanup() {
@@ -2668,6 +2674,7 @@ final class AXEventHandler {
             axRef: axRef,
             ruleEffects: evaluation.decision.ruleEffects,
             admissionHints: evaluation.decision.admissionHints,
+            appFullscreen: evaluation.appFullscreen,
             replacementMetadata: makeManagedReplacementMetadata(
                 bundleId: resolvedBundleId,
                 workspaceId: workspaceId,

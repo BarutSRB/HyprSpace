@@ -168,6 +168,7 @@ final class WindowCloseFocusRecoveryTests: XCTestCase {
                 axRef: WindowAdmissionTestSupport.axRef(for: replacementToken),
                 ruleEffects: .none,
                 admissionHints: .none,
+                appFullscreen: false,
                 replacementMetadata: fixture.closingMetadata,
                 structuralReplacementMatch: nil
             )
@@ -220,6 +221,7 @@ final class WindowCloseFocusRecoveryTests: XCTestCase {
                 axRef: WindowAdmissionTestSupport.axRef(for: replacementToken),
                 ruleEffects: .none,
                 admissionHints: .none,
+                appFullscreen: false,
                 replacementMetadata: fixture.closingMetadata,
                 structuralReplacementMatch: nil
             )
@@ -260,6 +262,7 @@ final class WindowCloseFocusRecoveryTests: XCTestCase {
                 axRef: WindowAdmissionTestSupport.axRef(for: replacementToken),
                 ruleEffects: .none,
                 admissionHints: .none,
+                appFullscreen: false,
                 replacementMetadata: fixture.closingMetadata,
                 structuralReplacementMatch: nil
             )

@@ -421,6 +421,7 @@ final class WorkspaceManager {
              .spaceTopologyChanged,
              .suppressedFocusChanged,
              .systemModalFocusChanged,
+             .topLevelInventoryObserved,
              .userCommand,
              .viewportChanged,
              .viewportCommitted,
@@ -1997,6 +1998,7 @@ final class WorkspaceManager {
         ruleEffects: ManagedWindowRuleEffects = .none,
         admissionHints: ManagedWindowAdmissionHints = .none,
         lifetimeAuthority: ManagedWindowLifetimeAuthority = .axTopLevelInventory,
+        allowsNativeFocusAdoption: Bool = true,
         managedReplacementMetadata: ManagedReplacementMetadata? = nil
     ) -> WindowToken {
         let token = WindowToken(pid: pid, windowId: windowId)
@@ -2006,6 +2008,11 @@ final class WorkspaceManager {
             )
             return existingEntry.token
         }
+        let adoptNativeFocus = allowsNativeFocusAdoption
+            && world.entry(for: token) == nil
+            && nativeFullscreenRecord(for: token) == nil
+            && world.focus.pendingManagedFocus == .empty
+            && world.focus.nativeFocusOwner.externalToken == token
         if let originalToken = nativeFullscreenOriginalToken(forCurrentToken: token),
            var record = nativeFullscreenRecordsByOriginalToken[originalToken],
            record.currentToken == token,
@@ -2014,7 +2021,7 @@ final class WorkspaceManager {
             record.workspaceId = workspace
             upsertNativeFullscreenRecord(record)
         }
-        recordReconcileEvent(
+        let txn = recordReconcileEvent(
             .windowAdmitted(
                 token: token,
                 workspaceId: workspace,
@@ -2024,6 +2031,7 @@ final class WorkspaceManager {
                 ruleEffects: ruleEffects,
                 admissionHints: admissionHints,
                 lifetimeAuthority: lifetimeAuthority,
+                adoptNativeFocus: adoptNativeFocus,
                 managedReplacementMetadata: managedReplacementMetadata,
                 source: .workspaceManager
             )
@@ -2031,7 +2039,26 @@ final class WorkspaceManager {
         if let handle = world.handle(for: token) {
             onWindowPresenceObserved?(handle)
         }
+        if txn.plan.focusSession != nil {
+            notifySessionStateChanged()
+            drainPendingRuntimeMonitorOverrideClears()
+        }
         return token
+    }
+
+    @discardableResult
+    func promoteLifetimeAuthorityForObservedTopLevelWindows(_ tokens: Set<WindowToken>) -> Bool {
+        let promotableTokens = Set(tokens.lazy.filter {
+            self.world.entry(for: $0)?.lifetimeAuthority == .directLifecycle
+        })
+        guard !promotableTokens.isEmpty else { return false }
+        recordReconcileEvent(
+            .topLevelInventoryObserved(
+                tokens: promotableTokens,
+                source: .workspaceManager
+            )
+        )
+        return true
     }
 
     @discardableResult
@@ -3848,7 +3875,7 @@ final class WorkspaceManager {
 extension WorkspaceManager {
     private func noteInvalidation(for event: WMEvent) {
         switch event {
-        case let .windowAdmitted(_, workspaceId, _, _, _, _, _, _, _, _),
+        case let .windowAdmitted(_, workspaceId, _, _, _, _, _, _, _, _, _),
              let .windowModeChanged(_, workspaceId, _, _, _),
              let .hiddenStateChanged(_, workspaceId, _, _, _),
              let .managedReplacementMetadataChanged(_, workspaceId, _, _, _):
@@ -3863,6 +3890,9 @@ extension WorkspaceManager {
             noteInvalidation(workspaceId: workspaceId, domains: .layout)
 
         case .niriPlacementsResolved:
+            break
+
+        case .topLevelInventoryObserved:
             break
 
         case let .hiddenApplicationsChanged(_, affectedWorkspaceIds, _):

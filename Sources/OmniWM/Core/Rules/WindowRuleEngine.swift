@@ -250,6 +250,7 @@ final class WindowRuleEngine {
     private enum StructuralEligibility {
         case eligible
         case requiresExplicitInclusion
+        case requiresExplicitUserInclusion
         case requiresIndependentRootInclusion
         case external
         case deferred(WindowDecisionDeferredReason)
@@ -457,6 +458,12 @@ final class WindowRuleEngine {
             if userRule == nil, builtInRule == nil {
                 return externalSurfaceDecision()
             }
+        case .requiresExplicitUserInclusion:
+            userRule = bestExplicitInclusionMatch(in: compiledUserRules, facts: facts)
+            builtInRule = nil
+            if userRule == nil {
+                return externalSurfaceDecision()
+            }
         case .requiresIndependentRootInclusion:
             userRule = bestExplicitInclusionMatch(in: compiledUserRules, facts: facts)
             builtInRule = bestExplicitInclusionMatch(in: builtInRules, facts: facts)
@@ -607,10 +614,12 @@ final class WindowRuleEngine {
         if let windowServer = windowServerEvidence,
            windowServer.level >= Self.systemSurfaceLevelFloor
         {
-            return .external
+            return .requiresExplicitUserInclusion
         }
 
-        if facts.ax.appPolicy == .accessory || facts.ax.appPolicy == .prohibited {
+        if facts.ax.appPolicy == .prohibited
+            || (facts.ax.appPolicy == .accessory && !facts.ax.hasCloseButton)
+        {
             return .requiresExplicitInclusion
         }
 

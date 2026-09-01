@@ -7,10 +7,32 @@ sidebar:
 
 Open **App Rules** from OmniWM's status-bar menu to configure window-matching behavior. Rules can match by bundle ID, app-name substring, title substring or regex, and AX role/subrole. More-specific matches win; ties follow list order.
 
+## Structural admission
+
+Rules do not turn every macOS surface into a window OmniWM owns. Structural admission runs first: help tags,
+input-method surfaces, and WindowServer children of another window stay unmanaged and cannot be opted in by a
+rule. At ordinary WindowServer levels, a closeable, parentless accessory-app `AXWindow` proceeds through normal
+classification.
+
+Buttonless accessory roots, prohibited-app roots, non-`AXWindow` roles, and otherwise unsupported AX subroles
+require a precise inclusion rule. The rule must identify the app or window, set both `axRole` and `axSubrole` to
+the observed values, and choose Tile or Float rather than Automatic. Parentless roots at status-window level or
+higher use the same precise shape, but only a user-authored rule can opt them in; built-in rules cannot. For example:
+
+```toml
+[[appRules]]
+bundleId = "com.example.overlay"
+axRole = "AXWindow"
+axSubrole = "AXStandardWindow"
+layout = "float"
+```
+
+Use the target's actual bundle ID and AX values. This escape hatch does not admit a parented surface.
+
 ## Rule actions
 
 - **Layout (Automatic / Tile / Float)** — leave classification automatic, or force matching windows to tile or float.
-- **Assign to Workspace** — use a valid workspace assignment as the initial default whenever the matching app currently has no tracked windows. Additional windows open on the workspace active when creation began. Automatic rule reevaluation leaves managed windows in place, while explicit rule application can move them. Readmission, structural replacements, tracked transient children, and unique persisted boot-restore matches preserve their existing placement continuity.
+- **Assign to Workspace** — use a valid workspace assignment as the initial default whenever the matching app currently has no tracked windows. Additional windows open on the workspace active when creation began. Automatic rule reevaluation leaves managed windows in place, while explicit rule application can move them. Readmission, structural replacements, and unique persisted boot-restore matches preserve their existing placement continuity.
 - **Initial Container Primary Span (Niri)** — start matching resizable windows at 5–100% when they create or claim a new container; the container remains freely resizable afterward.
 - **Minimum Size** — prevent the layout engine from sizing windows below a threshold.
 

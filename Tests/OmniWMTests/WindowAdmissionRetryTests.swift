@@ -1340,6 +1340,7 @@ final class WindowAdmissionRetryTests: XCTestCase {
                 axRef: axRef,
                 ruleEffects: .none,
                 admissionHints: .none,
+                appFullscreen: false,
                 replacementMetadata: .init(
                     bundleId: nil,
                     workspaceId: workspaceId,

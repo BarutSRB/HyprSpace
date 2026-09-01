@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Copyright (C) 2026 BarutSRB — https://github.com/BarutSRB/OmniWM
 
+import AppKit
 import ApplicationServices
 @testable import OmniWM
 import OmniWMIPC
@@ -710,35 +711,102 @@ final class WindowRuleEngineTests: XCTestCase {
         )
     }
 
-    func testSystemWindowLevelIsHardExternal() {
-        let engine = WindowRuleEngine()
-        let rule = AppRule(
+    func testSystemWindowLevelRequiresPreciseUserInclusion() {
+        let token = WindowToken(pid: 84_081, windowId: 84_082)
+        let systemLevelFacts = facts(
+            appName: "Overlay",
+            bundleId: "org.example",
+            windowServer: transientWindowServerInfo(
+                token: token,
+                level: CGWindowLevelForKey(.statusWindow),
+                parentId: 0
+            )
+        )
+        let preciseRule = AppRule(
             bundleId: "org.example",
             axRole: kAXWindowRole as String,
             axSubrole: kAXStandardWindowSubrole as String,
             layout: .tile
         )
-        engine.rebuild(rules: [rule])
-        let token = WindowToken(pid: 84_081, windowId: 84_082)
-        let decision = evaluate(
+        let ruleSets = [
+            [],
+            [AppRule(bundleId: "org.example", layout: .tile)],
+            [
+                AppRule(
+                    bundleId: "org.example",
+                    axRole: kAXWindowRole as String,
+                    axSubrole: kAXStandardWindowSubrole as String,
+                    minWidth: 640
+                )
+            ]
+        ]
+
+        for rules in ruleSets {
+            let engine = WindowRuleEngine()
+            engine.rebuild(rules: rules)
+            let decision = evaluate(engine, systemLevelFacts, token: token)
+            XCTAssertEqual(decision.disposition, .unmanaged)
+            XCTAssertEqual(decision.source, .builtInRule(WindowRuleEngine.externalSurfaceRuleName))
+        }
+
+        let preciseEngine = WindowRuleEngine()
+        preciseEngine.rebuild(rules: [preciseRule])
+        let preciseDecision = evaluate(preciseEngine, systemLevelFacts, token: token)
+
+        XCTAssertEqual(preciseDecision.disposition, .managed)
+        XCTAssertEqual(preciseDecision.source, .userRule(preciseRule.id))
+    }
+
+    func testSystemWindowLevelRejectsBuiltInsAndParentedSurfaces() {
+        let engine = WindowRuleEngine()
+        let quickLookToken = WindowToken(pid: 84_083, windowId: 84_084)
+        let quickLookDecision = evaluate(
             engine,
             facts(
-                appName: "Overlay",
-                bundleId: "org.example",
+                appName: "Finder",
+                bundleId: "com.apple.finder",
+                title: "Quick Look",
+                subrole: "Quick Look",
                 windowServer: transientWindowServerInfo(
-                    token: token,
+                    token: quickLookToken,
                     level: CGWindowLevelForKey(.statusWindow),
                     parentId: 0
                 )
             ),
-            token: token
+            token: quickLookToken
         )
 
-        XCTAssertEqual(decision.disposition, .unmanaged)
-        XCTAssertEqual(decision.source, .builtInRule(WindowRuleEngine.externalSurfaceRuleName))
+        XCTAssertEqual(quickLookDecision.disposition, .unmanaged)
+        XCTAssertEqual(quickLookDecision.source, .builtInRule(WindowRuleEngine.externalSurfaceRuleName))
+
+        let parentedToken = WindowToken(pid: 84_085, windowId: 84_086)
+        let preciseRule = AppRule(
+            bundleId: "org.example",
+            axRole: kAXWindowRole as String,
+            axSubrole: kAXStandardWindowSubrole as String,
+            layout: .float
+        )
+        let preciseEngine = WindowRuleEngine()
+        preciseEngine.rebuild(rules: [preciseRule])
+        let parentedDecision = evaluate(
+            preciseEngine,
+            facts(
+                appName: "Overlay",
+                bundleId: "org.example",
+                windowServer: transientWindowServerInfo(
+                    token: parentedToken,
+                    level: CGWindowLevelForKey(.statusWindow),
+                    parentId: 90_001
+                )
+            ),
+            token: parentedToken
+        )
+
+        XCTAssertEqual(parentedDecision.disposition, .unmanaged)
+        XCTAssertEqual(parentedDecision.source, .builtInRule(WindowRuleEngine.externalSurfaceRuleName))
     }
 
-    func testAccessoryAppRequiresPreciseSemanticInclusion() {
+    func testCloseableAccessoryAppUsesNormalAdmission() {
         let token = WindowToken(pid: 84_091, windowId: 84_092)
         let windowServer = transientWindowServerInfo(token: token, parentId: 0)
         let accessoryFacts = WindowRuleFacts(
@@ -748,8 +816,8 @@ final class WindowRuleEngineTests: XCTestCase {
                 subrole: kAXStandardWindowSubrole as String,
                 title: "Accessory",
                 hasCloseButton: true,
-                hasFullscreenButton: true,
-                fullscreenButtonEnabled: true,
+                hasFullscreenButton: false,
+                fullscreenButtonEnabled: false,
                 hasZoomButton: true,
                 hasMinimizeButton: true,
                 appPolicy: .accessory,
@@ -759,26 +827,69 @@ final class WindowRuleEngineTests: XCTestCase {
             sizeConstraints: nil,
             windowServer: windowServer
         )
+        let decision = evaluate(WindowRuleEngine(), accessoryFacts, token: token)
+
+        XCTAssertEqual(decision.disposition, .floating)
+        XCTAssertEqual(decision.source, .heuristic)
+
         let broadEngine = WindowRuleEngine()
-        broadEngine.rebuild(rules: [AppRule(bundleId: "org.example.accessory", layout: .float)])
+        let broadRule = AppRule(bundleId: "org.example.accessory", layout: .tile)
+        broadEngine.rebuild(rules: [broadRule])
+        let broadDecision = evaluate(broadEngine, accessoryFacts, token: token)
 
-        XCTAssertEqual(
-            evaluate(broadEngine, accessoryFacts, token: token).source,
-            .builtInRule(WindowRuleEngine.externalSurfaceRuleName)
-        )
+        XCTAssertEqual(broadDecision.disposition, .managed)
+        XCTAssertEqual(broadDecision.source, .userRule(broadRule.id))
+    }
 
-        let preciseEngine = WindowRuleEngine()
-        let preciseRule = AppRule(
-            bundleId: "org.example.accessory",
-            axRole: kAXWindowRole as String,
-            axSubrole: kAXStandardWindowSubrole as String,
-            layout: .float
-        )
-        preciseEngine.rebuild(rules: [preciseRule])
-        let preciseDecision = evaluate(preciseEngine, accessoryFacts, token: token)
+    func testButtonlessAccessoryAndProhibitedAppsRequirePreciseSemanticInclusion() {
+        let token = WindowToken(pid: 84_093, windowId: 84_094)
+        let windowServer = transientWindowServerInfo(token: token, parentId: 0)
+        let configurations: [(policy: NSApplication.ActivationPolicy, hasCloseButton: Bool)] = [
+            (.accessory, false),
+            (.prohibited, false),
+            (.prohibited, true)
+        ]
 
-        XCTAssertEqual(preciseDecision.disposition, .floating)
-        XCTAssertEqual(preciseDecision.source, .userRule(preciseRule.id))
+        for configuration in configurations {
+            let restrictedFacts = WindowRuleFacts(
+                appName: "Restricted",
+                ax: AXWindowFacts(
+                    role: kAXWindowRole as String,
+                    subrole: kAXStandardWindowSubrole as String,
+                    title: "Restricted",
+                    hasCloseButton: configuration.hasCloseButton,
+                    hasFullscreenButton: false,
+                    fullscreenButtonEnabled: false,
+                    hasZoomButton: false,
+                    hasMinimizeButton: false,
+                    appPolicy: configuration.policy,
+                    bundleId: "org.example.restricted",
+                    attributeFetchSucceeded: true
+                ),
+                sizeConstraints: nil,
+                windowServer: windowServer
+            )
+            let broadEngine = WindowRuleEngine()
+            broadEngine.rebuild(rules: [AppRule(bundleId: "org.example.restricted", layout: .float)])
+
+            XCTAssertEqual(
+                evaluate(broadEngine, restrictedFacts, token: token).source,
+                .builtInRule(WindowRuleEngine.externalSurfaceRuleName)
+            )
+
+            let preciseEngine = WindowRuleEngine()
+            let preciseRule = AppRule(
+                bundleId: "org.example.restricted",
+                axRole: kAXWindowRole as String,
+                axSubrole: kAXStandardWindowSubrole as String,
+                layout: .float
+            )
+            preciseEngine.rebuild(rules: [preciseRule])
+            let preciseDecision = evaluate(preciseEngine, restrictedFacts, token: token)
+
+            XCTAssertEqual(preciseDecision.disposition, .floating)
+            XCTAssertEqual(preciseDecision.source, .userRule(preciseRule.id))
+        }
     }
 
     func testHelpTagIsHardUnmanagedWithoutWindowServerOrCompleteAXFacts() {

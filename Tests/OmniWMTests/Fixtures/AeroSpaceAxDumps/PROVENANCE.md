@@ -31,9 +31,9 @@ explaining why. Do not treat a mismatch with AeroSpace as automatically a bug in
 regenerate `expectations.json` from OmniWM's own output: that would pin current behaviour and destroy
 the corpus's value.
 
-These dumps carry no WindowServer tags or parent-window id, so `transientWidgetSurfaceDecision` cannot
-be exercised from them. The loader synthesises `parentId: 0`, which makes that rule return `nil` at its
-own guard rather than run on fabricated input.
+These dumps carry no WindowServer tags or parent-window id. The loader synthesises `parentId: 0`, so the
+corpus exercises only parentless structural admission and cannot validate the hard exclusion for a distinct
+WindowServer parent.
 
 ## Licence
 

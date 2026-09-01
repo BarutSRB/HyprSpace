@@ -6053,7 +6053,6 @@ final class RuntimeArchitectureTests: XCTestCase {
         XCTAssertEqual(
             controller.resolveWindowServerInfoForDisposition(
                 token: token,
-                bundleId: ordinaryFacts.bundleId,
                 axFacts: ordinaryFacts,
                 preferredWindowInfo: nil
             ),
@@ -6063,7 +6062,6 @@ final class RuntimeArchitectureTests: XCTestCase {
         XCTAssertNil(
             controller.resolveWindowServerInfoForDisposition(
                 token: token,
-                bundleId: helpTagFacts.bundleId,
                 axFacts: helpTagFacts,
                 preferredWindowInfo: nil
             )
@@ -6072,7 +6070,6 @@ final class RuntimeArchitectureTests: XCTestCase {
         XCTAssertEqual(
             controller.resolveWindowServerInfoForDisposition(
                 token: token,
-                bundleId: candidateFacts.bundleId,
                 axFacts: candidateFacts,
                 preferredWindowInfo: exactWindowInfo
             ),
@@ -6082,23 +6079,12 @@ final class RuntimeArchitectureTests: XCTestCase {
         XCTAssertEqual(
             controller.resolveWindowServerInfoForDisposition(
                 token: token,
-                bundleId: candidateFacts.bundleId,
                 axFacts: candidateFacts,
                 preferredWindowInfo: nil
             ),
             exactWindowInfo
         )
         XCTAssertEqual(queryCount, 2)
-        XCTAssertEqual(
-            controller.resolveWindowServerInfoForDisposition(
-                token: token,
-                bundleId: "pl.maketheweb.cleanshotx",
-                axFacts: ordinaryFacts,
-                preferredWindowInfo: nil
-            ),
-            exactWindowInfo
-        )
-        XCTAssertEqual(queryCount, 3)
     }
 
     @MainActor

@@ -65,6 +65,199 @@ final class WindowAdmissionPolicyTests: XCTestCase {
         )
     }
 
+    func testRuleReevaluationPreservesMetadataWhenEvidenceIsUndecided() async throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        defer {
+            controller.layoutRefreshController.resetState()
+            controller.axManager.cleanup()
+        }
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let token = WindowToken(pid: 467_099, windowId: 467_100)
+        let axRef = WindowAdmissionTestSupport.axRef(for: token)
+        let ruleEffects = ManagedWindowRuleEffects(
+            minWidth: 640,
+            minHeight: 480,
+            matchedRuleId: UUID()
+        )
+        let admissionHints = ManagedWindowAdmissionHints(
+            initialNiriContainerPrimarySpan: 0.4
+        )
+        _ = controller.workspaceManager.addWindow(
+            axRef,
+            pid: token.pid,
+            windowId: token.windowId,
+            to: workspaceId,
+            mode: .floating,
+            ruleEffects: ruleEffects,
+            admissionHints: admissionHints
+        )
+        controller.axEventHandler.windowInfoProvider = { _ in nil }
+
+        let evaluation = controller.evaluateWindowDisposition(
+            axRef: axRef,
+            pid: token.pid
+        )
+        XCTAssertEqual(evaluation.decision.disposition, .undecided)
+
+        let outcome = await controller.reevaluateWindowRules(for: [.window(token)])
+
+        let entry = try XCTUnwrap(controller.workspaceManager.entry(for: token))
+        XCTAssertTrue(outcome.resolvedAnyTarget)
+        XCTAssertTrue(outcome.evaluatedAnyWindow)
+        XCTAssertFalse(outcome.stale)
+        XCTAssertFalse(outcome.relayoutNeeded)
+        XCTAssertEqual(entry.workspaceId, workspaceId)
+        XCTAssertEqual(entry.mode, .floating)
+        XCTAssertEqual(entry.ruleEffects, ruleEffects)
+        XCTAssertEqual(entry.admissionHints, admissionHints)
+    }
+
+    func testRuleReevaluationRequestsOneWindowServerBatchForMultipleTargets() async throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        defer {
+            controller.layoutRefreshController.resetState()
+            controller.axManager.cleanup()
+        }
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let pid: pid_t = 467_110
+        let tokens = (0 ..< 3).map { WindowToken(pid: pid, windowId: 467_111 + $0) }
+        for token in tokens {
+            _ = controller.workspaceManager.addWindow(
+                WindowAdmissionTestSupport.axRef(for: token),
+                pid: token.pid,
+                windowId: token.windowId,
+                to: workspaceId,
+                mode: .floating
+            )
+        }
+        func info(for token: WindowToken) -> WindowServerInfo {
+            WindowServerInfo(
+                id: UInt32(token.windowId),
+                pid: token.pid,
+                level: 0,
+                frame: CGRect(x: 0, y: 0, width: 640, height: 480)
+            )
+        }
+        var batches: [Set<UInt32>] = []
+        controller.axEventHandler.windowInfoBatchProvider = { windowIds in
+            batches.append(windowIds)
+            return [
+                UInt32(tokens[0].windowId): info(for: tokens[0]),
+                UInt32(tokens[1].windowId): info(for: tokens[1])
+            ]
+        }
+
+        let outcome = await controller.reevaluateWindowRules(for: [.pid(pid)])
+
+        XCTAssertTrue(outcome.evaluatedAnyWindow)
+        XCTAssertEqual(batches, [Set(tokens.map { UInt32($0.windowId) })])
+        for token in tokens {
+            XCTAssertNotNil(controller.workspaceManager.entry(for: token))
+        }
+    }
+
+    func testTopLevelInventoryPromotionBatchesDirectEntriesWithoutRuntimeInvalidation() throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let directToken = WindowToken(pid: 467_092, windowId: 467_093)
+        let inventoryToken = WindowToken(pid: 467_094, windowId: 467_095)
+        let unobservedDirectToken = WindowToken(pid: 467_096, windowId: 467_097)
+        let metadata = ManagedReplacementMetadata(
+            bundleId: "org.example.direct",
+            workspaceId: workspaceId,
+            mode: .tiling,
+            role: kAXWindowRole as String,
+            subrole: kAXStandardWindowSubrole as String,
+            title: "Direct",
+            windowLevel: 0,
+            parentWindowId: nil,
+            frame: CGRect(x: 10, y: 20, width: 640, height: 480)
+        )
+
+        _ = controller.workspaceManager.addWindow(
+            AXWindowRef(
+                element: AXUIElementCreateApplication(directToken.pid),
+                windowId: directToken.windowId
+            ),
+            pid: directToken.pid,
+            windowId: directToken.windowId,
+            to: workspaceId,
+            admissionHints: .init(initialNiriContainerPrimarySpan: 0.4),
+            lifetimeAuthority: .directLifecycle,
+            managedReplacementMetadata: metadata
+        )
+        _ = controller.workspaceManager.addWindow(
+            AXWindowRef(
+                element: AXUIElementCreateApplication(inventoryToken.pid),
+                windowId: inventoryToken.windowId
+            ),
+            pid: inventoryToken.pid,
+            windowId: inventoryToken.windowId,
+            to: workspaceId,
+            lifetimeAuthority: .axTopLevelInventory
+        )
+        _ = controller.workspaceManager.addWindow(
+            AXWindowRef(
+                element: AXUIElementCreateApplication(unobservedDirectToken.pid),
+                windowId: unobservedDirectToken.windowId
+            ),
+            pid: unobservedDirectToken.pid,
+            windowId: unobservedDirectToken.windowId,
+            to: workspaceId,
+            lifetimeAuthority: .directLifecycle
+        )
+
+        var invalidations: [(WorkspaceDescriptor.ID?, InvalidationDomain)] = []
+        var presenceObservations = 0
+        controller.workspaceManager.onRuntimeInvalidation = { invalidations.append(($0, $1)) }
+        controller.workspaceManager.onWindowPresenceObserved = { _ in presenceObservations += 1 }
+        let seq = controller.workspaceManager.worldSeq
+        let conflictingToken = WindowToken(pid: 467_098, windowId: unobservedDirectToken.windowId)
+        let before = try XCTUnwrap(controller.workspaceManager.entry(for: directToken))
+
+        XCTAssertTrue(
+            controller.workspaceManager.promoteLifetimeAuthorityForObservedTopLevelWindows(
+                [directToken, inventoryToken, conflictingToken]
+            )
+        )
+        XCTAssertEqual(controller.workspaceManager.worldSeq, seq + 1)
+        XCTAssertEqual(
+            controller.workspaceManager.entry(for: directToken)?.lifetimeAuthority,
+            .axTopLevelInventory
+        )
+        XCTAssertEqual(
+            controller.workspaceManager.entry(for: inventoryToken)?.lifetimeAuthority,
+            .axTopLevelInventory
+        )
+        XCTAssertEqual(
+            controller.workspaceManager.entry(for: unobservedDirectToken)?.lifetimeAuthority,
+            .directLifecycle
+        )
+        let after = try XCTUnwrap(controller.workspaceManager.entry(for: directToken))
+        XCTAssertEqual(after.workspaceId, before.workspaceId)
+        XCTAssertEqual(after.mode, before.mode)
+        XCTAssertEqual(after.axRef, before.axRef)
+        XCTAssertEqual(after.admissionHints, before.admissionHints)
+        XCTAssertEqual(after.restoreIntent, before.restoreIntent)
+        XCTAssertEqual(after.managedReplacementMetadata, metadata)
+        XCTAssertTrue(invalidations.isEmpty)
+        XCTAssertEqual(presenceObservations, 0)
+
+        let promotedSeq = controller.workspaceManager.worldSeq
+        XCTAssertFalse(
+            controller.workspaceManager.promoteLifetimeAuthorityForObservedTopLevelWindows(
+                [directToken, inventoryToken, conflictingToken]
+            )
+        )
+        XCTAssertEqual(controller.workspaceManager.worldSeq, promotedSeq)
+    }
+
     func testMeaningfulAdmissionFrameRejectsOneByOneProxyGeometry() {
         XCTAssertFalse(WMController.isMeaningfulAdmissionFrame(CGRect(x: 0, y: 0, width: 1, height: 1)))
         XCTAssertFalse(WMController.isMeaningfulAdmissionFrame(CGRect(x: 0, y: 0, width: 1, height: 400)))

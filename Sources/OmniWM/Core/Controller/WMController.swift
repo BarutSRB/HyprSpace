@@ -2646,6 +2646,22 @@ final class WMController {
         )
     }
 
+    private func batchedWindowServerInfo(
+        for tokens: Set<WindowToken>
+    ) -> [WindowToken: WindowServerInfo] {
+        let windowIds = Set(tokens.compactMap { UInt32(exactly: $0.windowId) })
+        guard windowIds.count > 1 else { return [:] }
+        let infoByWindowId = axEventHandler.resolveWindowInfo(windowIds)
+        return tokens.reduce(into: [:]) { result, token in
+            guard let windowId = UInt32(exactly: token.windowId),
+                  let info = Self.exactWindowServerInfo(infoByWindowId[windowId], for: token)
+            else {
+                return
+            }
+            result[token] = info
+        }
+    }
+
     static func exactWindowServerInfo(
         _ windowInfo: WindowServerInfo?,
         for token: WindowToken
@@ -2662,7 +2678,6 @@ final class WMController {
 
     func resolveWindowServerInfoForDisposition(
         token: WindowToken,
-        bundleId _: String? = nil,
         axFacts: AXWindowFacts,
         preferredWindowInfo: WindowServerInfo?
     ) -> WindowServerInfo? {
@@ -2830,6 +2845,8 @@ final class WMController {
             )
         }
 
+        let batchedWindowInfoByToken = batchedWindowServerInfo(for: tokensToReevaluate)
+
         var relayoutNeeded = false
         var ruleRelayoutNeeded = false
         var evaluatedAnyWindow = false
@@ -2852,7 +2869,17 @@ final class WMController {
                 : .liveCreate
 
             evaluatedAnyWindow = true
-            let evaluation = evaluateWindowDisposition(axRef: axRef, pid: token.pid)
+            let evaluation = evaluateWindowDisposition(
+                axRef: axRef,
+                pid: token.pid,
+                windowInfo: batchedWindowInfoByToken[token]
+            )
+            let ruleEffects = evaluation.decision.disposition == .undecided
+                ? existingEntry?.ruleEffects ?? evaluation.decision.ruleEffects
+                : evaluation.decision.ruleEffects
+            let admissionHints = evaluation.decision.disposition == .undecided
+                ? existingEntry?.admissionHints ?? evaluation.decision.admissionHints
+                : evaluation.decision.admissionHints
 
             guard let effectiveTrackedMode = trackedModePreservingAutomaticFallbackState(
                 decision: evaluation.decision,
@@ -2918,7 +2945,7 @@ final class WMController {
                    bundleId: evaluation.facts.ax.bundleId,
                    mode: effectiveTrackedMode,
                    facts: evaluation.facts,
-                   admissionHints: evaluation.decision.admissionHints
+                   admissionHints: admissionHints
                )
             {
                 affectedWorkspaceIds.insert(workspaceId)
@@ -2952,7 +2979,7 @@ final class WMController {
                     entry: $0,
                     workspaceId: workspaceId,
                     mode: oldMode ?? effectiveTrackedMode,
-                    ruleEffects: evaluation.decision.ruleEffects,
+                    ruleEffects: ruleEffects,
                     shouldPreservePreFullscreenState: false,
                     appFullscreen: false
                 )
@@ -2964,18 +2991,19 @@ final class WMController {
                     windowId: token.windowId,
                     to: workspaceId,
                     mode: oldMode ?? effectiveTrackedMode,
-                    ruleEffects: evaluation.decision.ruleEffects,
-                    admissionHints: evaluation.decision.admissionHints,
+                    ruleEffects: ruleEffects,
+                    admissionHints: admissionHints,
                     lifetimeAuthority: Self.ruleReevaluationLifetimeAuthority(
                         existing: existingEntry?.lifetimeAuthority,
                         observedInTopLevelInventory: topLevelInventoryTokens.contains(token)
                     ),
+                    allowsNativeFocusAdoption: !evaluation.appFullscreen,
                     managedReplacementMetadata: managedReplacementMetadata
                 )
             }
             if existingEntry != nil {
                 _ = workspaceManager.updateAdmissionHints(
-                    evaluation.decision.admissionHints,
+                    admissionHints,
                     for: token
                 )
             }
@@ -3026,7 +3054,7 @@ final class WMController {
             }
 
             if existingEntry == nil
-                || oldEffects != evaluation.decision.ruleEffects
+                || oldEffects != ruleEffects
                 || oldWorkspaceId != workspaceId
                 || oldMode != effectiveTrackedMode
             {
@@ -3043,6 +3071,10 @@ final class WMController {
                 axEventHandler.finishAdmissionRetryAfterTracking(windowId: windowId)
             }
         }
+
+        workspaceManager.promoteLifetimeAuthorityForObservedTopLevelWindows(
+            topLevelInventoryTokens
+        )
 
         let evaluatedPIDs = Set(tokensToReevaluate.map(\.pid))
         axManager.bindManagedWindows(

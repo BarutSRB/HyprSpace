@@ -74,7 +74,7 @@ Sources/
 │   │   │   └── Dwindle/             Binary-partition layout engine (5 files)
 │   │   ├── Animation/               Springs, cubic easing, deceleration, viewport motion, policy (8)
 │   │   ├── Config/                  SettingsStore, TOML codec, runtime state, per-monitor settings (29)
-│   │   ├── Rules/                   Window rule engine, lookup tables, interaction policy (4)
+│   │   ├── Rules/                   Window rule engine and structural lookup tables (3)
 │   │   ├── Input/                   Action catalog, bindings, Carbon hotkeys (14)
 │   │   ├── Multitouch/              Raw multitouch frame source + gesture bindings (2)
 │   │   ├── Monitor/                 Display detection, OutputId, restore assignments (6)
@@ -351,7 +351,7 @@ Some apps (Ghostty, browsers) destroy and recreate windows during internal opera
 
 **Workspace placement:**
 
-`PlacementResolver` applies continuity before fresh placement: automatic readmission keeps the existing workspace, structural replacements keep their original workspace and identity, tracked transient children inherit their parent workspace, and unique persisted boot-restore matches retain restore authority. A valid workspace rule is the initial default only while that running app instance has no tracked window; explicit rule application can still move existing windows. Later tiled and parentless floating live creates use a pending managed-focus destination and the interaction workspace captured when the create event arrived before mode-specific native-Space, focus, and frame fallbacks. Finder Quick Look is the narrow exception: native-Space and same-process tiled-window spawn placement remain ahead of interaction so its macOS focus churn cannot redirect the preview. Contextless startup and full-rescan discovery remain conservative and frame-distributed.
+`PlacementResolver` applies continuity before fresh placement: automatic readmission keeps the existing workspace, structural replacements keep their original workspace and identity, and unique persisted boot-restore matches retain restore authority. A valid workspace rule is the initial default only while that running app instance has no tracked window; explicit rule application can still move existing windows. Later tiled and parentless floating live creates use a pending managed-focus destination and the interaction workspace captured when the create event arrived before mode-specific native-Space, focus, and frame fallbacks. Finder Quick Look is the narrow exception: native-Space and same-process tiled-window spawn placement remain ahead of interaction so its macOS focus churn cannot redirect the preview. Contextless startup and full-rescan discovery remain conservative and frame-distributed.
 
 ### 3.4 Stage 2 — WorldStore, the Single Writer
 
@@ -662,7 +662,7 @@ Focus management is split across several objects (there is no single coordinator
 
 Managed origins merge with `keyboardOrProgrammatic > pointerHover > focusFollowsMouse`; the request returned by `IntentLedger.beginManagedRequest` is authoritative, so a weaker hover cannot downgrade an existing request for the same target. Only `keyboardOrProgrammatic` confirmation may move the cursor into the focused window. Real Niri, Dwindle, deferred-Dwindle, and floating-window pointer focus use `focusFollowsMouse`; tab clicks and completed gestures retain `pointerHover` and therefore full fronting.
 
-Focus-follows-mouse has two effects. The generated default is `focus.raiseOnMouseFocus = false`; in that mode OmniWM omits `NSRunningApplication.activate`, `kAXRaiseAction`, and explicit SkyLight ordering. The private specific-window primitive still establishes keyboard routing through `_SLPSSetFrontProcessWithOptions`, so focus without raise is a best-effort ordering contract: macOS or the client may activate or reorder itself. With `raiseOnMouseFocus = true`, OmniWM uses the existing full-fronting sequence. Both effects pass through the same hidden-app, lock-screen, interaction-policy, and foreign-transient gates.
+Focus-follows-mouse has two effects. The generated default is `focus.raiseOnMouseFocus = false`; in that mode OmniWM omits `NSRunningApplication.activate`, `kAXRaiseAction`, and explicit SkyLight ordering. The private specific-window primitive still establishes keyboard routing through `_SLPSSetFrontProcessWithOptions`, so focus without raise is a best-effort ordering contract: macOS or the client may activate or reorder itself. With `raiseOnMouseFocus = true`, OmniWM uses the existing full-fronting sequence. Both effects pass through the same hidden-app, lock-screen, and focus-policy gates.
 
 Focus-only switching between key windows inside one application requires a staged private handoff. OmniWM deactivates the source key window, schedules the target activation phase on the existing `DeadlineWheel` after a fixed 40 ms internal gap, and begins the normal 100 ms confirmation interval only after that phase runs. A handoff started by a confirmation retry retains retry-origin fact verification after activation, while the 40 ms phase itself does not consume retry budget. The gap is neither a pointer dwell preference nor a blocking sleep. If focus-follows-mouse is disabled or the pointer target becomes stale during the gap, OmniWM restores the source only while the handoff still owns focus; an external, modal, or lock-screen takeover is abandoned without restoration to avoid stealing focus. Cancellation retires the deadline and pending world request. Disabling focus-follows-mouse cancels only when the merged origin remains exactly `focusFollowsMouse`, while a stronger merged origin continues.
 
@@ -698,21 +698,36 @@ Window create/move/front-app events originate here; AX *destroy/miniaturize/focu
 
 ### 4.7 Window Rules Engine
 
-**Directory:** `Sources/OmniWM/Core/Rules/` — `WindowRuleEngine.swift`, the `HiddenTitleBarRegistry` and `InputMethodBundleRegistry` lookup tables, and the `WindowInteractionPolicy` policy type
+**Directory:** `Sources/OmniWM/Core/Rules/` — `WindowRuleEngine.swift` plus the
+`HiddenTitleBarRegistry` and `InputMethodBundleRegistry` structural lookup tables
 
-`decision(for:token:appFullscreen:) -> WindowDecision` compiles user rules + built-in rules into `CompiledRule`s and ranks matches by specificity then declaration order. Evaluation precedence (first decisive match wins):
+`decision(for:token:appFullscreen:) -> WindowDecision` establishes structural ownership before it ranks rule
+matches. User and built-in rules compile into separate `CompiledRule` lists; each list ranks matches by
+specificity then declaration order, and an explicit user layout takes precedence over a built-in layout.
+Evaluation proceeds through these boundaries:
 
-1. `AXHelpTag` role → hard unmanaged
-2. Input-method apps → unmanaged. `InputMethodBundleRegistry.discover()` seeds a known set of system text-input agents and then adds every `.app` bundle ID found in `/Library/Input Methods`, `/System/Library/Input Methods`, and `~/Library/Input Methods`, so third-party IMEs are covered too.
-3. Explicit user rule (bundle ID, app name, title literal/regex, AX role/subrole)
-4. Explicit built-in rule (default-floating apps, browser PiP regex, Steam tile)
-5. CleanShot recording overlay → floating
-6. Required-title-missing → deferral
-7. App in native fullscreen → managed
-8. Attribute-fetch failure → deferral
-9. Exact AX/WindowServer transient-widget signature → unmanaged; missing exact WindowServer evidence → deferral
-10. `HiddenTitleBarRegistry` signature → managed. Three paths, all requiring a level-0 parentless `AXWindow`: no window buttons on a standard-subrole window of a `.regular` app; a missing fullscreen button for a listed bundle (VS Code/VSCodium); or no buttons on an `AXDialog`-subrole window for a listed bundle (qutebrowser).
-11. `AXWindowService.heuristicDisposition` — decides from app activation policy, subrole, and window-button evidence (close/zoom/minimize/fullscreen, plus whether the fullscreen button is enabled). It does **not** read size constraints; `AXWindowService.sizeConstraints` is a separate call used for layout, not admission.
+1. `AXHelpTag` roles and input-method apps are hard external. `InputMethodBundleRegistry.discover()` seeds a
+   known set of system text-input agents and then adds every `.app` bundle ID found in `/Library/Input Methods`,
+   `/System/Library/Input Methods`, and `~/Library/Input Methods`, so third-party IMEs are covered too.
+2. Failed AX attribute collection or missing role/subrole defers admission. When evaluation has a live
+   `WindowToken`, the supplied WindowServer record must match both its window ID and PID; missing or mismatched
+   evidence also defers.
+3. A WindowServer record with a nonzero, non-self parent is hard external. No user or built-in rule can override
+   that parent boundary.
+4. A parentless root at or above the status-window level requires precise **user** inclusion. The matching rule
+   must choose Tile or Float and specify both the exact AX role and AX subrole. Built-in rules cannot cross this
+   high-level boundary.
+5. Prohibited-app roots, buttonless accessory-app roots, non-`AXWindow` roles, and otherwise unsupported AX
+   subroles require the same precise inclusion shape; either a user or built-in rule may supply it. A closeable
+   accessory-app `AXWindow` with a standard root subrole at a lower level instead follows normal admission.
+6. Standard and native-fullscreen root subroles are structurally eligible. `AXDialog` and `AXFloatingWindow`
+   roots are also eligible when hidden-title-bar, window-chrome, main-window, or modal evidence proves an
+   independent root. With none of those proofs, missing main/modal evidence defers; explicit negative evidence
+   requires precise inclusion.
+7. After those gates, matching rules, required-title deferral, native-fullscreen handling,
+   `HiddenTitleBarRegistry`, and `AXWindowService.heuristicDisposition` determine Tile, Float, or deferral. The
+   heuristic reads activation policy, subrole, and window-button evidence; size constraints are collected
+   separately for layout and do not decide ownership.
 
 ```swift
 struct WindowDecision: Equatable, Sendable {
@@ -727,15 +742,11 @@ struct WindowDecision: Equatable, Sendable {
 }
 ```
 
-The hard help-tag decision is app-independent and trusts a known `AXHelpTag` role without WindowServer
-evidence. It runs before configurable rules, contributes no rule effects, and keeps tooltip/help surfaces out of
-world state and auxiliary surfaces. The transient-widget decision is also app-independent and intentionally
-narrow: `AXWindow` + `AXUnknown`, no standard window buttons, and exact matching WindowServer identity with
-level zero, a nonzero non-self parent, a floating tag, and no document or modal tag. It does not inspect or
-require the parent to be tracked. Live evaluation performs at most one targeted WindowServer lookup only after
-this AX shape remains undecided (or for CleanShot's existing special case). Full-rescan reduction uses only its
-captured WindowServer snapshot. Existing tracked windows retain their mode during automatic reevaluation for
-the generic transient decision, while the hard help-tag exclusion can evict a previously tracked help surface.
+The disposition is the ownership boundary, not a capability flag applied after tracking. `.unmanaged` decisions
+contribute no rule effects or admission hints and never enter the authoritative `WindowModel`, layout engines,
+Overview, managed-focus navigation, or auxiliary surfaces. The high-level user escape hatch bypasses only the
+level gate: exact WindowServer identity and the parent, help-tag, and input-method exclusions still apply. Broad
+app/title rules and Automatic layout cannot cross any precise-inclusion gate.
 
 Per-app `initialContainerPrimarySpan` is an admission hint, not an ongoing `ManagedWindowRuleEffects` constraint.
 `WindowRuleEngine` takes it only from the single winning rule, and Niri consumes it once when a resizable

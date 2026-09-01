@@ -19,6 +19,7 @@ enum EventNormalizer {
             ruleEffects,
             admissionHints,
             lifetimeAuthority,
+            adoptNativeFocus,
             metadata,
             source
         ):
@@ -31,6 +32,7 @@ enum EventNormalizer {
                 ruleEffects: ruleEffects,
                 admissionHints: admissionHints,
                 lifetimeAuthority: lifetimeAuthority,
+                adoptNativeFocus: adoptNativeFocus,
                 managedReplacementMetadata: metadata,
                 source: source
             )
@@ -158,6 +160,7 @@ enum EventNormalizer {
              .systemModalFocusChanged,
              .systemSleep,
              .systemWake,
+             .topLevelInventoryObserved,
              .userCommand,
              .viewportChanged,
              .viewportCommitted,

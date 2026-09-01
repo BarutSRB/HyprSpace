@@ -9,12 +9,13 @@ enum StateReducer {
         event: WMEvent,
         existingEntry: WindowState?,
         currentSnapshot: ReconcileSnapshot,
-        monitors: [Monitor]
+        monitors: [Monitor],
+        windowExistedBeforeMutation: Bool = false
     ) -> ActionPlan {
         var plan = ActionPlan()
 
         switch event {
-        case let .windowAdmitted(_, workspaceId, monitorId, mode, _, _, _, _, _, _):
+        case let .windowAdmitted(token, workspaceId, monitorId, mode, _, _, _, _, adoptNativeFocus, _, _):
             plan.lifecyclePhase = lifecyclePhase(for: mode)
             plan.observedState = baseObservedState(
                 from: existingEntry,
@@ -27,6 +28,20 @@ enum StateReducer {
                 monitorId: monitorId,
                 mode: mode
             )
+            if !windowExistedBeforeMutation,
+               adoptNativeFocus,
+               currentSnapshot.focusSession.pendingManagedFocus == .empty,
+               currentSnapshot.focusSession.nativeFocusOwner.externalToken == token
+            {
+                var focusSession = adoptingManagedFocus(
+                    in: currentSnapshot.focusSession,
+                    token: token,
+                    monitorId: monitorId,
+                    mode: mode
+                )
+                _ = focusSession.rememberFocus(token, in: workspaceId, mode: mode)
+                plan.focusSession = focusSession
+            }
 
         case let .windowRekeyed(from, to, workspaceId, monitorId, _, _, _, _):
             plan.lifecyclePhase = .replacing
@@ -121,6 +136,9 @@ enum StateReducer {
             plan.notes = ["manual_layout_override=\(layoutOverride.map(\.rawValue) ?? "cleared")"]
 
         case .windowAdmissionHintsChanged:
+            break
+
+        case .topLevelInventoryObserved:
             break
 
         case let .niriPlacementsResolved(placements, _):
@@ -240,7 +258,7 @@ enum StateReducer {
             )
 
         case let .managedFocusConfirmed(token, workspaceId, monitorId, requestId, _):
-            let confirmation = managedFocusConfirmed(
+            let focusSession = managedFocusConfirmed(
                 from: currentSnapshot.focusSession,
                 token: token,
                 workspaceId: workspaceId,
@@ -248,12 +266,6 @@ enum StateReducer {
                 requestId: requestId,
                 mode: currentSnapshot.windows.first(where: { $0.token == token })?.mode
             )
-            var focusSession = confirmation.focusSession
-            if confirmation.accepted {
-                if focusSession.suppressedFocusToken == token {
-                    focusSession.suppressedFocusToken = nil
-                }
-            }
             setFocusSession(focusSession, current: currentSnapshot.focusSession, plan: &plan)
 
         case let .managedFocusCancelled(token, workspaceId, requestId, _):
@@ -487,23 +499,37 @@ enum StateReducer {
         monitorId: Monitor.ID?,
         requestId: UInt64?,
         mode: TrackedWindowMode?
-    ) -> (focusSession: FocusSessionSnapshot, accepted: Bool) {
-        var focusSession = focusSession
+    ) -> FocusSessionSnapshot {
         if let requestId {
             guard focusSession.pendingManagedFocus.requestId == requestId,
                   focusSession.pendingManagedFocus.token == token,
                   focusSession.pendingManagedFocus.workspaceId == workspaceId
             else {
-                return (focusSession, false)
+                return focusSession
             }
         } else if focusSession.pendingManagedFocus != .empty {
             guard focusSession.pendingManagedFocus.requestId == nil,
                   focusSession.pendingManagedFocus.token == token,
                   focusSession.pendingManagedFocus.workspaceId == workspaceId
             else {
-                return (focusSession, false)
+                return focusSession
             }
         }
+        return adoptingManagedFocus(
+            in: focusSession,
+            token: token,
+            monitorId: monitorId,
+            mode: mode
+        )
+    }
+
+    private static func adoptingManagedFocus(
+        in focusSession: FocusSessionSnapshot,
+        token: WindowToken,
+        monitorId: Monitor.ID?,
+        mode: TrackedWindowMode?
+    ) -> FocusSessionSnapshot {
+        var focusSession = focusSession
         focusSession.selectedManagedToken = token
         focusSession.nativeFocusOwner = .managed(token)
         focusSession.pendingManagedFocus = .empty
@@ -518,7 +544,10 @@ enum StateReducer {
             }
             focusSession.interactionMonitorId = monitorId
         }
-        return (focusSession, true)
+        if focusSession.suppressedFocusToken == token {
+            focusSession.suppressedFocusToken = nil
+        }
+        return focusSession
     }
 
     private static func managedFocusCancelled(

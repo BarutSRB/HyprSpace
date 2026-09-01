@@ -28,6 +28,7 @@ extension AXEventHandler {
             ruleEffects: candidate.ruleEffects,
             admissionHints: candidate.admissionHints,
             lifetimeAuthority: .directLifecycle,
+            allowsNativeFocusAdoption: !candidate.appFullscreen,
             managedReplacementMetadata: candidate.replacementMetadata
         )
         guard let trackedEntry = controller.workspaceManager.entry(for: trackedToken) else {
