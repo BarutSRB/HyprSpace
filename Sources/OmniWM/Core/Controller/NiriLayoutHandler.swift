@@ -457,6 +457,9 @@ enum StructuralMutationOutcome: Equatable {
         var shouldRequestRelayout = false
 
         controller.workspaceManager.withNiriViewportState(for: workspaceId) { state in
+            let activeColumnIndexBefore = state.activeColumnIndex
+            let viewOffsetBefore = state.viewOffset
+            let rebaseDeltaBefore = state.offsetTransition.rebaseDelta
             activateNode(
                 window,
                 in: workspaceId,
@@ -468,7 +471,11 @@ enum StructuralMutationOutcome: Equatable {
                 )
             )
             shouldStartScrollAnimation = state.hasPendingOffsetAnimation
+            let viewportGeometryChanged = state.activeColumnIndex != activeColumnIndexBefore
+                || state.viewOffset != viewOffsetBefore
+                || state.offsetTransition.rebaseDelta != rebaseDeltaBefore
             shouldRequestRelayout = state.offsetTransition.kind == .jump
+                && viewportGeometryChanged
         }
 
         controller.focusWindow(window.token, origin: .focusFollowsMouse)
@@ -1220,6 +1227,38 @@ enum StructuralMutationOutcome: Equatable {
         state.viewOffsetToRestore = nil
     }
 
+    private func stopMoveAnimationsForSingleWindowFit(pass: NiriLayoutPass) {
+        guard let context = pass.engine.singleWindowLayoutContext(in: pass.wsId) else { return }
+        context.container.moveAnimation = nil
+        context.window.stopMoveAnimations()
+    }
+
+    private func shouldResetViewportForSingleWindowFit(
+        node: NiriNode,
+        workspaceId: WorkspaceDescriptor.ID,
+        engine: NiriLayoutEngine,
+        controller: WMController
+    ) -> Bool {
+        if engine.singleWindowLayoutContext(in: workspaceId) != nil {
+            return true
+        }
+
+        // Focus recovery can run after the window leaves the world model but
+        // before the removal layout pass prunes its stale engine node.
+        guard engine.effectiveSingleWindowFit(in: workspaceId).mode != .containerPrimarySpan,
+              let window = node as? NiriWindow,
+              window.sizingMode == .normal,
+              let column = engine.column(of: window),
+              !column.isTabbed
+        else {
+            return false
+        }
+        let participatingEntries = controller.workspaceManager.tiledEntries(in: workspaceId).filter {
+            !controller.isManagedWindowSuppressedByMacOSHide($0.token)
+        }
+        return participatingEntries.count == 1 && participatingEntries.first?.token == window.token
+    }
+
     private func computeLayoutPlan(
         pass: NiriLayoutPass,
         motion: MotionSnapshot,
@@ -1243,6 +1282,11 @@ enum StructuralMutationOutcome: Equatable {
             viewFrame: snapshot.monitor.frame,
             scale: snapshot.monitor.scale
         )
+
+        let usesSingleWindowFit = pass.engine.singleWindowLayoutContext(in: pass.wsId) != nil
+        if usesSingleWindowFit {
+            stopMoveAnimationsForSingleWindowFit(pass: pass)
+        }
 
         let (frames, hiddenHandles) = pass.engine.calculateCombinedLayoutUsingPools(
             in: pass.wsId,
@@ -1281,16 +1325,21 @@ enum StructuralMutationOutcome: Equatable {
         }
 
         if let removalSeed = snapshot.removalSeed, !removalSeed.oldFrames.isEmpty {
-            let newFrames = pass.engine.captureWindowFrames(
-                in: pass.wsId,
-                excluding: snapshot.excludedTokens
-            )
-            let animationsTriggered = pass.engine.triggerMoveAnimations(
-                in: pass.wsId,
-                oldFrames: removalSeed.oldFrames,
-                newFrames: newFrames,
-                motion: motion
-            )
+            let animationsTriggered: Bool
+            if usesSingleWindowFit {
+                animationsTriggered = false
+            } else {
+                let newFrames = pass.engine.captureWindowFrames(
+                    in: pass.wsId,
+                    excluding: snapshot.excludedTokens
+                )
+                animationsTriggered = pass.engine.triggerMoveAnimations(
+                    in: pass.wsId,
+                    oldFrames: removalSeed.oldFrames,
+                    newFrames: newFrames,
+                    motion: motion
+                )
+            }
             let hasWindowAnimations = pass.engine.hasAnyWindowAnimationsRunning(in: pass.wsId)
             let hasColumnAnimations = pass.engine.hasAnyColumnAnimationsRunning(in: pass.wsId)
             if animationsTriggered || hasWindowAnimations || hasColumnAnimations {
@@ -2114,7 +2163,15 @@ enum StructuralMutationOutcome: Equatable {
 
         state.selectedNodeId = node.id
         controller.workspaceManager.withEngineMutationScope {
-            if !options.ensureVisible, !options.preserveViewportAnchor {
+            let usesSingleWindowFit = shouldResetViewportForSingleWindowFit(
+                node: node,
+                workspaceId: workspaceId,
+                engine: engine,
+                controller: controller
+            )
+            if usesSingleWindowFit {
+                resetViewportForSingleWindowFit(state: &state)
+            } else if !options.ensureVisible, !options.preserveViewportAnchor {
                 rebaseViewportAnchor(to: node, in: workspaceId, state: &state)
             }
 
@@ -2122,7 +2179,10 @@ enum StructuralMutationOutcome: Equatable {
                 engine.activateWindow(node.id, in: workspaceId)
             }
 
-            if options.ensureVisible, let monitor = controller.workspaceManager.monitor(for: workspaceId) {
+            if !usesSingleWindowFit,
+               options.ensureVisible,
+               let monitor = controller.workspaceManager.monitor(for: workspaceId)
+            {
                 let gap = controller.innerGap(for: monitor)
                 let workingFrame = controller.insetWorkingFrame(for: monitor)
                 engine.ensureSelectionVisible(

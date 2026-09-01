@@ -736,6 +736,42 @@ final class RuntimeArchitectureTests: XCTestCase {
         XCTAssertEqual(controller.intentLedger.activeManagedRequest?.origin, .focusFollowsMouse)
     }
 
+    @MainActor
+    func testNiriPointerHoverOnSettledSelectionDoesNotRequestRelayout() throws {
+        let controller = Self.controller()
+        let workspaceId = try XCTUnwrap(controller.workspaceManager.workspaceId(for: "1", createIfMissing: true))
+        _ = controller.workspaceManager.focusWorkspace(named: "1")
+        controller.niriLayoutHandler.enableNiriLayout()
+        let token = controller.workspaceManager.addWindow(
+            AXWindowRef(element: AXUIElementCreateApplication(765_704), windowId: 765_804),
+            pid: 765_704,
+            windowId: 765_804,
+            to: workspaceId
+        )
+        let node = try XCTUnwrap(controller.niriEngine?.addWindow(
+            token: token,
+            to: workspaceId,
+            afterSelection: nil
+        ))
+        controller.workspaceManager.withNiriViewportState(for: workspaceId) { state in
+            state.selectedNodeId = node.id
+            state.activeColumnIndex = 0
+            state.jumpOffset(to: 0)
+        }
+        let refreshController = controller.layoutRefreshController
+        refreshController.resetState()
+        refreshController.beginPerformanceCapture()
+        defer {
+            _ = refreshController.endPerformanceCapture()
+            refreshController.resetState()
+        }
+
+        controller.niriLayoutHandler.activatePointerHoveredWindow(node, in: workspaceId)
+
+        let metrics = try XCTUnwrap(refreshController.performanceSnapshot())
+        XCTAssertEqual(metrics.refreshesEnqueued, 0)
+    }
+
     func testMouseMoveWindowIdPrefersRoutedFieldAndFallsBackToTopmostField() throws {
         let event = try XCTUnwrap(
             CGEvent(
