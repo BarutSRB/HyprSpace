@@ -41,7 +41,7 @@ struct DiagnosticsIssue: Identifiable, Equatable {
         case settingsMigrated(report: SettingsMigrationReport, backupURL: URL)
         case settingsRecovered(reason: String, backupURL: URL)
         case settingsPersistenceBlocked(reason: String, backupURL: URL?)
-        case settingsInvalidExternal(reason: String)
+        case settingsInvalidRejected(reason: String)
     }
 
     let kind: Kind
@@ -65,7 +65,7 @@ struct DiagnosticsIssue: Identifiable, Equatable {
         case .settingsMigrated: "settings-migrated"
         case .settingsRecovered: "settings-recovered"
         case .settingsPersistenceBlocked: "settings-persistence-blocked"
-        case .settingsInvalidExternal: "settings-invalid-external"
+        case .settingsInvalidRejected: "settings-invalid-rejected"
         }
     }
 
@@ -83,7 +83,7 @@ struct DiagnosticsIssue: Identifiable, Equatable {
              .settingsFileCorrupt,
              .settingsMigrated,
              .settingsRecovered,
-             .settingsInvalidExternal:
+             .settingsInvalidRejected:
             .warning
         }
     }
@@ -101,7 +101,7 @@ struct DiagnosticsIssue: Identifiable, Equatable {
         case .settingsMigrated: "Settings upgraded"
         case .settingsRecovered: "Invalid settings recovered"
         case .settingsPersistenceBlocked: "Settings writes blocked"
-        case .settingsInvalidExternal: "External settings edit rejected"
+        case .settingsInvalidRejected: "Invalid settings left untouched"
         }
     }
 
@@ -142,8 +142,8 @@ struct DiagnosticsIssue: Identifiable, Equatable {
         case let .settingsPersistenceBlocked(reason, backupURL):
             "OmniWM left \(configPath) untouched and blocked configuration writes: \(reason)"
                 + (backupURL.map { " The exact original bytes are at \($0.path)." } ?? "")
-        case let .settingsInvalidExternal(reason):
-            "OmniWM left the active settings unchanged because \(configPath) could not be decoded: \(reason)"
+        case let .settingsInvalidRejected(reason):
+            "OmniWM could not decode \(configPath) and left the file untouched: \(reason) The active settings were not changed."
         }
     }
 
@@ -178,8 +178,8 @@ struct DiagnosticsIssue: Identifiable, Equatable {
             "Compare \(backupURL.path) with \(configPath), restore valid values, and then remove the recovery file."
         case .settingsPersistenceBlocked:
             "Resolve the reported schema or backup problem at \(configPath), then reload or restart OmniWM."
-        case .settingsInvalidExternal:
-            "Correct the reported value at \(configPath). OmniWM will apply the file after it decodes successfully."
+        case .settingsInvalidRejected:
+            "Correct the reported value at \(configPath); OmniWM applies the file once it decodes. Saving from the Settings window first secures the rejected bytes as a recovery file."
         }
     }
 
@@ -200,7 +200,7 @@ struct DiagnosticsIssue: Identifiable, Equatable {
              .settingsMigrated,
              .settingsRecovered,
              .settingsPersistenceBlocked,
-             .settingsInvalidExternal:
+             .settingsInvalidRejected:
             nil
         }
     }
@@ -212,7 +212,7 @@ struct DiagnosticsIssue: Identifiable, Equatable {
              .settingsMigrated,
              .settingsRecovered,
              .settingsPersistenceBlocked,
-             .settingsInvalidExternal:
+             .settingsInvalidRejected:
             true
         default:
             false

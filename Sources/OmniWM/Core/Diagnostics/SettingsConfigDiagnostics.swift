@@ -79,8 +79,8 @@ enum SettingsConfigDiagnostics {
                 kind: .settingsPersistenceBlocked(reason: reason, backupURL: nil),
                 describesRecovery: false
             )
-        case let .invalidExternal(reason):
-            return NoticeIssue(kind: .settingsInvalidExternal(reason: reason), describesRecovery: false)
+        case let .invalidRejected(reason):
+            return NoticeIssue(kind: .settingsInvalidRejected(reason: reason), describesRecovery: false)
         }
     }
 

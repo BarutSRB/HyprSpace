@@ -29,7 +29,7 @@ enum SettingsConfigNotice: Equatable {
     case unsupportedVersion(found: Int, supported: Int)
     case recoveredInvalid(backupURL: URL, reason: String)
     case persistenceWriteBlocked(reason: String)
-    case invalidExternal(reason: String)
+    case invalidRejected(reason: String)
 
     var blockingReason: String? {
         switch self {
@@ -43,7 +43,7 @@ enum SettingsConfigNotice: Equatable {
             ).localizedDescription
         case .migrated,
              .recoveredInvalid,
-             .invalidExternal:
+             .invalidRejected:
             nil
         }
     }

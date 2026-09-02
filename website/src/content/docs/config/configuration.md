@@ -29,7 +29,7 @@ Every setting is also editable in the SwiftUI Settings window, organized into 14
 ## Live reload and recovery
 
 - Saving `settings.toml` from an editor applies the changes immediately; no restart needed.
-- If the file cannot be parsed at startup, OmniWM preserves the unparseable data as `settings.toml.corrupt` (then `settings.toml.corrupt.1`) next to the config file — two write-once slots — and continues with defaults. A malformed live edit is initially left untouched while the active settings remain unchanged; if you later save from the Settings window, OmniWM first secures those exact rejected bytes in a recovery slot before replacing the file.
+- If the file cannot be parsed, OmniWM leaves it untouched and reports the problem in Diagnostics: at startup it runs with defaults, and a malformed live edit leaves the active settings unchanged. If you later save from the Settings window, OmniWM first secures the exact rejected bytes as `settings.toml.corrupt` (then `settings.toml.corrupt.1`) next to the config file — two write-once slots — before replacing the file.
 - Unrecognized keys are preserved on save and reported by the built-in diagnostics rather than deleted. If an unrecognized key belongs to an array element that cannot be matched unambiguously after an edit, OmniWM leaves the file untouched and blocks writes instead of attaching the key to the wrong element.
 
 ### Automatic version upgrades
@@ -46,7 +46,7 @@ After a successful backup, OmniWM atomically rewrites the file as canonical vers
 
 Config logs and the built-in Diagnostics report every defaulted path, mapped or retired hotkey, and the backup location. Paths shown there use the resolved XDG config directory, including a custom `XDG_CONFIG_HOME`.
 
-Older schema-less files are attempted through the same migration, but are outside the guaranteed compatibility range. OmniWM v0.6.0 used direction-specific resize action ids: for both `resizeGrow` and `resizeShrink`, replace the `.left`/`.right` pair with one `.horizontal` entry and the `.up`/`.down` pair with one `.vertical` entry, choosing which binding to keep if the pair differed. If older files contain retired structures that cannot satisfy strict post-migration validation, startup uses the normal `.corrupt` recovery and a live edit is rejected without changing the active settings. Version 1 files continue to use strict validation and the same recovery behavior. A file with a newer, unsupported `schemaVersion` is not treated as corrupt: OmniWM leaves it untouched, blocks configuration writes, and reports that this OmniWM version cannot safely edit it.
+Older schema-less files are attempted through the same migration, but are outside the guaranteed compatibility range. OmniWM v0.6.0 used direction-specific resize action ids: for both `resizeGrow` and `resizeShrink`, replace the `.left`/`.right` pair with one `.horizontal` entry and the `.up`/`.down` pair with one `.vertical` entry, choosing which binding to keep if the pair differed. If older files contain retired structures that cannot satisfy strict post-migration validation, startup leaves the file untouched and runs with defaults, and a live edit is rejected without changing the active settings. Version 1 files continue to use strict validation and the same recovery behavior. A file with a newer, unsupported `schemaVersion` is not treated as corrupt: OmniWM leaves it untouched, blocks configuration writes, and reports that this OmniWM version cannot safely edit it.
 
 ## Runtime state lives elsewhere
 

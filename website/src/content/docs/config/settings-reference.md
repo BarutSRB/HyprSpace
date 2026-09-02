@@ -30,7 +30,7 @@ The canonical file declares:
 schemaVersion = 1
 ```
 
-An absent version identifies a legacy version 0 file. OmniWM guarantees automatic migration for settings emitted by v0.6.1 through v0.6.3 before strict validation; older schema-less files are attempted but may use normal invalid-file recovery if retired structures cannot validate. A successful upgrade creates an exact write-once `settings.toml.pre-v1` or `settings.toml.pre-v1.1` backup, then rewrites canonical TOML; this can reorder keys and removes comments, while preserving unrecognized keys when their owner can be matched safely. Files declaring a newer unsupported version remain untouched and configuration writes are blocked. See [Automatic version upgrades](/config/configuration/#automatic-version-upgrades) for the migration rules and recovery behavior.
+An absent version identifies a legacy version 0 file. OmniWM guarantees automatic migration for settings emitted by v0.6.1 through v0.6.3 before strict validation; older schema-less files are attempted but are left untouched (with defaults active) if retired structures cannot validate. A successful upgrade creates an exact write-once `settings.toml.pre-v1` or `settings.toml.pre-v1.1` backup, then rewrites canonical TOML; this can reorder keys and removes comments, while preserving unrecognized keys when their owner can be matched safely. Files declaring a newer unsupported version remain untouched and configuration writes are blocked. See [Automatic version upgrades](/config/configuration/#automatic-version-upgrades) for the migration rules and recovery behavior.
 
 ## general
 

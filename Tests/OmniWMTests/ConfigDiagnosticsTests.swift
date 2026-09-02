@@ -131,7 +131,7 @@ final class ConfigDiagnosticsTests: XCTestCase {
 
         let issues = SettingsConfigDiagnostics.issues(
             directoryURL: directory,
-            notice: .invalidExternal(reason: reason)
+            notice: .invalidRejected(reason: reason)
         )
         let issue = try XCTUnwrap(issues.first)
 

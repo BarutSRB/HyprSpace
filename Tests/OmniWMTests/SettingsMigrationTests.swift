@@ -250,7 +250,7 @@ final class SettingsMigrationTests: XCTestCase {
     }
 
     @MainActor
-    func testVersion061MigrationSucceedsWhileVersion060DirectionalResizeRecoversAsInvalid() throws {
+    func testVersion061MigrationSucceedsWhileVersion060DirectionalResizeIsLeftUntouched() throws {
         let version061 = try legacyFixtureData(named: "v0.6.2-custom")
         let supported = try SettingsTOMLCodec.decodeForLoad(version061)
         XCTAssertNotNil(supported.migration)
@@ -270,19 +270,15 @@ final class SettingsMigrationTests: XCTestCase {
         let persistence = makePersistence(in: fixture)
         let outcome = persistence.loadOutcome()
         guard let notice = outcome.notice,
-              case let .recoveredInvalid(backupURL, reason) = notice
+              case let .invalidRejected(reason) = notice
         else {
-            return XCTFail("Expected unsupported legacy settings to use startup recovery")
+            return XCTFail("Expected unsupported legacy settings to be left untouched")
         }
 
         XCTAssertTrue(reason.contains("resizeGrow.left"))
-        XCTAssertEqual(backupURL, corruptURL(in: fixture, index: 0))
-        XCTAssertEqual(try Data(contentsOf: backupURL), version060)
-        XCTAssertEqual(outcome.export, SettingsExport.defaults())
-        XCTAssertEqual(
-            try SettingsTOMLCodec.decode(Data(contentsOf: settingsURL(in: fixture))),
-            SettingsExport.defaults()
-        )
+        XCTAssertNil(outcome.export)
+        XCTAssertEqual(try Data(contentsOf: settingsURL(in: fixture)), version060)
+        assertNoCorruptFiles(in: fixture, file: #filePath, line: #line)
         XCTAssertFalse(FileManager.default.fileExists(atPath: preVersionOneURL(in: fixture).path))
     }
 
@@ -674,7 +670,7 @@ final class SettingsMigrationTests: XCTestCase {
         for _ in 0 ..< 200 {
             if !settings.settingsWritesBlocked,
                let notice = settings.configNotice,
-               case .invalidExternal = notice
+               case .invalidRejected = notice
             {
                 break
             }
@@ -682,7 +678,7 @@ final class SettingsMigrationTests: XCTestCase {
         }
 
         XCTAssertFalse(settings.settingsWritesBlocked)
-        guard let notice = settings.configNotice, case .invalidExternal = notice else {
+        guard let notice = settings.configNotice, case .invalidRejected = notice else {
             return XCTFail("Expected invalid external-edit notice")
         }
         XCTAssertEqual(settings.gapSize, 17)

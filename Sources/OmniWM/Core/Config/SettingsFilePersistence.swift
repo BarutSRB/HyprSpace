@@ -148,7 +148,7 @@ final class SettingsFilePersistence {
                 contents,
                 at: targetURL,
                 fallback: SettingsExport.defaults(),
-                recoverInvalid: true
+                isInitialLoad: true
             )
         } catch {
             let reason = SettingsTOMLCodec.diagnosticDescription(for: error)
@@ -356,7 +356,7 @@ final class SettingsFilePersistence {
                 contents,
                 at: targetURL,
                 fallback: lastPersistedExport ?? SettingsExport.defaults(),
-                recoverInvalid: false
+                isInitialLoad: false
             )
         } catch {
             let reason = SettingsTOMLCodec.diagnosticDescription(for: error)
@@ -369,19 +369,13 @@ final class SettingsFilePersistence {
         _ contents: FileContents,
         at targetURL: URL,
         fallback: SettingsExport,
-        recoverInvalid: Bool
+        isInitialLoad: Bool
     ) -> SettingsFileLoadOutcome {
         do {
             let result = try SettingsTOMLCodec.decodeForLoad(contents.data)
             return applyDecodedContents(result, contents: contents, targetURL: targetURL)
         } catch {
-            return applyRejectedContents(
-                error,
-                contents: contents,
-                targetURL: targetURL,
-                fallback: fallback,
-                recoverInvalid: recoverInvalid
-            )
+            return applyRejectedContents(error, contents: contents, fallback: fallback, isInitialLoad: isInitialLoad)
         }
     }
 
@@ -456,9 +450,8 @@ final class SettingsFilePersistence {
     private func applyRejectedContents(
         _ error: Error,
         contents: FileContents,
-        targetURL: URL,
         fallback: SettingsExport,
-        recoverInvalid: Bool
+        isInitialLoad: Bool
     ) -> SettingsFileLoadOutcome {
         if let codecError = error as? SettingsTOMLCodecError,
            case let .unsupportedSchemaVersion(found, supported) = codecError
@@ -468,17 +461,14 @@ final class SettingsFilePersistence {
                 supported: supported,
                 contents: contents,
                 fallback: fallback,
-                recoverInvalid: recoverInvalid
+                isInitialLoad: isInitialLoad
             )
         }
         let reason = SettingsTOMLCodec.diagnosticDescription(for: error)
-        guard recoverInvalid else {
-            writeBlockNotice = nil
-            lastRejectedFingerprint = contents.fingerprint
-            report("Ignoring invalid external settings edit at \(fileURL.path): \(reason)")
-            return SettingsFileLoadOutcome(export: nil, notice: .invalidExternal(reason: reason))
-        }
-        return recoverInvalidContents(contents, targetURL: targetURL, reason: reason)
+        writeBlockNotice = nil
+        lastRejectedFingerprint = contents.fingerprint
+        report("Ignoring invalid settings at \(fileURL.path): \(reason)")
+        return SettingsFileLoadOutcome(export: nil, notice: .invalidRejected(reason: reason))
     }
 
     private func applyUnsupportedVersion(
@@ -486,7 +476,7 @@ final class SettingsFilePersistence {
         supported: Int,
         contents: FileContents,
         fallback: SettingsExport,
-        recoverInvalid: Bool
+        isInitialLoad: Bool
     ) -> SettingsFileLoadOutcome {
         let notice = SettingsConfigNotice.unsupportedVersion(found: found, supported: supported)
         let reason = notice.blockingReason ?? "Unsupported settings schema."
@@ -498,34 +488,7 @@ final class SettingsFilePersistence {
         }
         refreshSettingsFileWatcher(for: contents.fingerprint)
         report("Refusing unsupported settings at \(fileURL.path): \(reason) Writes are blocked.")
-        return SettingsFileLoadOutcome(export: recoverInvalid ? fallback : nil, notice: notice)
-    }
-
-    private func recoverInvalidContents(
-        _ contents: FileContents,
-        targetURL: URL,
-        reason: String
-    ) -> SettingsFileLoadOutcome {
-        report("Failed to load \(fileURL.path): \(reason)")
-        let defaults = SettingsExport.defaults()
-        do {
-            let backupURL = try recoverInvalidSettings(contents.data, at: targetURL, replacingWith: defaults)
-            report("Recovered invalid settings from \(fileURL.path) to \(backupURL.path): \(reason)")
-            return SettingsFileLoadOutcome(
-                export: defaults,
-                notice: .recoveredInvalid(backupURL: backupURL, reason: reason)
-            )
-        } catch {
-            let recoveryReason = SettingsTOMLCodec.diagnosticDescription(for: error)
-            let combinedReason = "\(reason) Recovery failed: \(recoveryReason)"
-            let notice = SettingsConfigNotice.persistenceWriteBlocked(reason: combinedReason)
-            writeBlockNotice = notice
-            lastObservedFingerprint = contents.fingerprint
-            lastPersistedExport = defaults
-            refreshSettingsFileWatcher(for: contents.fingerprint)
-            report("Failed to recover invalid settings at \(fileURL.path): \(combinedReason)")
-            return SettingsFileLoadOutcome(export: defaults, notice: notice)
-        }
+        return SettingsFileLoadOutcome(export: isInitialLoad ? fallback : nil, notice: notice)
     }
 
     private func prepareMigrationRewrite(
