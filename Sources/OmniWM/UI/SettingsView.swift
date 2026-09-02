@@ -299,12 +299,7 @@ struct GeneralSettingsTab: View {
     }
 
     private func syncOuterGaps() {
-        controller.setOuterGaps(
-            left: settings.outerGapLeft,
-            right: settings.outerGapRight,
-            top: settings.outerGapTop,
-            bottom: settings.outerGapBottom
-        )
+        controller.updateMonitorGapSettings()
     }
 
     private func updateGapSetting(for monitor: Monitor, _ update: (inout MonitorGapSettings) -> Void) {

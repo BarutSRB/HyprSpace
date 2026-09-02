@@ -104,28 +104,10 @@ struct ResizeConfiguration {
 struct LayoutGaps {
     var horizontal: CGFloat
     var vertical: CGFloat
-    var outer: OuterGaps
 
-    struct OuterGaps {
-        var left: CGFloat
-        var right: CGFloat
-        var top: CGFloat
-        var bottom: CGFloat
-
-        static let zero = OuterGaps(left: 0, right: 0, top: 0, bottom: 0)
-
-        init(left: CGFloat = 0, right: CGFloat = 0, top: CGFloat = 0, bottom: CGFloat = 0) {
-            self.left = left
-            self.right = right
-            self.top = top
-            self.bottom = bottom
-        }
-    }
-
-    init(horizontal: CGFloat = 8.0, vertical: CGFloat = 8.0, outer: OuterGaps = .zero) {
+    init(horizontal: CGFloat = 8.0, vertical: CGFloat = 8.0) {
         self.horizontal = horizontal
         self.vertical = vertical
-        self.outer = outer
     }
 
     var asTuple: (horizontal: CGFloat, vertical: CGFloat) {

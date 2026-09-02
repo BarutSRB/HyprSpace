@@ -91,7 +91,6 @@ struct NiriWorkspaceSnapshot {
     let useScrollAnimationPath: Bool
     let removalSeed: NiriWindowRemovalSeed?
     let gap: CGFloat
-    let outerGaps: LayoutGaps.OuterGaps
     let displayRefreshRate: Double
     let isActiveWorkspace: Bool
 }

@@ -807,8 +807,7 @@ extension NiriDirectionalOrientationTests {
             monitor: sourceMonitor,
             gaps: LayoutGaps(
                 horizontal: gap,
-                vertical: gap,
-                outer: controller.workspaceManager.outerGaps
+                vertical: gap
             ),
             state: controller.workspaceManager.niriViewportState(for: workspaceId),
             workingArea: WorkingAreaContext(
@@ -843,8 +842,7 @@ extension NiriDirectionalOrientationTests {
         let gap = fixture.controller.innerGap(for: fixture.sourceMonitor)
         let gaps = LayoutGaps(
             horizontal: gap,
-            vertical: gap,
-            outer: fixture.controller.workspaceManager.outerGaps
+            vertical: gap
         )
         let area = WorkingAreaContext(
             workingFrame: fixture.controller.insetWorkingFrame(for: fixture.sourceMonitor),

@@ -302,8 +302,7 @@ final class NiriPortraitRevealIntegrationTests: XCTestCase {
             monitor: fixture.sourceMonitor,
             gaps: LayoutGaps(
                 horizontal: gap,
-                vertical: gap,
-                outer: fixture.controller.workspaceManager.outerGaps
+                vertical: gap
             ),
             state: state,
             workingArea: WorkingAreaContext(

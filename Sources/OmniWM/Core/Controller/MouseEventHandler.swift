@@ -1431,8 +1431,7 @@ final class MouseEventHandler {
         let geometry = controller.niriInteractionGeometry(for: monitor)
         let gaps = LayoutGaps(
             horizontal: geometry.innerGap,
-            vertical: geometry.innerGap,
-            outer: controller.workspaceManager.outerGaps
+            vertical: geometry.innerGap
         )
         let wsId = resize.workspaceId
 

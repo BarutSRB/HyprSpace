@@ -457,13 +457,6 @@ final class WMController {
         setHotkeysEnabled(settings.hotkeysEnabled)
 
         setGapSize(settings.gapSize, publishChange: false)
-        setOuterGaps(
-            left: settings.outerGapLeft,
-            right: settings.outerGapRight,
-            top: settings.outerGapTop,
-            bottom: settings.outerGapBottom,
-            publishChange: false
-        )
 
         if niriEngine == nil {
             enableNiriLayout(
@@ -603,19 +596,6 @@ final class WMController {
 
     func setGapSize(_ size: Double, publishChange: Bool = true) {
         workspaceManager.setGaps(to: size)
-        if publishChange {
-            publishDisplayChanged()
-        }
-    }
-
-    func setOuterGaps(
-        left: Double,
-        right: Double,
-        top: Double,
-        bottom: Double,
-        publishChange: Bool = true
-    ) {
-        workspaceManager.setOuterGaps(left: left, right: right, top: top, bottom: bottom)
         if publishChange {
             publishDisplayChanged()
         }

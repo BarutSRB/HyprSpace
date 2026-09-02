@@ -558,7 +558,6 @@ enum StructuralMutationOutcome: Equatable {
             useScrollAnimationPath: useScrollAnimationPath,
             removalSeed: removalSeed,
             gap: controller.innerGap(for: monitor, scale: refreshInput.monitor.scale),
-            outerGaps: controller.workspaceManager.outerGaps,
             displayRefreshRate: controller.layoutRefreshController.layoutState
                 .refreshRateByDisplay[monitor.displayId] ?? 60.0,
             isActiveWorkspace: refreshInput.isActiveWorkspace
@@ -575,8 +574,7 @@ enum StructuralMutationOutcome: Equatable {
         let sampledAnimationTime = settlesAnimation ? nil : animationTime
         let gaps = LayoutGaps(
             horizontal: snapshot.gap,
-            vertical: snapshot.gap,
-            outer: snapshot.outerGaps
+            vertical: snapshot.gap
         )
 
         let area = WorkingAreaContext(
@@ -1234,8 +1232,7 @@ enum StructuralMutationOutcome: Equatable {
     ) -> WorkspaceLayoutPlan {
         let gaps = LayoutGaps(
             horizontal: pass.gap,
-            vertical: pass.gap,
-            outer: snapshot.outerGaps
+            vertical: pass.gap
         )
 
         let area = WorkingAreaContext(
@@ -3015,8 +3012,7 @@ struct NodeActivationOptions {
         )
         let layoutGaps = LayoutGaps(
             horizontal: gaps,
-            vertical: gaps,
-            outer: controller.workspaceManager.outerGaps
+            vertical: gaps
         )
         let animationTime = (engine.animationClock?.now() ?? CACurrentMediaTime()) + 2.0
         let newFrames = engine.calculateCombinedLayoutUsingPools(

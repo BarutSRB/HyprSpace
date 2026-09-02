@@ -28,7 +28,6 @@ final class WorkspaceManager {
     private var disconnectedVisibleWorkspaceCache: [MonitorRestoreKey: WorkspaceDescriptor.ID] = [:]
 
     private(set) var gaps: Double = 8
-    private(set) var outerGaps: LayoutGaps.OuterGaps = .zero
     private let world = WorldStore()
     private let restorePlanner = RestorePlanner()
     let animationDriver = AnimationDriver()
@@ -1877,25 +1876,6 @@ final class WorkspaceManager {
         let clamped = max(0, min(64, size))
         guard clamped != gaps else { return }
         gaps = clamped
-        noteInvalidation(workspaceId: nil, domains: [.workspace, .layout])
-        onGapsChanged?()
-    }
-
-    func setOuterGaps(left: Double, right: Double, top: Double, bottom: Double) {
-        let newGaps = LayoutGaps.OuterGaps(
-            left: max(0, CGFloat(left)),
-            right: max(0, CGFloat(right)),
-            top: max(0, CGFloat(top)),
-            bottom: max(0, CGFloat(bottom))
-        )
-        if outerGaps.left == newGaps.left,
-           outerGaps.right == newGaps.right,
-           outerGaps.top == newGaps.top,
-           outerGaps.bottom == newGaps.bottom
-        {
-            return
-        }
-        outerGaps = newGaps
         noteInvalidation(workspaceId: nil, domains: [.workspace, .layout])
         onGapsChanged?()
     }
