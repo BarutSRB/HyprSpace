@@ -35,8 +35,8 @@ core window relayout is not consumer-gated.
 Stream the subscribe response and subsequent events to stdout as JSON.
 
 ```
-omniwmctl subscribe <channels> [--no-send-initial]
-omniwmctl subscribe --all [--no-send-initial]
+omniwmctl subscribe <channels> [--no-send-initial] [--format json|ndjson]
+omniwmctl subscribe --all [--no-send-initial] [--format json|ndjson]
 ```
 
 Channels are specified as a comma-separated list or with `--all` for all channels.
@@ -45,8 +45,9 @@ Channels are specified as a comma-separated list or with `--all` for all channel
 |------|-------------|
 | `--all` | Subscribe to all channels |
 | `--no-send-initial` | Skip sending initial state snapshot |
+| `--format json\|ndjson` | `json` (default) pretty-prints every envelope; `ndjson` writes one compact envelope per line. `table`, `tsv`, and `text` are rejected for subscriptions |
 
-Output is always JSON. Stdout begins with a single pretty-printed `IPCResponse` envelope with `kind: "subscribe"` and `status: "subscribed"`. After that, OmniWM emits a best-effort initial state snapshot for each subscribed channel unless `--no-send-initial` is used, followed by live `IPCEventEnvelope` updates as they occur.
+Stdout begins with a single `IPCResponse` envelope with `kind: "subscribe"` and `status: "subscribed"`. After that, OmniWM emits a best-effort initial state snapshot for each subscribed channel unless `--no-send-initial` is used, followed by live `IPCEventEnvelope` updates as they occur. With `--format ndjson` every envelope, including the first response, is exactly one line, which is the shape `watch --exec` children already receive.
 
 **Examples:**
 

@@ -76,7 +76,7 @@ enum CLIRenderer {
     static func responseOutput(_ response: IPCResponse, format: CLIOutputFormat) throws -> CLIRenderedOutput {
         if format.prefersJSON {
             return CLIRenderedOutput(
-                data: try IPCWire.encodeResponseLine(response, prettyPrinted: true),
+                data: try IPCWire.encodeResponseLine(response, prettyPrinted: format.prettyPrintsJSON),
                 destination: .standardOutput
             )
         }
@@ -89,7 +89,7 @@ enum CLIRenderer {
 
     static func eventOutput(_ event: IPCEventEnvelope, format: CLIOutputFormat) throws -> CLIRenderedOutput {
         CLIRenderedOutput(
-            data: try IPCWire.encodeEventLine(event, prettyPrinted: format.prefersJSON),
+            data: try IPCWire.encodeEventLine(event, prettyPrinted: format.prettyPrintsJSON),
             destination: .standardOutput
         )
     }
@@ -137,7 +137,7 @@ enum CLIRenderer {
         if format.prefersJSON {
             let envelope = CLILocalFailureEnvelope(code: code, message: message, exitCode: exitCode)
             return CLIRenderedOutput(
-                data: try encodeLocalEnvelope(envelope),
+                data: try encodeLocalEnvelope(envelope, prettyPrinted: format.prettyPrintsJSON),
                 destination: .standardOutput
             )
         }
@@ -566,7 +566,8 @@ enum CLIRenderer {
 
     private static func formatRows(headers: [String], rows: [[String]], format: CLIOutputFormat) -> String {
         switch format {
-        case .json:
+        case .json,
+             .ndjson:
             return ""
         case .tsv:
             let sanitizedRows = ([headers] + rows).map { $0.map(sanitizedCell) }
@@ -652,8 +653,8 @@ enum CLIRenderer {
         "\(Int(size.width))x\(Int(size.height))"
     }
 
-    private static func encodeLocalEnvelope(_ envelope: CLILocalFailureEnvelope) throws -> Data {
-        var data = try IPCWire.makeEncoder(prettyPrinted: true).encode(envelope)
+    private static func encodeLocalEnvelope(_ envelope: CLILocalFailureEnvelope, prettyPrinted: Bool) throws -> Data {
+        var data = try IPCWire.makeEncoder(prettyPrinted: prettyPrinted).encode(envelope)
         data.append(0x0A)
         return data
     }

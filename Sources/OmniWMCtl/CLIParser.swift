@@ -136,12 +136,16 @@ enum CLIParser {
                 watchConfiguration: nil
             )
         case "subscribe":
+            let format = normalized.outputFormat ?? .json
+            guard format.prefersJSON else {
+                throw CLIParseError.usage(usageText)
+            }
             return ParsedCLICommand(
                 invocation: .remote(try parseSubscribeRequest(
                     id: requestId,
                     arguments: Array(filteredArguments.dropFirst())
                 )),
-                outputFormat: .json,
+                outputFormat: format,
                 expectsEventStream: true,
                 watchConfiguration: nil
             )
@@ -823,18 +827,18 @@ enum CLIParser {
         lines += ruleLines.map { "  omniwmctl \($0)" }
         lines += captureLines.map { "  omniwmctl \($0)" }
         lines += [
-            "  omniwmctl query <\(queryNames)> [selectors...] [--fields <csv>] [--format <json|table|tsv|text>]"
+            "  omniwmctl query <\(queryNames)> [selectors...] [--fields <csv>] [--format <json|ndjson|table|tsv|text>]"
         ]
         lines += workspaceLines.map { "  omniwmctl \($0)" }
         lines += windowLines.map { "  omniwmctl \($0)" }
         lines += [
-            "  omniwmctl subscribe <\(subscriptionNames)> [--no-send-initial]",
-            "  omniwmctl subscribe --all [--no-send-initial]",
+            "  omniwmctl subscribe <\(subscriptionNames)> [--no-send-initial] [--format json|ndjson]",
+            "  omniwmctl subscribe --all [--no-send-initial] [--format json|ndjson]",
             "  omniwmctl watch <\(subscriptionNames)> [--no-send-initial] --exec <argv...>",
             "  omniwmctl watch --all [--no-send-initial] --exec <argv...>",
             "",
             "Formats:",
-            "  --format json|table|tsv|text",
+            "  --format json|ndjson|table|tsv|text",
             "  --json (alias for --format json)",
             "",
             "Rule Options:"

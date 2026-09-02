@@ -8,7 +8,7 @@ sidebar:
 ## CLI Reference
 
 ```
-omniwmctl <command> [arguments...] [--format json|table|tsv|text] [--json]
+omniwmctl <command> [arguments...] [--format json|ndjson|table|tsv|text] [--json]
 ```
 
 ### Top-Level Commands
@@ -34,7 +34,7 @@ Remote commands require IPC to be enabled. Local commands work even when the IPC
 
 | Flag | Description |
 |------|-------------|
-| `--format <format>` | Output format: `json`, `table`, `tsv`, `text` |
+| `--format <format>` | Output format: `json`, `ndjson` (one compact JSON envelope per line), `table`, `tsv`, `text` |
 | `--json` | Alias for `--format json` |
 
 Global flags must appear before `--exec` in watch commands.

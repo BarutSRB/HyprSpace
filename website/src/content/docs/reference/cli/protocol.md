@@ -238,6 +238,7 @@ This envelope is produced locally by the CLI, so it does not include IPC fields 
 | Format | Description | Default for |
 |--------|-------------|-------------|
 | `json` | Pretty-printed JSON | queries, subscribe |
+| `ndjson` | One compact JSON envelope per line | — |
 | `table` | Aligned columns with headers | — |
 | `tsv` | Tab-separated values | — |
 | `text` | Simple human-readable text | commands, ping, version |

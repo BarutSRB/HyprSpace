@@ -6,11 +6,16 @@ import OmniWMIPC
 
 enum CLIOutputFormat: String, Equatable {
     case json
+    case ndjson
     case table
     case tsv
     case text
 
     var prefersJSON: Bool {
+        self == .json || self == .ndjson
+    }
+
+    var prettyPrintsJSON: Bool {
         self == .json
     }
 

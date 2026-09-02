@@ -6,7 +6,7 @@ sidebar:
 ---
 
 ```
-omniwmctl query <name> [selectors...] [--fields <field1,field2,...>] [--format json|table|tsv|text]
+omniwmctl query <name> [selectors...] [--fields <field1,field2,...>] [--format json|ndjson|table|tsv|text]
 ```
 
 Default output format for queries is `json`.

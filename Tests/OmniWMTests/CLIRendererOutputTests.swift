@@ -95,6 +95,49 @@ final class CLIRendererOutputTests: XCTestCase {
         XCTAssertEqual(try IPCWire.decodeResponse(from: output.data), response)
     }
 
+    func testNDJSONResponseAndEventAreCompactSingleLines() throws {
+        let response = IPCResponse.success(
+            id: "sub",
+            kind: .subscribe,
+            status: .subscribed,
+            result: IPCResult(subscribed: IPCSubscribeResult(channels: [.focus]))
+        )
+        let responseOutput = try CLIRenderer.responseOutput(response, format: .ndjson)
+        XCTAssertEqual(responseOutput.data, try IPCWire.encodeResponseLine(response, prettyPrinted: false))
+        XCTAssertEqual(responseOutput.data.filter { $0 == 0x0A }.count, 1)
+
+        let event = IPCEventEnvelope.success(
+            id: "evt",
+            channel: .displayChanged,
+            result: IPCResult(displays: IPCDisplaysQueryResult(displays: []))
+        )
+        let eventOutput = try CLIRenderer.eventOutput(event, format: .ndjson)
+        XCTAssertEqual(eventOutput.data, try IPCWire.encodeEventLine(event, prettyPrinted: false))
+        XCTAssertEqual(eventOutput.data.filter { $0 == 0x0A }.count, 1)
+    }
+
+    func testJSONOutputStaysPrettyPrinted() throws {
+        let response = IPCResponse.success(
+            id: "sub",
+            kind: .subscribe,
+            status: .subscribed,
+            result: IPCResult(subscribed: IPCSubscribeResult(channels: [.focus]))
+        )
+        XCTAssertEqual(
+            try CLIRenderer.responseOutput(response, format: .json).data,
+            try IPCWire.encodeResponseLine(response, prettyPrinted: true)
+        )
+        let event = IPCEventEnvelope.success(
+            id: "evt",
+            channel: .displayChanged,
+            result: IPCResult(displays: IPCDisplaysQueryResult(displays: []))
+        )
+        XCTAssertEqual(
+            try CLIRenderer.eventOutput(event, format: .json).data,
+            try IPCWire.encodeEventLine(event, prettyPrinted: true)
+        )
+    }
+
     func testWindowIdColumnIsAppendedOnlyWhenPresent() throws {
         let response = IPCResponse.success(
             id: "1",
