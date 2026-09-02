@@ -187,7 +187,7 @@ Mouse and trackpad gestures.
 | `scrollEnabled` | boolean | `true` | Modifier + mouse scroll wheel scrolls along the Niri primary axis. |
 | `scrollSensitivity` | float | `5.0` | Scroll gesture sensitivity. |
 | `scrollModifierKey` | string | `"optionShift"` | Modifier for wheel scrolling: `optionShift` or `controlShift`. |
-| `mouseMoveModifierKey` | string | `"option"` | Modifier for drag-to-swap of tiled windows: `off`, `option`, `control`, `command`, `controlOption`, `optionCommand`, `controlCommand`, `controlOptionCommand`. |
+| `mouseMoveModifierKey` | string | `"option"` | Modifier for drag-to-swap of tiled windows in Niri and Dwindle (Niri also accepts `Shift` for insert): `off`, `option`, `control`, `command`, `controlOption`, `optionCommand`, `controlCommand`, `controlOptionCommand`. |
 | `mouseResizeModifierKey` | string | `"option"` | Modifier for right-drag resize: `option`, `control`, `command`, `shift`, `controlOption`, `optionCommand`, `optionShift`, `controlCommand`, `controlShift`, `commandShift`, `controlOptionCommand`, `controlOptionShift`, `optionCommandShift`, `controlCommandShift`, `controlOptionCommandShift`. |
 | `fingerCount` | integer | `3` | Trackpad column-scroll finger count: `2`, `3`, or `4`. |
 | `invertDirection` | boolean | `true` | Inverts trackpad gesture direction. |

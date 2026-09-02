@@ -219,6 +219,7 @@ final class MouseEventHandler {
         var activeInteractionButton: MouseButton?
         var capturedInteractionButton: MouseButton?
         var resizeLayout: LayoutType?
+        var moveLayout: LayoutType?
         var awaitsNativeTitleBarDragTarget = false
         var nativeTitleBarDragFallbackToken: WindowToken?
         var nativeTitleBarDragFallbackReleased = false
@@ -939,8 +940,10 @@ final class MouseEventHandler {
 
         if state.isMoving {
             controller.niriEngine?.interactiveMoveCancel()
+            controller.dwindleEngine?.interactiveMoveCancel()
             state.dragGhostController?.endDrag()
             state.isMoving = false
+            state.moveLayout = nil
             state.activeInteractionButton = nil
         }
 
@@ -1191,6 +1194,7 @@ final class MouseEventHandler {
                 }
                 if moveStarted {
                     state.isMoving = true
+                    state.moveLayout = .niri
                     state.activeInteractionButton = button
                     state.capturedInteractionButton = button
                     NSCursor.closedHand.set()
@@ -1262,6 +1266,9 @@ final class MouseEventHandler {
         wsId: WorkspaceDescriptor.ID
     ) -> Bool {
         guard let controller, let engine = controller.dwindleEngine else { return false }
+        if button == .left {
+            return beginDwindleMove(at: location, modifiers: modifiers, engine: engine, wsId: wsId)
+        }
         guard button == .right,
               Self.modifierFlagsMatch(modifiers, required: controller.settings.mouseResizeModifierKey.cgEventFlag)
         else { return false }
@@ -1302,6 +1309,104 @@ final class MouseEventHandler {
         state.resizeLayout = .dwindle
         edges.cursor.set()
         return true
+    }
+
+    private func beginDwindleMove(
+        at location: CGPoint,
+        modifiers: CGEventFlags,
+        engine: DwindleLayoutEngine,
+        wsId: WorkspaceDescriptor.ID
+    ) -> Bool {
+        guard let controller else { return false }
+        let now = controller.animationClock.now()
+        guard Self.mouseMoveMode(
+            modifiers: modifiers,
+            required: controller.settings.mouseMoveModifierKey.cgEventFlags
+        ) == .swap,
+            let token = engine.hitTestFocusableWindow(point: location, in: wsId, at: now),
+            let frame = engine.presentedFrame(for: token, in: wsId, at: now),
+            engine.interactiveMoveBegin(token: token, startLocation: location, in: wsId)
+        else { return false }
+
+        state.isMoving = true
+        state.moveLayout = .dwindle
+        state.activeInteractionButton = .left
+        state.capturedInteractionButton = .left
+        NSCursor.closedHand.set()
+        if state.dragGhostController == nil {
+            state.dragGhostController = DragGhostController()
+        }
+        state.dragGhostController?.beginDrag(windowId: token.windowId, originalFrame: frame, cursorLocation: location)
+        return false
+    }
+
+    private func handleDwindleMoveDrag(at location: CGPoint) {
+        guard let controller, let engine = controller.dwindleEngine, let move = engine.interactiveMove else {
+            cancelActiveMouseInteraction()
+            return
+        }
+        let now = controller.animationClock.now()
+        state.dragGhostController?.updatePosition(cursorLocation: location)
+        if let target = engine.interactiveMoveUpdate(currentLocation: location, at: now),
+           let frame = engine.presentedFrame(for: target, in: move.workspaceId, at: now)
+        {
+            state.dragGhostController?.showSwapTarget(frame: frame)
+        } else {
+            state.dragGhostController?.hideSwapTarget()
+        }
+    }
+
+    private func finishDwindleMove() {
+        guard let controller, let engine = controller.dwindleEngine, let move = engine.interactiveMove else { return }
+        guard move.targetToken != nil else {
+            engine.interactiveMoveCancel()
+            return
+        }
+        let wsId = move.workspaceId
+        let swapped = controller.workspaceManager.withEngineMutationScope(
+            in: wsId,
+            label: "dwindle_mouse_swap",
+            source: .mouse
+        ) {
+            engine.interactiveMoveEnd() != nil
+        }
+        guard swapped else { return }
+        controller.workspaceManager.recordLayoutOperation(.windowsSwapped, in: wsId, source: .mouse)
+        if controller.hasStartedServices {
+            controller.layoutRefreshController.requestImmediateRelayout(reason: .interactiveGesture)
+        }
+    }
+
+    private func finishNiriMove(at location: CGPoint) {
+        guard let controller else { return }
+        guard let engine = controller.niriEngine, let move = engine.interactiveMove else {
+            controller.niriEngine?.interactiveMoveCancel()
+            return
+        }
+        let wsId = move.workspaceId
+        guard let monitor = controller.workspaceManager.monitor(for: wsId) else {
+            engine.interactiveMoveCancel()
+            return
+        }
+        let geometry = controller.niriInteractionGeometry(for: monitor)
+        let movedToken = move.windowToken
+        var didEnd = false
+        controller.workspaceManager.withNiriViewportState(for: wsId) { vstate in
+            didEnd = engine.interactiveMoveEnd(
+                at: location,
+                motion: controller.motionPolicy.snapshot(),
+                state: &vstate,
+                workingFrame: geometry.workingFrame,
+                gaps: geometry.innerGap
+            )
+        }
+        guard didEnd else { return }
+        controller.workspaceManager.recordLayoutOperation(
+            .interactiveMoveEnded(token: movedToken),
+            in: wsId,
+            source: .mouse
+        )
+        controller.layoutRefreshController.requestImmediateRelayout(reason: .interactiveGesture)
     }
 
     func focusedBorderResizeToken(
@@ -1366,6 +1471,10 @@ final class MouseEventHandler {
 
         if state.isMoving {
             guard shouldAcceptInteractionButton(button) else { return }
+            if state.moveLayout == .dwindle {
+                handleDwindleMoveDrag(at: location)
+                return
+            }
             guard let engine = controller.niriEngine,
                   let move = engine.interactiveMove
             else {
@@ -1911,40 +2020,15 @@ final class MouseEventHandler {
 
         if state.isMoving {
             guard shouldAcceptInteractionButton(button) else { return }
-            if let engine = controller.niriEngine,
-               let move = engine.interactiveMove
-            {
-                let wsId = move.workspaceId
-                if let monitor = controller.workspaceManager.monitor(for: wsId) {
-                    let geometry = controller.niriInteractionGeometry(for: monitor)
-                    let movedToken = move.windowToken
-                    var didEnd = false
-                    controller.workspaceManager.withNiriViewportState(for: wsId) { vstate in
-                        didEnd = engine.interactiveMoveEnd(
-                            at: location,
-                            motion: controller.motionPolicy.snapshot(),
-                            state: &vstate,
-                            workingFrame: geometry.workingFrame,
-                            gaps: geometry.innerGap
-                        )
-                    }
-                    if didEnd {
-                        controller.workspaceManager.recordLayoutOperation(
-                            .interactiveMoveEnded(token: movedToken),
-                            in: wsId,
-                            source: .mouse
-                        )
-                        controller.layoutRefreshController.requestImmediateRelayout(reason: .interactiveGesture)
-                    }
-                } else {
-                    engine.interactiveMoveCancel()
-                }
+            if state.moveLayout == .dwindle {
+                finishDwindleMove()
             } else {
-                controller.niriEngine?.interactiveMoveCancel()
+                finishNiriMove(at: location)
             }
 
             state.dragGhostController?.endDrag()
             state.isMoving = false
+            state.moveLayout = nil
             state.activeInteractionButton = nil
             NSCursor.arrow.set()
             return

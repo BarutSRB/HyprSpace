@@ -15,7 +15,7 @@ Use [App Rules](/features/app-rules/) to exclude problematic apps from tiling or
 
 ## Swap windows by dragging
 
-On the Niri desktop, hold the configured mouse-move modifier and drag to swap tiled windows; add `Shift` to insert into a column. The modifier defaults to `Option` and can be changed or disabled in **Settings → Mouse & Trackpad**. In [Overview](/features/overview/), `Option + drag` targets a workspace, window position, or Niri column gap.
+Hold the configured mouse-move modifier and drag a tiled window onto another to swap them; this works in both layouts. On Niri, add `Shift` to insert into a column instead. In Dwindle the drag swaps whole tiles, so a tab group moves with all of its members, the drop target is outlined while you hover it, releasing anywhere else changes nothing, and `Shift` has no effect. The modifier defaults to `Option` and can be changed or disabled in **Settings → Mouse & Trackpad**. In [Overview](/features/overview/), `Option + drag` targets a workspace, window position, or Niri column gap.
 
 ## Resize with a right-drag
 

@@ -25,6 +25,7 @@ final class DwindleLayoutEngine {
     var isMutationSanctioned = true
 
     var interactiveResize: DwindleInteractiveResize?
+    var interactiveMove: DwindleInteractiveMove?
 
     func assertSanctionedMutation(_ operation: StaticString = #function) {
         assert(
@@ -62,6 +63,9 @@ final class DwindleLayoutEngine {
         guard let state = states.removeValue(forKey: workspaceId) else { return }
         if interactiveResize?.workspaceId == workspaceId {
             clearInteractiveResize()
+        }
+        if interactiveMove?.workspaceId == workspaceId {
+            interactiveMoveCancel()
         }
         for token in state.leafByToken.keys {
             releaseConstraintsIfUntracked(token)
@@ -1996,11 +2000,30 @@ final class DwindleLayoutEngine {
             from: currentHandle,
             direction: direction,
             in: workspaceId
-        ),
-            let neighbor = state.leafByToken[neighborHandle],
-            let neighborTile = neighbor.tile
-        else {
+        ) else {
             return .atWorkspaceEdge
+        }
+
+        return swapLeafTiles(of: currentHandle, and: neighborHandle, in: workspaceId)
+            ? .movedWithinWorkspace
+            : .atWorkspaceEdge
+    }
+
+    @discardableResult
+    func swapLeafTiles(
+        of token: WindowToken,
+        and otherToken: WindowToken,
+        in workspaceId: WorkspaceDescriptor.ID
+    ) -> Bool {
+        assertSanctionedMutation()
+        guard let state = states[workspaceId],
+              let current = state.leafByToken[token],
+              let currentTile = current.tile,
+              let neighbor = state.leafByToken[otherToken],
+              let neighborTile = neighbor.tile,
+              current !== neighbor
+        else {
+            return false
         }
 
         let now = animationClock?.now() ?? CACurrentMediaTime()
@@ -2033,7 +2056,7 @@ final class DwindleLayoutEngine {
         if state.pendingMovementFrameSeeds[currentTile.activeToken] == nil,
            let currentMovementFrameSeed
         {
-            state.pendingMovementFrameSeeds[currentHandle] = currentMovementFrameSeed
+            state.pendingMovementFrameSeeds[token] = currentMovementFrameSeed
         }
         if state.pendingMovementFrameSeeds[neighborTile.activeToken] == nil,
            let neighborMovementFrameSeed
@@ -2042,8 +2065,7 @@ final class DwindleLayoutEngine {
         }
 
         state.selectedNodeId = neighbor.id
-
-        return .movedWithinWorkspace
+        return true
     }
 
     @discardableResult
