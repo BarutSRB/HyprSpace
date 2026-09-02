@@ -102,20 +102,54 @@ final class LockedWindowGenerationMap: @unchecked Sendable {
 }
 
 final class LockedEnhancedUIStateMap: @unchecked Sendable {
+    private enum State {
+        case enabled
+        case disabled(expiresAt: ContinuousClock.Instant)
+    }
+
     static let shared = LockedEnhancedUIStateMap()
 
+    private static let disabledStateLifetime: Duration = .seconds(1)
+
+    private let clock: @Sendable () -> ContinuousClock.Instant
     private let lock = NSLock()
-    private var statesByPid: [pid_t: Bool] = [:]
+    private var statesByPid: [pid_t: State] = [:]
+
+    init(clock: @escaping @Sendable () -> ContinuousClock.Instant = { ContinuousClock.now }) {
+        self.clock = clock
+    }
 
     func state(for pid: pid_t) -> Bool? {
         lock.lock()
         defer { lock.unlock() }
-        return statesByPid[pid]
+        guard let state = statesByPid[pid] else { return nil }
+        switch state {
+        case .enabled:
+            return true
+        case let .disabled(expiresAt):
+            guard clock() < expiresAt else {
+                statesByPid.removeValue(forKey: pid)
+                return nil
+            }
+            return false
+        }
     }
 
     func store(_ enabled: Bool, for pid: pid_t) {
+        if enabled {
+            lock.lock()
+            statesByPid[pid] = .enabled
+            lock.unlock()
+            return
+        }
+
+        let expiresAt = clock().advanced(by: Self.disabledStateLifetime)
         lock.lock()
-        statesByPid[pid] = enabled
+        if case .enabled? = statesByPid[pid] {
+            lock.unlock()
+            return
+        }
+        statesByPid[pid] = .disabled(expiresAt: expiresAt)
         lock.unlock()
     }
 

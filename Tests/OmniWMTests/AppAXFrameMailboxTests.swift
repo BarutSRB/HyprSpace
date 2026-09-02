@@ -5,6 +5,7 @@ import ApplicationServices
 import Darwin
 import Dispatch
 @testable import OmniWM
+import Synchronization
 import XCTest
 
 @MainActor
@@ -195,6 +196,59 @@ final class AppAXFrameMailboxTests: XCTestCase {
         XCTAssertEqual(results.first?.writeResult.failureReason, .cancelled)
         XCTAssertEqual(snapshot.staleBeforeIPC, 1)
         XCTAssertEqual(snapshot.enhancedUICalls, 0)
+    }
+
+    func testDisabledEnhancedUICacheExpiresExactlyAfterOneSecond() {
+        let initialNow = ContinuousClock.now
+        let now = Mutex(initialNow)
+        let cache = LockedEnhancedUIStateMap(clock: { now.withLock { $0 } })
+        let pid = pid_t(410_201)
+
+        cache.store(false, for: pid)
+        XCTAssertEqual(cache.state(for: pid), false)
+
+        now.withLock { $0 = initialNow.advanced(by: .milliseconds(999)) }
+        XCTAssertEqual(cache.state(for: pid), false)
+
+        now.withLock { $0 = initialNow.advanced(by: .seconds(1)) }
+        XCTAssertNil(cache.state(for: pid))
+        XCTAssertNil(cache.state(for: pid))
+    }
+
+    func testRenewedDisabledEnhancedUICacheUsesNewDeadline() {
+        let initialNow = ContinuousClock.now
+        let now = Mutex(initialNow)
+        let cache = LockedEnhancedUIStateMap(clock: { now.withLock { $0 } })
+        let pid = pid_t(410_202)
+
+        cache.store(false, for: pid)
+        now.withLock { $0 = initialNow.advanced(by: .seconds(1)) }
+        XCTAssertNil(cache.state(for: pid))
+
+        cache.store(false, for: pid)
+        now.withLock { $0 = initialNow.advanced(by: .milliseconds(1_999)) }
+        XCTAssertEqual(cache.state(for: pid), false)
+
+        now.withLock { $0 = initialNow.advanced(by: .seconds(2)) }
+        XCTAssertNil(cache.state(for: pid))
+    }
+
+    func testExpiredDisabledEnhancedUICachePromotesToPersistentEnabled() {
+        let initialNow = ContinuousClock.now
+        let now = Mutex(initialNow)
+        let cache = LockedEnhancedUIStateMap(clock: { now.withLock { $0 } })
+        let pid = pid_t(410_203)
+
+        cache.store(false, for: pid)
+        now.withLock { $0 = initialNow.advanced(by: .seconds(1)) }
+        XCTAssertNil(cache.state(for: pid))
+
+        cache.store(true, for: pid)
+        now.withLock { $0 = initialNow.advanced(by: .seconds(10_000)) }
+        XCTAssertEqual(cache.state(for: pid), true)
+
+        cache.store(false, for: pid)
+        XCTAssertEqual(cache.state(for: pid), true)
     }
 
     func testFailedEnhancedUIProbeRetriesOnNextEligibleBatch() {
