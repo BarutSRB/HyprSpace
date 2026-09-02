@@ -8,7 +8,7 @@ sidebar:
 Complete reference for `settings.toml`, in the file's canonical order. The authoritative schema is [`CanonicalTOMLConfig.swift`](https://github.com/BarutSRB/OmniWM/blob/main/Sources/OmniWM/Core/Config/CanonicalTOMLConfig.swift); defaults come from [`SettingsExport.swift`](https://github.com/BarutSRB/OmniWM/blob/main/Sources/OmniWM/Core/Config/SettingsExport.swift) and [`BuiltInSettingsDefaults.swift`](https://github.com/BarutSRB/OmniWM/blob/main/Sources/OmniWM/Core/Config/BuiltInSettingsDefaults.swift).
 
 :::caution
-The current schema is strict — a missing required key in a version 1 file invalidates the whole file, `hotkeys` must list every assignable action exactly once, and an enumerated string key must use one of its listed values (an unknown value rejects the whole file, exactly like a missing key). Edit values in place; see [Configuration](/config/configuration/).
+The current schema is strict — a missing required key in a version 2 file invalidates the whole file, `hotkeys` must list every assignable action exactly once, and an enumerated string key must use one of its listed values (an unknown value rejects the whole file, exactly like a missing key). Edit values in place; see [Configuration](/config/configuration/).
 :::
 
 **Conventions**
@@ -22,15 +22,15 @@ The current schema is strict — a missing required key in a version 1 file inva
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
-| `schemaVersion` | integer | `1` | Version of the complete `settings.toml` schema. This top-level key appears before the first table. |
+| `schemaVersion` | integer | `2` | Version of the complete `settings.toml` schema. This top-level key appears before the first table. |
 
 The canonical file declares:
 
 ```toml
-schemaVersion = 1
+schemaVersion = 2
 ```
 
-An absent version identifies a legacy version 0 file. OmniWM guarantees automatic migration for settings emitted by v0.6.1 through v0.6.3 before strict validation; older schema-less files are attempted but are left untouched (with defaults active) if retired structures cannot validate. A successful upgrade creates an exact write-once `settings.toml.pre-v1` or `settings.toml.pre-v1.1` backup, then rewrites canonical TOML; this can reorder keys and removes comments, while preserving unrecognized keys when their owner can be matched safely. Files declaring a newer unsupported version remain untouched and configuration writes are blocked. See [Automatic version upgrades](/config/configuration/#automatic-version-upgrades) for the migration rules and recovery behavior.
+An absent version identifies a legacy version 0 file, while OmniWM v0.6.4 emitted version 1. OmniWM guarantees sequential in-memory migration for settings emitted by v0.6.2 through v0.6.4 before strict version 2 validation. A successful version 0 or version 1 upgrade creates an exact write-once `settings.toml.pre-v2` or `settings.toml.pre-v2.1` backup, then atomically rewrites canonical TOML once; this can reorder keys and removes comments, while preserving unrecognized keys when their owner can be matched safely. Valid release migrations never use the `.corrupt` recovery slots. Older schema-less files are attempted but remain untouched with defaults active if they cannot validate, and files declaring a newer unsupported version remain untouched with configuration writes blocked. See [Automatic version upgrades](/config/configuration/#automatic-version-upgrades) for the migration rules and recovery behavior.
 
 ## general
 

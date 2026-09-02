@@ -68,6 +68,11 @@ final class SettingsFilePersistence {
     nonisolated static let preVersionOneFileName = "settings.toml.pre-v1"
     nonisolated static let secondaryPreVersionOneFileName = "settings.toml.pre-v1.1"
     nonisolated static let preVersionOneFileNames = [preVersionOneFileName, secondaryPreVersionOneFileName]
+    nonisolated static func migrationBackupFileNames(for targetVersion: Int) -> [String] {
+        let primary = "settings.toml.pre-v\(targetVersion)"
+        return [primary, "\(primary).1"]
+    }
+
     nonisolated static var fileURL: URL {
         defaultDirectoryURL.appendingPathComponent(fileName, isDirectory: false)
     }
@@ -245,7 +250,8 @@ final class SettingsFilePersistence {
             let rewrite = try prepareMigrationRewrite(
                 originalData: originalData,
                 decoded: decoded,
-                export: export
+                export: export,
+                migration: migration
             )
             backupURL = rewrite.backupURL
             try persist(rewrite.data, at: targetURL, export: export)
@@ -411,7 +417,8 @@ final class SettingsFilePersistence {
             let rewrite = try prepareMigrationRewrite(
                 originalData: contents.data,
                 decoded: result,
-                export: result.export
+                export: result.export,
+                migration: migration
             )
             backupURL = rewrite.backupURL
             try persist(rewrite.data, at: targetURL, export: result.export)
@@ -494,16 +501,19 @@ final class SettingsFilePersistence {
     private func prepareMigrationRewrite(
         originalData: Data,
         decoded: SettingsTOMLDecodeResult,
-        export: SettingsExport
+        export: SettingsExport,
+        migration: SettingsMigrationReport
     ) throws -> MigrationRewrite {
         guard let migratedData = decoded.migratedData else {
-            throw SettingsTOMLCodecError.migrationInvariant("Version 0 migration did not produce TOML data.")
+            throw SettingsTOMLCodecError.migrationInvariant(
+                "Settings migration to schema version \(migration.toVersion) did not produce TOML data."
+            )
         }
         let data = try SettingsTOMLCodec.encode(export, preservingUnknownKeysFrom: migratedData)
         let backupURL = try secureBackup(
             originalData,
-            fileNames: Self.preVersionOneFileNames,
-            exhaustedError: .preVersionOneBackupSlotsExhausted
+            fileNames: Self.migrationBackupFileNames(for: migration.toVersion),
+            exhaustedError: .migrationBackupSlotsExhausted(targetVersion: migration.toVersion)
         )
         return MigrationRewrite(data: data, backupURL: backupURL)
     }

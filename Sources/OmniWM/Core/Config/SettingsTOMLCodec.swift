@@ -6,7 +6,54 @@ import TOML
 
 // Only file in OmniWM that imports TOML — keep this boundary so swift-toml stays swappable.
 enum SettingsTOMLCodec {
-    static let currentSchemaVersion = 1
+    static let currentSchemaVersion = 2
+
+    private static let versionOneHotkeyIDs = [
+        "toggleScratchpad.1",
+        "assignFocusedWindowToScratchpad.1",
+        "toggleScratchpad.2",
+        "assignFocusedWindowToScratchpad.2",
+        "toggleScratchpad.3",
+        "assignFocusedWindowToScratchpad.3",
+        "toggleScratchpad.4",
+        "assignFocusedWindowToScratchpad.4",
+        "toggleScratchpad.5",
+        "assignFocusedWindowToScratchpad.5",
+        "toggleScratchpad.6",
+        "assignFocusedWindowToScratchpad.6",
+        "toggleScratchpad.7",
+        "assignFocusedWindowToScratchpad.7",
+        "toggleScratchpad.8",
+        "assignFocusedWindowToScratchpad.8",
+        "toggleScratchpad.9",
+        "assignFocusedWindowToScratchpad.9",
+        "toggleScratchpad.10",
+        "assignFocusedWindowToScratchpad.10"
+    ]
+
+    private static let versionTwoHotkeyIDs = [
+        "switchWorkspaceSlot.1",
+        "moveToWorkspaceSlot.1",
+        "switchWorkspaceSlot.2",
+        "moveToWorkspaceSlot.2",
+        "switchWorkspaceSlot.3",
+        "moveToWorkspaceSlot.3",
+        "switchWorkspaceSlot.4",
+        "moveToWorkspaceSlot.4",
+        "switchWorkspaceSlot.5",
+        "moveToWorkspaceSlot.5",
+        "switchWorkspaceSlot.6",
+        "moveToWorkspaceSlot.6",
+        "switchWorkspaceSlot.7",
+        "moveToWorkspaceSlot.7",
+        "switchWorkspaceSlot.8",
+        "moveToWorkspaceSlot.8",
+        "switchWorkspaceSlot.9",
+        "moveToWorkspaceSlot.9",
+        "closeFocusedWindow"
+    ]
+
+    static let hotkeyIDsAddedInVersionTwo = Set(versionTwoHotkeyIDs)
 
     private struct PersistedHotkeyArray: Decodable {
         let hotkeys: [PersistedHotkeyBinding]
@@ -82,7 +129,17 @@ enum SettingsTOMLCodec {
             return SettingsTOMLDecodeResult(export: canonical.toSettingsExport(), migration: nil, migratedData: nil)
         }
 
-        let report = try migrateVersionZero(&raw)
+        let versionOneReport = version == 0 ? try migrateVersionZero(&raw) : nil
+        let versionTwoAddedHotkeyIDs = migrateVersionOne(&raw)
+        canonicalizeMigratedHotkeys(in: &raw)
+        let report = SettingsMigrationReport(
+            fromVersion: version,
+            toVersion: currentSchemaVersion,
+            defaultedPaths: versionOneReport?.defaultedPaths ?? [],
+            addedHotkeyIDs: (versionOneReport?.addedHotkeyIDs ?? []) + versionTwoAddedHotkeyIDs,
+            mappedHotkeys: versionOneReport?.mappedHotkeys ?? [],
+            retiredHotkeys: versionOneReport?.retiredHotkeys ?? []
+        )
         let encoder = TOMLEncoder()
         encoder.outputFormatting = [.sortedKeys, .prettyPrinted]
         let migratedData = try encoder.encode(raw)
@@ -157,10 +214,10 @@ enum SettingsTOMLCodec {
 
         stampMissingAppRuleIDs(in: &raw)
         let hotkeyResult = try migrateVersionZeroHotkeys(in: &raw)
-        raw["schemaVersion"] = .integer(Int64(currentSchemaVersion))
+        raw["schemaVersion"] = .integer(1)
         return SettingsMigrationReport(
             fromVersion: 0,
-            toVersion: currentSchemaVersion,
+            toVersion: 1,
             defaultedPaths: defaultedPaths,
             addedHotkeyIDs: hotkeyResult.addedIDs,
             mappedHotkeys: hotkeyResult.mapped,
@@ -189,10 +246,6 @@ enum SettingsTOMLCodec {
         })
     }
 
-    static let hotkeyIDsAddedAfterVersionZero: Set<String> = Set(ActionCatalog.workspaceSlotRange.flatMap { slot in
-        ["switchWorkspaceSlot.\(slot)", "moveToWorkspaceSlot.\(slot)"]
-    }).union(["closeFocusedWindow"])
-
     private static func migrateVersionZeroHotkeys(
         in raw: inout [String: TOMLNode]
     ) throws -> SettingsHotkeyMigrationResult {
@@ -203,21 +256,10 @@ enum SettingsTOMLCodec {
         let decoder = TOMLDecoder()
         let validationData = try TOMLEncoder().encode(["hotkeys": TOMLNode.array(entries)])
         _ = try decoder.decode(PersistedHotkeyArray.self, from: validationData)
-        let defaultsTree = try decoder.decode(
-            [String: TOMLNode].self,
-            from: encodeCanonical(.defaults())
-        )
-        guard case let .array(defaultEntries) = defaultsTree["hotkeys"] else {
-            throw SettingsTOMLCodecError.migrationInvariant("Canonical hotkey defaults could not be encoded.")
-        }
-
         let mappings = [
             "assignFocusedWindowToScratchpad": "assignFocusedWindowToScratchpad.1",
             "toggleScratchpadWindow": "toggleScratchpad.1"
         ]
-        let addedHotkeyIDs = Set(ScratchpadIndex.range.flatMap { index in
-            ["toggleScratchpad.\(index)", "assignFocusedWindowToScratchpad.\(index)"]
-        }).union(Self.hotkeyIDsAddedAfterVersionZero)
         let retirements = [
             "consumeOrExpelWindowLeft": ["consumeWindowIntoColumn", "expelWindowFromColumn"],
             "consumeOrExpelWindowRight": ["consumeWindowIntoColumn", "expelWindowFromColumn"]
@@ -229,11 +271,7 @@ enum SettingsTOMLCodec {
             mappings: mappings,
             retirements: retirements
         )
-        let addedIDs = appendMissingHotkeyDefaults(
-            defaultEntries,
-            eligibleIDs: addedHotkeyIDs,
-            to: &migrated.entries
-        )
+        let addedIDs = appendMissingUnassignedHotkeys(versionOneHotkeyIDs, to: &migrated.entries)
         raw["hotkeys"] = .array(migrated.entries)
         return SettingsHotkeyMigrationResult(
             addedIDs: addedIDs,
@@ -275,19 +313,41 @@ enum SettingsTOMLCodec {
         return result
     }
 
-    private static func appendMissingHotkeyDefaults(
-        _ defaults: [TOMLNode],
-        eligibleIDs: Set<String>,
+    private static func migrateVersionOne(_ raw: inout [String: TOMLNode]) -> [String] {
+        defer { raw["schemaVersion"] = .integer(2) }
+        guard case var .array(entries) = raw["hotkeys"] else { return [] }
+
+        let addedIDs = appendMissingUnassignedHotkeys(versionTwoHotkeyIDs, to: &entries)
+        raw["hotkeys"] = .array(entries)
+        return addedIDs
+    }
+
+    private static func appendMissingUnassignedHotkeys(
+        _ ids: [String],
         to entries: inout [TOMLNode]
     ) -> [String] {
         let presentIDs = Set(entries.compactMap(hotkeyID))
         var addedIDs: [String] = []
-        for entry in defaults {
-            guard let id = hotkeyID(entry), eligibleIDs.contains(id), !presentIDs.contains(id) else { continue }
-            entries.append(entry)
+        for id in ids where !presentIDs.contains(id) {
+            entries.append(.table([
+                "binding": .string("Unassigned"),
+                "id": .string(id)
+            ]))
             addedIDs.append(id)
         }
         return addedIDs
+    }
+
+    private static func canonicalizeMigratedHotkeys(in raw: inout [String: TOMLNode]) {
+        guard case let .array(entries) = raw["hotkeys"] else { return }
+        let order = Dictionary(
+            uniqueKeysWithValues: HotkeyBindingRegistry.defaults().enumerated().map { ($1.id, $0) }
+        )
+        raw["hotkeys"] = .array(entries.enumerated().sorted { lhs, rhs in
+            let lhsOrder = hotkeyID(lhs.element).flatMap { order[$0] } ?? Int.max
+            let rhsOrder = hotkeyID(rhs.element).flatMap { order[$0] } ?? Int.max
+            return lhsOrder == rhsOrder ? lhs.offset < rhs.offset : lhsOrder < rhsOrder
+        }.map(\.element))
     }
 
     private static func hotkeyID(_ node: TOMLNode) -> String? {

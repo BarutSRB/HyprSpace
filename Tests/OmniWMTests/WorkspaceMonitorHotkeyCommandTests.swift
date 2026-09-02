@@ -69,8 +69,8 @@ final class WorkspaceMonitorHotkeyCommandTests: XCTestCase {
         let numeric = try XCTUnwrap(ActionCatalog.spec(for: .switchWorkspace(0)))
         XCTAssertEqual(numeric.id, "switchWorkspace.0")
         XCTAssertNotEqual(numeric.defaultBinding, .unassigned)
-        XCTAssertTrue(SettingsTOMLCodec.hotkeyIDsAddedAfterVersionZero.contains("switchWorkspaceSlot.9"))
-        XCTAssertTrue(SettingsTOMLCodec.hotkeyIDsAddedAfterVersionZero.contains("moveToWorkspaceSlot.1"))
+        XCTAssertTrue(SettingsTOMLCodec.hotkeyIDsAddedInVersionTwo.contains("switchWorkspaceSlot.9"))
+        XCTAssertTrue(SettingsTOMLCodec.hotkeyIDsAddedInVersionTwo.contains("moveToWorkspaceSlot.1"))
     }
 
     func testDirectionalWindowMoveActionsAreRegistered() throws {

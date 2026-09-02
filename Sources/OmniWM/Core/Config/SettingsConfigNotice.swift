@@ -6,7 +6,7 @@ import Foundation
 enum SettingsFilePersistenceError: Error, Equatable, LocalizedError {
     case corruptBackupSlotsExhausted
     case danglingSettingsSymlink(String)
-    case preVersionOneBackupSlotsExhausted
+    case migrationBackupSlotsExhausted(targetVersion: Int)
     case writesBlocked(String)
 
     var errorDescription: String? {
@@ -15,8 +15,8 @@ enum SettingsFilePersistenceError: Error, Equatable, LocalizedError {
             "Both settings recovery slots are occupied."
         case let .danglingSettingsSymlink(path):
             "The settings symlink at \(path) points to a missing file; create its target or replace the symlink, then restart OmniWM."
-        case .preVersionOneBackupSlotsExhausted:
-            "Both pre-version-1 settings backup slots are occupied."
+        case let .migrationBackupSlotsExhausted(targetVersion):
+            "Both pre-version-\(targetVersion) settings backup slots are occupied."
         case let .writesBlocked(reason):
             "Settings writes are blocked: \(reason)"
         }

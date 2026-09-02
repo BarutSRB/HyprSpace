@@ -5,10 +5,10 @@ sidebar:
   order: 1
 ---
 
-OmniWM stores its editable configuration at `${XDG_CONFIG_HOME:-$HOME/.config}/omniwm/settings.toml`. That file is the canonical settings source: it is live-reloaded whenever you save it from an editor, and every change made in the Settings window is written back to it. Current files include the top-level key `schemaVersion = 1`.
+OmniWM stores its editable configuration at `${XDG_CONFIG_HOME:-$HOME/.config}/omniwm/settings.toml`. That file is the canonical settings source: it is live-reloaded whenever you save it from an editor, and every change made in the Settings window is written back to it. Current files include the top-level key `schemaVersion = 2`.
 
 :::caution[The schema is strict]
-After version upgrades, `settings.toml` is validated as a whole. In a version 1 file, a missing required key invalidates the **entire file**, and the `hotkeys` array must contain every assignable action **exactly once** — an unknown, duplicate, or missing action id rejects the file. Enumerated string keys must use one of their listed values; an unknown value rejects the whole file too. The safest way to edit is to change values in place (or use the Settings window) rather than deleting keys. See the [Settings Reference](/config/settings-reference/) for every key and its default.
+After version upgrades, `settings.toml` is validated as a whole. In a version 2 file, a missing required key invalidates the **entire file**, and the `hotkeys` array must contain every assignable action **exactly once** — an unknown, duplicate, or missing action id rejects the file. Enumerated string keys must use one of their listed values; an unknown value rejects the whole file too. The safest way to edit is to change values in place (or use the Settings window) rather than deleting keys. See the [Settings Reference](/config/settings-reference/) for every key and its default.
 :::
 
 ## Opening the file
@@ -34,19 +34,20 @@ Every setting is also editable in the SwiftUI Settings window, organized into 14
 
 ### Automatic version upgrades
 
-A file without `schemaVersion` is a legacy version 0 file. OmniWM guarantees automatic upgrades for settings emitted by OmniWM v0.6.1 through v0.6.3, then applies the strict current schema:
+A file without `schemaVersion` is a legacy version 0 file; OmniWM v0.6.4 emitted version 1 files. OmniWM guarantees automatic upgrades for settings emitted by v0.6.2 through v0.6.4. Version 0 files pass through the version 1 migration and then the version 2 migration in memory, while version 1 files start at the second step. Only the final strict version 2 file is written:
 
 - Missing settings introduced since version 0 receive their compatibility defaults. In particular, `focus.raiseOnMouseFocus` becomes `true` to preserve the old behavior; `gaps.fullscreenUsesOuterGaps` and `workspaceBar.hideInNativeFullscreen` become `false`; and `scratchpads.labels` starts empty.
-- Missing current hotkey entries receive their current defaults. The old `assignFocusedWindowToScratchpad` and `toggleScratchpadWindow` ids become their slot 1 equivalents while preserving the configured triggers; an explicitly configured slot 1 id wins if both forms are present.
+- The version 0 hotkey step adds the required scratchpad slot entries. The old `assignFocusedWindowToScratchpad` and `toggleScratchpadWindow` ids become their slot 1 equivalents while preserving the configured triggers; an explicitly configured slot 1 id wins if both forms are present.
 - The retired `consumeOrExpelWindowLeft` and `consumeOrExpelWindowRight` actions are removed. Diagnostics suggest the current replacement commands.
+- The version 1 to version 2 step adds the 18 `switchWorkspaceSlot.N` and `moveToWorkspaceSlot.N` entries plus `closeFocusedWindow`, all unassigned unless already present. Final validation still rejects any unrelated unknown, duplicate, or missing hotkey id.
 
-Before rewriting the file, OmniWM copies its exact original bytes to the write-once backup `settings.toml.pre-v1`, using `settings.toml.pre-v1.1` if the first slot already contains different data. An existing byte-for-byte identical backup is reused. If neither slot is safe to use or the backup cannot be written, OmniWM leaves the original file untouched, applies the upgraded settings only in memory, and blocks subsequent settings writes so the original cannot be overwritten.
+Before rewriting either version 0 or version 1, OmniWM copies its exact original bytes to the write-once backup `settings.toml.pre-v2`, using `settings.toml.pre-v2.1` if the first slot already contains different data. An existing byte-for-byte identical backup is reused. If neither slot is safe to use or the backup cannot be written, OmniWM leaves the original file untouched, applies the upgraded settings only in memory, and blocks subsequent settings writes so the original cannot be overwritten.
 
-After a successful backup, OmniWM atomically rewrites the file as canonical version 1 TOML. The rewrite preserves unrecognized keys, the target of a symlink, and file permissions, but it can reorder the document and does not preserve comments. The pre-v1 backup retains the exact original text. A successful upgrade does not create a `.corrupt` backup.
+After a successful backup, OmniWM atomically rewrites the file once as canonical version 2 TOML. The rewrite preserves unrecognized keys, the target of a symlink, and file permissions, but it can reorder the document and does not preserve comments. The pre-v2 backup retains the exact original text. A valid release migration never creates a `.corrupt` backup; those recovery slots are reserved for a genuinely rejected file that is later replaced by an explicit settings save.
 
 Config logs and the built-in Diagnostics report every defaulted path, mapped or retired hotkey, and the backup location. Paths shown there use the resolved XDG config directory, including a custom `XDG_CONFIG_HOME`.
 
-Older schema-less files are attempted through the same migration, but are outside the guaranteed compatibility range. OmniWM v0.6.0 used direction-specific resize action ids: for both `resizeGrow` and `resizeShrink`, replace the `.left`/`.right` pair with one `.horizontal` entry and the `.up`/`.down` pair with one `.vertical` entry, choosing which binding to keep if the pair differed. If older files contain retired structures that cannot satisfy strict post-migration validation, startup leaves the file untouched and runs with defaults, and a live edit is rejected without changing the active settings. Version 1 files continue to use strict validation and the same recovery behavior. A file with a newer, unsupported `schemaVersion` is not treated as corrupt: OmniWM leaves it untouched, blocks configuration writes, and reports that this OmniWM version cannot safely edit it.
+Older schema-less files are attempted through the same migration, but are outside the guaranteed compatibility range. OmniWM v0.6.0 used direction-specific resize action ids: for both `resizeGrow` and `resizeShrink`, replace the `.left`/`.right` pair with one `.horizontal` entry and the `.up`/`.down` pair with one `.vertical` entry, choosing which binding to keep if the pair differed. If a version 0 or version 1 file contains structures that cannot satisfy strict post-migration validation, startup leaves the file untouched and runs with defaults, and a live edit is rejected without changing the active settings. A file with a newer, unsupported `schemaVersion` is not treated as corrupt: OmniWM leaves it untouched, blocks configuration writes, and reports that this OmniWM version cannot safely edit it.
 
 ## Runtime state lives elsewhere
 
