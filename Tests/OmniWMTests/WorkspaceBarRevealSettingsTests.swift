@@ -7,7 +7,7 @@ import XCTest
 
 final class WorkspaceBarRevealSettingsTests: XCTestCase {
     func testDefaultsRoundTrip() throws {
-        XCTAssertEqual(SettingsExport.defaults().workspaceBarRevealModifier, WorkspaceBarRevealModifier.off.rawValue)
+        XCTAssertEqual(SettingsExport.defaults().workspaceBarRevealModifier, .off)
         XCTAssertEqual(SettingsExport.defaults().workspaceBarRevealHoldMilliseconds, 200)
 
         let data = try SettingsTOMLCodec.encode(.defaults())
@@ -16,13 +16,13 @@ final class WorkspaceBarRevealSettingsTests: XCTestCase {
         XCTAssertTrue(toml.contains("revealHoldMilliseconds = 200"))
 
         let decoded = try SettingsTOMLCodec.decode(data)
-        XCTAssertEqual(decoded.workspaceBarRevealModifier, WorkspaceBarRevealModifier.off.rawValue)
+        XCTAssertEqual(decoded.workspaceBarRevealModifier, .off)
         XCTAssertEqual(decoded.workspaceBarRevealHoldMilliseconds, 200)
     }
 
     func testNonDefaultRoundTrip() throws {
         var export = SettingsExport.defaults()
-        export.workspaceBarRevealModifier = WorkspaceBarRevealModifier.controlOptionCommand.rawValue
+        export.workspaceBarRevealModifier = .controlOptionCommand
         export.workspaceBarRevealHoldMilliseconds = 350
 
         let data = try SettingsTOMLCodec.encode(export)
@@ -31,16 +31,16 @@ final class WorkspaceBarRevealSettingsTests: XCTestCase {
         XCTAssertTrue(toml.contains("revealHoldMilliseconds = 350"))
 
         let decoded = try SettingsTOMLCodec.decode(data)
-        XCTAssertEqual(decoded.workspaceBarRevealModifier, WorkspaceBarRevealModifier.controlOptionCommand.rawValue)
+        XCTAssertEqual(decoded.workspaceBarRevealModifier, .controlOptionCommand)
         XCTAssertEqual(decoded.workspaceBarRevealHoldMilliseconds, 350)
     }
 
     @MainActor
-    func testApplyExportClampsDelayAndRecoversInvalidModifier() {
+    func testApplyExportClampsDelay() {
         let settings = makeSettingsStore()
         var export = SettingsExport.defaults()
 
-        export.workspaceBarRevealModifier = WorkspaceBarRevealModifier.option.rawValue
+        export.workspaceBarRevealModifier = .option
         export.workspaceBarRevealHoldMilliseconds = -50
         settings.applyExport(export)
         XCTAssertEqual(settings.workspaceBarRevealModifier, .option)
@@ -49,10 +49,6 @@ final class WorkspaceBarRevealSettingsTests: XCTestCase {
         export.workspaceBarRevealHoldMilliseconds = 5000
         settings.applyExport(export)
         XCTAssertEqual(settings.workspaceBarRevealHoldMilliseconds, 1000)
-
-        export.workspaceBarRevealModifier = "bogus"
-        settings.applyExport(export)
-        XCTAssertEqual(settings.workspaceBarRevealModifier, .off)
     }
 
     @MainActor

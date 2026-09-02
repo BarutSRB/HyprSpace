@@ -52,11 +52,9 @@ struct MonitorNiriSettings: MonitorSettingsType {
         monitorDisplayUUID = try DisplayUUID.decode(from: container, forKey: .monitorDisplayUUID)
         monitorDisplayId = try container.decodeIfPresent(CGDirectDisplayID.self, forKey: .monitorDisplayId)
         visibleContainerCount = try container.decodeIfPresent(Int.self, forKey: .visibleContainerCount)
-        centerFocusedColumn = try container.decodeIfPresent(String.self, forKey: .centerFocusedColumn)
-            .flatMap { CenterFocusedColumn(rawValue: $0) }
+        centerFocusedColumn = try container.decodeIfPresent(CenterFocusedColumn.self, forKey: .centerFocusedColumn)
         alwaysCenterSingleColumn = try container.decodeIfPresent(Bool.self, forKey: .alwaysCenterSingleColumn)
-        singleWindowFit = try container.decodeIfPresent(String.self, forKey: .singleWindowFit)
-            .map { SingleWindowFit(serialized: $0) }
+        singleWindowFit = try container.decodeIfPresent(SingleWindowFit.self, forKey: .singleWindowFit)
         infiniteLoop = try container.decodeIfPresent(Bool.self, forKey: .infiniteLoop)
     }
 
@@ -72,9 +70,9 @@ struct MonitorNiriSettings: MonitorSettingsType {
             displayIdKey: .monitorDisplayId
         )
         try container.encodeIfPresent(visibleContainerCount, forKey: .visibleContainerCount)
-        try container.encodeIfPresent(centerFocusedColumn?.rawValue, forKey: .centerFocusedColumn)
+        try container.encodeIfPresent(centerFocusedColumn, forKey: .centerFocusedColumn)
         try container.encodeIfPresent(alwaysCenterSingleColumn, forKey: .alwaysCenterSingleColumn)
-        try container.encodeIfPresent(singleWindowFit?.serialized, forKey: .singleWindowFit)
+        try container.encodeIfPresent(singleWindowFit, forKey: .singleWindowFit)
         try container.encodeIfPresent(infiniteLoop, forKey: .infiniteLoop)
     }
 }

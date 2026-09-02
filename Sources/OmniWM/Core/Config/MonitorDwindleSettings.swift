@@ -57,8 +57,7 @@ struct MonitorDwindleSettings: MonitorSettingsType {
         smartSplit = try container.decodeIfPresent(Bool.self, forKey: .smartSplit)
         defaultSplitRatio = try container.decodeIfPresent(Double.self, forKey: .defaultSplitRatio)
         splitWidthMultiplier = try container.decodeIfPresent(Double.self, forKey: .splitWidthMultiplier)
-        singleWindowFit = try container.decodeIfPresent(String.self, forKey: .singleWindowFit)
-            .map { SingleWindowFit(serialized: $0) }
+        singleWindowFit = try container.decodeIfPresent(SingleWindowFit.self, forKey: .singleWindowFit)
         useGlobalGaps = try container.decodeIfPresent(Bool.self, forKey: .useGlobalGaps)
         innerGap = try container.decodeIfPresent(Double.self, forKey: .innerGap)
     }
@@ -77,7 +76,7 @@ struct MonitorDwindleSettings: MonitorSettingsType {
         try container.encodeIfPresent(smartSplit, forKey: .smartSplit)
         try container.encodeIfPresent(defaultSplitRatio, forKey: .defaultSplitRatio)
         try container.encodeIfPresent(splitWidthMultiplier, forKey: .splitWidthMultiplier)
-        try container.encodeIfPresent(singleWindowFit?.serialized, forKey: .singleWindowFit)
+        try container.encodeIfPresent(singleWindowFit, forKey: .singleWindowFit)
         try container.encodeIfPresent(useGlobalGaps, forKey: .useGlobalGaps)
         try container.encodeIfPresent(innerGap, forKey: .innerGap)
     }

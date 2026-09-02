@@ -7,10 +7,7 @@ import XCTest
 
 final class QuakeTerminalAppearanceSettingsTests: XCTestCase {
     func testBackgroundEffectDefaultsToStandardBlur() {
-        XCTAssertEqual(
-            SettingsExport.defaults().quakeTerminalBackgroundEffect,
-            QuakeTerminalBackgroundEffect.standardBlur.rawValue
-        )
+        XCTAssertEqual(SettingsExport.defaults().quakeTerminalBackgroundEffect, .standardBlur)
     }
 
     func testBackgroundEffectGhosttyValues() {
@@ -70,14 +67,14 @@ final class QuakeTerminalAppearanceSettingsTests: XCTestCase {
     func testRoundTripsEveryBackgroundEffectInQuakeTerminalTable() throws {
         for effect in QuakeTerminalBackgroundEffect.allCases {
             var export = SettingsExport.defaults()
-            export.quakeTerminalBackgroundEffect = effect.rawValue
+            export.quakeTerminalBackgroundEffect = effect
 
             let data = try SettingsTOMLCodec.encode(export)
             let toml = String(decoding: data, as: UTF8.self)
             let decoded = try SettingsTOMLCodec.decode(data)
 
             XCTAssertTrue(toml.contains("backgroundEffect = \"\(effect.rawValue)\""))
-            XCTAssertEqual(decoded.quakeTerminalBackgroundEffect, effect.rawValue)
+            XCTAssertEqual(decoded.quakeTerminalBackgroundEffect, effect)
         }
     }
 
@@ -128,19 +125,17 @@ final class QuakeTerminalAppearanceSettingsTests: XCTestCase {
         XCTAssertEqual(settings.toExport().quakeTerminalBackgroundBlurRadius, 100)
     }
 
-    @MainActor
-    func testApplyExportRejectsUnknownBackgroundEffect() {
-        let settings = makeSettingsStore()
-        var export = SettingsExport.defaults()
+    func testUnknownBackgroundEffectRejectsDecode() throws {
+        let toml = String(decoding: try SettingsTOMLCodec.encode(.defaults()), as: UTF8.self)
+            .replacingOccurrences(
+                of: "backgroundEffect = \"\(QuakeTerminalBackgroundEffect.standardBlur.rawValue)\"",
+                with: "backgroundEffect = \"futureGlass\""
+            )
 
-        export.quakeTerminalBackgroundEffect = "futureGlass"
-        settings.applyExport(export)
-
-        XCTAssertEqual(settings.quakeTerminalBackgroundEffect, .standardBlur)
-        XCTAssertEqual(
-            settings.toExport().quakeTerminalBackgroundEffect,
-            QuakeTerminalBackgroundEffect.standardBlur.rawValue
-        )
+        XCTAssertThrowsError(try SettingsTOMLCodec.decode(Data(toml.utf8))) { error in
+            XCTAssertTrue(SettingsTOMLCodec.diagnosticDescription(for: error)
+                .contains("quakeTerminal.backgroundEffect"))
+        }
     }
 
     @MainActor
@@ -180,7 +175,7 @@ final class QuakeTerminalAppearanceSettingsTests: XCTestCase {
 
         let persisted = try SettingsTOMLCodec.decode(Data(contentsOf: persistence.fileURL))
         XCTAssertEqual(persisted.quakeTerminalBackgroundBlurRadius, 40)
-        XCTAssertEqual(persisted.quakeTerminalBackgroundEffect, QuakeTerminalBackgroundEffect.glassClear.rawValue)
+        XCTAssertEqual(persisted.quakeTerminalBackgroundEffect, .glassClear)
     }
 
     private func replacingValue(

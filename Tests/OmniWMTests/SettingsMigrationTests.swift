@@ -70,7 +70,7 @@ final class SettingsMigrationTests: XCTestCase {
             XCTAssertEqual(export.raiseOnMouseFocus, testCase.raise, testCase.name)
             XCTAssertEqual(export.gapSize, 27, testCase.name)
             XCTAssertEqual(export.fullscreenUsesOuterGaps, testCase.fullscreenGaps, testCase.name)
-            XCTAssertEqual(export.defaultLayoutType, LayoutType.dwindle.rawValue, testCase.name)
+            XCTAssertEqual(export.defaultLayoutType, .dwindle, testCase.name)
             XCTAssertFalse(export.workspaceBarHideInNativeFullscreen, testCase.name)
             XCTAssertEqual(export.workspaceBarExcludedBundleIDs, ["com.example.Hidden"], testCase.name)
             XCTAssertEqual(export.scratchpadLabels, [:], testCase.name)

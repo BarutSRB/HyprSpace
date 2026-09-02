@@ -416,18 +416,18 @@ final class SettingsTOMLCodecTests: XCTestCase {
     }
 
     func testTrackpadScrollStyleRoundTrips() throws {
-        XCTAssertEqual(SettingsExport.defaults().trackpadScrollStyle, TrackpadScrollStyle.snap.rawValue)
+        XCTAssertEqual(SettingsExport.defaults().trackpadScrollStyle, .snap)
 
         var export = SettingsExport.defaults()
-        export.trackpadScrollStyle = TrackpadScrollStyle.momentum.rawValue
+        export.trackpadScrollStyle = .momentum
         let data = try SettingsTOMLCodec.encode(export)
 
         XCTAssertTrue(String(decoding: data, as: UTF8.self).contains("trackpadScrollStyle = \"momentum\""))
-        XCTAssertEqual(try SettingsTOMLCodec.decode(data).trackpadScrollStyle, TrackpadScrollStyle.momentum.rawValue)
+        XCTAssertEqual(try SettingsTOMLCodec.decode(data).trackpadScrollStyle, .momentum)
     }
 
     func testMouseMoveModifierRoundTrips() throws {
-        XCTAssertEqual(SettingsExport.defaults().mouseMoveModifierKey, MouseMoveModifierKey.option.rawValue)
+        XCTAssertEqual(SettingsExport.defaults().mouseMoveModifierKey, .option)
         XCTAssertTrue(
             String(decoding: try SettingsTOMLCodec.encode(.defaults()), as: UTF8.self)
                 .contains("mouseMoveModifierKey = \"option\"")
@@ -435,24 +435,21 @@ final class SettingsTOMLCodecTests: XCTestCase {
 
         for modifier in [MouseMoveModifierKey.off, .controlOption] {
             var export = SettingsExport.defaults()
-            export.mouseMoveModifierKey = modifier.rawValue
+            export.mouseMoveModifierKey = modifier
             let data = try SettingsTOMLCodec.encode(export)
 
-            XCTAssertEqual(try SettingsTOMLCodec.decode(data).mouseMoveModifierKey, modifier.rawValue)
+            XCTAssertEqual(try SettingsTOMLCodec.decode(data).mouseMoveModifierKey, modifier)
         }
     }
 
-    @MainActor
-    func testUnsupportedMouseMoveModifierFallsBackToOptionWhenApplied() throws {
-        var export = SettingsExport.defaults()
-        export.mouseMoveModifierKey = "shift"
-        let decoded = try SettingsTOMLCodec.decode(SettingsTOMLCodec.encode(export))
-        let settings = makeSettingsStore()
+    func testUnsupportedMouseMoveModifierRejectsDecode() throws {
+        let data = try defaultsWithReplacements(
+            ("mouseMoveModifierKey = \"option\"\n", "mouseMoveModifierKey = \"shift\"\n")
+        )
 
-        settings.applyExport(decoded)
-
-        XCTAssertEqual(settings.mouseMoveModifierKey, .option)
-        XCTAssertEqual(settings.toExport().mouseMoveModifierKey, MouseMoveModifierKey.option.rawValue)
+        XCTAssertThrowsError(try SettingsTOMLCodec.decode(data)) { error in
+            XCTAssertTrue(SettingsTOMLCodec.diagnosticDescription(for: error).contains("gestures.mouseMoveModifierKey"))
+        }
     }
 
     @MainActor
@@ -464,7 +461,7 @@ final class SettingsTOMLCodecTests: XCTestCase {
         destination.applyExport(source.toExport())
 
         XCTAssertEqual(destination.mouseMoveModifierKey, .controlCommand)
-        XCTAssertEqual(destination.toExport().mouseMoveModifierKey, MouseMoveModifierKey.controlCommand.rawValue)
+        XCTAssertEqual(destination.toExport().mouseMoveModifierKey, .controlCommand)
     }
 
     @MainActor
@@ -492,13 +489,13 @@ final class SettingsTOMLCodecTests: XCTestCase {
     func testWorkspaceSwipeSettingsRoundTrip() throws {
         let defaults = SettingsExport.defaults()
         XCTAssertFalse(defaults.workspaceSwipeEnabled)
-        XCTAssertEqual(defaults.workspaceSwipeFingerCount, GestureFingerCount.three.rawValue)
-        XCTAssertEqual(defaults.workspaceSwipeAxis, WorkspaceSwipeAxis.vertical.rawValue)
+        XCTAssertEqual(defaults.workspaceSwipeFingerCount, .three)
+        XCTAssertEqual(defaults.workspaceSwipeAxis, .vertical)
 
         var export = defaults
         export.workspaceSwipeEnabled = true
-        export.workspaceSwipeFingerCount = GestureFingerCount.four.rawValue
-        export.workspaceSwipeAxis = WorkspaceSwipeAxis.horizontal.rawValue
+        export.workspaceSwipeFingerCount = .four
+        export.workspaceSwipeAxis = .horizontal
         let data = try SettingsTOMLCodec.encode(export)
         let encoded = String(decoding: data, as: UTF8.self)
 
@@ -508,8 +505,8 @@ final class SettingsTOMLCodecTests: XCTestCase {
 
         let decoded = try SettingsTOMLCodec.decode(data)
         XCTAssertTrue(decoded.workspaceSwipeEnabled)
-        XCTAssertEqual(decoded.workspaceSwipeFingerCount, GestureFingerCount.four.rawValue)
-        XCTAssertEqual(decoded.workspaceSwipeAxis, WorkspaceSwipeAxis.horizontal.rawValue)
+        XCTAssertEqual(decoded.workspaceSwipeFingerCount, .four)
+        XCTAssertEqual(decoded.workspaceSwipeAxis, .horizontal)
     }
 
     @MainActor
@@ -545,31 +542,37 @@ final class SettingsTOMLCodecTests: XCTestCase {
     }
 
     @MainActor
-    func testUnsupportedWorkspaceSwipeValuesFallBackWhenApplied() throws {
-        let data = try defaultsWithReplacements(
-            ("workspaceSwipeFingerCount = 3\n", "workspaceSwipeFingerCount = 5\n"),
-            ("workspaceSwipeAxis = \"vertical\"\n", "workspaceSwipeAxis = \"diagonal\"\n")
-        )
-        let export = try SettingsTOMLCodec.decode(data)
+    func testUnsupportedWorkspaceSwipeValuesRejectDecode() throws {
+        let cases: [(replacement: (String, String), keyPath: String)] = [
+            (
+                ("workspaceSwipeFingerCount = 3\n", "workspaceSwipeFingerCount = 5\n"),
+                "gestures.workspaceSwipeFingerCount"
+            ),
+            (
+                ("workspaceSwipeAxis = \"vertical\"\n", "workspaceSwipeAxis = \"diagonal\"\n"),
+                "gestures.workspaceSwipeAxis"
+            )
+        ]
 
-        XCTAssertEqual(export.workspaceSwipeFingerCount, 5)
-        XCTAssertEqual(export.workspaceSwipeAxis, "diagonal")
-
-        let settings = makeSettingsStore()
-        settings.applyExport(export)
-
-        XCTAssertEqual(settings.workspaceSwipeFingerCount, .three)
-        XCTAssertEqual(settings.workspaceSwipeAxis, .vertical)
+        for testCase in cases {
+            let data = try defaultsWithReplacements(testCase.replacement)
+            XCTAssertThrowsError(try SettingsTOMLCodec.decode(data), testCase.keyPath) { error in
+                XCTAssertTrue(
+                    SettingsTOMLCodec.diagnosticDescription(for: error).contains(testCase.keyPath),
+                    testCase.keyPath
+                )
+            }
+        }
     }
 
     @MainActor
     func testHorizontalWorkspaceSwipeSelectionSurvivesFingerCountCollision() {
         var export = SettingsExport.defaults()
         export.scrollGestureEnabled = true
-        export.gestureFingerCount = GestureFingerCount.three.rawValue
+        export.gestureFingerCount = .three
         export.workspaceSwipeEnabled = true
-        export.workspaceSwipeFingerCount = GestureFingerCount.three.rawValue
-        export.workspaceSwipeAxis = WorkspaceSwipeAxis.horizontal.rawValue
+        export.workspaceSwipeFingerCount = .three
+        export.workspaceSwipeAxis = .horizontal
 
         let settings = makeSettingsStore()
         settings.applyExport(export)
@@ -652,18 +655,18 @@ final class SettingsTOMLCodecTests: XCTestCase {
     }
 
     func testFocusLockModifierRoundTrips() throws {
-        XCTAssertEqual(SettingsExport.defaults().focusLockModifier, FocusLockModifier.off.rawValue)
+        XCTAssertEqual(SettingsExport.defaults().focusLockModifier, .off)
         XCTAssertTrue(
             String(decoding: try SettingsTOMLCodec.encode(.defaults()), as: UTF8.self)
                 .contains("lockModifier = \"off\"")
         )
 
         var export = SettingsExport.defaults()
-        export.focusLockModifier = FocusLockModifier.leftOption.rawValue
+        export.focusLockModifier = .leftOption
         let data = try SettingsTOMLCodec.encode(export)
 
         XCTAssertTrue(String(decoding: data, as: UTF8.self).contains("lockModifier = \"leftOption\""))
-        XCTAssertEqual(try SettingsTOMLCodec.decode(data).focusLockModifier, FocusLockModifier.leftOption.rawValue)
+        XCTAssertEqual(try SettingsTOMLCodec.decode(data).focusLockModifier, .leftOption)
     }
 
     func testFocusCrossesMonitorAtEdgeRoundTrips() throws {
@@ -697,6 +700,132 @@ final class SettingsTOMLCodecTests: XCTestCase {
 
         XCTAssertTrue(String(decoding: data, as: UTF8.self).contains("constrainToArrangement = true"))
         XCTAssertTrue(try SettingsTOMLCodec.decode(data).cursorContainmentEnabled)
+    }
+
+    func testUnknownEnumValueRejectsWholeFile() throws {
+        let cases: [(line: String, invalid: String, key: String)] = [
+            ("defaultLayoutType = \"\(LayoutType.niri.rawValue)\"", "defaultLayoutType = \"bsp\"", "defaultLayoutType"),
+            ("lockModifier = \"\(FocusLockModifier.off.rawValue)\"", "lockModifier = \"hyper\"", "lockModifier"),
+            ("mode = \"\(MonitorRoutingMode.macOS.rawValue)\"", "mode = \"sideways\"", "routing.mode"),
+            (
+                "centerFocusedColumn = \"\(CenterFocusedColumn.never.rawValue)\"",
+                "centerFocusedColumn = \"sometimes\"",
+                "centerFocusedColumn"
+            ),
+            ("singleWindowFit = \"fill\"", "singleWindowFit = \"stretch\"", "singleWindowFit"),
+            (
+                "windowLevel = \"\(WorkspaceBarWindowLevel.popup.rawValue)\"",
+                "windowLevel = \"basement\"",
+                "windowLevel"
+            ),
+            (
+                "position = \"\(WorkspaceBarPosition.overlappingMenuBar.rawValue)\"",
+                "position = \"sideways\"",
+                "workspaceBar.position"
+            ),
+            (
+                "notchMode = \"\(WorkspaceBarNotchMode.moveBelowMenuBar.rawValue)\"",
+                "notchMode = \"ignoreNotch\"",
+                "notchMode"
+            ),
+            (
+                "revealModifier = \"\(WorkspaceBarRevealModifier.off.rawValue)\"",
+                "revealModifier = \"fn\"",
+                "revealModifier"
+            ),
+            (
+                "scrollModifierKey = \"\(ScrollModifierKey.optionShift.rawValue)\"",
+                "scrollModifierKey = \"fn\"",
+                "scrollModifierKey"
+            ),
+            (
+                "mouseMoveModifierKey = \"\(MouseMoveModifierKey.option.rawValue)\"",
+                "mouseMoveModifierKey = \"shift\"",
+                "mouseMoveModifierKey"
+            ),
+            (
+                "mouseResizeModifierKey = \"\(MouseResizeModifierKey.option.rawValue)\"",
+                "mouseResizeModifierKey = \"hyperspace\"",
+                "mouseResizeModifierKey"
+            ),
+            ("fingerCount = \(GestureFingerCount.three.rawValue)\n", "fingerCount = 7\n", "fingerCount"),
+            (
+                "trackpadScrollStyle = \"\(TrackpadScrollStyle.snap.rawValue)\"",
+                "trackpadScrollStyle = \"drift\"",
+                "trackpadScrollStyle"
+            ),
+            (
+                "workspaceSwipeFingerCount = \(GestureFingerCount.three.rawValue)\n",
+                "workspaceSwipeFingerCount = 7\n",
+                "workspaceSwipeFingerCount"
+            ),
+            (
+                "workspaceSwipeAxis = \"\(WorkspaceSwipeAxis.vertical.rawValue)\"",
+                "workspaceSwipeAxis = \"diagonal\"",
+                "workspaceSwipeAxis"
+            ),
+            (
+                "position = \"\(QuakeTerminalPosition.center.rawValue)\"",
+                "position = \"corner\"",
+                "quakeTerminal.position"
+            ),
+            (
+                "backgroundEffect = \"\(QuakeTerminalBackgroundEffect.standardBlur.rawValue)\"",
+                "backgroundEffect = \"futureGlass\"",
+                "backgroundEffect"
+            ),
+            (
+                "monitorMode = \"\(QuakeTerminalMonitorMode.focusedWindow.rawValue)\"",
+                "monitorMode = \"everywhere\"",
+                "monitorMode"
+            ),
+            ("mode = \"\(AppearanceMode.dark.rawValue)\"", "mode = \"sepia\"", "appearance.mode")
+        ]
+        let defaults = String(decoding: try SettingsTOMLCodec.encode(.defaults()), as: UTF8.self)
+        XCTAssertNoThrow(try SettingsTOMLCodec.decode(Data(defaults.utf8)))
+
+        for testCase in cases {
+            XCTAssertTrue(defaults.contains(testCase.line), testCase.key)
+            let data = Data(defaults.replacingOccurrences(of: testCase.line, with: testCase.invalid).utf8)
+            XCTAssertThrowsError(try SettingsTOMLCodec.decode(data), testCase.key) { error in
+                XCTAssertTrue(
+                    SettingsTOMLCodec.diagnosticDescription(for: error).contains(testCase.key),
+                    "\(testCase.key): \(SettingsTOMLCodec.diagnosticDescription(for: error))"
+                )
+            }
+        }
+    }
+
+    func testMonitorOverrideUnknownEnumValuesRejectDecode() throws {
+        var export = SettingsExport.defaults()
+        export.monitorNiriSettings = [
+            MonitorNiriSettings(monitorName: "Override", singleWindowFit: SingleWindowFit(mode: .containerPrimarySpan))
+        ]
+        export.monitorDwindleSettings = [
+            MonitorDwindleSettings(
+                monitorName: "Override",
+                singleWindowFit: SingleWindowFit(mode: .containerPrimarySpan)
+            )
+        ]
+        let toml = String(decoding: try SettingsTOMLCodec.encode(export), as: UTF8.self)
+        XCTAssertEqual(toml.components(separatedBy: "singleWindowFit = \"container_primary_span\"").count, 3)
+
+        let invalid = toml.replacingOccurrences(
+            of: "singleWindowFit = \"container_primary_span\"",
+            with: "singleWindowFit = \"stretch\""
+        )
+
+        XCTAssertThrowsError(try SettingsTOMLCodec.decode(Data(invalid.utf8))) { error in
+            XCTAssertTrue(SettingsTOMLCodec.diagnosticDescription(for: error).contains("singleWindowFit"))
+        }
+    }
+
+    func testEmptySingleWindowFitRejectsDecode() throws {
+        let data = try defaultsWithReplacements(("singleWindowFit = \"fill\"", "singleWindowFit = \"\""))
+
+        XCTAssertThrowsError(try SettingsTOMLCodec.decode(data)) { error in
+            XCTAssertTrue(SettingsTOMLCodec.diagnosticDescription(for: error).contains("singleWindowFit"))
+        }
     }
 
     private func defaultsWithReplacements(_ replacements: (String, String)...) throws -> Data {

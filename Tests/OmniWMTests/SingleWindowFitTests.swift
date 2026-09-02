@@ -35,15 +35,10 @@ final class SingleWindowFitTests: XCTestCase {
         )
     }
 
-    func testDecodeGarbageFallsBackToFullScreen() {
-        XCTAssertEqual(SingleWindowFit(serialized: "").mode, .fill)
-        XCTAssertEqual(SingleWindowFit(serialized: "wat").mode, .fill)
-        XCTAssertEqual(SingleWindowFit(serialized: "0x0").mode, .fill)
-        XCTAssertEqual(SingleWindowFit(serialized: "-5x100").mode, .fill)
-        XCTAssertEqual(SingleWindowFit(serialized: "ax9").mode, .fill)
-        XCTAssertEqual(SingleWindowFit(serialized: "column_width").mode, .fill)
-        XCTAssertEqual(SingleWindowFit(serialized: "column-width").mode, .fill)
-        XCTAssertEqual(SingleWindowFit(serialized: "columnwidth").mode, .fill)
+    func testDecodeGarbageIsRejected() {
+        for serialized in ["", "wat", "0x0", "-5x100", "ax9", "column_width", "column-width", "columnwidth"] {
+            XCTAssertNil(SingleWindowFit(serialized: serialized), serialized)
+        }
     }
 
     func testFrameFillReturnsWorkingFrame() {
@@ -72,8 +67,8 @@ final class SingleWindowFitTests: XCTestCase {
 
     func testSettingsTOMLRoundTripsSingleWindowFitKeys() throws {
         var export = SettingsExport.defaults()
-        export.niriSingleWindowFit = SingleWindowFit(mode: .containerPrimarySpan).serialized
-        export.dwindleSingleWindowFit = SingleWindowFit(mode: .custom, width: 1280, height: 720).serialized
+        export.niriSingleWindowFit = SingleWindowFit(mode: .containerPrimarySpan)
+        export.dwindleSingleWindowFit = SingleWindowFit(mode: .custom, width: 1280, height: 720)
         export.monitorNiriSettings = [
             MonitorNiriSettings(
                 monitorName: "Portrait",
@@ -93,16 +88,16 @@ final class SingleWindowFitTests: XCTestCase {
 
         XCTAssertTrue(toml.contains("singleWindowFit"))
         XCTAssertFalse(toml.contains("singleWindowAspectRatio"))
-        XCTAssertEqual(decoded.niriSingleWindowFit, "container_primary_span")
-        XCTAssertEqual(decoded.dwindleSingleWindowFit, "1280x720")
+        XCTAssertEqual(decoded.niriSingleWindowFit.serialized, "container_primary_span")
+        XCTAssertEqual(decoded.dwindleSingleWindowFit.serialized, "1280x720")
         XCTAssertEqual(decoded.monitorNiriSettings.first?.singleWindowFit?.serialized, "container_primary_span")
         XCTAssertEqual(decoded.monitorDwindleSettings.first?.singleWindowFit?.serialized, "1024x768")
     }
 
     func testLegacySingleWindowAspectRatioKeysAreIgnoredAndDiagnosed() throws {
         var export = SettingsExport.defaults()
-        export.niriSingleWindowFit = SingleWindowFit(mode: .containerPrimarySpan).serialized
-        export.dwindleSingleWindowFit = SingleWindowFit(mode: .custom, width: 1280, height: 720).serialized
+        export.niriSingleWindowFit = SingleWindowFit(mode: .containerPrimarySpan)
+        export.dwindleSingleWindowFit = SingleWindowFit(mode: .custom, width: 1280, height: 720)
         export.monitorNiriSettings = [
             MonitorNiriSettings(
                 monitorName: "Portrait",

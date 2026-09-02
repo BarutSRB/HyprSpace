@@ -36,7 +36,7 @@ struct CanonicalTOMLConfig: Codable, Equatable {
         var hotkeysEnabled: Bool
         var systemHyperTrigger: SystemHyperTrigger
         var hyperKeyModifiers: HyperKeyModifiers
-        var defaultLayoutType: String
+        var defaultLayoutType: LayoutType
         var preventSleepEnabled: Bool
         var updateChecksEnabled: Bool
         var ipcEnabled: Bool
@@ -46,7 +46,7 @@ struct CanonicalTOMLConfig: Codable, Equatable {
     struct Focus: Codable, Equatable {
         var followsMouse: Bool
         var raiseOnMouseFocus: Bool
-        var lockModifier: String
+        var lockModifier: FocusLockModifier
         var moveMouseToFocusedWindow: Bool
         var followsWindowToMonitor: Bool
         var crossesMonitorAtEdge: Bool
@@ -64,7 +64,7 @@ struct CanonicalTOMLConfig: Codable, Equatable {
     }
 
     struct Routing: Codable, Equatable {
-        var mode: String
+        var mode: MonitorRoutingMode
     }
 
     struct Gaps: Codable, Equatable {
@@ -83,9 +83,9 @@ struct CanonicalTOMLConfig: Codable, Equatable {
     struct Niri: Codable, Equatable {
         var visibleContainerCount: Int
         var infiniteLoop: Bool
-        var centerFocusedColumn: String
+        var centerFocusedColumn: CenterFocusedColumn
         var alwaysCenterSingleColumn: Bool
-        var singleWindowFit: String
+        var singleWindowFit: SingleWindowFit
         var containerPrimarySpanPresets: [Double]?
         var defaultContainerPrimarySpan: Double?
     }
@@ -94,7 +94,7 @@ struct CanonicalTOMLConfig: Codable, Equatable {
         var smartSplit: Bool
         var defaultSplitRatio: Double
         var splitWidthMultiplier: Double
-        var singleWindowFit: String
+        var singleWindowFit: SingleWindowFit
         var useGlobalGaps: Bool
         var moveToRootStable: Bool
     }
@@ -150,9 +150,9 @@ struct CanonicalTOMLConfig: Codable, Equatable {
         var enabled: Bool
         var showLabels: Bool
         var showFloatingWindows: Bool
-        var windowLevel: String
-        var position: String
-        var notchMode: String
+        var windowLevel: WorkspaceBarWindowLevel
+        var position: WorkspaceBarPosition
+        var notchMode: WorkspaceBarNotchMode
         var notchActiveZoneWidth: Double
         var systemStatsButton: Bool
         var deduplicateAppIcons: Bool
@@ -160,7 +160,7 @@ struct CanonicalTOMLConfig: Codable, Equatable {
         var excludedBundleIDs: [String]
         var iconOverrides: [String: String]
         var reserveLayoutSpace: Bool
-        var revealModifier: String
+        var revealModifier: WorkspaceBarRevealModifier
         var revealHoldMilliseconds: Double
         var hideInNativeFullscreen: Bool
         var height: Double
@@ -199,15 +199,15 @@ struct CanonicalTOMLConfig: Codable, Equatable {
     struct Gestures: Codable, Equatable {
         var scrollEnabled: Bool
         var scrollSensitivity: Double
-        var scrollModifierKey: String
-        var mouseMoveModifierKey: String
-        var mouseResizeModifierKey: String
-        var fingerCount: Int
+        var scrollModifierKey: ScrollModifierKey
+        var mouseMoveModifierKey: MouseMoveModifierKey
+        var mouseResizeModifierKey: MouseResizeModifierKey
+        var fingerCount: GestureFingerCount
         var invertDirection: Bool
-        var trackpadScrollStyle: String
+        var trackpadScrollStyle: TrackpadScrollStyle
         var workspaceSwipeEnabled: Bool
-        var workspaceSwipeFingerCount: Int
-        var workspaceSwipeAxis: String
+        var workspaceSwipeFingerCount: GestureFingerCount
+        var workspaceSwipeAxis: WorkspaceSwipeAxis
     }
 
     struct StatusBar: Codable, Equatable {
@@ -231,19 +231,19 @@ struct CanonicalTOMLConfig: Codable, Equatable {
 
     struct QuakeTerminal: Codable, Equatable {
         var enabled: Bool
-        var position: String
+        var position: QuakeTerminalPosition
         var widthPercent: Double
         var heightPercent: Double
         var animationDuration: Double
         var autoHide: Bool
         var opacity: Double?
-        var backgroundEffect: String
+        var backgroundEffect: QuakeTerminalBackgroundEffect
         var backgroundBlurRadius: Int?
-        var monitorMode: String?
+        var monitorMode: QuakeTerminalMonitorMode?
     }
 
     struct Appearance: Codable, Equatable {
-        var mode: String
+        var mode: AppearanceMode
     }
 }
 

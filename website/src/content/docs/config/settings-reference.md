@@ -8,7 +8,7 @@ sidebar:
 Complete reference for `settings.toml`, in the file's canonical order. The authoritative schema is [`CanonicalTOMLConfig.swift`](https://github.com/BarutSRB/OmniWM/blob/main/Sources/OmniWM/Core/Config/CanonicalTOMLConfig.swift); defaults come from [`SettingsExport.swift`](https://github.com/BarutSRB/OmniWM/blob/main/Sources/OmniWM/Core/Config/SettingsExport.swift) and [`BuiltInSettingsDefaults.swift`](https://github.com/BarutSRB/OmniWM/blob/main/Sources/OmniWM/Core/Config/BuiltInSettingsDefaults.swift).
 
 :::caution
-The current schema is strict — a missing required key in a version 1 file invalidates the whole file, and `hotkeys` must list every assignable action exactly once. Edit values in place; see [Configuration](/config/configuration/).
+The current schema is strict — a missing required key in a version 1 file invalidates the whole file, `hotkeys` must list every assignable action exactly once, and an enumerated string key must use one of its listed values (an unknown value rejects the whole file, exactly like a missing key). Edit values in place; see [Configuration](/config/configuration/).
 :::
 
 **Conventions**

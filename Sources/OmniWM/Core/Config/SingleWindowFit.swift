@@ -80,20 +80,16 @@ extension SingleWindowFit {
         }
     }
 
-    init(serialized raw: String) {
+    init?(serialized raw: String) {
         let token = raw.trimmingCharacters(in: .whitespaces).lowercased()
         switch token {
-        case "fill",
-             "":
+        case "fill":
             self = .fullScreen
         case "container_primary_span":
             self = SingleWindowFit(mode: .containerPrimarySpan)
         default:
-            if token.contains("x"), let fit = Self.parseCustom(token) {
-                self = fit
-            } else {
-                self = .fullScreen
-            }
+            guard token.contains("x"), let fit = Self.parseCustom(token) else { return nil }
+            self = fit
         }
     }
 
@@ -111,5 +107,24 @@ extension SingleWindowFit {
             return String(integer)
         }
         return String(value)
+    }
+}
+
+extension SingleWindowFit: Codable {
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let raw = try container.decode(String.self)
+        guard let fit = SingleWindowFit(serialized: raw) else {
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Unsupported singleWindowFit value \"\(raw)\""
+            )
+        }
+        self = fit
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(serialized)
     }
 }

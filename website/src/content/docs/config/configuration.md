@@ -8,7 +8,7 @@ sidebar:
 OmniWM stores its editable configuration at `${XDG_CONFIG_HOME:-$HOME/.config}/omniwm/settings.toml`. That file is the canonical settings source: it is live-reloaded whenever you save it from an editor, and every change made in the Settings window is written back to it. Current files include the top-level key `schemaVersion = 1`.
 
 :::caution[The schema is strict]
-After version upgrades, `settings.toml` is validated as a whole. In a version 1 file, a missing required key invalidates the **entire file**, and the `hotkeys` array must contain every assignable action **exactly once** — an unknown, duplicate, or missing action id rejects the file. The safest way to edit is to change values in place (or use the Settings window) rather than deleting keys. See the [Settings Reference](/config/settings-reference/) for every key and its default.
+After version upgrades, `settings.toml` is validated as a whole. In a version 1 file, a missing required key invalidates the **entire file**, and the `hotkeys` array must contain every assignable action **exactly once** — an unknown, duplicate, or missing action id rejects the file. Enumerated string keys must use one of their listed values; an unknown value rejects the whole file too. The safest way to edit is to change values in place (or use the Settings window) rather than deleting keys. See the [Settings Reference](/config/settings-reference/) for every key and its default.
 :::
 
 ## Opening the file

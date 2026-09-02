@@ -7,13 +7,10 @@ import XCTest
 
 final class WorkspaceBarNotchModeSettingsTests: XCTestCase {
     func testNotchModeRoundTrips() throws {
-        XCTAssertEqual(
-            SettingsExport.defaults().workspaceBarNotchMode,
-            WorkspaceBarNotchMode.moveBelowMenuBar.rawValue
-        )
+        XCTAssertEqual(SettingsExport.defaults().workspaceBarNotchMode, .moveBelowMenuBar)
 
         var export = SettingsExport.defaults()
-        export.workspaceBarNotchMode = WorkspaceBarNotchMode.splitActiveLeft.rawValue
+        export.workspaceBarNotchMode = .splitActiveLeft
         export.workspaceBarNotchActiveZoneWidth = 220
         let data = try SettingsTOMLCodec.encode(export)
         let toml = String(decoding: data, as: UTF8.self)
@@ -21,7 +18,7 @@ final class WorkspaceBarNotchModeSettingsTests: XCTestCase {
         XCTAssertTrue(toml.contains("notchMode = \"splitActiveLeft\""))
         XCTAssertTrue(toml.contains("notchActiveZoneWidth = 220"))
         let decoded = try SettingsTOMLCodec.decode(data)
-        XCTAssertEqual(decoded.workspaceBarNotchMode, WorkspaceBarNotchMode.splitActiveLeft.rawValue)
+        XCTAssertEqual(decoded.workspaceBarNotchMode, .splitActiveLeft)
         XCTAssertEqual(decoded.workspaceBarNotchActiveZoneWidth, 220)
     }
 
@@ -51,10 +48,7 @@ final class WorkspaceBarNotchModeSettingsTests: XCTestCase {
         )
 
         XCTAssertTrue(SettingsTOMLCodec.unknownKeyPaths(in: withLegacyKey).contains("workspaceBar.notchAware"))
-        XCTAssertEqual(
-            try SettingsTOMLCodec.decode(withLegacyKey).workspaceBarNotchMode,
-            WorkspaceBarNotchMode.moveBelowMenuBar.rawValue
-        )
+        XCTAssertEqual(try SettingsTOMLCodec.decode(withLegacyKey).workspaceBarNotchMode, .moveBelowMenuBar)
     }
 
     @MainActor
@@ -69,10 +63,6 @@ final class WorkspaceBarNotchModeSettingsTests: XCTestCase {
         export.workspaceBarNotchActiveZoneWidth = 9999
         settings.applyExport(export)
         XCTAssertEqual(settings.workspaceBarNotchActiveZoneWidth, 400)
-
-        export.workspaceBarNotchMode = "bogus"
-        settings.applyExport(export)
-        XCTAssertEqual(settings.workspaceBarNotchMode, .moveBelowMenuBar)
     }
 
     @MainActor

@@ -17,7 +17,7 @@ struct SettingsExport: Equatable {
     var hotkeysEnabled: Bool
     var focusFollowsMouse: Bool
     var raiseOnMouseFocus: Bool
-    var focusLockModifier: String
+    var focusLockModifier: FocusLockModifier
     var moveMouseToFocusedWindow: Bool
     var focusFollowsWindowToMonitor: Bool
     var focusCrossesMonitorAtEdge: Bool
@@ -25,7 +25,7 @@ struct SettingsExport: Equatable {
     var mouseWarpMargin: Int
     var mouseWarpEnabled: Bool
     var cursorContainmentEnabled: Bool
-    var monitorRoutingMode: String
+    var monitorRoutingMode: MonitorRoutingMode
     var monitorRoutingSettings: [MonitorRoutingSettings]
     var gapSize: Double
     var outerGapLeft: Double
@@ -36,14 +36,14 @@ struct SettingsExport: Equatable {
 
     var niriVisibleContainerCount: Int
     var niriInfiniteLoop: Bool
-    var niriCenterFocusedColumn: String
+    var niriCenterFocusedColumn: CenterFocusedColumn
     var niriAlwaysCenterSingleColumn: Bool
-    var niriSingleWindowFit: String
+    var niriSingleWindowFit: SingleWindowFit
     var niriContainerPrimarySpanPresets: [Double]?
     var niriDefaultContainerPrimarySpan: Double?
 
     var workspaceConfigurations: [WorkspaceConfiguration]
-    var defaultLayoutType: String
+    var defaultLayoutType: LayoutType
 
     var bordersEnabled: Bool
     var borderWidth: Double
@@ -65,9 +65,9 @@ struct SettingsExport: Equatable {
     var workspaceBarEnabled: Bool
     var workspaceBarShowLabels: Bool
     var workspaceBarShowFloatingWindows: Bool
-    var workspaceBarWindowLevel: String
-    var workspaceBarPosition: String
-    var workspaceBarNotchMode: String
+    var workspaceBarWindowLevel: WorkspaceBarWindowLevel
+    var workspaceBarPosition: WorkspaceBarPosition
+    var workspaceBarNotchMode: WorkspaceBarNotchMode
     var workspaceBarNotchActiveZoneWidth: Double
     var workspaceBarSystemStatsButton: Bool
     var workspaceBarDeduplicateAppIcons: Bool
@@ -76,7 +76,7 @@ struct SettingsExport: Equatable {
     var workspaceBarIconOverrides: [String: String]
     var scratchpadLabels: [String: String]
     var workspaceBarReserveLayoutSpace: Bool
-    var workspaceBarRevealModifier: String
+    var workspaceBarRevealModifier: WorkspaceBarRevealModifier
     var workspaceBarRevealHoldMilliseconds: Double
     var workspaceBarHideInNativeFullscreen: Bool
     var workspaceBarHeight: Double
@@ -94,7 +94,7 @@ struct SettingsExport: Equatable {
     var dwindleSmartSplit: Bool
     var dwindleDefaultSplitRatio: Double
     var dwindleSplitWidthMultiplier: Double
-    var dwindleSingleWindowFit: String
+    var dwindleSingleWindowFit: SingleWindowFit
     var dwindleUseGlobalGaps: Bool
     var dwindleMoveToRootStable: Bool
     var monitorDwindleSettings: [MonitorDwindleSettings]
@@ -106,15 +106,15 @@ struct SettingsExport: Equatable {
     var ipcEnabled: Bool
     var scrollGestureEnabled: Bool
     var scrollSensitivity: Double
-    var scrollModifierKey: String
-    var mouseMoveModifierKey: String
-    var mouseResizeModifierKey: String
-    var gestureFingerCount: Int
+    var scrollModifierKey: ScrollModifierKey
+    var mouseMoveModifierKey: MouseMoveModifierKey
+    var mouseResizeModifierKey: MouseResizeModifierKey
+    var gestureFingerCount: GestureFingerCount
     var gestureInvertDirection: Bool
-    var trackpadScrollStyle: String
+    var trackpadScrollStyle: TrackpadScrollStyle
     var workspaceSwipeEnabled: Bool
-    var workspaceSwipeFingerCount: Int
-    var workspaceSwipeAxis: String
+    var workspaceSwipeFingerCount: GestureFingerCount
+    var workspaceSwipeAxis: WorkspaceSwipeAxis
     var statusBarShowWorkspaceName: Bool
     var statusBarShowAppNames: Bool
     var statusBarUseWorkspaceId: Bool
@@ -129,17 +129,17 @@ struct SettingsExport: Equatable {
     var clipboardMaxTotalBytes: Int
 
     var quakeTerminalEnabled: Bool
-    var quakeTerminalPosition: String
+    var quakeTerminalPosition: QuakeTerminalPosition
     var quakeTerminalWidthPercent: Double
     var quakeTerminalHeightPercent: Double
     var quakeTerminalAnimationDuration: Double
     var quakeTerminalAutoHide: Bool
     var quakeTerminalOpacity: Double?
-    var quakeTerminalBackgroundEffect: String
+    var quakeTerminalBackgroundEffect: QuakeTerminalBackgroundEffect
     var quakeTerminalBackgroundBlurRadius: Int?
-    var quakeTerminalMonitorMode: String?
+    var quakeTerminalMonitorMode: QuakeTerminalMonitorMode?
 
-    var appearanceMode: String
+    var appearanceMode: AppearanceMode
 }
 
 // MARK: - Defaults & Diffing
@@ -150,7 +150,7 @@ extension SettingsExport {
             hotkeysEnabled: true,
             focusFollowsMouse: false,
             raiseOnMouseFocus: false,
-            focusLockModifier: FocusLockModifier.off.rawValue,
+            focusLockModifier: .off,
             moveMouseToFocusedWindow: false,
             focusFollowsWindowToMonitor: false,
             focusCrossesMonitorAtEdge: false,
@@ -158,7 +158,7 @@ extension SettingsExport {
             mouseWarpMargin: 1,
             mouseWarpEnabled: true,
             cursorContainmentEnabled: false,
-            monitorRoutingMode: MonitorRoutingMode.macOS.rawValue,
+            monitorRoutingMode: .macOS,
             monitorRoutingSettings: [],
             gapSize: 16,
             outerGapLeft: 0,
@@ -168,13 +168,13 @@ extension SettingsExport {
             fullscreenUsesOuterGaps: false,
             niriVisibleContainerCount: 2,
             niriInfiniteLoop: false,
-            niriCenterFocusedColumn: CenterFocusedColumn.never.rawValue,
+            niriCenterFocusedColumn: .never,
             niriAlwaysCenterSingleColumn: false,
-            niriSingleWindowFit: SingleWindowFit.fullScreen.serialized,
+            niriSingleWindowFit: .fullScreen,
             niriContainerPrimarySpanPresets: BuiltInSettingsDefaults.niriContainerPrimarySpanPresets,
             niriDefaultContainerPrimarySpan: 0.5,
             workspaceConfigurations: BuiltInSettingsDefaults.workspaceConfigurations,
-            defaultLayoutType: LayoutType.niri.rawValue,
+            defaultLayoutType: .niri,
             bordersEnabled: true,
             borderWidth: 5.0,
             borderColorRed: 0.084585202284378935,
@@ -192,9 +192,9 @@ extension SettingsExport {
             workspaceBarEnabled: true,
             workspaceBarShowLabels: true,
             workspaceBarShowFloatingWindows: false,
-            workspaceBarWindowLevel: WorkspaceBarWindowLevel.popup.rawValue,
-            workspaceBarPosition: WorkspaceBarPosition.overlappingMenuBar.rawValue,
-            workspaceBarNotchMode: WorkspaceBarNotchMode.moveBelowMenuBar.rawValue,
+            workspaceBarWindowLevel: .popup,
+            workspaceBarPosition: .overlappingMenuBar,
+            workspaceBarNotchMode: .moveBelowMenuBar,
             workspaceBarNotchActiveZoneWidth: 180,
             workspaceBarSystemStatsButton: false,
             workspaceBarDeduplicateAppIcons: false,
@@ -203,7 +203,7 @@ extension SettingsExport {
             workspaceBarIconOverrides: [:],
             scratchpadLabels: [:],
             workspaceBarReserveLayoutSpace: false,
-            workspaceBarRevealModifier: WorkspaceBarRevealModifier.off.rawValue,
+            workspaceBarRevealModifier: .off,
             workspaceBarRevealHoldMilliseconds: 200,
             workspaceBarHideInNativeFullscreen: false,
             workspaceBarHeight: 24.0,
@@ -219,7 +219,7 @@ extension SettingsExport {
             dwindleSmartSplit: false,
             dwindleDefaultSplitRatio: 1.0,
             dwindleSplitWidthMultiplier: 1.0,
-            dwindleSingleWindowFit: SingleWindowFit.fullScreen.serialized,
+            dwindleSingleWindowFit: .fullScreen,
             dwindleUseGlobalGaps: true,
             dwindleMoveToRootStable: true,
             monitorDwindleSettings: [],
@@ -229,15 +229,15 @@ extension SettingsExport {
             ipcEnabled: false,
             scrollGestureEnabled: true,
             scrollSensitivity: 5.0,
-            scrollModifierKey: ScrollModifierKey.optionShift.rawValue,
-            mouseMoveModifierKey: MouseMoveModifierKey.option.rawValue,
-            mouseResizeModifierKey: MouseResizeModifierKey.option.rawValue,
-            gestureFingerCount: GestureFingerCount.three.rawValue,
+            scrollModifierKey: .optionShift,
+            mouseMoveModifierKey: .option,
+            mouseResizeModifierKey: .option,
+            gestureFingerCount: .three,
             gestureInvertDirection: true,
-            trackpadScrollStyle: TrackpadScrollStyle.snap.rawValue,
+            trackpadScrollStyle: .snap,
             workspaceSwipeEnabled: false,
-            workspaceSwipeFingerCount: GestureFingerCount.three.rawValue,
-            workspaceSwipeAxis: WorkspaceSwipeAxis.vertical.rawValue,
+            workspaceSwipeFingerCount: .three,
+            workspaceSwipeAxis: .vertical,
             statusBarShowWorkspaceName: false,
             statusBarShowAppNames: false,
             statusBarUseWorkspaceId: false,
@@ -250,16 +250,16 @@ extension SettingsExport {
             clipboardMaxItemBytes: 8_388_608,
             clipboardMaxTotalBytes: 67_108_864,
             quakeTerminalEnabled: true,
-            quakeTerminalPosition: QuakeTerminalPosition.center.rawValue,
+            quakeTerminalPosition: .center,
             quakeTerminalWidthPercent: 50.0,
             quakeTerminalHeightPercent: 50.0,
             quakeTerminalAnimationDuration: 0.2,
             quakeTerminalAutoHide: false,
             quakeTerminalOpacity: 1.0,
-            quakeTerminalBackgroundEffect: QuakeTerminalBackgroundEffect.standardBlur.rawValue,
+            quakeTerminalBackgroundEffect: .standardBlur,
             quakeTerminalBackgroundBlurRadius: QuakeTerminalAppearancePolicy.disabledBackgroundBlurRadius,
-            quakeTerminalMonitorMode: QuakeTerminalMonitorMode.focusedWindow.rawValue,
-            appearanceMode: AppearanceMode.dark.rawValue
+            quakeTerminalMonitorMode: .focusedWindow,
+            appearanceMode: .dark
         )
     }
 }

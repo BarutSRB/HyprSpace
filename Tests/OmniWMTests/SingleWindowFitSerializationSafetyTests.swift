@@ -5,9 +5,9 @@
 import XCTest
 
 final class SingleWindowFitSerializationSafetyTests: XCTestCase {
-    func testNonFiniteDimensionsFallBackToFullScreen() {
+    func testNonFiniteDimensionsRejectDeserialization() {
         for serialized in ["1e999x1e999", "1e999x100", "100x1e999", "nanx100", "100xnan"] {
-            XCTAssertEqual(SingleWindowFit(serialized: serialized).mode, .fill)
+            XCTAssertNil(SingleWindowFit(serialized: serialized))
         }
     }
 
@@ -63,12 +63,12 @@ final class SingleWindowFitSerializationSafetyTests: XCTestCase {
         let boundaryFit = SingleWindowFit(mode: .custom, width: Double(Int.max), height: 720)
         let hugeFit = SingleWindowFit(mode: .custom, width: 1024, height: Double.greatestFiniteMagnitude)
         var export = SettingsExport.defaults()
-        export.niriSingleWindowFit = boundaryFit.serialized
+        export.niriSingleWindowFit = boundaryFit
         export.monitorDwindleSettings = [MonitorDwindleSettings(monitorName: "Extreme", singleWindowFit: hugeFit)]
 
         let decoded = try SettingsTOMLCodec.decode(SettingsTOMLCodec.encode(export))
 
-        XCTAssertEqual(decoded.niriSingleWindowFit, boundaryFit.serialized)
+        XCTAssertEqual(decoded.niriSingleWindowFit, boundaryFit)
         XCTAssertEqual(decoded.monitorDwindleSettings.first?.singleWindowFit, hugeFit)
     }
 }

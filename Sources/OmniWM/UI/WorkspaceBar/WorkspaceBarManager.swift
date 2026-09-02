@@ -4,7 +4,7 @@
 import AppKit
 import SwiftUI
 
-enum WorkspaceBarWindowLevel: String, CaseIterable, Identifiable {
+enum WorkspaceBarWindowLevel: String, CaseIterable, Codable, Identifiable {
     case normal
     case floating
     case status
@@ -36,7 +36,7 @@ enum WorkspaceBarWindowLevel: String, CaseIterable, Identifiable {
     }
 }
 
-enum WorkspaceBarPosition: String, CaseIterable, Identifiable {
+enum WorkspaceBarPosition: String, CaseIterable, Codable, Identifiable {
     case overlappingMenuBar
     case belowMenuBar
 
@@ -52,7 +52,7 @@ enum WorkspaceBarPosition: String, CaseIterable, Identifiable {
     }
 }
 
-enum WorkspaceBarNotchMode: String, CaseIterable, Identifiable {
+enum WorkspaceBarNotchMode: String, CaseIterable, Codable, Identifiable {
     case off
     case moveBelowMenuBar
     case splitActiveLeft
