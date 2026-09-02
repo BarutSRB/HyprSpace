@@ -232,7 +232,11 @@ struct GeneralSettingsTab: View {
                         onReset: { updateGapSetting(for: monitor) { $0.fullscreenUsesOuterGaps = nil } }
                     )
                     SettingsCaption(
-                        "Overrides selected global outer-margin values for \(monitor.name). Top is measured from the screen's physical top edge."
+                        "Overrides selected global outer-margin values for \(monitor.name). "
+                            + topGapCaption(
+                                settings.gapSettings(for: monitor)?.outerGapTop ?? settings.outerGapTop,
+                                on: monitor
+                            )
                     )
                     SettingsCaption(
                         "Keeps these margins for OmniWM Full Screen and the Single Window ‘Full Screen’ fit. Any active Workspace Bar reservation is also kept; native macOS Full Screen is unchanged."
@@ -267,6 +271,9 @@ struct GeneralSettingsTab: View {
                         valueWidth: 64
                     )
                     .onChange(of: settings.outerGapTop) { _, _ in syncOuterGaps() }
+                    if let mainMonitor = connectedMonitors.first(where: \.isMain) {
+                        SettingsCaption(topGapCaption(settings.outerGapTop, on: mainMonitor))
+                    }
 
                     SettingsSliderRow(
                         label: "Bottom",
@@ -296,6 +303,13 @@ struct GeneralSettingsTab: View {
         .onAppear {
             connectedMonitors = Monitor.current()
         }
+    }
+
+    private func topGapCaption(_ top: Double, on monitor: Monitor) -> String {
+        let menuBarInset = Int(max(0, monitor.frame.maxY - monitor.visibleFrame.maxY))
+        let belowMenuBar = max(0, Int(top) - menuBarInset)
+        return "Top is measured from the screen's physical top edge: "
+            + "\(Int(top)) px → \(belowMenuBar) px below the menu bar on \(monitor.name)."
     }
 
     private func syncOuterGaps() {
