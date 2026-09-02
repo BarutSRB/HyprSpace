@@ -35,6 +35,8 @@ struct ActionSpec: Equatable {
 }
 
 enum ActionCatalog {
+    static let workspaceSlotRange = 1 ... 9
+
     private static let digitCodes: [UInt32] = [
         UInt32(kVK_ANSI_1), UInt32(kVK_ANSI_2), UInt32(kVK_ANSI_3),
         UInt32(kVK_ANSI_4), UInt32(kVK_ANSI_5), UInt32(kVK_ANSI_6),
@@ -145,6 +147,25 @@ enum ActionCatalog {
                     binding: KeyBinding(keyCode: code, modifiers: UInt32(optionKey | shiftKey))
                 )
             )
+        }
+
+        for slot in workspaceSlotRange {
+            specs.append(contentsOf: [
+                action(
+                    id: "switchWorkspaceSlot.\(slot)",
+                    command: .switchWorkspaceSlot(slot),
+                    category: .workspace,
+                    binding: .unassigned,
+                    keywords: ["slot", "position", "monitor"]
+                ),
+                action(
+                    id: "moveToWorkspaceSlot.\(slot)",
+                    command: .moveToWorkspaceSlot(slot),
+                    category: .workspace,
+                    binding: .unassigned,
+                    keywords: ["slot", "position", "monitor"]
+                )
+            ])
         }
 
         specs.append(
@@ -1016,6 +1037,8 @@ enum ActionCatalog {
              .moveWindowToWorkspaceUp,
              .moveWindowToWorkspaceDown,
              .switchWorkspace,
+             .switchWorkspaceSlot,
+             .moveToWorkspaceSlot,
              .switchWorkspaceNext,
              .switchWorkspacePrevious,
              .focusMonitorPrevious,
@@ -1056,6 +1079,8 @@ enum ActionCatalog {
         case .moveColumnToWorkspaceUp: "Move Column to Workspace Up"
         case .moveColumnToWorkspaceDown: "Move Column to Workspace Down"
         case let .switchWorkspace(idx): "Switch to Workspace \(idx + 1)"
+        case let .switchWorkspaceSlot(slot): "Switch to Workspace Slot \(slot)"
+        case let .moveToWorkspaceSlot(slot): "Move to Workspace Slot \(slot)"
         case .switchWorkspaceNext: "Switch to Next Workspace"
         case .switchWorkspacePrevious: "Switch to Previous Workspace"
         case .focusMonitorPrevious: "Focus Previous Monitor"
@@ -1186,6 +1211,10 @@ enum ActionCatalog {
             .expelWindowFromColumn
         case .switchWorkspace:
             .switchWorkspace
+        case .switchWorkspaceSlot:
+            .switchWorkspaceSlot
+        case .moveToWorkspaceSlot:
+            .moveToWorkspaceSlot
         case .switchWorkspaceNext:
             .switchWorkspaceNext
         case .switchWorkspacePrevious:

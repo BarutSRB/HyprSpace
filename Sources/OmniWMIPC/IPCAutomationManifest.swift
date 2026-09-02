@@ -281,6 +281,10 @@ public enum IPCAutomationManifest {
         kind: .workspaceNumber,
         summary: "Positive numeric workspace ID."
     )
+    private static let slotNumberArgument = IPCCommandArgumentDescriptor(
+        kind: .workspaceNumber,
+        summary: "One-based position in the interaction monitor's ordered workspace list."
+    )
     private static let columnIndexArgument = IPCCommandArgumentDescriptor(
         kind: .columnIndex,
         summary: "One-based column index."
@@ -642,6 +646,12 @@ public enum IPCAutomationManifest {
             arguments: [workspaceNumberArgument]
         ),
         command(
+            ["switch-workspace", "slot"],
+            name: .switchWorkspaceSlot,
+            summary: "Switch to the workspace at a one-based position in the interaction monitor's workspace list.",
+            arguments: [slotNumberArgument]
+        ),
+        command(
             ["move-to-workspace"],
             name: .moveToWorkspace,
             summary: "Move the focused window to a workspace by workspace ID.",
@@ -662,6 +672,12 @@ public enum IPCAutomationManifest {
             name: .moveToWorkspaceOnMonitor,
             summary: "Move the focused window to a workspace already assigned to the requested adjacent monitor.",
             arguments: [workspaceNumberArgument, directionArgument]
+        ),
+        command(
+            ["move-to-workspace", "slot"],
+            name: .moveToWorkspaceSlot,
+            summary: "Move the focused window to the workspace at a one-based position in the interaction monitor's workspace list.",
+            arguments: [slotNumberArgument]
         ),
         command(
             ["move-to-monitor"],

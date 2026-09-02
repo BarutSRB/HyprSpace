@@ -625,19 +625,59 @@ final class WorkspaceNavigationHandler {
         }
 
         guard let targetWorkspace else { return }
+        activateWorkspaceInOrder(targetWorkspace, from: currentWorkspace.id, on: currentMonitorId)
+    }
 
-        saveNiriViewportState(for: currentWorkspace.id)
-        guard controller.workspaceManager.setActiveWorkspace(targetWorkspace.id, on: currentMonitorId) else {
-            return
+    func workspaceSlot(_ slot: Int) -> WorkspaceDescriptor? {
+        guard let controller, slot >= 1, let monitorId = interactionMonitorId(for: controller) else { return nil }
+        let ordered = controller.workspaceManager.workspaces(on: monitorId)
+        return ordered.indices.contains(slot - 1) ? ordered[slot - 1] : nil
+    }
+
+    @discardableResult
+    func switchWorkspaceSlot(_ slot: Int) -> Bool {
+        guard let controller,
+              let monitorId = interactionMonitorId(for: controller),
+              let targetWorkspace = workspaceSlot(slot),
+              let currentWorkspace = controller.workspaceManager.activeWorkspaceOrFirst(on: monitorId),
+              currentWorkspace.id != targetWorkspace.id
+        else { return false }
+        return activateWorkspaceInOrder(targetWorkspace, from: currentWorkspace.id, on: monitorId)
+    }
+
+    @discardableResult
+    func moveFocusedWindow(toWorkspaceSlot slot: Int) -> Bool {
+        guard let controller,
+              let token = controller.workspaceManager.selectedManagedToken,
+              let targetWorkspace = workspaceSlot(slot),
+              controller.workspaceManager.workspace(for: token) != targetWorkspace.id
+        else { return false }
+        if case .changed = commitWindowMove(handle: WindowHandle(id: token), toWorkspaceId: targetWorkspace.id) {
+            return true
+        }
+        return false
+    }
+
+    @discardableResult
+    private func activateWorkspaceInOrder(
+        _ targetWorkspace: WorkspaceDescriptor,
+        from currentWorkspaceId: WorkspaceDescriptor.ID,
+        on monitorId: Monitor.ID
+    ) -> Bool {
+        guard let controller else { return false }
+        saveNiriViewportState(for: currentWorkspaceId)
+        guard controller.workspaceManager.setActiveWorkspace(targetWorkspace.id, on: monitorId) else {
+            return false
         }
 
         let monitor = controller.workspaceManager.monitor(for: targetWorkspace.id)
-            ?? controller.workspaceManager.monitor(byId: currentMonitorId)
+            ?? controller.workspaceManager.monitor(byId: monitorId)
         commitWorkspaceTransitionFocusHandoff(
             targetWorkspaceId: targetWorkspace.id,
             monitor: monitor,
             startScrollAnimation: false
         )
+        return true
     }
 
     func saveNiriViewportState(for workspaceId: WorkspaceDescriptor.ID) {

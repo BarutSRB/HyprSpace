@@ -88,6 +88,10 @@ final class IPCCommandRouter {
                 return .invalidArguments
             }
             return switchWorkspaceAnywhere(to: target)
+        case let .switchWorkspaceSlot(slotNumber):
+            return switchWorkspaceSlot(slotNumber)
+        case let .moveToWorkspaceSlot(slotNumber):
+            return moveFocusedWindow(toWorkspaceSlot: slotNumber)
         case let .moveToWorkspace(workspaceNumber):
             guard let target = workspaceTarget(from: workspaceNumber) else {
                 return .invalidArguments
@@ -542,6 +546,30 @@ final class IPCCommandRouter {
             .id
         return currentWorkspaceId == previousWorkspaceId && currentMonitorId == previousMonitorId ? .notFound :
             .executed
+    }
+
+    private func switchWorkspaceSlot(_ slot: Int) -> ExternalCommandResult {
+        guard slot >= 1 else { return .invalidArguments }
+        if let guardResult = validateControllerState() {
+            return guardResult
+        }
+        guard let target = controller.workspaceNavigationHandler.workspaceSlot(slot) else { return .notFound }
+        guard controller.activeWorkspace()?.id != target.id else { return .noChange }
+        return controller.workspaceNavigationHandler.switchWorkspaceSlot(slot) ? .executed : .notFound
+    }
+
+    private func moveFocusedWindow(toWorkspaceSlot slot: Int) -> ExternalCommandResult {
+        guard slot >= 1 else { return .invalidArguments }
+        if let guardResult = validateControllerState() {
+            return guardResult
+        }
+        guard let token = controller.workspaceManager.selectedManagedToken,
+              let target = controller.workspaceNavigationHandler.workspaceSlot(slot)
+        else { return .notFound }
+        guard controller.workspaceManager.workspace(for: token) != target.id else { return .noChange }
+        return controller.workspaceNavigationHandler.moveFocusedWindow(toWorkspaceSlot: slot)
+            ? .executed
+            : .workspaceStateConflict
     }
 
     private func moveFocusedWindow(to target: WorkspaceTarget) -> ExternalCommandResult {

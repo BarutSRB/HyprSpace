@@ -189,7 +189,9 @@ enum SettingsTOMLCodec {
         })
     }
 
-    static let hotkeyIDsAddedAfterVersionZero: Set<String> = ["closeFocusedWindow"]
+    static let hotkeyIDsAddedAfterVersionZero: Set<String> = Set(ActionCatalog.workspaceSlotRange.flatMap { slot in
+        ["switchWorkspaceSlot.\(slot)", "moveToWorkspaceSlot.\(slot)"]
+    }).union(["closeFocusedWindow"])
 
     private static func migrateVersionZeroHotkeys(
         in raw: inout [String: TOMLNode]

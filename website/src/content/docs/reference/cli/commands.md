@@ -105,6 +105,7 @@ In Dwindle, `focus left/right` remains spatial. `focus up/down` traverses a grou
 | `command switch-workspace prev` | — | shared | Switch to the previous workspace |
 | `command switch-workspace back-and-forth` | — | shared | Switch to the previously active workspace |
 | `command switch-workspace anywhere` | `<number>` | shared | Focus a workspace by numeric workspace ID across all monitors |
+| `command switch-workspace slot` | `<number>` | shared | Switch to the workspace at a one-based position in the interaction monitor's ordered workspace list |
 
 ### Move to Workspace
 
@@ -114,8 +115,11 @@ In Dwindle, `focus left/right` remains spatial. `focus up/down` traverses a grou
 | `command move-to-workspace up` | — | shared | Move focused window to the adjacent workspace above |
 | `command move-to-workspace down` | — | shared | Move focused window to the adjacent workspace below |
 | `command move-to-workspace on-monitor` | `<number> <left\|right\|up\|down>` | shared | Move focused window to a workspace already assigned to the requested adjacent monitor |
+| `command move-to-workspace slot` | `<number>` | shared | Move focused window to the workspace at a one-based position in the interaction monitor's ordered workspace list |
 
 Workspace IDs are positive numeric strings. Direct hotkeys stay limited to `1-9`, but the workspace UI and IPC/CLI both support `10+`.
+
+Workspace IDs are global, so `switch-workspace 3` targets workspace `3` wherever it lives. The `slot` variants address a position in the interaction monitor's ordered workspace list instead, the same order the workspace bar shows, so `switch-workspace slot 2` opens whichever workspace comes second on the monitor you are using. A slot beyond that monitor's list reports `not_found`; the native actions `Switch to Workspace Slot 1-9` and `Move to Workspace Slot 1-9` are unassigned by default.
 
 ### Monitor Focus
 

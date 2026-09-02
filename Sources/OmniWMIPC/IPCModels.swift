@@ -242,10 +242,12 @@ public enum IPCCommandName: String, Codable, CaseIterable, Equatable, Sendable {
     case switchWorkspacePrevious = "switch-workspace-previous"
     case switchWorkspaceBackAndForth = "switch-workspace-back-and-forth"
     case switchWorkspaceAnywhere = "switch-workspace-anywhere"
+    case switchWorkspaceSlot = "switch-workspace-slot"
     case moveToWorkspace = "move-to-workspace"
     case moveToWorkspaceUp = "move-to-workspace-up"
     case moveToWorkspaceDown = "move-to-workspace-down"
     case moveToWorkspaceOnMonitor = "move-to-workspace-on-monitor"
+    case moveToWorkspaceSlot = "move-to-workspace-slot"
     case moveToMonitor = "move-to-monitor"
     case focusMonitorPrevious = "focus-monitor-previous"
     case focusMonitorNext = "focus-monitor-next"
@@ -376,10 +378,12 @@ public enum IPCCommandRequest: Equatable, Sendable {
     case switchWorkspacePrevious
     case switchWorkspaceBackAndForth
     case switchWorkspaceAnywhere(workspaceNumber: Int)
+    case switchWorkspaceSlot(slotNumber: Int)
     case moveToWorkspace(workspaceNumber: Int)
     case moveToWorkspaceUp
     case moveToWorkspaceDown
     case moveToWorkspaceOnMonitor(workspaceNumber: Int, direction: IPCDirection)
+    case moveToWorkspaceSlot(slotNumber: Int)
     case moveToMonitor(direction: IPCDirection)
     case focusMonitorPrevious
     case focusMonitorNext
@@ -493,6 +497,8 @@ public enum IPCCommandRequest: Equatable, Sendable {
             .switchWorkspaceBackAndForth
         case .switchWorkspaceAnywhere:
             .switchWorkspaceAnywhere
+        case .switchWorkspaceSlot:
+            .switchWorkspaceSlot
         case .moveToWorkspace:
             .moveToWorkspace
         case .moveToWorkspaceUp:
@@ -501,6 +507,8 @@ public enum IPCCommandRequest: Equatable, Sendable {
             .moveToWorkspaceDown
         case .moveToWorkspaceOnMonitor:
             .moveToWorkspaceOnMonitor
+        case .moveToWorkspaceSlot:
+            .moveToWorkspaceSlot
         case .moveToMonitor:
             .moveToMonitor
         case .focusMonitorPrevious:
@@ -751,6 +759,8 @@ public enum IPCCommandRequest: Equatable, Sendable {
             self = .switchWorkspaceBackAndForth
         case .switchWorkspaceAnywhere:
             self = .switchWorkspaceAnywhere(workspaceNumber: try requireInteger())
+        case .switchWorkspaceSlot:
+            self = .switchWorkspaceSlot(slotNumber: try requireInteger())
         case .moveToWorkspace:
             self = .moveToWorkspace(workspaceNumber: try requireInteger())
         case .moveToWorkspaceUp:
@@ -765,6 +775,8 @@ public enum IPCCommandRequest: Equatable, Sendable {
                 workspaceNumber: arguments.workspaceNumber,
                 direction: arguments.direction
             )
+        case .moveToWorkspaceSlot:
+            self = .moveToWorkspaceSlot(slotNumber: try requireInteger())
         case .moveToMonitor:
             self = .moveToMonitor(direction: try requireDirection())
         case .focusMonitorPrevious:
@@ -920,6 +932,10 @@ extension IPCCommandRequest: Codable {
         let workspaceNumber: Int
     }
 
+    private struct IPCSlotNumberArguments: Codable, Equatable, Sendable {
+        let slotNumber: Int
+    }
+
     private struct IPCColumnIndexArguments: Codable, Equatable, Sendable {
         let columnIndex: Int
     }
@@ -1025,6 +1041,12 @@ extension IPCCommandRequest: Codable {
         case .switchWorkspaceAnywhere:
             let arguments = try container.decode(IPCWorkspaceNumberArguments.self, forKey: .arguments)
             self = .switchWorkspaceAnywhere(workspaceNumber: arguments.workspaceNumber)
+        case .switchWorkspaceSlot:
+            let arguments = try container.decode(IPCSlotNumberArguments.self, forKey: .arguments)
+            self = .switchWorkspaceSlot(slotNumber: arguments.slotNumber)
+        case .moveToWorkspaceSlot:
+            let arguments = try container.decode(IPCSlotNumberArguments.self, forKey: .arguments)
+            self = .moveToWorkspaceSlot(slotNumber: arguments.slotNumber)
         case .moveToWorkspace:
             let arguments = try container.decode(IPCWorkspaceNumberArguments.self, forKey: .arguments)
             self = .moveToWorkspace(workspaceNumber: arguments.workspaceNumber)
@@ -1217,6 +1239,9 @@ extension IPCCommandRequest: Codable {
             break
         case let .switchWorkspaceAnywhere(workspaceNumber):
             try container.encode(IPCWorkspaceNumberArguments(workspaceNumber: workspaceNumber), forKey: .arguments)
+        case let .switchWorkspaceSlot(slotNumber),
+             let .moveToWorkspaceSlot(slotNumber):
+            try container.encode(IPCSlotNumberArguments(slotNumber: slotNumber), forKey: .arguments)
         case let .moveToWorkspace(workspaceNumber):
             try container.encode(IPCWorkspaceNumberArguments(workspaceNumber: workspaceNumber), forKey: .arguments)
         case .moveToWorkspaceUp:

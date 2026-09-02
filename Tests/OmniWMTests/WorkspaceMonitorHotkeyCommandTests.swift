@@ -35,6 +35,44 @@ final class WorkspaceMonitorHotkeyCommandTests: XCTestCase {
         }
     }
 
+    func testWorkspaceSlotActionsAreRegistered() throws {
+        for slot in ActionCatalog.workspaceSlotRange {
+            let cases: [(command: HotkeyCommand, id: String, title: String, ipcName: IPCCommandName)] = [
+                (
+                    .switchWorkspaceSlot(slot),
+                    "switchWorkspaceSlot.\(slot)",
+                    "Switch to Workspace Slot \(slot)",
+                    .switchWorkspaceSlot
+                ),
+                (
+                    .moveToWorkspaceSlot(slot),
+                    "moveToWorkspaceSlot.\(slot)",
+                    "Move to Workspace Slot \(slot)",
+                    .moveToWorkspaceSlot
+                )
+            ]
+
+            for entry in cases {
+                let spec = try XCTUnwrap(ActionCatalog.spec(for: entry.command))
+
+                XCTAssertEqual(spec.id, entry.id)
+                XCTAssertEqual(spec.title, entry.title)
+                XCTAssertEqual(spec.category, .workspace)
+                XCTAssertEqual(spec.layoutCompatibility, .shared)
+                XCTAssertEqual(spec.defaultBinding, .unassigned)
+                XCTAssertEqual(spec.ipcCommandName, entry.ipcName)
+                XCTAssertNotNil(spec.ipcDescriptor)
+                XCTAssertEqual(HotkeyBindingRegistry.command(for: entry.id), entry.command)
+            }
+        }
+
+        let numeric = try XCTUnwrap(ActionCatalog.spec(for: .switchWorkspace(0)))
+        XCTAssertEqual(numeric.id, "switchWorkspace.0")
+        XCTAssertNotEqual(numeric.defaultBinding, .unassigned)
+        XCTAssertTrue(SettingsTOMLCodec.hotkeyIDsAddedAfterVersionZero.contains("switchWorkspaceSlot.9"))
+        XCTAssertTrue(SettingsTOMLCodec.hotkeyIDsAddedAfterVersionZero.contains("moveToWorkspaceSlot.1"))
+    }
+
     func testDirectionalWindowMoveActionsAreRegistered() throws {
         let cases: [(direction: Direction, id: String, title: String)] = [
             (.left, "moveWindowToMonitor.left", "Move Window to Left Monitor"),

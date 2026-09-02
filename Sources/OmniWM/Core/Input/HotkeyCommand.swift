@@ -37,6 +37,8 @@ enum HotkeyCommand: Codable, Equatable, Hashable {
     case moveColumnToWorkspaceUp
     case moveColumnToWorkspaceDown
     case switchWorkspace(Int)
+    case switchWorkspaceSlot(Int)
+    case moveToWorkspaceSlot(Int)
     case switchWorkspaceNext
     case switchWorkspacePrevious
     case focusMonitorPrevious
