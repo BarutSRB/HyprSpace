@@ -1052,6 +1052,35 @@ final class WindowCornerRadiiTests: XCTestCase {
     }
 
     @MainActor
+    func testCornerSampleTreatsZeroRadiiAsInvalidReading() {
+        // Server queries can transiently report zero radii for unrealized windows;
+        // the sample must fall through to raw (or nil) so a square ring never caches.
+        let zeroResolved = [
+            NSNumber(value: 0),
+            NSNumber(value: 0),
+            NSNumber(value: 0),
+            NSNumber(value: 0)
+        ] as CFArray
+        let raw = [NSNumber(value: 11.5)] as CFArray
+        let observedSize = CGSize(width: 800, height: 600)
+
+        XCTAssertEqual(
+            SkyLight.cornerSample(resolved: zeroResolved, raw: raw, observedSize: observedSize),
+            WindowCornerSample(
+                radii: WindowCornerRadii(uniform: 11.5),
+                observedSize: observedSize,
+                source: .raw
+            )
+        )
+        XCTAssertNil(
+            SkyLight.cornerSample(resolved: zeroResolved, raw: nil, observedSize: observedSize)
+        )
+        XCTAssertNil(
+            SkyLight.cornerSample(resolved: zeroResolved, raw: zeroResolved, observedSize: observedSize)
+        )
+    }
+
+    @MainActor
     func testCornerSampleRejectsInvalidObservedSize() {
         let raw = [NSNumber(value: 11.5)] as CFArray
 
