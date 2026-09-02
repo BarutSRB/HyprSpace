@@ -1320,6 +1320,65 @@ final class TrackpadWorkspaceGestureTests: XCTestCase {
         await cleanupRecoveringMultitouchSource(fixture, harness: harness)
     }
 
+    func testCancelledPhaseSettlesCommittedGestureWithoutFlick() async throws {
+        let fixture = try makeFixture(scrollGestureEnabled: true)
+        let engine = try XCTUnwrap(fixture.controller.niriEngine)
+        for index in 0 ..< 3 {
+            let token = addManagedWindow(
+                to: fixture.ws1,
+                controller: fixture.controller,
+                pid: pid_t(8_201 + index),
+                windowId: 8_301 + index
+            )
+            _ = engine.addWindow(token: token, to: fixture.ws1, afterSelection: nil)
+        }
+        for column in engine.columns(in: fixture.ws1) {
+            column.cachedWidth = 700
+        }
+
+        let harness = await installRecoveringMultitouchSource(fixture)
+        let generation = try XCTUnwrap(harness.source.diagnosticsSnapshot().activeGeneration)
+        let location = CGPoint(x: 800, y: 450)
+        sendRawFrame(harness.source, generation: generation, fingers: 3, x: 0.8, y: 0.5, at: 300, location: location)
+        sendRawFrame(
+            harness.source,
+            generation: generation,
+            fingers: 3,
+            x: 0.74,
+            y: 0.5,
+            at: 300.01,
+            location: location
+        )
+        XCTAssertTrue(fixture.controller.workspaceManager.animationDriver.hasGesture(in: fixture.ws1))
+
+        fixture.controller.mouseEventHandler.receiveTapGestureEvent(
+            MouseEventHandler.GestureEventSnapshot(
+                location: location,
+                phaseRawValue: NSEvent.Phase.cancelled.rawValue,
+                timestamp: 300.02,
+                touches: []
+            )
+        )
+
+        XCTAssertFalse(fixture.controller.workspaceManager.animationDriver.hasGesture(in: fixture.ws1))
+        XCTAssertEqual(fixture.controller.mouseEventHandler.state.gesturePhase, .idle)
+        XCTAssertEqual(activeWorkspace(fixture), fixture.ws1)
+
+        sendRawFrame(harness.source, generation: generation, fingers: 0, x: 0, y: 0, at: 300.5, location: location)
+        sendRawFrame(harness.source, generation: generation, fingers: 3, x: 0.8, y: 0.5, at: 301, location: location)
+        sendRawFrame(
+            harness.source,
+            generation: generation,
+            fingers: 3,
+            x: 0.74,
+            y: 0.5,
+            at: 301.01,
+            location: location
+        )
+        XCTAssertTrue(fixture.controller.workspaceManager.animationDriver.hasGesture(in: fixture.ws1))
+        await cleanupRecoveringMultitouchSource(fixture, harness: harness)
+    }
+
     private func installRecoveringMultitouchSource(
         _ fixture: Fixture
     ) async -> (

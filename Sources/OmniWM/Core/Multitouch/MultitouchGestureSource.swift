@@ -13,6 +13,7 @@ private let multitouchStateByteOffset = 20
 private let multitouchPositionXByteOffset = 32
 private let multitouchPositionYByteOffset = 36
 private let multitouchTouchingState: Int32 = 4
+private let multitouchLiftTimeout = 0.12
 
 final class MultitouchFrameMailbox: @unchecked Sendable {
     struct PerformanceSnapshot: Equatable, Sendable {
@@ -57,6 +58,11 @@ final class MultitouchFrameMailbox: @unchecked Sendable {
         case began
         case changed
         case ended
+        case cancelled
+
+        var isTerminal: Bool {
+            self == .ended || self == .cancelled
+        }
     }
 
     struct Delivery: Sendable {
@@ -69,6 +75,7 @@ final class MultitouchFrameMailbox: @unchecked Sendable {
         var generation: UInt = 0
         var touchingSlots: UInt64 = 0
         var ownerSlot: Int?
+        var ownerTimestamp: Double = 0
         var drainScheduled = false
         var pending: [Delivery] = []
         var spare: [Delivery] = []
@@ -108,37 +115,65 @@ final class MultitouchFrameMailbox: @unchecked Sendable {
                 return false
             }
             let hasTouches = !frame.touches.isEmpty
-            let slotMask: UInt64 = 1 << UInt64(slot)
-            let wasTouching = value.touchingSlots & slotMask != 0
-            if hasTouches {
-                value.touchingSlots |= slotMask
-            } else {
-                value.touchingSlots &= ~slotMask
-            }
-            guard let owner = value.ownerSlot else {
-                guard hasTouches, !wasTouching else { return false }
-                value.ownerSlot = slot
-                makeRoomForGesture(in: &value)
-                return enqueue(.began, frame, generation: generation, in: &value)
-            }
-            guard owner == slot else { return false }
-            guard hasTouches else {
+            var scheduled = false
+            if let owner = value.ownerSlot, hasTouches,
+               frame.timestamp - value.ownerTimestamp > multitouchLiftTimeout
+            {
+                value.touchingSlots &= ~(1 << UInt64(owner))
                 value.ownerSlot = nil
-                return enqueue(.ended, frame, generation: generation, in: &value)
-            }
-            if value.pending.last?.kind == .changed {
-                value.pending[value.pending.count - 1] = Delivery(
-                    frame: frame,
+                scheduled = enqueue(
+                    .cancelled,
+                    MultitouchGestureSource.RawFrame(
+                        touches: MultitouchGestureSource.RawTouchBuffer(),
+                        timestamp: frame.timestamp
+                    ),
                     generation: generation,
-                    kind: .changed
+                    in: &value
                 )
-                if let counters = value.performanceCounters {
-                    _ = counters.overwrittenChanges.wrappingAdd(1, ordering: .relaxed)
-                }
-                return scheduleDrainIfNeeded(in: &value)
             }
-            return enqueue(.changed, frame, generation: generation, in: &value)
+            return route(frame, hasTouches: hasTouches, generation: generation, slot: slot, in: &value) || scheduled
         }
+    }
+
+    private func route(
+        _ frame: MultitouchGestureSource.RawFrame,
+        hasTouches: Bool,
+        generation: UInt,
+        slot: Int,
+        in value: inout State
+    ) -> Bool {
+        let slotMask: UInt64 = 1 << UInt64(slot)
+        let wasTouching = value.touchingSlots & slotMask != 0
+        if hasTouches {
+            value.touchingSlots |= slotMask
+        } else {
+            value.touchingSlots &= ~slotMask
+        }
+        guard let owner = value.ownerSlot else {
+            guard hasTouches, !wasTouching else { return false }
+            value.ownerSlot = slot
+            value.ownerTimestamp = frame.timestamp
+            makeRoomForGesture(in: &value)
+            return enqueue(.began, frame, generation: generation, in: &value)
+        }
+        guard owner == slot else { return false }
+        guard hasTouches else {
+            value.ownerSlot = nil
+            return enqueue(.ended, frame, generation: generation, in: &value)
+        }
+        value.ownerTimestamp = frame.timestamp
+        if value.pending.last?.kind == .changed {
+            value.pending[value.pending.count - 1] = Delivery(
+                frame: frame,
+                generation: generation,
+                kind: .changed
+            )
+            if let counters = value.performanceCounters {
+                _ = counters.overwrittenChanges.wrappingAdd(1, ordering: .relaxed)
+            }
+            return scheduleDrainIfNeeded(in: &value)
+        }
+        return enqueue(.changed, frame, generation: generation, in: &value)
     }
 
     private func enqueue(
@@ -152,7 +187,7 @@ final class MultitouchFrameMailbox: @unchecked Sendable {
         {
             value.pending.remove(at: changedIndex)
         }
-        if kind == .ended {
+        if kind.isTerminal {
             makeRoomForEnd(in: &value)
         }
         guard value.pending.count < capacity else { return scheduleDrainIfNeeded(in: &value) }
@@ -224,7 +259,7 @@ final class MultitouchFrameMailbox: @unchecked Sendable {
 
     private func makeRoomForGesture(in value: inout State) {
         while value.pending.count > capacity - 3 {
-            guard let endIndex = value.pending.firstIndex(where: { $0.kind == .ended }) else {
+            guard let endIndex = value.pending.firstIndex(where: { $0.kind.isTerminal }) else {
                 value.pending.removeAll(keepingCapacity: true)
                 return
             }
@@ -234,7 +269,7 @@ final class MultitouchFrameMailbox: @unchecked Sendable {
 
     private func makeRoomForEnd(in value: inout State) {
         while value.pending.count >= capacity,
-              let endIndex = value.pending.firstIndex(where: { $0.kind == .ended })
+              let endIndex = value.pending.firstIndex(where: { $0.kind.isTerminal })
         {
             value.pending.removeFirst(endIndex + 1)
         }
@@ -762,13 +797,7 @@ final class MultitouchGestureSource {
         let activeCount = frame.touches.count
         if activeCount == 0 {
             guard previousActiveCount > 0 else { return (nil, 0) }
-            let snapshot = MouseEventHandler.GestureEventSnapshot(
-                location: location,
-                phaseRawValue: NSEvent.Phase.ended.rawValue,
-                timestamp: frame.timestamp,
-                touches: []
-            )
-            return (snapshot, 0)
+            return (liftSnapshot(.ended, location: location, timestamp: frame.timestamp), 0)
         }
 
         let phase: NSEvent.Phase = previousActiveCount == 0 ? .began : .changed
@@ -785,6 +814,25 @@ final class MultitouchGestureSource {
             touches: touches
         )
         return (snapshot, activeCount)
+    }
+
+    private static func liftSnapshot(
+        _ phase: NSEvent.Phase,
+        location: CGPoint,
+        timestamp: Double
+    ) -> MouseEventHandler.GestureEventSnapshot {
+        MouseEventHandler.GestureEventSnapshot(
+            location: location,
+            phaseRawValue: phase.rawValue,
+            timestamp: timestamp,
+            touches: []
+        )
+    }
+
+    private func cancelRawGesture(_ frame: RawFrame, generation: UInt, location: CGPoint) {
+        guard recordAndAccept(frame, generation: generation), previousActiveCount > 0 else { return }
+        previousActiveCount = 0
+        onSnapshot?(Self.liftSnapshot(.cancelled, location: location, timestamp: frame.timestamp))
     }
 
     private func scheduleRevalidation(after delay: Duration, settlesWake: Bool = false) {
@@ -1129,7 +1177,11 @@ final class MultitouchGestureSource {
         guard !deliveries.isEmpty else { return }
         let location = NSEvent.mouseLocation
         for delivery in deliveries {
-            handleRawFrame(delivery.frame, generation: delivery.generation, location: location)
+            if delivery.kind == .cancelled {
+                cancelRawGesture(delivery.frame, generation: delivery.generation, location: location)
+            } else {
+                handleRawFrame(delivery.frame, generation: delivery.generation, location: location)
+            }
         }
         rawFrameMailbox.recycle(deliveries)
     }

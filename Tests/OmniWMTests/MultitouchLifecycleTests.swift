@@ -852,6 +852,64 @@ final class MultitouchLifecycleTests: XCTestCase {
         await shutdown(harness)
     }
 
+    func testOwnerMissingLiftRecoversWithCancelledThenBegan() async {
+        let harness = makeHarness([FakeMultitouchBackend.enumeration([deviceA])])
+        var snapshots: [MouseEventHandler.GestureEventSnapshot] = []
+        harness.source.onSnapshot = { snapshots.append($0) }
+        harness.source.startLifecycle()
+        await runNext(harness)
+
+        harness.backend.emitFrame(registryId: 101, touches: contacts(3), timestamp: 1.00)
+        harness.backend.emitFrame(registryId: 101, touches: contacts(3), timestamp: 1.01)
+        await drainMultitouchTasks()
+        XCTAssertEqual(
+            snapshots.map(\.phaseRawValue),
+            [NSEvent.Phase.began.rawValue, NSEvent.Phase.changed.rawValue]
+        )
+
+        harness.backend.emitFrame(registryId: 101, touches: contacts(3), timestamp: 1.20)
+        await drainMultitouchTasks()
+
+        XCTAssertEqual(
+            snapshots.map(\.phaseRawValue),
+            [
+                NSEvent.Phase.began.rawValue,
+                NSEvent.Phase.changed.rawValue,
+                NSEvent.Phase.cancelled.rawValue,
+                NSEvent.Phase.began.rawValue
+            ]
+        )
+        XCTAssertEqual(snapshots.map(\.timestamp), [1.00, 1.01, 1.20, 1.20])
+        XCTAssertEqual(snapshots.map(\.touches.count), [3, 3, 0, 3])
+        await shutdown(harness)
+    }
+
+    func testSecondDeviceRecoversAfterOwnerMissingLift() async {
+        let harness = makeHarness([FakeMultitouchBackend.enumeration([deviceA, deviceB])])
+        var snapshots: [MouseEventHandler.GestureEventSnapshot] = []
+        harness.source.onSnapshot = { snapshots.append($0) }
+        harness.source.startLifecycle()
+        await runNext(harness)
+
+        harness.backend.emitFrame(registryId: 101, touches: contacts(3), timestamp: 1.00)
+        harness.backend.emitFrame(registryId: 101, touches: contacts(3), timestamp: 1.01)
+        await drainMultitouchTasks()
+        harness.backend.emitFrame(registryId: 202, touches: contacts(1), timestamp: 1.20)
+        await drainMultitouchTasks()
+
+        XCTAssertEqual(
+            snapshots.map(\.phaseRawValue),
+            [
+                NSEvent.Phase.began.rawValue,
+                NSEvent.Phase.changed.rawValue,
+                NSEvent.Phase.cancelled.rawValue,
+                NSEvent.Phase.began.rawValue
+            ]
+        )
+        XCTAssertEqual(snapshots.map(\.touches.count), [3, 3, 0, 1])
+        await shutdown(harness)
+    }
+
     private func contacts(_ count: Int) -> [(x: Float, y: Float)] {
         Array(repeating: (x: Float(0.5), y: Float(0.5)), count: count)
     }
