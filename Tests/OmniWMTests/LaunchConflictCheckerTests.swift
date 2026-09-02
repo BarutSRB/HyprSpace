@@ -443,3 +443,86 @@ final class LaunchConflictGateTests: XCTestCase {
         XCTAssertEqual(quitCount, 1)
     }
 }
+
+@MainActor
+final class LaunchConflictAutoRecheckTests: XCTestCase {
+    @MainActor
+    private final class ScriptedScan {
+        private var results: [LaunchConflictCheckResult]
+        private(set) var scans = 0
+        private(set) var clears = 0
+
+        init(_ results: [LaunchConflictCheckResult]) {
+            self.results = results
+        }
+
+        func makeRecheck(interval: TimeInterval = 1) -> LaunchConflictAutoRecheck {
+            LaunchConflictAutoRecheck(
+                interval: interval,
+                scan: {
+                    self.scans += 1
+                    return self.results.isEmpty ? .clear : self.results.removeFirst()
+                },
+                onClear: {
+                    self.clears += 1
+                }
+            )
+        }
+    }
+
+    func testTickKeepsPollingWhileBlockedAndClearsOnce() {
+        let script = ScriptedScan([.blocked(.scanUnavailable), .blocked(.conflicts([.yabai])), .clear])
+        let recheck = script.makeRecheck()
+        recheck.start()
+
+        recheck.tick()
+        recheck.tick()
+        XCTAssertEqual(script.scans, 2)
+        XCTAssertEqual(script.clears, 0)
+
+        recheck.tick()
+        XCTAssertEqual(script.scans, 3)
+        XCTAssertEqual(script.clears, 1)
+
+        recheck.tick()
+        XCTAssertEqual(script.scans, 3)
+        XCTAssertEqual(script.clears, 1)
+    }
+
+    func testTimerFiresOnMainRunLoopAndStopsAfterClear() {
+        let script = ScriptedScan([.blocked(.conflicts([.yabai])), .blocked(.conflicts([.yabai])), .clear])
+        let recheck = script.makeRecheck(interval: 0.01)
+        recheck.start()
+
+        let deadline = Date().addingTimeInterval(5)
+        while script.clears == 0, Date() < deadline {
+            RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02))
+        }
+        XCTAssertEqual(script.clears, 1)
+        XCTAssertEqual(script.scans, 3)
+
+        RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.05))
+        XCTAssertEqual(script.scans, 3)
+        XCTAssertEqual(script.clears, 1)
+    }
+
+    func testStopPreventsFurtherTicks() {
+        let script = ScriptedScan([.clear])
+        let recheck = script.makeRecheck()
+        recheck.start()
+        recheck.stop()
+
+        recheck.tick()
+        XCTAssertEqual(script.scans, 0)
+        XCTAssertEqual(script.clears, 0)
+    }
+
+    func testTickWithoutStartDoesNotScan() {
+        let script = ScriptedScan([.clear])
+        let recheck = script.makeRecheck()
+
+        recheck.tick()
+        XCTAssertEqual(script.scans, 0)
+        XCTAssertEqual(script.clears, 0)
+    }
+}

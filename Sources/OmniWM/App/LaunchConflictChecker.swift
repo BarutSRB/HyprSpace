@@ -165,6 +165,46 @@ enum LaunchConflictGate {
 }
 
 @MainActor
+final class LaunchConflictAutoRecheck {
+    private let interval: TimeInterval
+    private let scan: @MainActor () -> LaunchConflictCheckResult
+    private let onClear: @MainActor () -> Void
+    private var timer: Timer?
+
+    init(
+        interval: TimeInterval = 1,
+        scan: @escaping @MainActor () -> LaunchConflictCheckResult,
+        onClear: @escaping @MainActor () -> Void
+    ) {
+        self.interval = interval
+        self.scan = scan
+        self.onClear = onClear
+    }
+
+    func start() {
+        guard timer == nil else { return }
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.tick()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
+    }
+
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+    }
+
+    func tick() {
+        guard timer != nil, scan() == .clear else { return }
+        stop()
+        onClear()
+    }
+}
+
+@MainActor
 struct LaunchConflictChecker {
     struct Environment {
         var applicationSnapshots: @MainActor () -> [LaunchProcessSnapshot]

@@ -159,8 +159,9 @@ The application starts in `Sources/OmniWMApp/OmniWMApp.swift`:
 Before `finishBootstrap()` builds the runtime object graph, `bootstrapApplication()` takes a one-shot snapshot of the current user's
 GUI applications and processes. Another active window manager that could issue window operations at the same time,
 a second OmniWM instance, or an incomplete process inventory blocks startup to prevent conflicting window mutations.
-The warning can rescan after the interfering app or service is stopped, but there is no bypass and no background
-conflict monitoring after bootstrap succeeds.
+While the warning is shown OmniWM rescans every second and dismisses the warning on its own once the interfering app
+or service is gone; Check Again forces an immediate rescan. There is no bypass and no background conflict monitoring
+after bootstrap succeeds.
 
 The launch permission check requires Accessibility and Input Monitoring before bootstrap. Screen Recording is
 optional and only controls capture-derived visuals.
