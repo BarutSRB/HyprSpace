@@ -231,8 +231,8 @@ final class CommandHandler {
         return .executed
     }
 
-    static func shouldIgnoreCommand(_: HotkeyCommand, isOverviewOpen: Bool) -> Bool {
-        isOverviewOpen
+    static func shouldIgnoreCommand(_ command: HotkeyCommand, isOverviewOpen: Bool) -> Bool {
+        isOverviewOpen && command != .toggleOverview
     }
 
     private func layoutHandler<T>(as capability: T.Type) -> T? {

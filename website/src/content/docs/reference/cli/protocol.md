@@ -205,7 +205,7 @@ This envelope is produced locally by the CLI, so it does not include IPC fields 
 | `invalid_arguments` | Bad arguments for the command/rule |
 | `protocol_mismatch` | Client/server protocol version mismatch |
 | `ignored_disabled` | Window manager is disabled |
-| `ignored_overview` | Overview is open, so `CommandHandler` rejects external/IPC commands before normal execution |
+| `ignored_overview` | Overview is open, so `CommandHandler` rejects external/IPC commands (except `toggle-overview`) before normal execution |
 | `layout_mismatch` | Command incompatible with the active workspace layout |
 | `unauthorized` | Missing or invalid authorization token |
 | `stale_window_id` | Window ID is from a previous session or no longer valid |

@@ -199,12 +199,12 @@ Workspace IDs are positive numeric strings. Direct hotkeys stay limited to `1-9`
 | `command toggle-workspace-bar` | — | shared | Toggle workspace bar visibility |
 | `command hidden-bar panel` | — | shared | Toggle the panel containing configured hidden menu-bar items |
 | `command toggle-quake-terminal` | — | shared | Toggle the configured Quake terminal |
-| `command toggle-overview` | — | shared | Open Overview when it is closed; see the modal-routing note below |
+| `command toggle-overview` | — | shared | Open Overview when it is closed, or dismiss it onto the current selection when it is open |
 | `command toggle-system-stats` | — | shared | Toggle the system stats popup when a workspace-bar System Stats button is available |
 
 For example, run `omniwmctl command hidden-bar panel` to show or dismiss the Hidden Bar panel.
 
-Overview is modal with respect to external commands. `omniwmctl command toggle-overview` opens it while it is closed, but while Overview is open every IPC/external command—including another `toggle-overview`—returns `ignored_overview`. Dismissal remains local: Escape, Enter, backdrop dismissal, or the configured physical Overview toggle closes onto the current selection.
+Overview is modal with respect to external commands. While it is open every IPC/external command except `toggle-overview` returns `ignored_overview`; `omniwmctl command toggle-overview` closes it onto the current selection, exactly like Escape, Enter, backdrop dismissal, or the configured physical Overview toggle.
 
 **Layout compatibility:**
 - `shared` — works with any active layout

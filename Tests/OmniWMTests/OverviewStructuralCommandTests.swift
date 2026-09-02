@@ -5,10 +5,40 @@ import ApplicationServices
 import CoreGraphics
 import Foundation
 @testable import OmniWM
+import OmniWMIPC
 import XCTest
 
 @MainActor
 final class OverviewStructuralCommandTests: XCTestCase {
+    func testOverviewGuardExemptsOnlyToggleOverview() {
+        XCTAssertFalse(CommandHandler.shouldIgnoreCommand(.toggleOverview, isOverviewOpen: true))
+        XCTAssertTrue(CommandHandler.shouldIgnoreCommand(.moveColumnToFirst, isOverviewOpen: true))
+        XCTAssertFalse(CommandHandler.shouldIgnoreCommand(.moveColumnToFirst, isOverviewOpen: false))
+    }
+
+    func testPerformCommandToggleOverviewClosesOpenOverview() throws {
+        let fixture = try makeFixture(layouts: [.niri])
+        _ = try addManagedWindow(pid: 461_030, windowId: 30, to: fixture.workspaceIds[0], fixture: fixture)
+        fixture.controller.toggleOverview()
+        defer {
+            if fixture.controller.isOverviewOpen() {
+                fixture.controller.toggleOverview()
+            }
+        }
+        XCTAssertTrue(fixture.controller.isOverviewOpen())
+
+        XCTAssertEqual(fixture.controller.commandHandler.performCommand(.moveColumnToFirst), .ignoredOverview)
+        XCTAssertEqual(fixture.controller.commandHandler.performCommand(.toggleOverview), .executed)
+        XCTAssertFalse(fixture.controller.isOverviewOpen())
+
+        let router = IPCCommandRouter(controller: fixture.controller, sessionToken: "test")
+        XCTAssertEqual(router.handle(IPCCommandRequest.toggleOverview), .executed)
+        XCTAssertTrue(fixture.controller.isOverviewOpen())
+        XCTAssertEqual(router.handle(IPCCommandRequest.moveColumnToFirst), .ignoredOverview)
+        XCTAssertEqual(router.handle(IPCCommandRequest.toggleOverview), .executed)
+        XCTAssertFalse(fixture.controller.isOverviewOpen())
+    }
+
     private final class FocusRecorder {
         var activatedPIDs: [pid_t] = []
         var focusedTokens: [WindowToken] = []
