@@ -52,11 +52,9 @@ final class FocusNotificationDispatcher {
         }
         var focusChanged = false
 
-        let currentMonitorId = controller.workspaceManager.interactionMonitorId ?? controller.monitorForInteraction()?
-            .id
-        let currentWorkspaceId = controller.workspaceManager.nativeManagedFocusToken
-            .flatMap { controller.workspaceManager.workspace(for: $0) }
-            ?? currentMonitorId.flatMap { controller.workspaceManager.activeWorkspace(on: $0)?.id }
+        let projection = controller.interactionWorkspaceProjection()
+        let currentMonitorId = projection.monitor?.id
+        let currentWorkspaceId = projection.workspace?.id
 
         let currentToken = controller.workspaceManager.nativeManagedFocusToken
         let currentWindowId = currentToken

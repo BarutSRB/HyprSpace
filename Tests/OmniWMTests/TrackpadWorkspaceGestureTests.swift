@@ -447,6 +447,64 @@ final class TrackpadWorkspaceGestureTests: XCTestCase {
         }
     }
 
+    func testEmptyWorkspaceTargetClearsManagedFocusWhenLayoutIsInvalidated() throws {
+        let fixture = try makeFixture()
+        let manager = fixture.controller.workspaceManager
+        let token = addManagedWindow(to: fixture.ws1, controller: fixture.controller, pid: 7_010, windowId: 7_110)
+        XCTAssertTrue(manager.confirmManagedFocus(token, in: fixture.ws1, activateWorkspaceOnMonitor: false))
+        XCTAssertEqual(manager.nativeFocusOwner, .managed(token))
+
+        try withBlockedLayoutRefreshes(fixture) {
+            fixture.controller.workspaceNavigationHandler.switchWorkspaceRelative(isNext: true)
+            manager.invalidateLayout(for: [fixture.ws2])
+            let action = try XCTUnwrap(
+                fixture.controller.layoutRefreshController.layoutState.pendingRefresh?.postLayoutActions.first
+            )
+            XCTAssertFalse(action.isCurrent(using: manager))
+            action.runIfCurrent(using: manager)
+
+            XCTAssertEqual(activeWorkspace(fixture), fixture.ws2)
+            XCTAssertEqual(manager.nativeFocusOwner, .none)
+            XCTAssertNil(manager.pendingFocusedToken)
+        }
+    }
+
+    func testRapidSwipeThroughEmptyWorkspaceRejectsStaleClear() throws {
+        var focusedWindowIds: [UInt32] = []
+        let fixture = try makeFixture(
+            windowFocusOperations: WindowFocusOperations(
+                activateApp: { _ in },
+                focusSpecificWindow: { _, windowId, _ in focusedWindowIds.append(windowId) },
+                raiseWindow: { _ in }
+            )
+        )
+        let manager = fixture.controller.workspaceManager
+        let ws1Token = addManagedWindow(to: fixture.ws1, controller: fixture.controller, pid: 7_011, windowId: 7_111)
+        let ws3Token = addManagedWindow(to: fixture.ws3, controller: fixture.controller, pid: 7_013, windowId: 7_113)
+        XCTAssertTrue(manager.confirmManagedFocus(ws1Token, in: fixture.ws1, activateWorkspaceOnMonitor: false))
+        XCTAssertTrue(manager.rememberFocus(ws3Token, in: fixture.ws3))
+
+        try withBlockedLayoutRefreshes(fixture) {
+            let firstEnd = performVerticalSwipe(fixture, totalUnits: 220, startTime: 100)
+            _ = performVerticalSwipe(fixture, totalUnits: 220, startTime: firstEnd + 0.05)
+
+            let actions = try XCTUnwrap(
+                fixture.controller.layoutRefreshController.layoutState.pendingRefresh?.postLayoutActions
+            )
+            XCTAssertEqual(actions.count, 2)
+            XCTAssertFalse(actions[0].isCurrent(using: manager))
+            XCTAssertTrue(actions[1].isCurrent(using: manager))
+            for action in actions {
+                action.runIfCurrent(using: manager)
+            }
+
+            XCTAssertEqual(activeWorkspace(fixture), fixture.ws3)
+            XCTAssertEqual(focusedWindowIds, [UInt32(ws3Token.windowId)])
+            XCTAssertEqual(manager.pendingFocusedToken, ws3Token)
+            XCTAssertEqual(manager.nativeFocusOwner, .managed(ws1Token))
+        }
+    }
+
     func testSharedCountHorizontalSwipeRoutesToColumnScroll() throws {
         let fixture = try makeFixture(scrollGestureEnabled: true)
         var time: TimeInterval = 100

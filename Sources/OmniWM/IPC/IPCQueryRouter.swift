@@ -63,8 +63,7 @@ final class IPCQueryRouter {
     }
 
     func activeWorkspaceResult() -> IPCActiveWorkspaceQueryResult {
-        let monitor = controller.monitorForInteraction()
-        let workspace = monitor.flatMap { controller.workspaceManager.activeWorkspace(on: $0.id) }
+        let (monitor, workspace) = controller.interactionWorkspaceProjection()
         let focusedApp: IPCAppRef?
 
         if let workspace,
@@ -85,8 +84,7 @@ final class IPCQueryRouter {
     }
 
     func focusedMonitorResult() -> IPCFocusedMonitorQueryResult {
-        let monitor = controller.monitorForInteraction()
-        let activeWorkspace = monitor.flatMap { controller.workspaceManager.activeWorkspace(on: $0.id) }
+        let (monitor, activeWorkspace) = controller.interactionWorkspaceProjection()
 
         return IPCFocusedMonitorQueryResult(
             display: monitor.map(displayRef(from:)),
@@ -168,8 +166,7 @@ final class IPCQueryRouter {
         let focusedWindowToken = controller.workspaceManager.nativeManagedFocusToken
         let focusedWorkspaceId = controller.workspaceManager.nativeManagedFocusToken
             .flatMap { controller.workspaceManager.workspace(for: $0) }
-        let currentWorkspaceId = controller.monitorForInteraction()
-            .flatMap { controller.workspaceManager.activeWorkspace(on: $0.id)?.id }
+        let currentWorkspaceId = controller.interactionWorkspaceProjection().workspace?.id
         let visibleWorkspaceIds = controller.workspaceManager.visibleWorkspaceIds()
         let workspaces = orderedWorkspaces()
             .filter { descriptor in

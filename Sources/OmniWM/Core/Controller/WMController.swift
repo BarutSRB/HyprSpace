@@ -1365,6 +1365,11 @@ final class WMController {
         placementResolver.monitorForInteraction()
     }
 
+    func interactionWorkspaceProjection() -> (monitor: Monitor?, workspace: WorkspaceDescriptor?) {
+        let monitor = monitorForInteraction()
+        return (monitor, monitor.flatMap { workspaceManager.activeWorkspace(on: $0.id) })
+    }
+
     private func handleSessionStateChanged(surfaceScope: SessionSurfaceInvalidationScope) {
         switch surfaceScope {
         case .full:

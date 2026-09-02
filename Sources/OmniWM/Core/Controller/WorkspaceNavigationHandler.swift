@@ -259,9 +259,9 @@ final class WorkspaceNavigationHandler {
         if let monitor {
             controller.layoutRefreshController.stopScrollAnimation(for: monitor.displayId)
         }
-        controller.layoutRefreshController.commitWorkspaceTransition(
-            reason: .workspaceTransition
-        ) { [weak self, weak controller] in
+        let newestFocusIntentId = controller.intentLedger.newestFocusIntentId()
+        let focusEpochSeq = controller.workspaceManager.worldSeq
+        let handoffAction: LayoutRefreshController.PostLayoutAction = { [weak self, weak controller] in
             guard let controller else { return }
             if let focusToken = handoff.focusToken {
                 controller.focusWindow(focusToken)
@@ -272,6 +272,17 @@ final class WorkspaceNavigationHandler {
                 controller.layoutRefreshController.startScrollAnimation(for: targetWorkspaceId)
             }
         }
+        controller.layoutRefreshController.commitWorkspaceTransition(
+            reason: .workspaceTransition,
+            postLayout: handoffAction,
+            postLayoutInvalidated: { [weak controller] in
+                guard let controller,
+                      controller.intentLedger.newestFocusIntentId() == newestFocusIntentId,
+                      controller.workspaceManager.isSeqEpochCurrent(focusEpochSeq, domains: .focus)
+                else { return }
+                handoffAction()
+            }
+        )
     }
 
     func focusMonitorCyclic(previous: Bool) {
