@@ -46,7 +46,38 @@ final class SubscribeCLIContractTests: XCTestCase {
 
     func testHelpExposesNDJSONFormat() {
         XCTAssertTrue(CLIParser.usageText.contains("--format json|ndjson|table|tsv|text"))
-        XCTAssertTrue(CLIParser.usageText
-            .contains("omniwmctl subscribe --all [--no-send-initial] [--format json|ndjson]"))
+        XCTAssertTrue(
+            CLIParser.usageText
+                .contains("omniwmctl subscribe --all [--no-send-initial] [--reconnect] [--format json|ndjson]")
+        )
+    }
+
+    func testSubscribeAndWatchParseReconnectFlag() throws {
+        XCTAssertFalse(try CLIParser.parse(arguments: ["omniwmctl", "subscribe", "focus"]).reconnect)
+        XCTAssertTrue(try CLIParser.parse(arguments: ["omniwmctl", "subscribe", "focus", "--reconnect"]).reconnect)
+
+        let watch = try CLIParser.parse(arguments: ["omniwmctl", "watch", "--all", "--reconnect", "--exec", "cat"])
+        XCTAssertTrue(watch.reconnect)
+        XCTAssertEqual(watch.watchConfiguration, CLIWatchConfiguration(childArguments: ["cat"]))
+
+        XCTAssertThrowsError(
+            try CLIParser.parse(arguments: ["omniwmctl", "subscribe", "focus", "--reconnect", "--reconnect"])
+        )
+    }
+
+    func testReconnectAfterExecBelongsToChild() throws {
+        let watch = try CLIParser.parse(arguments: ["omniwmctl", "watch", "focus", "--exec", "cat", "--reconnect"])
+
+        XCTAssertFalse(watch.reconnect)
+        XCTAssertEqual(watch.watchConfiguration, CLIWatchConfiguration(childArguments: ["cat", "--reconnect"]))
+    }
+
+    func testHelpAndCompletionsExposeReconnectFlag() {
+        XCTAssertTrue(
+            CLIParser.usageText.contains("omniwmctl watch --all [--no-send-initial] [--reconnect] --exec <argv...>")
+        )
+        for shell in CLIShell.allCases {
+            XCTAssertTrue(CLICompletionGenerator.script(for: shell).contains("--reconnect"), shell.rawValue)
+        }
     }
 }

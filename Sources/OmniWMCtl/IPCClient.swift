@@ -123,26 +123,6 @@ actor IPCClientConnection {
         return try IPCWire.decodeEvent(from: Data(line.utf8))
     }
 
-    func eventStream() -> AsyncThrowingStream<IPCEventEnvelope, Error> {
-        AsyncThrowingStream { continuation in
-            let task = Task {
-                do {
-                    while let event = try self.readEvent() {
-                        continuation.yield(event)
-                    }
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
-                }
-            }
-
-            continuation.onTermination = { _ in
-                self.interrupt()
-                task.cancel()
-            }
-        }
-    }
-
     func close() {
         interrupt()
         try? handle.close()

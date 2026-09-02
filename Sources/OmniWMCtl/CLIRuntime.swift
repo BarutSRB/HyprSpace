@@ -33,10 +33,60 @@ final class CLIWatchProcessState: @unchecked Sendable {
     }
 }
 
+final class CLIConnectionBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var current: IPCClientConnection?
+
+    func open(with environment: CLIRuntimeEnvironment) throws -> IPCClientConnection {
+        let connection = try environment.openConnection()
+        lock.lock()
+        current = connection
+        lock.unlock()
+        return connection
+    }
+
+    func interruptCurrent() {
+        lock.lock()
+        let connection = current
+        lock.unlock()
+        connection?.interrupt()
+    }
+
+    func closeCurrent() {
+        lock.lock()
+        let connection = current
+        current = nil
+        lock.unlock()
+        guard let connection else { return }
+        connection.interrupt()
+        Task {
+            await connection.close()
+        }
+    }
+}
+
+struct CLIRuntimeEnvironment: Sendable {
+    let openConnection: @Sendable () throws -> IPCClientConnection
+    let sleep: @Sendable (Duration) async throws -> Void
+
+    static let live = CLIRuntimeEnvironment(
+        openConnection: { try IPCClient().openConnection() },
+        sleep: { try await Task.sleep(for: $0) }
+    )
+}
+
 enum CLIRuntime {
     private enum WatchRuntimeError: Error {
         case childLaunch(Error)
     }
+
+    private struct SubscriptionSession {
+        let connection: IPCClientConnection
+        let response: IPCResponse
+    }
+
+    private static let reconnectInitialDelay: Duration = .milliseconds(500)
+    private static let reconnectMaximumDelay: Duration = .seconds(5)
 
     struct WatchChildResult: Sendable, Equatable {
         enum TerminationReason: Sendable, Equatable {
@@ -49,7 +99,7 @@ enum CLIRuntime {
         let terminationStatus: Int32
     }
 
-    static func run(arguments: [String], client: IPCClient = IPCClient()) async -> Int32 {
+    static func run(arguments: [String], environment: CLIRuntimeEnvironment = .live) async -> Int32 {
         let outputFormat = CLIParser.outputFormat(arguments: arguments)
 
         do {
@@ -60,36 +110,26 @@ enum CLIRuntime {
                 CLIRenderer.write(try localActionOutput(action))
                 return CLIExitCode.success.rawValue
             case let .remote(request):
-                let connection = try client.openConnection()
+                if case let .subscribe(subscription) = request.payload {
+                    return await runSubscription(
+                        request: request,
+                        subscription: subscription,
+                        parsed: parsed,
+                        environment: environment
+                    )
+                }
+
+                let connection = try environment.openConnection()
                 defer {
                     Task {
                         await connection.close()
                     }
                 }
 
-                if let watchConfiguration = parsed.watchConfiguration {
-                    return await runWatch(
-                        request: request,
-                        watchConfiguration: watchConfiguration,
-                        connection: connection,
-                        outputFormat: parsed.outputFormat
-                    )
-                }
-
                 try await connection.send(request)
                 let response = try await connection.readResponse()
-                let responseExitCode = CLIRenderer.exitCode(for: response)
                 CLIRenderer.write(try CLIRenderer.responseOutput(response, format: parsed.outputFormat))
-
-                guard parsed.expectsEventStream else {
-                    return responseExitCode.rawValue
-                }
-
-                let events = await connection.eventStream()
-                for try await event in events {
-                    CLIRenderer.write(try CLIRenderer.eventOutput(event, format: parsed.outputFormat))
-                }
-                return responseExitCode.rawValue
+                return CLIRenderer.exitCode(for: response).rawValue
             }
         } catch let error as CLIParseError {
             writeLocalFailure(
@@ -123,43 +163,88 @@ enum CLIRuntime {
         }
     }
 
-    private static func runWatch(
+    private static func runSubscription(
         request: IPCRequest,
-        watchConfiguration: CLIWatchConfiguration,
-        connection: IPCClientConnection,
-        outputFormat: CLIOutputFormat
+        subscription: IPCSubscribeRequest,
+        parsed: ParsedCLICommand,
+        environment: CLIRuntimeEnvironment
     ) async -> Int32 {
         let processState = CLIWatchProcessState()
+        let connections = CLIConnectionBox()
+        let outputFormat = parsed.outputFormat
+
+        func openSession(sendInitial: Bool) async throws -> SubscriptionSession {
+            let connection = try connections.open(with: environment)
+            try await connection.send(IPCRequest(
+                id: request.id,
+                subscribe: IPCSubscribeRequest(
+                    channels: subscription.channels,
+                    allChannels: subscription.allChannels,
+                    sendInitial: sendInitial
+                )
+            ))
+            return SubscriptionSession(connection: connection, response: try await connection.readResponse())
+        }
+
+        func reconnectSession() async throws -> SubscriptionSession {
+            var delay = reconnectInitialDelay
+            while true {
+                try await environment.sleep(delay)
+                try Task.checkCancellation()
+                delay = min(delay * 2, reconnectMaximumDelay)
+                do {
+                    return try await openSession(sendInitial: true)
+                } catch let error where isTransportError(error) {
+                    connections.closeCurrent()
+                    writeNotice("omniwmctl: reconnect failed: \(error)")
+                }
+            }
+        }
+
+        func deliver(_ event: IPCEventEnvelope) async throws {
+            guard let watchConfiguration = parsed.watchConfiguration else {
+                CLIRenderer.write(try CLIRenderer.eventOutput(event, format: outputFormat))
+                return
+            }
+            do {
+                let result = try await executeWatchChild(
+                    event: event,
+                    childArguments: watchConfiguration.childArguments,
+                    processState: processState
+                )
+                if result.terminationReason != .exit || result.terminationStatus != 0 {
+                    reportWatchChildFailure(result: result, command: watchConfiguration.childArguments)
+                }
+            } catch {
+                throw WatchRuntimeError.childLaunch(error)
+            }
+        }
 
         return await withTaskCancellationHandler {
+            defer {
+                connections.closeCurrent()
+            }
             do {
-                try await connection.send(request)
-                let response = try await connection.readResponse()
-                guard response.ok else {
-                    CLIRenderer.write(try CLIRenderer.responseOutput(response, format: outputFormat))
-                    return CLIRenderer.exitCode(for: response).rawValue
+                var session = try await openSession(sendInitial: subscription.sendInitial)
+                if !session.response.ok || parsed.watchConfiguration == nil {
+                    CLIRenderer.write(try CLIRenderer.responseOutput(session.response, format: outputFormat))
+                }
+                guard session.response.ok else {
+                    return CLIRenderer.exitCode(for: session.response).rawValue
                 }
 
                 while true {
-                    if Task.isCancelled {
-                        return CLIExitCode.success.rawValue
-                    }
-
-                    guard let event = try await connection.readEvent() else {
-                        throw POSIXError(.ECONNRESET)
-                    }
-
                     do {
-                        let result = try await executeWatchChild(
-                            event: event,
-                            childArguments: watchConfiguration.childArguments,
-                            processState: processState
-                        )
-                        if result.terminationReason != .exit || result.terminationStatus != 0 {
-                            reportWatchChildFailure(result: result, command: watchConfiguration.childArguments)
+                        try await forwardEvents(from: session.connection, deliver: deliver)
+                    } catch let error where parsed.reconnect && isTransportError(error) && !Task.isCancelled {
+                        connections.closeCurrent()
+                        writeNotice("omniwmctl: connection lost: \(error); reconnecting")
+                        session = try await reconnectSession()
+                        guard session.response.ok else {
+                            CLIRenderer.write(try CLIRenderer.responseOutput(session.response, format: outputFormat))
+                            return CLIRenderer.exitCode(for: session.response).rawValue
                         }
-                    } catch {
-                        throw WatchRuntimeError.childLaunch(error)
+                        writeNotice("omniwmctl: reconnected")
                     }
                 }
             } catch is CancellationError {
@@ -207,11 +292,25 @@ enum CLIRuntime {
             }
         } onCancel: {
             processState.terminateCurrent()
-            connection.interrupt()
-            Task {
-                await connection.close()
-            }
+            connections.interruptCurrent()
         }
+    }
+
+    private static func forwardEvents(
+        from connection: IPCClientConnection,
+        deliver: (IPCEventEnvelope) async throws -> Void
+    ) async throws {
+        while true {
+            try Task.checkCancellation()
+            guard let event = try await connection.readEvent() else {
+                throw POSIXError(.ECONNRESET)
+            }
+            try await deliver(event)
+        }
+    }
+
+    private static func writeNotice(_ message: String) {
+        FileHandle.standardError.write(Data((message + "\n").utf8))
     }
 
     private static func executeWatchChild(

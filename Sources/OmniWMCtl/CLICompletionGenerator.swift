@@ -5,8 +5,8 @@ import Foundation
 import OmniWMIPC
 
 enum CLICompletionGenerator {
-    private static let subscribeFlags = ["--all", "--no-send-initial"]
-    private static let watchFlags = ["--all", "--no-send-initial", "--exec"]
+    private static let subscribeFlags = ["--all", "--no-send-initial", "--reconnect"]
+    private static let watchFlags = ["--all", "--no-send-initial", "--reconnect", "--exec"]
 
     static func script(for shell: CLIShell) -> String {
         switch shell {

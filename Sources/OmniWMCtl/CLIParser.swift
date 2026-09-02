@@ -25,6 +25,7 @@ struct ParsedCLICommand: Equatable {
     let outputFormat: CLIOutputFormat
     let expectsEventStream: Bool
     let watchConfiguration: CLIWatchConfiguration?
+    var reconnect = false
 
     var request: IPCRequest {
         guard case let .remote(request) = invocation else {
@@ -140,14 +141,16 @@ enum CLIParser {
             guard format.prefersJSON else {
                 throw CLIParseError.usage(usageText)
             }
+            let parsed = try parseSubscriptionArguments(
+                arguments: Array(filteredArguments.dropFirst()),
+                allowExec: false
+            )
             return ParsedCLICommand(
-                invocation: .remote(try parseSubscribeRequest(
-                    id: requestId,
-                    arguments: Array(filteredArguments.dropFirst())
-                )),
+                invocation: .remote(IPCRequest(id: requestId, subscribe: parsed.request)),
                 outputFormat: format,
                 expectsEventStream: true,
-                watchConfiguration: nil
+                watchConfiguration: nil,
+                reconnect: parsed.reconnect
             )
         case "watch":
             return try parseWatchCommand(
@@ -188,6 +191,7 @@ enum CLIParser {
 
     private struct ParsedSubscriptionArguments {
         let request: IPCSubscribeRequest
+        let reconnect: Bool
         let execArguments: [String]?
     }
 
@@ -569,11 +573,6 @@ enum CLIParser {
         )
     }
 
-    private static func parseSubscribeRequest(id: String, arguments: [String]) throws -> IPCRequest {
-        let parsed = try parseSubscriptionArguments(arguments: arguments, allowExec: false)
-        return IPCRequest(id: id, subscribe: parsed.request)
-    }
-
     private static func parseWatchCommand(
         id: String,
         arguments: [String],
@@ -588,7 +587,8 @@ enum CLIParser {
             invocation: .remote(IPCRequest(id: id, subscribe: parsed.request)),
             outputFormat: outputFormat,
             expectsEventStream: false,
-            watchConfiguration: CLIWatchConfiguration(childArguments: execArguments)
+            watchConfiguration: CLIWatchConfiguration(childArguments: execArguments),
+            reconnect: parsed.reconnect
         )
     }
 
@@ -608,6 +608,7 @@ enum CLIParser {
         var channels: [IPCSubscriptionChannel] = []
         var allChannels = false
         var sendInitial = true
+        var reconnect = false
         var sawChannelList = false
         var index = 0
         var execArguments: [String]?
@@ -633,6 +634,10 @@ enum CLIParser {
             case "--no-send-initial":
                 guard sendInitial else { throw CLIParseError.usage(usageText) }
                 sendInitial = false
+                index += 1
+            case "--reconnect":
+                guard !reconnect else { throw CLIParseError.usage(usageText) }
+                reconnect = true
                 index += 1
             default:
                 guard !argument.hasPrefix("--"), !sawChannelList else {
@@ -668,6 +673,7 @@ enum CLIParser {
                 allChannels: allChannels,
                 sendInitial: sendInitial
             ),
+            reconnect: reconnect,
             execArguments: execArguments
         )
     }
@@ -832,10 +838,10 @@ enum CLIParser {
         lines += workspaceLines.map { "  omniwmctl \($0)" }
         lines += windowLines.map { "  omniwmctl \($0)" }
         lines += [
-            "  omniwmctl subscribe <\(subscriptionNames)> [--no-send-initial] [--format json|ndjson]",
-            "  omniwmctl subscribe --all [--no-send-initial] [--format json|ndjson]",
-            "  omniwmctl watch <\(subscriptionNames)> [--no-send-initial] --exec <argv...>",
-            "  omniwmctl watch --all [--no-send-initial] --exec <argv...>",
+            "  omniwmctl subscribe <\(subscriptionNames)> [--no-send-initial] [--reconnect] [--format json|ndjson]",
+            "  omniwmctl subscribe --all [--no-send-initial] [--reconnect] [--format json|ndjson]",
+            "  omniwmctl watch <\(subscriptionNames)> [--no-send-initial] [--reconnect] --exec <argv...>",
+            "  omniwmctl watch --all [--no-send-initial] [--reconnect] --exec <argv...>",
             "",
             "Formats:",
             "  --format json|ndjson|table|tsv|text",

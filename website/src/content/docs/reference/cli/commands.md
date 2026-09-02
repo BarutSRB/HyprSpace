@@ -45,7 +45,7 @@ Global flags must appear before `--exec` in watch commands.
 |------|------|---------|
 | 0 | success | Command completed successfully |
 | 1 | rejected | Server rejected the request |
-| 2 | transportFailure | Could not connect to IPC socket |
+| 2 | transportFailure | Could not connect to the IPC socket, or a `subscribe`/`watch` stream ended because OmniWM closed the connection (use `--reconnect` to keep streaming) |
 | 3 | invalidArguments | CLI argument parsing failed |
 | 4 | internalError | Unexpected internal error |
 

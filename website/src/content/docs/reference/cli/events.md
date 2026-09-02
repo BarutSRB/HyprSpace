@@ -35,8 +35,8 @@ core window relayout is not consumer-gated.
 Stream the subscribe response and subsequent events to stdout as JSON.
 
 ```
-omniwmctl subscribe <channels> [--no-send-initial] [--format json|ndjson]
-omniwmctl subscribe --all [--no-send-initial] [--format json|ndjson]
+omniwmctl subscribe <channels> [--no-send-initial] [--reconnect] [--format json|ndjson]
+omniwmctl subscribe --all [--no-send-initial] [--reconnect] [--format json|ndjson]
 ```
 
 Channels are specified as a comma-separated list or with `--all` for all channels.
@@ -45,15 +45,25 @@ Channels are specified as a comma-separated list or with `--all` for all channel
 |------|-------------|
 | `--all` | Subscribe to all channels |
 | `--no-send-initial` | Skip sending initial state snapshot |
+| `--reconnect` | Reconnect and resubscribe after the connection to OmniWM is lost (see below) |
 | `--format json\|ndjson` | `json` (default) pretty-prints every envelope; `ndjson` writes one compact envelope per line. `table`, `tsv`, and `text` are rejected for subscriptions |
 
 Stdout begins with a single `IPCResponse` envelope with `kind: "subscribe"` and `status: "subscribed"`. After that, OmniWM emits a best-effort initial state snapshot for each subscribed channel unless `--no-send-initial` is used, followed by live `IPCEventEnvelope` updates as they occur. With `--format ndjson` every envelope, including the first response, is exactly one line, which is the shape `watch --exec` children already receive.
+
+When OmniWM closes the connection, for example because it quit or relaunched, `subscribe` exits with code 2 (`transportFailure`), the same as `watch`.
+
+### Reconnecting
+
+With `--reconnect`, `subscribe` and `watch` survive an OmniWM relaunch. After the first successful subscribe handshake, a lost connection is reported on stderr and the client retries with a delay that starts at 0.5 s and doubles up to 5 s until OmniWM accepts the connection again. Every resubscribe requests initial snapshots, even with `--no-send-initial`, so the client catches up on the state it missed; the resynchronization is marked by `omniwmctl: reconnected` on stderr. Only the first handshake response is printed. A handshake that OmniWM rejects (for example `unauthorized` or `protocol_mismatch`) ends the stream with exit code 1, a failed initial connection exits 2 without retrying, and one-shot commands never retry.
 
 **Examples:**
 
 ```bash
 # Watch focus changes
 omniwmctl subscribe focus
+
+# Keep streaming across OmniWM relaunches, one JSON line per event
+omniwmctl subscribe --all --reconnect --format ndjson
 
 # Watch all events
 omniwmctl subscribe --all
@@ -67,13 +77,13 @@ omniwmctl subscribe active-workspace,windows-changed --no-send-initial
 Subscribe to events and execute a command for each event received. The event data is passed to the child process on stdin.
 
 ```
-omniwmctl watch <channels> [--no-send-initial] --exec <command> [args...]
-omniwmctl watch --all [--no-send-initial] --exec <command> [args...]
+omniwmctl watch <channels> [--no-send-initial] [--reconnect] --exec <command> [args...]
+omniwmctl watch --all [--no-send-initial] [--reconnect] --exec <command> [args...]
 ```
 
 The `--exec` flag is required and marks the boundary between watch flags and the child command. Everything after `--exec` is the child command and its arguments.
 
-`watch` consumes the subscribe handshake client-side instead of printing it. It runs one child process per event, waits for that child to finish before handling the next event, writes exactly one NDJSON event line to the child's stdin, and reports non-zero child exits to stderr without terminating the watcher.
+`watch` consumes the subscribe handshake client-side instead of printing it. It runs one child process per event, waits for that child to finish before handling the next event, writes exactly one NDJSON event line to the child's stdin, and reports non-zero child exits to stderr without terminating the watcher. `--reconnect` behaves exactly as for `subscribe`; a `--reconnect` placed after `--exec` belongs to the child command.
 
 **Environment variables passed to child process:**
 
