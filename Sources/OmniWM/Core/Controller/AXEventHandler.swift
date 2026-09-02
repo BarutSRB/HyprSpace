@@ -338,7 +338,7 @@ final class AXEventHandler {
     private static let windowCloseFocusRecoveryDuration: TimeInterval = 0.6
     static let sameAppCloseProbeDelay: Duration = .milliseconds(80)
     static let appTerminationFocusRecoveryTimeout: Duration = .milliseconds(600)
-    private static let mouseFocusIntentDuration: TimeInterval = 0.35
+    static let mouseFocusIntentDuration: TimeInterval = 0.35
     private static let createFocusTraceLimit = 128
     private static let managedReplacementTraceLimit = 128
     private static let createFocusTraceLoggingEnabled =
@@ -368,6 +368,7 @@ final class AXEventHandler {
     var previouslyFocusedManagedToken: WindowToken?
     private var windowCloseFocusRecoveryContext: WindowCloseFocusRecoveryContext?
     private var recentMouseFocusIntent: RecentMouseFocusIntent?
+    var recentUnmanagedPointerClickExpiresAt: Date?
     private var createFocusTrace =
         RingBuffer<NiriCreateFocusTraceEvent>(capacity: AXEventHandler.createFocusTraceLimit)
     private var managedReplacementTrace =
@@ -2435,7 +2436,7 @@ final class AXEventHandler {
         }
         if shouldConfirmRequest,
            controller.moveMouseToFocusedWindowEnabled,
-           !hasRecentMouseFocusIntent(for: entry.token),
+           !suppressesMouseWarp(for: entry.token),
            controller.intentLedger.allowsMouseToFocusedWarp(for: entry.token),
            controller.workspaceManager.nativeManagedFocusToken == entry.token
         {

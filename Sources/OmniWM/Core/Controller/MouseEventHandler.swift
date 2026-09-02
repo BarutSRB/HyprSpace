@@ -1136,6 +1136,8 @@ final class MouseEventHandler {
                 : nil)
             if let token = focusIntentToken {
                 controller.axEventHandler.noteMouseFocusIntent(token: token)
+            } else {
+                controller.axEventHandler.noteUnmanagedPointerClick()
             }
             state.nativeTitleBarDragFallbackToken = exactToken == nil ? focusIntentToken : nil
             if let exactToken {

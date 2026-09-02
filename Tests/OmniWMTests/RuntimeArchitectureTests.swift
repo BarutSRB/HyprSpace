@@ -508,6 +508,82 @@ final class RuntimeArchitectureTests: XCTestCase {
     }
 
     @MainActor
+    func testPointerClickOnUnmanagedWindowSuppressesKeyboardManagedFocusWarp() throws {
+        let fixture = try Self.managedNiriActivationFixture(
+            origin: .keyboardOrProgrammatic,
+            pid: 765_704,
+            windowId: 765_804
+        )
+        var warpedPoints: [CGPoint] = []
+        fixture.controller.warpMouseCursorPosition = { warpedPoints.append($0) }
+        fixture.controller.currentMouseLocation = { CGPoint(x: -10_000, y: -10_000) }
+
+        Self.clickUnmanagedWindow(controller: fixture.controller, workspaceId: fixture.entry.workspaceId)
+        fixture.controller.axEventHandler.handleManagedAppActivation(
+            entry: fixture.entry,
+            isWorkspaceActive: true,
+            appFullscreen: false,
+            activeRequestId: fixture.requestId
+        )
+
+        XCTAssertTrue(warpedPoints.isEmpty)
+    }
+
+    @MainActor
+    func testPointerClickOnUnmanagedWindowSuppressesExternalManagedFocusWarp() throws {
+        let fixture = try Self.managedNiriActivationFixture(
+            origin: .keyboardOrProgrammatic,
+            pid: 765_705,
+            windowId: 765_805,
+            openRequest: false
+        )
+        var warpedPoints: [CGPoint] = []
+        fixture.controller.warpMouseCursorPosition = { warpedPoints.append($0) }
+        fixture.controller.currentMouseLocation = { CGPoint(x: -10_000, y: -10_000) }
+
+        Self.clickUnmanagedWindow(controller: fixture.controller, workspaceId: fixture.entry.workspaceId)
+        fixture.controller.axEventHandler.handleManagedAppActivation(
+            entry: fixture.entry,
+            isWorkspaceActive: true,
+            appFullscreen: false
+        )
+
+        XCTAssertTrue(warpedPoints.isEmpty)
+    }
+
+    @MainActor
+    func testExternalManagedFocusConfirmationStillWarpsWithoutPointerInput() throws {
+        let fixture = try Self.managedNiriActivationFixture(
+            origin: .keyboardOrProgrammatic,
+            pid: 765_707,
+            windowId: 765_807,
+            openRequest: false
+        )
+        var warpedPoints: [CGPoint] = []
+        fixture.controller.warpMouseCursorPosition = { warpedPoints.append($0) }
+        fixture.controller.currentMouseLocation = { CGPoint(x: -10_000, y: -10_000) }
+
+        fixture.controller.axEventHandler.handleManagedAppActivation(
+            entry: fixture.entry,
+            isWorkspaceActive: true,
+            appFullscreen: false
+        )
+
+        XCTAssertEqual(warpedPoints.count, 1)
+    }
+
+    @MainActor
+    private static func clickUnmanagedWindow(controller: WMController, workspaceId: WorkspaceDescriptor.ID) {
+        let visibleFrame = controller.workspaceManager.monitor(for: workspaceId)?.visibleFrame ?? .zero
+        controller.mouseEventHandler.dispatchMouseDown(
+            at: CGPoint(x: visibleFrame.minX + 10, y: visibleFrame.minY + 10),
+            modifiers: [],
+            button: .left,
+            windowIdUnderPointer: 999_999
+        )
+    }
+
+    @MainActor
     func testManagedSurfaceFocusActivatesItsWorkspace() throws {
         let fixture = try Self.inactiveWorkspaceFocusFixture(
             pid: 765_761,
@@ -623,11 +699,12 @@ final class RuntimeArchitectureTests: XCTestCase {
             pid: 765_706,
             windowId: 765_806
         )
-        _ = fixture.controller.intentLedger.cancelManagedRequest(requestId: fixture.requestId)
+        let requestId = try XCTUnwrap(fixture.requestId)
+        _ = fixture.controller.intentLedger.cancelManagedRequest(requestId: requestId)
         _ = fixture.controller.workspaceManager.cancelManagedFocusRequest(
             matching: fixture.entry.token,
             workspaceId: fixture.entry.workspaceId,
-            requestId: fixture.requestId
+            requestId: requestId
         )
         XCTAssertNil(fixture.controller.intentLedger.activeManagedRequest)
 
@@ -7688,9 +7765,10 @@ final class RuntimeArchitectureTests: XCTestCase {
         origin: ManagedFocusOrigin,
         pid: pid_t,
         windowId: Int,
+        openRequest: Bool = true,
         file: StaticString = #filePath,
         line: UInt = #line
-    ) throws -> (controller: WMController, entry: WindowState, requestId: UInt64) {
+    ) throws -> (controller: WMController, entry: WindowState, requestId: UInt64?) {
         let controller = Self.controller(file: file, line: line)
         let workspaceId = try XCTUnwrap(
             controller.workspaceManager.workspaceId(for: "1", createIfMissing: true),
@@ -7726,25 +7804,29 @@ final class RuntimeArchitectureTests: XCTestCase {
         node.frame = targetFrame
         node.renderedFrame = targetFrame
 
-        let request = controller.intentLedger.beginManagedRequest(
-            token: token,
-            workspaceId: workspaceId,
-            origin: origin
-        )
-        _ = controller.workspaceManager.beginManagedFocusRequest(
-            token,
-            in: workspaceId,
-            requestId: request.requestId
-        )
+        var requestId: UInt64?
+        if openRequest {
+            let request = controller.intentLedger.beginManagedRequest(
+                token: token,
+                workspaceId: workspaceId,
+                origin: origin
+            )
+            _ = controller.workspaceManager.beginManagedFocusRequest(
+                token,
+                in: workspaceId,
+                requestId: request.requestId
+            )
+            requestId = request.requestId
+        }
         let entry = try XCTUnwrap(controller.workspaceManager.entry(for: token), file: file, line: line)
-        return (controller, entry, request.requestId)
+        return (controller, entry, requestId)
     }
 
     @MainActor
     private static func confirmManagedNiriFocus(
         controller: WMController,
         entry: WindowState,
-        requestId: UInt64,
+        requestId: UInt64?,
         file: StaticString = #filePath,
         line: UInt = #line
     ) {

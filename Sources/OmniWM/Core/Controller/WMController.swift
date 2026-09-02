@@ -3856,8 +3856,8 @@ final class WMController {
     }
 
     func moveMouseToWindow(_ token: WindowToken, preferredFrame: CGRect? = nil) {
-        guard !axEventHandler.hasRecentMouseFocusIntent(for: token) else {
-            MouseTrace.record("focus-warp suppressed (mouse-click-intent) token=\(token)")
+        guard !axEventHandler.suppressesMouseWarp(for: token) else {
+            MouseTrace.record("focus-warp suppressed (pointer-intent) token=\(token)")
             return
         }
         guard let entry = workspaceManager.entry(for: token) else { return }

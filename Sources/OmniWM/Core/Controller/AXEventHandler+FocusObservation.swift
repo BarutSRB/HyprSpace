@@ -128,3 +128,19 @@ extension AXEventHandler {
         return identityAliasesByWindowId[token.windowId]?.contains(pid: pid) == true
     }
 }
+
+extension AXEventHandler {
+    func noteUnmanagedPointerClick() {
+        recentUnmanagedPointerClickExpiresAt = Date().addingTimeInterval(Self.mouseFocusIntentDuration)
+    }
+
+    func suppressesMouseWarp(for token: WindowToken) -> Bool {
+        if let expiresAt = recentUnmanagedPointerClickExpiresAt {
+            if expiresAt > Date() {
+                return true
+            }
+            recentUnmanagedPointerClickExpiresAt = nil
+        }
+        return hasRecentMouseFocusIntent(for: token)
+    }
+}
