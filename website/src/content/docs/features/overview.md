@@ -12,6 +12,7 @@ Press `Option + Shift + O` and all of your workspaces' windows fly into a scroll
 - Type to filter windows live; `Backspace` deletes search text.
 - `Arrow Keys` navigate spatially; `Left` / `Right` stay within the current workspace. `Tab` / `Shift + Tab` cycle forward or backward through matching windows, and keyboard navigation automatically scrolls the selected thumbnail into view.
 - `Enter` or a click focuses the selected window. `Escape`, the configured Overview shortcut, and clicking the backdrop also dismiss Overview and focus the current selection; `Escape` does not clear search first.
+- Mouse and trackpad scrolling follow the system Natural Scrolling setting.
 - `Alt (Option) + Shift + Mouse Scroll` temporarily zooms the current overview; the next opening starts from the configured baseline.
 - If another application takes focus, Overview dismisses without stealing focus back.
 

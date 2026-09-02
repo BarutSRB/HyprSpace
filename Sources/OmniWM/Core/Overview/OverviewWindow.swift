@@ -192,7 +192,6 @@ final class OverviewView: NSView {
     private var traceInvalidatedAt: CFTimeInterval = 0
     private(set) var tracePendingInvalidations = 0
     private let dragThreshold: CGFloat = 6.0
-    private let scrollAxisEpsilon: CGFloat = 0.0001
 
     init(
         frame: NSRect,
@@ -397,22 +396,12 @@ final class OverviewView: NSView {
     }
 
     override func scrollWheel(with event: NSEvent) {
-        let delta = normalizedScrollDelta(for: event)
+        let delta = OverviewScrollInput.dominantDelta(deltaX: event.scrollingDeltaX, deltaY: event.scrollingDeltaY)
         if let onScrollWithModifiers {
             onScrollWithModifiers(delta, event.modifierFlags, event.hasPreciseScrollingDeltas)
         } else {
             onScroll?(delta)
         }
-    }
-
-    private func normalizedScrollDelta(for event: NSEvent) -> CGFloat {
-        let rawY = event.scrollingDeltaY
-        let rawX = event.scrollingDeltaX
-        let dominantRaw = abs(rawY) >= abs(rawX) ? rawY : rawX
-        if abs(dominantRaw) <= scrollAxisEpsilon {
-            return 0
-        }
-        return event.isDirectionInvertedFromDevice ? -dominantRaw : dominantRaw
     }
 
     private func cancelDrag() {
