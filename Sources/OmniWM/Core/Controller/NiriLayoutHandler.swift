@@ -2060,10 +2060,11 @@ enum StructuralMutationOutcome: Equatable {
             }
         controller.workspaceManager.withEngineMutationScope {
             engine.updateMonitors(currentMonitors, orientations: orientations)
+        }
+        refreshResolvedMonitorSettings()
+        controller.workspaceManager.withEngineMutationScope {
             engine.syncWorkspaceAssignments(workspaceAssignments, orientations: orientations)
         }
-
-        refreshResolvedMonitorSettings()
     }
 
     func refreshResolvedMonitorSettings() {
@@ -2071,8 +2072,12 @@ enum StructuralMutationOutcome: Equatable {
 
         controller.workspaceManager.withEngineMutationScope {
             for monitor in controller.workspaceManager.monitors {
-                let resolved = controller.settings.resolvedNiriSettings(for: monitor)
-                engine.updateMonitorSettings(resolved, for: monitor.id)
+                _ = engine.ensureMonitor(
+                    for: monitor.id,
+                    monitor: monitor,
+                    orientation: controller.settings.effectiveOrientation(for: monitor)
+                )
+                engine.updateMonitorSettings(controller.settings.resolvedNiriSettings(for: monitor), for: monitor.id)
             }
         }
     }

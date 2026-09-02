@@ -95,6 +95,7 @@ struct NiriRenderStyle {
 final class NiriWorkspaceState {
     let root: NiriRoot
     var nodesByToken: [WindowToken: NiriWindow] = [:]
+    var attachedMonitorId: Monitor.ID?
 
     init(workspaceId: WorkspaceDescriptor.ID) {
         root = NiriRoot(workspaceId: workspaceId)
@@ -244,14 +245,20 @@ final class NiriLayoutEngine {
         }
     }
 
-    func resolvedContainerResetPrimarySpan(in workspaceId: WorkspaceDescriptor
-        .ID) -> (proportion: CGFloat, presetWidthIdx: Int?)
-    {
+    func resolvedContainerResetPrimarySpan(
+        in workspaceId: WorkspaceDescriptor.ID
+    ) -> (proportion: CGFloat, presetWidthIdx: Int?) {
+        resolvedContainerResetPrimarySpan(for: monitorContaining(workspace: workspaceId))
+    }
+
+    func resolvedContainerResetPrimarySpan(
+        for monitorId: Monitor.ID?
+    ) -> (proportion: CGFloat, presetWidthIdx: Int?) {
         if let defaultContainerPrimarySpan {
             return (defaultContainerPrimarySpan, matchingPresetIndex(for: defaultContainerPrimarySpan))
         }
-
-        return (1.0 / CGFloat(effectiveVisibleContainerCount(in: workspaceId)), nil)
+        let settings = monitorId.map(effectiveSettings(for:)) ?? globalResolvedSettings()
+        return (1.0 / CGFloat(settings.visibleContainerCount), nil)
     }
 
     func initialContainerSizingState(for proportion: CGFloat) -> NiriContainerSizingState {
