@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Copyright (C) 2026 BarutSRB — https://github.com/BarutSRB/OmniWM
 
+import Carbon
 import Foundation
 @testable import OmniWM
 import XCTest
@@ -502,6 +503,56 @@ final class SettingsMigrationTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: settingsURL(in: fixture)), rewritten)
         XCTAssertEqual(try fileInode(at: settingsURL(in: fixture)), rewrittenInode)
         XCTAssertEqual(try Data(contentsOf: historicalBackupURL), historicalBackup)
+    }
+
+    @MainActor
+    func testVersionOneStartupMigrationPreservesHyperChordsWithExtraModifiers() throws {
+        defer { KeySymbolMapper.setHyperKeyModifiers(.default) }
+        let fixture = try makeFixture("version-one-custom-hyper")
+        defer { fixture.remove() }
+        let original = try versionOneCustomHyperData()
+        try original.write(to: settingsURL(in: fixture))
+        KeySymbolMapper.setHyperKeyModifiers(.default)
+        let persistence = makePersistence(in: fixture)
+
+        let first = persistence.loadOutcome()
+        let export = try XCTUnwrap(first.export)
+        guard let notice = first.notice,
+              case let .migrated(report, backupURL) = notice
+        else {
+            return XCTFail("Expected version-one migration notice")
+        }
+
+        XCTAssertEqual(report.fromVersion, 1)
+        XCTAssertEqual(report.toVersion, 2)
+        XCTAssertEqual(backupURL, migrationBackupURL(in: fixture))
+        XCTAssertEqual(try Data(contentsOf: backupURL), original)
+        XCTAssertEqual(
+            hotkey("focus.left", in: export)?.binding,
+            .chord(KeyBinding(
+                keyCode: UInt32(kVK_ANSI_H),
+                modifiers: UInt32(controlKey | optionKey | cmdKey)
+            ))
+        )
+        XCTAssertEqual(
+            hotkey("move.left", in: export)?.binding,
+            .chord(KeyBinding(
+                keyCode: UInt32(kVK_ANSI_H),
+                modifiers: UInt32(controlKey | optionKey | shiftKey | cmdKey)
+            ))
+        )
+
+        let rewritten = try Data(contentsOf: settingsURL(in: fixture))
+        XCTAssertTrue(try hotkeySection(id: "focus.left", in: rewritten).contains("binding = \"Hyper+H\""))
+        XCTAssertTrue(try hotkeySection(id: "move.left", in: rewritten).contains("binding = \"Hyper+Shift+H\""))
+        XCTAssertEqual(try SettingsTOMLCodec.decode(rewritten), export)
+        XCTAssertEqual(KeySymbolMapper.hyperModifiers, HyperKeyModifiers.default.carbonMask)
+
+        let restarted = makePersistence(in: fixture).loadOutcome()
+        XCTAssertNil(restarted.notice)
+        XCTAssertEqual(restarted.export, export)
+        XCTAssertEqual(try Data(contentsOf: settingsURL(in: fixture)), rewritten)
+        XCTAssertEqual(KeySymbolMapper.hyperModifiers, HyperKeyModifiers.default.carbonMask)
     }
 
     @MainActor
@@ -1046,6 +1097,31 @@ final class SettingsMigrationTests: XCTestCase {
         return try Data(contentsOf: resources
             .appendingPathComponent("Fixtures/Settings", isDirectory: true)
             .appendingPathComponent("\(name).toml", isDirectory: false))
+    }
+
+    private func versionOneCustomHyperData() throws -> Data {
+        var text = String(decoding: try legacyFixtureData(named: "v0.6.4-custom"), as: UTF8.self)
+        let replacements = [
+            (
+                "hyperKeyModifiers = \"Control+Option+Shift+Command\"",
+                "hyperKeyModifiers = \"Control+Option+Command\""
+            ),
+            (
+                "binding = \"Option+Left Arrow\"\nid = \"focus.left\"",
+                "binding = \"Hyper+H\"\nid = \"focus.left\""
+            ),
+            (
+                "binding = \"Option+Shift+Left Arrow\"\nid = \"move.left\"",
+                "binding = \"Hyper+Shift+H\"\nid = \"move.left\""
+            )
+        ]
+        for (current, replacement) in replacements {
+            guard text.contains(current) else {
+                throw NSError(domain: "SettingsMigrationTests", code: 1)
+            }
+            text = text.replacingOccurrences(of: current, with: replacement)
+        }
+        return Data(text.utf8)
     }
 
     @MainActor

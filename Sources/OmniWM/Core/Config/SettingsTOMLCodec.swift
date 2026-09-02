@@ -100,6 +100,10 @@ enum SettingsTOMLCodec {
     }
 
     private static func encodeCanonical(_ export: SettingsExport) throws -> Data {
+        let activeHyperKeyModifiers = HyperKeyModifiers(carbonMask: KeySymbolMapper.hyperModifiers) ?? .default
+        KeySymbolMapper.setHyperKeyModifiers(export.hyperKeyModifiers)
+        defer { KeySymbolMapper.setHyperKeyModifiers(activeHyperKeyModifiers) }
+
         let canonical = CanonicalTOMLConfig(export: export)
         let encoder = TOMLEncoder()
         encoder.outputFormatting = [.sortedKeys, .prettyPrinted]

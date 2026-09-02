@@ -188,18 +188,25 @@ final class HotkeyChordTests: XCTestCase {
         XCTAssertEqual(KeySymbolMapper.hyperModifiers, threeModifiers.carbonMask)
     }
 
-    func testEncodePreservingUnknownKeysLeavesActiveHyperCompositionUnchanged() throws {
+    func testTOMLEncodingUsesExportHyperCompositionAndRestoresActiveComposition() throws {
         defer { KeySymbolMapper.setHyperKeyModifiers(.default) }
-        let previous = try SettingsTOMLCodec.encode(SettingsExport.defaults())
+        let source = try canonicalTOML(
+            hyperKeyModifiers: "Control+Option+Command",
+            bindings: [(id: "focus.left", binding: "Hyper+H"), (id: "move.left", binding: "Hyper+Shift+H")]
+        )
+        let export = try SettingsTOMLCodec.decode(source)
+        let encodings = [
+            try SettingsTOMLCodec.encode(export),
+            try SettingsTOMLCodec.encode(export, preservingUnknownKeysFrom: source)
+        ]
 
-        let threeModifiers = try XCTUnwrap(HyperKeyModifiers.fromHumanReadable("Control+Option+Command"))
-        var export = SettingsExport.defaults()
-        export.hyperKeyModifiers = threeModifiers
-        KeySymbolMapper.setHyperKeyModifiers(threeModifiers)
-
-        _ = try SettingsTOMLCodec.encode(export, preservingUnknownKeysFrom: previous)
-
-        XCTAssertEqual(KeySymbolMapper.hyperModifiers, threeModifiers.carbonMask)
+        for encoded in encodings {
+            let toml = String(decoding: encoded, as: UTF8.self)
+            XCTAssertTrue(toml.contains("binding = \"Hyper+H\"\nid = \"focus.left\""))
+            XCTAssertTrue(toml.contains("binding = \"Hyper+Shift+H\"\nid = \"move.left\""))
+            XCTAssertEqual(try SettingsTOMLCodec.decode(encoded), export)
+            XCTAssertEqual(KeySymbolMapper.hyperModifiers, HyperKeyModifiers.default.carbonMask)
+        }
     }
 
     private func withHyperComposition(_ composition: String, _ body: () throws -> Void) throws {
