@@ -10,6 +10,7 @@ actor IPCApplicationBridge {
     private let eventBroker: IPCEventBroker
     private let sessionToken: String
     private let authorizationToken: String
+    private var lastPublishedDisplays: IPCResult?
 
     @MainActor
     init(
@@ -196,6 +197,10 @@ actor IPCApplicationBridge {
     func publishEvent(_ channel: IPCSubscriptionChannel) async {
         guard hasSubscribers(for: channel) else { return }
         guard let event = await eventEnvelope(for: channel) else { return }
+        if channel == .displayChanged {
+            guard event.result != lastPublishedDisplays else { return }
+            lastPublishedDisplays = event.result
+        }
         await eventBroker.publish(event)
     }
 

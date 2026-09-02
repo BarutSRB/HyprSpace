@@ -435,9 +435,13 @@ final class ServiceLifecycleManager {
             return
         }
 
+        let topologyChanged = controller.workspaceManager.monitors != currentMonitors
         controller.workspaceManager.applyMonitorConfigurationChange(currentMonitors)
         controller.resetMouseWarpTransientState()
         controller.syncMouseWarpPolicy(for: controller.workspaceManager.monitors)
+        if topologyChanged {
+            controller.publishDisplayChanged()
+        }
         guard performPostUpdateActions else { return }
 
         controller.syncMonitorsToNiriEngine()

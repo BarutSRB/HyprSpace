@@ -78,6 +78,88 @@ final class IPCSessionEventPublicationTests: XCTestCase {
         XCTAssertNil(trailing)
     }
 
+    func testAdoptedMonitorChangesPublishDisplaySnapshots() async throws {
+        let fixture = try makeFixture()
+        let bridge = makeBridge(controller: fixture.controller)
+        fixture.controller.ipcApplicationBridge = bridge
+        let stream = await bridge.stream(for: .displayChanged)
+        var iterator = stream.makeAsyncIterator()
+        let lifecycle = fixture.controller.serviceLifecycleManager
+        let second = makeMonitor(displayId: 2, name: "Second", width: 1440)
+
+        lifecycle.applyMonitorConfigurationChanged(
+            currentMonitors: [fixture.monitor, second],
+            performPostUpdateActions: false
+        )
+        let addedEvent = await iterator.next()
+        let added = try displays(in: addedEvent)
+        XCTAssertEqual(added.map(\.name), ["Events", "Second"])
+
+        lifecycle.applyMonitorConfigurationChanged(
+            currentMonitors: [fixture.monitor, makeMonitor(displayId: 2, name: "Second", width: 1920)],
+            performPostUpdateActions: false
+        )
+        let reconfiguredEvent = await iterator.next()
+        let reconfigured = try displays(in: reconfiguredEvent)
+        XCTAssertEqual(reconfigured.map(\.name), ["Events", "Second"])
+        XCTAssertNotEqual(reconfigured[1].frame, added[1].frame)
+
+        lifecycle.applyMonitorConfigurationChanged(currentMonitors: [fixture.monitor], performPostUpdateActions: false)
+        let removedEvent = await iterator.next()
+        let removed = try displays(in: removedEvent)
+        XCTAssertEqual(removed.map(\.name), ["Events"])
+
+        lifecycle.applyMonitorConfigurationChanged(currentMonitors: [fixture.monitor], performPostUpdateActions: false)
+        lifecycle.applyMonitorConfigurationChanged(
+            currentMonitors: [fixture.monitor, makeMonitor(displayId: 3, name: "Transient", width: 1)],
+            performPostUpdateActions: false
+        )
+        for _ in 0 ..< 8 {
+            await Task.yield()
+        }
+        await bridge.shutdown()
+        let trailing = await iterator.next()
+        XCTAssertNil(trailing)
+    }
+
+    func testIdenticalDisplaySnapshotsAreNotRepublished() async throws {
+        let fixture = try makeFixture()
+        let bridge = makeBridge(controller: fixture.controller)
+        let stream = await bridge.stream(for: .displayChanged)
+        var iterator = stream.makeAsyncIterator()
+
+        await bridge.publishEvent(.displayChanged)
+        let first = await iterator.next()
+        XCTAssertEqual(first?.channel, .displayChanged)
+
+        await bridge.publishEvent(.displayChanged)
+        await bridge.shutdown()
+        let trailing = await iterator.next()
+        XCTAssertNil(trailing)
+    }
+
+    private func displays(in delivered: IPCEventEnvelope?) throws -> [IPCDisplayQuerySnapshot] {
+        let event = try XCTUnwrap(delivered)
+        XCTAssertEqual(event.channel, .displayChanged)
+        guard case let .displays(result) = event.result.payload else {
+            XCTFail("unexpected payload \(event.result.payload)")
+            return []
+        }
+        return result.displays
+    }
+
+    private func makeMonitor(displayId: CGDirectDisplayID, name: String, width: CGFloat) -> Monitor {
+        let frame = CGRect(x: 1600, y: 0, width: width, height: 900)
+        return Monitor(
+            id: .init(displayId: displayId),
+            displayId: displayId,
+            frame: frame,
+            visibleFrame: frame,
+            hasNotch: false,
+            name: name
+        )
+    }
+
     private func makeBridge(controller: WMController) -> IPCApplicationBridge {
         IPCApplicationBridge(
             controller: controller,

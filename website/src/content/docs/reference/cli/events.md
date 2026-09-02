@@ -27,7 +27,7 @@ core window relayout is not consumer-gated.
 | `active-workspace` | active-workspace | Interaction monitor and active workspace updates |
 | `focused-monitor` | focused-monitor | Focused monitor updates |
 | `windows-changed` | windows | Managed window inventory updates |
-| `display-changed` | displays | Display state updates |
+| `display-changed` | displays | Full display snapshot after any adopted display add, remove, or reconfigure, after a gap-setting change, or when the interaction monitor changes; identical consecutive snapshots are not repeated |
 | `layout-changed` | workspaces | Workspace layout updates |
 
 ## subscribe

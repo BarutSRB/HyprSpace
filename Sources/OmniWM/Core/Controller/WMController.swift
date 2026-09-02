@@ -914,7 +914,7 @@ final class WMController {
         publishDisplayChanged()
     }
 
-    private func publishDisplayChanged() {
+    func publishDisplayChanged() {
         guard let ipcApplicationBridge else { return }
         Task {
             await ipcApplicationBridge.publishEvent(.displayChanged)
