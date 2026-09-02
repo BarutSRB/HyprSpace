@@ -242,6 +242,51 @@ final class WorkspaceBarDataSourceTests: XCTestCase {
         XCTAssertEqual(Set(scratchpad.windows[0].allWindows.map(\.id)), Set([first, second]))
     }
 
+    func testWindowItemsCarryBundleIdentityFromReplacementMetadata() throws {
+        let fixture = try makeFixture()
+        _ = addWindow(pid: 44_001, windowId: 44_101, bundleId: "com.example.first", mode: .tiling, to: fixture)
+        _ = addWindow(pid: 44_002, windowId: 44_102, bundleId: nil, mode: .tiling, to: fixture)
+
+        let projection = project(fixture, excludedBundleIDs: [])
+        let item = try XCTUnwrap(projection.items.first { $0.id == fixture.workspaceId })
+
+        XCTAssertEqual(Set(item.tiledWindows.map(\.bundleId)), Set(["com.example.first", nil]))
+    }
+
+    func testWorkspaceBarIPCPayloadIncludesBundleId() throws {
+        let controller = WMController(
+            settings: makeSettingsStore(),
+            windowFocusOperations: WindowFocusOperations(
+                activateApp: { _ in },
+                focusSpecificWindow: { _, _, _ in },
+                raiseWindow: { _ in }
+            )
+        )
+        let monitor = makeMonitor(displayId: 47_001)
+        controller.workspaceManager.applyMonitorConfigurationChange([monitor])
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        _ = controller.workspaceManager.focusWorkspace(named: "1")
+        _ = addWindow(
+            token: WindowToken(pid: 47_101, windowId: 47_201),
+            bundleId: "com.example.ipc",
+            mode: .tiling,
+            workspaceId: workspaceId,
+            workspaceManager: controller.workspaceManager
+        )
+        let router = IPCQueryRouter(controller: controller, appVersion: nil, sessionToken: "workspace-bar-bundle-tests")
+
+        let workspaceBar = router.workspaceBarResult()
+        let ipcMonitor = try XCTUnwrap(workspaceBar.monitors.first { $0.name == monitor.name })
+        let ipcWorkspace = try XCTUnwrap(ipcMonitor.workspaces.first { $0.rawName == "1" })
+        let app = try XCTUnwrap(ipcWorkspace.windows.first)
+
+        XCTAssertEqual(app.bundleId, "com.example.ipc")
+        let encoded = String(decoding: try IPCWire.makeEncoder().encode(app), as: UTF8.self)
+        XCTAssertTrue(encoded.contains("\"bundleId\":\"com.example.ipc\""))
+    }
+
     func testWorkspaceBarIPCUsesFilteredProjectionWhileWindowsQueryRetainsEntry() throws {
         let settings = makeSettingsStore()
         XCTAssertTrue(settings.addWorkspaceBarExcludedBundleID("com.example.ipc"))

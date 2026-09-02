@@ -28,6 +28,7 @@ struct WorkspaceBarWindowItem: Identifiable, Equatable, @unchecked Sendable {
     let handle: WindowHandle
     let windowId: Int
     let appName: String
+    let bundleId: String?
     let icon: NSImage?
     let isFocused: Bool
     let windowCount: Int
@@ -47,6 +48,7 @@ struct WorkspaceBarWindowItem: Identifiable, Equatable, @unchecked Sendable {
             && lhs.handle === rhs.handle
             && lhs.windowId == rhs.windowId
             && lhs.appName == rhs.appName
+            && lhs.bundleId == rhs.bundleId
             && lhs.icon === rhs.icon
             && lhs.isFocused == rhs.isFocused
             && lhs.windowCount == rhs.windowCount

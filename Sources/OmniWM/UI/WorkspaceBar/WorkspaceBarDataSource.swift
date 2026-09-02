@@ -322,6 +322,7 @@ enum WorkspaceBarDataSource {
             handle: firstHandle,
             windowId: firstEntry.windowId,
             appName: appName,
+            bundleId: bundleId(for: firstEntry, appInfoCache: appInfoCache),
             icon: icon(
                 for: firstEntry,
                 appInfo: appInfo,
@@ -353,6 +354,7 @@ enum WorkspaceBarDataSource {
                 handle: handle,
                 windowId: entry.windowId,
                 appName: appName,
+                bundleId: bundleId(for: entry, appInfoCache: appInfoCache),
                 icon: icon(
                     for: entry,
                     appInfo: appInfo,

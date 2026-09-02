@@ -265,6 +265,7 @@ final class IPCQueryRouter {
         IPCWorkspaceBarApp(
             id: windowIdentifier(item.id),
             appName: item.appName,
+            bundleId: item.bundleId,
             isFocused: item.isFocused,
             windowCount: item.windowCount,
             allWindows: item.allWindows.map { window in

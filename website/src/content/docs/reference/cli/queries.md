@@ -56,7 +56,7 @@ For windows, `is-visible` is true only when the workspace is visible, the window
 
 | Query | Selectors | Fields | Description |
 |-------|-----------|--------|-------------|
-| `workspace-bar` | — | — | Workspace bar projection for every monitor |
+| `workspace-bar` | — | — | Workspace bar projection for every monitor; app pills carry `id`, `appName`, `bundleId` (omitted when unknown), `isFocused`, `windowCount`, and `allWindows` |
 | `active-workspace` | — | — | Current interaction monitor and active workspace |
 | `focused-monitor` | — | — | Current interaction monitor and its active workspace |
 | `apps` | — | — | Managed app summary |

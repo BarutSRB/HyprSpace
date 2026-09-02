@@ -23,7 +23,7 @@ core window relayout is not consumer-gated.
 | Channel | Result Type | Description |
 |---------|-------------|-------------|
 | `focus` | focused-window | Focused window snapshot updates |
-| `workspace-bar` | workspace-bar | Workspace bar projection updates |
+| `workspace-bar` | workspace-bar | Workspace bar projection updates; each app pill carries `id`, `appName`, `bundleId` (omitted when unknown), `isFocused`, `windowCount`, and `allWindows` |
 | `active-workspace` | active-workspace | Interaction monitor and active workspace updates |
 | `focused-monitor` | focused-monitor | Focused monitor updates |
 | `windows-changed` | windows | Managed window inventory updates |
