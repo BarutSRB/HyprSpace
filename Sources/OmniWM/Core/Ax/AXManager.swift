@@ -493,6 +493,21 @@ final class AXManager {
         frameLedger.pendingFrameWrite(for: windowId)
     }
 
+    // Keeps tests on the same pending-write lifecycle as production frame applications.
+    @discardableResult
+    func stageFrameWrite(for target: AXFrameApplicationTarget) -> AXFrameApplicationRequest? {
+        frameLedger.prepareFrameApplication(
+            pid: target.pid,
+            windowId: target.windowId,
+            expectedWindow: target.expectedWindow,
+            frame: target.frame,
+            components: target.components,
+            isRetry: false,
+            verify: true,
+            terminalObserver: nil
+        ).request
+    }
+
     func frameStateDump() -> String {
         var sections = ["Ledger:\n\(frameLedger.stateDump())"]
         let inactive = inactiveWorkspaceWindowIds.sorted()

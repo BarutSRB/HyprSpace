@@ -8,10 +8,16 @@ import Foundation
 struct WorldView {
     private let controller: WMController
     private let borderFrameResolver: ((Int) -> CGRect?)?
+    private let liveBoundsProvider: ((Int) -> CGRect?)?
 
-    init(controller: WMController, borderFrameResolver: ((Int) -> CGRect?)? = nil) {
+    init(
+        controller: WMController,
+        borderFrameResolver: ((Int) -> CGRect?)? = nil,
+        liveBoundsProvider: ((Int) -> CGRect?)? = nil
+    ) {
         self.controller = controller
         self.borderFrameResolver = borderFrameResolver
+        self.liveBoundsProvider = liveBoundsProvider
     }
 
     var hasStartedServices: Bool {
@@ -152,14 +158,17 @@ struct WorldView {
     }
 
     func borderFrame(for entry: WindowState) -> CGRect? {
-        if let borderFrameResolver {
-            return borderFrameResolver(entry.windowId)
+        // The ring hugs what is actually presented: live WindowServer bounds are the
+        // ground truth for overlay placement, even while an AX write is still pending
+        // (apps may apply writes late or constrain themselves — issues #211/#223/#380).
+        // Pending writes and layout caches only backfill when live bounds are unavailable.
+        if let observed = observedWindowBounds(windowId: entry.windowId) {
+            return observed
         }
-        if let cached = cachedBorderFrame(for: entry) {
-            return cached
+        if let pending = controller.axManager.pendingFrameWrite(for: entry.windowId) {
+            return pending
         }
-        BorderOpMetricsRecorder.shared.noteBoundsQueryFallback()
-        return observedWindowBounds(windowId: entry.windowId)
+        return cachedBorderFrame(for: entry) ?? borderFrameResolver?(entry.windowId)
     }
 
     func cachedBorderFrame(for entry: WindowState) -> CGRect? {
@@ -183,6 +192,9 @@ struct WorldView {
     }
 
     func observedWindowBounds(windowId: Int) -> CGRect? {
+        if let liveBoundsProvider {
+            return liveBoundsProvider(windowId)
+        }
         guard windowId > 0,
               let bounds = SkyLight.shared.getWindowBounds(UInt32(windowId)),
               bounds.width > 0, bounds.height > 0

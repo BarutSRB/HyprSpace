@@ -1113,6 +1113,105 @@ final class WindowCornerRadiiTests: XCTestCase {
     }
 
     @MainActor
+    private func borderFrameFixture() throws -> (controller: WMController, entry: WindowState) {
+        let controller = WindowAdmissionTestSupport.controller(prefix: "BorderSurfaceTests")
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let token = WindowToken(pid: 813_101, windowId: 813_102)
+        _ = controller.workspaceManager.addWindow(
+            WindowAdmissionTestSupport.axRef(for: token),
+            pid: token.pid,
+            windowId: token.windowId,
+            to: workspaceId,
+            mode: .floating
+        )
+        let cached = CGRect(x: 80, y: 90, width: 700, height: 500)
+        controller.workspaceManager.updateFloatingGeometry(frame: cached, for: token)
+        return (controller, try XCTUnwrap(controller.workspaceManager.entry(for: token)))
+    }
+
+    @MainActor
+    func testBorderFramePrefersLiveBoundsEvenWhileAXWriteIsPending() throws {
+        let fixture = try borderFrameFixture()
+        let pending = CGRect(x: 10, y: 20, width: 900, height: 600)
+        let live = CGRect(x: 40, y: 50, width: 800, height: 500)
+        let target = AXFrameApplicationTarget(
+            pid: fixture.entry.pid,
+            window: fixture.entry.axRef,
+            frame: pending
+        )
+        XCTAssertNotNil(fixture.controller.axManager.stageFrameWrite(for: target))
+
+        let world = WorldView(controller: fixture.controller, liveBoundsProvider: { _ in live })
+        XCTAssertEqual(world.borderFrame(for: fixture.entry), live)
+
+        fixture.controller.axManager.cancelPendingFrameJobs([
+            (pid: fixture.entry.pid, windowId: fixture.entry.windowId)
+        ])
+        XCTAssertNil(fixture.controller.axManager.pendingFrameWrite(for: fixture.entry.windowId))
+        XCTAssertEqual(world.borderFrame(for: fixture.entry), live)
+    }
+
+    @MainActor
+    func testBorderFrameFallsBackToPendingAXWriteWhenLiveBoundsAreUnavailable() throws {
+        let fixture = try borderFrameFixture()
+        let pending = CGRect(x: 10, y: 20, width: 900, height: 600)
+        let target = AXFrameApplicationTarget(
+            pid: fixture.entry.pid,
+            window: fixture.entry.axRef,
+            frame: pending
+        )
+        XCTAssertNotNil(fixture.controller.axManager.stageFrameWrite(for: target))
+
+        let world = WorldView(controller: fixture.controller, liveBoundsProvider: { _ in nil })
+        XCTAssertEqual(world.borderFrame(for: fixture.entry), pending)
+    }
+
+    @MainActor
+    func testBorderFrameUsesDivergentLiveBoundsAfterAXWriteSettles() throws {
+        let fixture = try borderFrameFixture()
+        let live = CGRect(x: 40, y: 50, width: 800, height: 500)
+        fixture.controller.axManager.confirmFrameWrite(
+            for: fixture.entry.windowId,
+            frame: CGRect(x: 10, y: 20, width: 900, height: 600)
+        )
+
+        let world = WorldView(controller: fixture.controller, liveBoundsProvider: { _ in live })
+        XCTAssertEqual(world.borderFrame(for: fixture.entry), live)
+    }
+
+    @MainActor
+    func testBorderFrameFallsBackToCacheWhenLiveBoundsAreUnavailable() throws {
+        let fixture = try borderFrameFixture()
+        let world = WorldView(controller: fixture.controller, liveBoundsProvider: { _ in nil })
+
+        XCTAssertEqual(world.borderFrame(for: fixture.entry), fixture.entry.floatingState?.lastFrame)
+    }
+
+    @MainActor
+    func testCompletedBorderDerivationReturnsToLiveBoundsAfterAnimation() throws {
+        let fixture = try borderFrameFixture()
+        fixture.controller.hasStartedServices = true
+        fixture.controller.settings.bordersEnabled = true
+        XCTAssertTrue(fixture.controller.workspaceManager.setManagedFocus(
+            fixture.entry.token,
+            in: fixture.entry.workspaceId
+        ))
+        let cached = try XCTUnwrap(fixture.entry.floatingState?.lastFrame)
+        let live = CGRect(x: 140, y: 150, width: 800, height: 500)
+        let world = WorldView(controller: fixture.controller, liveBoundsProvider: { _ in live })
+        let previous = DesiredBorderSurface(
+            token: fixture.entry.token,
+            frame: cached,
+            config: BorderConfig.from(settings: fixture.controller.settings)
+        )
+
+        XCTAssertEqual(SurfaceDerivation.deriveAnimationBorder(world: world, previous: previous)?.frame, cached)
+        XCTAssertEqual(SurfaceDerivation.deriveBorder(world: world)?.frame, live)
+    }
+
+    @MainActor
     func testFloatingToTilingBorderFrameUsesAcceptedTiledFrameOverStaleObservedFrame() throws {
         let controller = WindowAdmissionTestSupport.controller(prefix: "BorderSurfaceTests")
         let workspaceId = try XCTUnwrap(
