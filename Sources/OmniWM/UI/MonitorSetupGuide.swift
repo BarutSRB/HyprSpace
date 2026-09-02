@@ -18,12 +18,14 @@ struct MonitorSetupGuide: View {
     private enum Step: Int, CaseIterable {
         case macOSArrangement
         case physicalArrangement
+        case workspaceHomes
         case mouseWarp
 
         var title: String {
             switch self {
             case .macOSArrangement: "Arrange Displays in macOS"
             case .physicalArrangement: "Match Your Real Desk"
+            case .workspaceHomes: "Give Every Display a Workspace"
             case .mouseWarp: "Make the Pointer Feel Natural"
             }
         }
@@ -32,6 +34,7 @@ struct MonitorSetupGuide: View {
             switch self {
             case .macOSArrangement: "macwindow.on.rectangle"
             case .physicalArrangement: "display.2"
+            case .workspaceHomes: "rectangle.3.group"
             case .mouseWarp: "computermouse"
             }
         }
@@ -67,7 +70,8 @@ struct MonitorSetupGuide: View {
             monitors: sortedMonitors,
             routingMode: settings.monitorRoutingMode,
             routingSettings: settings.monitorRoutingSettings,
-            mouseWarpEnabled: settings.mouseWarpEnabled
+            mouseWarpEnabled: settings.mouseWarpEnabled,
+            workspaceConfigurations: settings.workspaceConfigurations
         ))
         _draftMonitors = State(initialValue: sortedMonitors)
         _liveMonitors = State(initialValue: sortedMonitors)
@@ -114,14 +118,24 @@ struct MonitorSetupGuide: View {
         draft.readiness(for: liveMonitors)
     }
 
+    private var uncoveredMonitors: [Monitor] {
+        draft.uncoveredMonitors(in: liveMonitors)
+    }
+
+    private var hasWorkspaceCoverage: Bool {
+        draft.hasWorkspaceCoverage(in: liveMonitors)
+    }
+
     private var canContinue: Bool {
         switch step {
         case .macOSArrangement:
             confirmedMacOSArrangement && liveMonitors.count > 1
         case .physicalArrangement:
             routingReadiness == .ready
+        case .workspaceHomes:
+            routingReadiness == .ready && hasWorkspaceCoverage
         case .mouseWarp:
-            routingReadiness == .ready
+            routingReadiness == .ready && hasWorkspaceCoverage
         }
     }
 
@@ -192,6 +206,8 @@ struct MonitorSetupGuide: View {
                 macOSArrangementStep
             case .physicalArrangement:
                 physicalArrangementStep
+            case .workspaceHomes:
+                workspaceHomesStep
             case .mouseWarp:
                 mouseWarpStep
             }
@@ -344,6 +360,66 @@ struct MonitorSetupGuide: View {
         }
     }
 
+    private var workspaceHomesStep: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            explanation(
+                title: "Make every display a window destination",
+                text: "Moving a window to another display requires a workspace there. Assign at least one "
+                    + "workspace to every connected display before finishing setup."
+            )
+
+            MonitorSetupCard {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Workspace home monitors")
+                        .font(.headline)
+                    Text("You can change these later in Workspaces settings.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                VStack(spacing: 12) {
+                    ForEach(draft.workspaceConfigurations) { configuration in
+                        MonitorSetupWorkspaceRow(
+                            configuration: configuration,
+                            monitorAssignment: monitorAssignmentBinding(for: configuration.id),
+                            connectedMonitors: liveMonitors,
+                            canRemove: draft.isDraftCreatedWorkspace(configuration.id),
+                            onRemove: {
+                                draft.removeDraftCreatedWorkspace(configuration.id)
+                            }
+                        )
+                    }
+                }
+            }
+
+            MonitorSetupCard {
+                if hasWorkspaceCoverage {
+                    Label("Every display has a workspace", systemImage: "checkmark.circle.fill")
+                        .font(.headline)
+                        .foregroundStyle(.green)
+                } else {
+                    Label(
+                        "Add or reassign a workspace for each display below",
+                        systemImage: "exclamationmark.triangle.fill"
+                    )
+                    .font(.headline)
+                    .foregroundStyle(.orange)
+
+                    ForEach(uncoveredMonitors, id: \.id) { monitor in
+                        Button {
+                            draft.addWorkspace(for: monitor)
+                        } label: {
+                            Label(
+                                "Add Workspace to \(displayName(for: monitor))",
+                                systemImage: "plus.circle"
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private var mouseWarpStep: some View {
         VStack(alignment: .leading, spacing: 20) {
             explanation(
@@ -388,6 +464,10 @@ struct MonitorSetupGuide: View {
 
                 LabeledContent("Routing") {
                     Text("Custom — matches your desk")
+                        .foregroundStyle(.secondary)
+                }
+                LabeledContent("Workspace Homes") {
+                    Text("Every display covered")
                         .foregroundStyle(.secondary)
                 }
                 LabeledContent("Mouse Warp") {
@@ -476,6 +556,21 @@ struct MonitorSetupGuide: View {
         }
     }
 
+    private func displayName(for monitor: Monitor) -> String {
+        let number = displayNumbers[monitor.id] ?? 0
+        let name = draftDisplayLabels[monitor.id]?.accessibilityName ?? monitor.name
+        return "Display \(number), \(name)"
+    }
+
+    private func monitorAssignmentBinding(
+        for workspaceID: WorkspaceConfiguration.ID
+    ) -> Binding<MonitorAssignment> {
+        Binding(
+            get: { draft.monitorAssignment(for: workspaceID) ?? .main },
+            set: { draft.setMonitorAssignment($0, for: workspaceID) }
+        )
+    }
+
     private func refreshLiveMonitors() {
         let monitors = MonitorSettingsTabModel.sortedMonitors(Monitor.current())
         liveMonitors = monitors
@@ -491,7 +586,8 @@ struct MonitorSetupGuide: View {
             monitors: monitors,
             routingMode: settings.monitorRoutingMode,
             routingSettings: settings.monitorRoutingSettings,
-            mouseWarpEnabled: draft.mouseWarpEnabled
+            mouseWarpEnabled: draft.mouseWarpEnabled,
+            workspaceConfigurations: settings.workspaceConfigurations
         )
         selectedMonitor = monitors.first?.id
         confirmedMacOSArrangement = false
@@ -501,20 +597,73 @@ struct MonitorSetupGuide: View {
 
     private func finish() {
         guard routingReadiness == .ready,
+              hasWorkspaceCoverage,
               let routingSettings = draft.routingSettings(
                   preserving: settings.monitorRoutingSettings,
                   monitors: liveMonitors
               )
         else { return }
 
+        let workspaceConfigurationsChanged = settings.workspaceConfigurations != draft.workspaceConfigurations
         settings.applyMonitorSetup(
             routingSettings: routingSettings,
-            mouseWarpEnabled: draft.mouseWarpEnabled
+            mouseWarpEnabled: draft.mouseWarpEnabled,
+            workspaceConfigurations: draft.workspaceConfigurations
         )
+        if workspaceConfigurationsChanged {
+            controller.updateWorkspaceConfig()
+        }
         controller.resetMouseWarpTransientState()
         settings.monitorSetupStatus = .completed
         identificationOverlayController.hide()
         onFinish()
+    }
+}
+
+private struct MonitorSetupWorkspaceRow: View {
+    let configuration: WorkspaceConfiguration
+    @Binding var monitorAssignment: MonitorAssignment
+    let connectedMonitors: [Monitor]
+    let canRemove: Bool
+    let onRemove: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Workspace \(configuration.name)")
+                    .font(.callout.weight(.semibold))
+                    .lineLimit(1)
+                if configuration.effectiveDisplayName != configuration.name {
+                    Text(configuration.effectiveDisplayName)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            .frame(minWidth: 110, alignment: .leading)
+
+            Spacer(minLength: 12)
+
+            WorkspaceHomeMonitorPicker(
+                selection: $monitorAssignment,
+                connectedMonitors: connectedMonitors
+            )
+            .labelsHidden()
+            .frame(width: 260)
+            .accessibilityLabel("Home monitor for workspace \(configuration.name)")
+
+            if canRemove {
+                Button(role: .destructive, action: onRemove) {
+                    Label("Remove Workspace \(configuration.name)", systemImage: "trash")
+                        .labelStyle(.iconOnly)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("Remove workspace \(configuration.name)")
+                .help("Remove this newly added workspace")
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .contain)
     }
 }
 

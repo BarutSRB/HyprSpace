@@ -1,6 +1,6 @@
 ---
 title: Multi-Monitor Setup
-description: Configure the macOS display arrangement and the OmniWM routing map so focus, window moves, and mouse warp follow your real desk.
+description: Configure display placement, OmniWM routing, workspace homes, and mouse warp for a multi-monitor desk.
 sidebar:
   order: 4
 ---
@@ -11,11 +11,12 @@ OmniWM uses two display maps that do different work — the macOS arrangement ha
 
 1. Open **System Settings > Displays > Arrange**. Put the physically largest or widest display at the bottom. Place the next smaller display above and to its right so its bottom-left corner touches the lower display's top-right corner. Continue the same staircase for every additional display. This macOS map is a technical arrangement used for actual window placement; it does not need to look like your desk.
 2. Open **OmniWM Settings > Monitors** and arrange the OmniWM routing map to match where the displays really sit on your desk. Tiles can be separated by empty grid cells, but every display must remain connected through a chain of shared rows or columns. A diagonal-only tile is disconnected and cannot exchange directional focus, window moves, or mouse warp.
-3. Leave **Mouse Warp** turned on for the recommended experience. It lets the pointer cross between displays according to the real-desk OmniWM map even though macOS uses the staircase.
+3. Assign at least one workspace to every connected display. Window moves between displays need a destination workspace, so the setup assistant will not finish while a display is uncovered. You can reassign an existing workspace or explicitly add one for that display.
+4. Leave **Mouse Warp** turned on for the recommended experience. It lets the pointer cross between displays according to the real-desk OmniWM map even though macOS uses the staircase.
 
 ## The Monitor Setup assistant
 
-The setup assistant opens automatically when OmniWM first sees multiple displays. To review or redo it later, choose **Run Monitor Setup…** in **Settings > Monitors**. The assistant's **Show Numbers on Screens** action helps match each physical display to its tile.
+The setup assistant opens automatically when OmniWM first sees multiple displays. To review or redo it later, choose **Run Monitor Setup…** in **Settings > Monitors**. The assistant's **Show Numbers on Screens** action helps match each physical display to its tile. Routing, workspace-home, and Mouse Warp changes remain drafts until you finish the assistant.
 
 ## Per-monitor behavior
 
@@ -28,7 +29,7 @@ Two settings shape how windows travel between displays:
 
 ## Workspaces and their home monitor
 
-Every workspace has a **Home Monitor**. The `Move Workspace to Left / Right / Up / Down Monitor` actions target the active workspace and intentionally use the same temporary runtime override as `omniwmctl workspace move-to-monitor --force` — they do not rewrite the workspace's Home Monitor or swap workspaces, and unsafe fullscreen, hidden-app, scratchpad, or focus states still block the move. See the [CLI reference](/reference/cli/overview/) for the scripted equivalent.
+Every workspace has a **Home Monitor**, and every connected display needs at least one workspace assigned to it for cross-display window moves to have a destination. The `Move Workspace to Left / Right / Up / Down Monitor` actions target the active workspace and intentionally use the same temporary runtime override as `omniwmctl workspace move-to-monitor --force` — they do not rewrite the workspace's Home Monitor or swap workspaces, and unsafe fullscreen, hidden-app, scratchpad, or focus states still block the move. See the [CLI reference](/reference/cli/overview/) for the scripted equivalent.
 
 :::note
 The monitor-related shortcuts (`Focus Next Monitor`, `Focus Last Monitor`, and the move actions above) are listed with their defaults in [Keyboard Shortcuts](/guides/keyboard-shortcuts/).

@@ -97,7 +97,7 @@ struct MonitorSettingsTab: View {
                             Text(
                                 settings.monitorSetupStatus == .completed
                                     ? "Run the guide again after moving, replacing, or adding a display."
-                                    : "Follow three visual steps for the macOS staircase, your real desk, and Mouse Warp."
+                                    : "Follow four guided steps for display placement, workspace homes, and Mouse Warp."
                             )
                             .font(.caption)
                             .foregroundStyle(.secondary)

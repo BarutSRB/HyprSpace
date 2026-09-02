@@ -108,11 +108,15 @@ final class SettingsStore {
 
     func applyMonitorSetup(
         routingSettings: [MonitorRoutingSettings],
-        mouseWarpEnabled: Bool
+        mouseWarpEnabled: Bool,
+        workspaceConfigurations: [WorkspaceConfiguration]
     ) {
         monitorRoutingSettings = routingSettings
         monitorRoutingMode = .custom
         self.mouseWarpEnabled = mouseWarpEnabled
+        if self.workspaceConfigurations != workspaceConfigurations {
+            self.workspaceConfigurations = workspaceConfigurations
+        }
     }
 
     var gapSize = SettingsStore.defaultExport.gapSize {

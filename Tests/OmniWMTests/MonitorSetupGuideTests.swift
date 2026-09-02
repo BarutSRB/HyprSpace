@@ -62,19 +62,26 @@ final class MonitorSetupGuideTests: XCTestCase {
         let initialMode = settings.monitorRoutingMode
         let initialRows = settings.monitorRoutingSettings
         let initialMouseWarp = settings.mouseWarpEnabled
+        let initialWorkspaceConfigurations = settings.workspaceConfigurations
         var draft = MonitorSetupDraft(
             monitors: monitors,
             routingMode: settings.monitorRoutingMode,
             routingSettings: settings.monitorRoutingSettings,
-            mouseWarpEnabled: settings.mouseWarpEnabled
+            mouseWarpEnabled: settings.mouseWarpEnabled,
+            workspaceConfigurations: settings.workspaceConfigurations
         )
 
         draft.move(monitors[1].id, direction: .down)
         draft.mouseWarpEnabled.toggle()
+        if let workspaceID = draft.workspaceConfigurations.first?.id {
+            draft.setMonitorAssignment(.secondary, for: workspaceID)
+        }
+        draft.addWorkspace(for: monitors[1])
 
         XCTAssertEqual(settings.monitorRoutingMode, initialMode)
         XCTAssertEqual(settings.monitorRoutingSettings, initialRows)
         XCTAssertEqual(settings.mouseWarpEnabled, initialMouseWarp)
+        XCTAssertEqual(settings.workspaceConfigurations, initialWorkspaceConfigurations)
     }
 
     func testGuideBuildsAtMinimumSettingsWindowSize() {

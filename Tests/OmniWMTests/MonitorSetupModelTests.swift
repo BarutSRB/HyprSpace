@@ -21,7 +21,8 @@ final class MonitorSetupModelTests: XCTestCase {
             monitors: monitors,
             routingMode: .custom,
             routingSettings: routing,
-            mouseWarpEnabled: false
+            mouseWarpEnabled: false,
+            workspaceConfigurations: []
         )
 
         XCTAssertEqual(draft.cell(for: monitors[0].id), .init(column: 0, row: 0))
@@ -41,7 +42,8 @@ final class MonitorSetupModelTests: XCTestCase {
             monitors: monitors,
             routingMode: .macOS,
             routingSettings: inactiveRouting,
-            mouseWarpEnabled: true
+            mouseWarpEnabled: true,
+            workspaceConfigurations: []
         )
 
         XCTAssertEqual(draft.cell(for: monitors[0].id), .init(column: 0, row: 0))
@@ -56,7 +58,8 @@ final class MonitorSetupModelTests: XCTestCase {
             monitors: monitors,
             routingMode: .custom,
             routingSettings: incompleteRouting,
-            mouseWarpEnabled: true
+            mouseWarpEnabled: true,
+            workspaceConfigurations: []
         )
 
         XCTAssertEqual(draft.cell(for: monitors[0].id), .init(column: 0, row: 0))
@@ -81,7 +84,8 @@ final class MonitorSetupModelTests: XCTestCase {
             monitors: [first, second],
             routingMode: .macOS,
             routingSettings: [],
-            mouseWarpEnabled: true
+            mouseWarpEnabled: true,
+            workspaceConfigurations: []
         )
 
         XCTAssertEqual(Set(draft.cells.values).count, 2)
@@ -95,7 +99,8 @@ final class MonitorSetupModelTests: XCTestCase {
             monitors: monitors,
             routingMode: .macOS,
             routingSettings: [],
-            mouseWarpEnabled: true
+            mouseWarpEnabled: true,
+            workspaceConfigurations: []
         )
 
         draft.place(monitors[0].id, at: .init(column: 2, row: 0))
@@ -117,7 +122,8 @@ final class MonitorSetupModelTests: XCTestCase {
             monitors: monitors,
             routingMode: .macOS,
             routingSettings: [],
-            mouseWarpEnabled: true
+            mouseWarpEnabled: true,
+            workspaceConfigurations: []
         )
 
         draft.move(monitors[0].id, direction: .right)
@@ -153,13 +159,15 @@ final class MonitorSetupModelTests: XCTestCase {
             monitors: horizontal,
             routingMode: .macOS,
             routingSettings: [],
-            mouseWarpEnabled: true
+            mouseWarpEnabled: true,
+            workspaceConfigurations: []
         )
         let disconnectedDraft = MonitorSetupDraft(
             monitors: diagonal,
             routingMode: .macOS,
             routingSettings: [],
-            mouseWarpEnabled: true
+            mouseWarpEnabled: true,
+            workspaceConfigurations: []
         )
 
         XCTAssertTrue(connectedDraft.isCardinallyConnected)
@@ -179,7 +187,8 @@ final class MonitorSetupModelTests: XCTestCase {
             monitors: monitors,
             routingMode: .macOS,
             routingSettings: [],
-            mouseWarpEnabled: true
+            mouseWarpEnabled: true,
+            workspaceConfigurations: []
         )
 
         XCTAssertEqual(draft.readiness(for: monitors.reversed()), .ready)
@@ -199,7 +208,8 @@ final class MonitorSetupModelTests: XCTestCase {
             monitors: monitors,
             routingMode: .macOS,
             routingSettings: [],
-            mouseWarpEnabled: true
+            mouseWarpEnabled: true,
+            workspaceConfigurations: []
         )
 
         XCTAssertEqual(
@@ -227,7 +237,8 @@ final class MonitorSetupModelTests: XCTestCase {
             monitors: monitors,
             routingMode: .macOS,
             routingSettings: [],
-            mouseWarpEnabled: true
+            mouseWarpEnabled: true,
+            workspaceConfigurations: []
         )
 
         let updated = try XCTUnwrap(
@@ -241,6 +252,110 @@ final class MonitorSetupModelTests: XCTestCase {
         XCTAssertEqual(first.gridColumn, 0)
         XCTAssertEqual(second.gridColumn, 1)
         XCTAssertTrue(updated.contains(where: { $0.monitorDisplayUUID == disconnectedUUID }))
+    }
+
+    func testWorkspaceCoverageUsesRuntimeMonitorAssignmentResolution() throws {
+        let monitors = threeSideBySideMonitors()
+        let configurations = [
+            WorkspaceConfiguration(name: "1", monitorAssignment: .main),
+            WorkspaceConfiguration(name: "2", monitorAssignment: .secondary)
+        ]
+        var draft = MonitorSetupDraft(
+            monitors: monitors,
+            routingMode: .macOS,
+            routingSettings: [],
+            mouseWarpEnabled: true,
+            workspaceConfigurations: configurations
+        )
+
+        XCTAssertFalse(draft.hasWorkspaceCoverage(in: monitors))
+        XCTAssertEqual(draft.uncoveredMonitors(in: monitors).count, 1)
+        let uncoveredMonitor = try XCTUnwrap(draft.uncoveredMonitors(in: monitors).first)
+        XCTAssertEqual(
+            Set(draft.uncoveredMonitors(in: monitors.reversed()).map(\.id)),
+            [uncoveredMonitor.id]
+        )
+
+        draft.addWorkspace(for: uncoveredMonitor)
+
+        XCTAssertTrue(draft.hasWorkspaceCoverage(in: monitors))
+    }
+
+    func testWorkspaceReassignmentChangesDraftCoverageWithoutChangingConfigurationIdentity() {
+        let monitors = sideBySideMonitors()
+        let configurations = [
+            WorkspaceConfiguration(name: "1", monitorAssignment: .main, layoutType: .niri),
+            WorkspaceConfiguration(name: "2", monitorAssignment: .main, layoutType: .dwindle)
+        ]
+        var draft = MonitorSetupDraft(
+            monitors: monitors,
+            routingMode: .macOS,
+            routingSettings: [],
+            mouseWarpEnabled: true,
+            workspaceConfigurations: configurations
+        )
+
+        XCTAssertFalse(draft.hasWorkspaceCoverage(in: monitors))
+
+        draft.setMonitorAssignment(.secondary, for: configurations[1].id)
+
+        XCTAssertTrue(draft.hasWorkspaceCoverage(in: monitors))
+        XCTAssertEqual(draft.workspaceConfigurations.map(\.id), configurations.map(\.id))
+        XCTAssertEqual(draft.workspaceConfigurations.map(\.name), configurations.map(\.name))
+        XCTAssertEqual(draft.workspaceConfigurations.map(\.layoutType), configurations.map(\.layoutType))
+        XCTAssertEqual(configurations.map(\.monitorAssignment), [.main, .main])
+    }
+
+    func testAddingAndRemovingWorkspaceOnlyMutatesDraftCreatedRows() throws {
+        let monitors = threeSideBySideMonitors()
+        let configurations = [
+            WorkspaceConfiguration(name: "1", monitorAssignment: .main),
+            WorkspaceConfiguration(name: "3", monitorAssignment: .secondary)
+        ]
+        var draft = MonitorSetupDraft(
+            monitors: monitors,
+            routingMode: .macOS,
+            routingSettings: [],
+            mouseWarpEnabled: true,
+            workspaceConfigurations: configurations
+        )
+        let uncoveredMonitor = try XCTUnwrap(draft.uncoveredMonitors(in: monitors).first)
+
+        draft.addWorkspace(for: uncoveredMonitor)
+
+        XCTAssertEqual(draft.workspaceConfigurations.map(\.name), ["1", "2", "3"])
+        let added = try XCTUnwrap(draft.workspaceConfigurations.first(where: { $0.name == "2" }))
+        XCTAssertEqual(added.layoutType, .defaultLayout)
+        XCTAssertEqual(
+            added.monitorAssignment,
+            .specificDisplay(OutputId(from: uncoveredMonitor))
+        )
+        XCTAssertTrue(draft.isDraftCreatedWorkspace(added.id))
+        XCTAssertTrue(draft.hasWorkspaceCoverage(in: monitors))
+
+        draft.removeDraftCreatedWorkspace(configurations[0].id)
+        XCTAssertEqual(draft.workspaceConfigurations.count, 3)
+
+        draft.removeDraftCreatedWorkspace(added.id)
+        XCTAssertEqual(draft.workspaceConfigurations.map(\.name), ["1", "3"])
+        XCTAssertFalse(draft.hasWorkspaceCoverage(in: monitors))
+        XCTAssertFalse(draft.isDraftCreatedWorkspace(added.id))
+
+        draft.removeDraftCreatedWorkspace(added.id)
+        XCTAssertEqual(draft.workspaceConfigurations.map(\.name), ["1", "3"])
+    }
+
+    func testEmptyMonitorSetDoesNotHaveWorkspaceCoverage() {
+        let draft = MonitorSetupDraft(
+            monitors: [],
+            routingMode: .macOS,
+            routingSettings: [],
+            mouseWarpEnabled: true,
+            workspaceConfigurations: [WorkspaceConfiguration(name: "1", monitorAssignment: .main)]
+        )
+
+        XCTAssertFalse(draft.hasWorkspaceCoverage(in: []))
+        XCTAssertTrue(draft.uncoveredMonitors(in: []).isEmpty)
     }
 
     func testStaircaseFramesShrinkAndTouchAtEveryCorner() {

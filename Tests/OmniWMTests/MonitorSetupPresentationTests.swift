@@ -52,7 +52,7 @@ final class MonitorSetupPresentationTests: XCTestCase {
         XCTAssertEqual(reloaded.monitorSetupStatus, .completed)
     }
 
-    func testApplyMonitorSetupCommitsRoutingModeAndMouseWarp() {
+    func testApplyMonitorSetupCommitsRoutingMouseWarpAndWorkspaces() {
         let root = temporaryRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         let settings = makeSettingsStore(root: root)
@@ -70,14 +70,23 @@ final class MonitorSetupPresentationTests: XCTestCase {
                 gridRow: 0
             )
         ]
+        let workspaceConfigurations = [
+            WorkspaceConfiguration(name: "1", monitorAssignment: .main),
+            WorkspaceConfiguration(name: "2", monitorAssignment: .secondary)
+        ]
         settings.monitorRoutingMode = .macOS
         settings.mouseWarpEnabled = true
 
-        settings.applyMonitorSetup(routingSettings: routing, mouseWarpEnabled: false)
+        settings.applyMonitorSetup(
+            routingSettings: routing,
+            mouseWarpEnabled: false,
+            workspaceConfigurations: workspaceConfigurations
+        )
 
         XCTAssertEqual(settings.monitorRoutingSettings, routing)
         XCTAssertEqual(settings.monitorRoutingMode, .custom)
         XCTAssertFalse(settings.mouseWarpEnabled)
+        XCTAssertEqual(settings.workspaceConfigurations, workspaceConfigurations)
     }
 
     func testNavigationRequestIsConsumedOnceAndSelectsMonitors() {

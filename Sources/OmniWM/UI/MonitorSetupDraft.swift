@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Copyright (C) 2026 BarutSRB — https://github.com/BarutSRB/OmniWM
 
+import OmniWMIPC
+
 struct MonitorSetupDraft {
     struct Cell: Hashable {
         var column: Int
@@ -29,17 +31,24 @@ struct MonitorSetupDraft {
     private(set) var monitorIDs: Set<Monitor.ID>
     private(set) var cells: [Monitor.ID: Cell]
     var mouseWarpEnabled: Bool
+    private(set) var workspaceConfigurations: [WorkspaceConfiguration]
     private let monitorIdentities: Set<OutputId>
+    private var draftCreatedWorkspaceIDs: Set<WorkspaceConfiguration.ID>
 
     init(
         monitors: [Monitor],
         routingMode: MonitorRoutingMode,
         routingSettings: [MonitorRoutingSettings],
-        mouseWarpEnabled: Bool
+        mouseWarpEnabled: Bool,
+        workspaceConfigurations: [WorkspaceConfiguration]
     ) {
         monitorIDs = Set(monitors.map(\.id))
         monitorIdentities = Set(monitors.map(OutputId.init(from:)))
         self.mouseWarpEnabled = mouseWarpEnabled
+        self.workspaceConfigurations = workspaceConfigurations.sorted {
+            WorkspaceIDPolicy.sortsBefore($0.name, $1.name)
+        }
+        draftCreatedWorkspaceIDs = []
 
         let initialLayout: [MonitorRoutingSettings]
         if routingMode == .custom,
@@ -124,6 +133,57 @@ struct MonitorSetupDraft {
             monitors: monitors,
             cells: routingCells
         )
+    }
+
+    func uncoveredMonitors(in monitors: [Monitor]) -> [Monitor] {
+        let sortedMonitors = Monitor.sortedByPosition(monitors)
+        let coveredMonitorIDs = Set(workspaceConfigurations.compactMap { configuration in
+            configuration.monitorAssignment
+                .toMonitorDescription()
+                .resolveMonitor(sortedMonitors: sortedMonitors)?
+                .id
+        })
+        return sortedMonitors.filter { !coveredMonitorIDs.contains($0.id) }
+    }
+
+    func hasWorkspaceCoverage(in monitors: [Monitor]) -> Bool {
+        !monitors.isEmpty && uncoveredMonitors(in: monitors).isEmpty
+    }
+
+    mutating func addWorkspace(for monitor: Monitor) {
+        let configuration = WorkspaceConfiguration(
+            name: WorkspaceConfigurationAddPolicy.nextAvailableWorkspaceName(
+                in: workspaceConfigurations
+            ),
+            monitorAssignment: .specificDisplay(OutputId(from: monitor)),
+            layoutType: .defaultLayout
+        )
+        workspaceConfigurations.append(configuration)
+        workspaceConfigurations.sort { WorkspaceIDPolicy.sortsBefore($0.name, $1.name) }
+        draftCreatedWorkspaceIDs.insert(configuration.id)
+    }
+
+    mutating func removeDraftCreatedWorkspace(_ workspaceID: WorkspaceConfiguration.ID) {
+        guard draftCreatedWorkspaceIDs.remove(workspaceID) != nil else { return }
+        workspaceConfigurations.removeAll { $0.id == workspaceID }
+    }
+
+    func isDraftCreatedWorkspace(_ workspaceID: WorkspaceConfiguration.ID) -> Bool {
+        draftCreatedWorkspaceIDs.contains(workspaceID)
+    }
+
+    func monitorAssignment(for workspaceID: WorkspaceConfiguration.ID) -> MonitorAssignment? {
+        workspaceConfigurations.first(where: { $0.id == workspaceID })?.monitorAssignment
+    }
+
+    mutating func setMonitorAssignment(
+        _ assignment: MonitorAssignment,
+        for workspaceID: WorkspaceConfiguration.ID
+    ) {
+        guard let index = workspaceConfigurations.firstIndex(where: { $0.id == workspaceID }) else {
+            return
+        }
+        workspaceConfigurations[index].monitorAssignment = assignment
     }
 
     private mutating func normalizeAndCompact() {

@@ -331,30 +331,10 @@ struct WorkspaceEditSheet: View {
                 ))
                 .textFieldStyle(.roundedBorder)
 
-                Picker("Home Monitor", selection: $configuration.monitorAssignment) {
-                    Text("Main").tag(MonitorAssignment.main)
-                    Text("Secondary").tag(MonitorAssignment.secondary)
-                    Divider()
-                    if case let .specificDisplay(output) = configuration.monitorAssignment,
-                       output.resolveMonitor(in: connectedMonitors) == nil
-                    {
-                        Text("Unavailable: \(output.name)")
-                            .tag(configuration.monitorAssignment)
-                        Divider()
-                    }
-                    ForEach(connectedMonitors, id: \.id) { monitor in
-                        HStack {
-                            Text(monitor.name)
-                            if monitor.isMain {
-                                Text("(Main)").foregroundColor(.secondary)
-                            }
-                            if monitor.displayUUID == nil {
-                                Text("(Session only)").foregroundColor(.secondary)
-                            }
-                        }
-                        .tag(MonitorAssignment.specificDisplay(OutputId(from: monitor)))
-                    }
-                }
+                WorkspaceHomeMonitorPicker(
+                    selection: $configuration.monitorAssignment,
+                    connectedMonitors: connectedMonitors
+                )
 
                 Text(
                     "Main follows the current main display. Secondary follows the first non-main display. Specific Display pins this workspace to the selected monitor when available."
@@ -383,5 +363,39 @@ struct WorkspaceEditSheet: View {
         }
         .padding()
         .frame(minWidth: 420)
+    }
+}
+
+struct WorkspaceHomeMonitorPicker: View {
+    @Binding var selection: MonitorAssignment
+    let connectedMonitors: [Monitor]
+
+    var body: some View {
+        Picker("Home Monitor", selection: $selection) {
+            Text("Main").tag(MonitorAssignment.main)
+            Text("Secondary").tag(MonitorAssignment.secondary)
+            Divider()
+            if case let .specificDisplay(output) = selection,
+               output.resolveMonitor(in: connectedMonitors) == nil
+            {
+                Text("Unavailable: \(output.name)")
+                    .tag(selection)
+                Divider()
+            }
+            ForEach(connectedMonitors, id: \.id) { monitor in
+                HStack {
+                    Text(monitor.name)
+                    if monitor.isMain {
+                        Text("(Main)")
+                            .foregroundStyle(.secondary)
+                    }
+                    if monitor.displayUUID == nil {
+                        Text("(Session only)")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .tag(MonitorAssignment.specificDisplay(OutputId(from: monitor)))
+            }
+        }
     }
 }
