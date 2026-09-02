@@ -227,6 +227,43 @@ final class SettingsFilePersistenceTests: XCTestCase {
     }
 
     @MainActor
+    func testDeferredSaveDoesNotOverwriteAcceptedExternalRestore() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.remove() }
+
+        let persistence = SettingsFilePersistence(
+            directory: fixture.configDirectory,
+            startWatching: false,
+            deferSaves: true
+        )
+        let settings = SettingsStore(
+            persistence: persistence,
+            runtimeState: RuntimeStateStore(
+                directory: fixture.root.appendingPathComponent("state", isDirectory: true),
+                deferSaves: false
+            ),
+            autosaveEnabled: true
+        )
+        var restored = settings.toExport()
+        restored.outerGapTop = 41
+
+        settings.gapSize = 20
+        try SettingsTOMLCodec.encode(restored).write(to: persistence.fileURL, options: .atomic)
+        persistence.handlePossibleSettingsFileChange()
+
+        XCTAssertEqual(settings.outerGapTop, 41)
+        XCTAssertEqual(settings.gapSize, restored.gapSize)
+
+        settings.flushNow()
+        for _ in 0 ..< 4 {
+            await Task.yield()
+        }
+
+        XCTAssertEqual(try SettingsTOMLCodec.decode(Data(contentsOf: persistence.fileURL)), restored)
+        XCTAssertEqual(settings.toExport(), restored)
+    }
+
+    @MainActor
     func testStartupEmptyFileIsLeftUntouched() throws {
         let fixture = try makeFixture()
         defer { fixture.remove() }

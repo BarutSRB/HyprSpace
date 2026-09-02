@@ -552,7 +552,7 @@ final class SettingsFilePersistence {
         handlePossibleSettingsFileChange()
     }
 
-    private func handlePossibleSettingsFileChange() {
+    func handlePossibleSettingsFileChange() {
         let observedFingerprint = currentFingerprint()
         refreshSettingsFileWatcher(for: observedFingerprint)
 
@@ -564,6 +564,9 @@ final class SettingsFilePersistence {
         guard observedFingerprint != lastObservedFingerprint else { return }
         guard observedFingerprint != lastRejectedFingerprint else { return }
         guard let outcome = reloadOutcomeIfChanged() else { return }
+        if outcome.export != nil {
+            pendingExport = nil
+        }
         onExternalChange?(outcome)
     }
 
