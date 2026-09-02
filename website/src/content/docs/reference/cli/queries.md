@@ -50,9 +50,13 @@ For windows, `is-visible` is true only when the workspace is visible, the window
 
 **Workspace fields:** `id`, `raw-name`, `display-name`, `number`, `layout`, `display`, `is-focused`, `is-visible`, `is-current`, `window-counts`, `focused-window-id`
 
+The three workspace flags answer different questions. `is-focused` marks the workspace that holds the natively focused managed window, `is-current` marks the active workspace on the interaction monitor (the one `--current` selects), and `is-visible` marks every workspace that is active on some monitor. With two monitors, two workspaces are visible, one is current, and at most one is focused.
+
 **Display fields:** `id`, `name`, `is-main`, `is-current`, `frame`, `visible-frame`, `has-notch`, `orientation`, `inner-gap`, `outer-gap-left`, `outer-gap-right`, `outer-gap-top`, `outer-gap-bottom`, `fullscreen-uses-outer-gaps`, `active-workspace`
 
 `fullscreen-uses-outer-gaps` reports the resolved per-display policy used by OmniWM Full Screen, Niri maximized, and the Single Window “Full Screen” fit. It does not affect native macOS Full Screen.
+
+`frame` and `visible-frame` use AppKit global screen coordinates as reported by `NSScreen`: the origin is the bottom-left corner of the main display and `y` grows upward, so a display above the main one has a larger `y` than the main display. Window `frame` values use the same coordinate space.
 
 ## Query Reference
 

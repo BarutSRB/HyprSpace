@@ -15,7 +15,7 @@ The current schema is strict — a missing required key in a version 1 file inva
 
 - Keys marked *(optional)* may be omitted; every other key is required.
 - **Colors** are tables with `red`, `green`, `blue`, `alpha` floats in `0.0`–`1.0`.
-- **`singleWindowFit`** values are strings: `"fill"`, a custom size `"WIDTHxHEIGHT"` (e.g. `"1920x1080"`), or — Niri only — `"container_primary_span"`.
+- **`singleWindowFit`** values are strings: `"fill"`, a custom size `"WIDTHxHEIGHT"` (e.g. `"1920x1080"`), or — Niri only — `"container_primary_span"`. `"fill"` is the Settings window's "Full Screen" fit: the lone window takes the fullscreen layout frame, so it follows `fullscreenUsesOuterGaps` rather than the regular tiling gaps.
 - Values listed as enums accept exactly the raw strings shown.
 
 ## File schema
@@ -89,8 +89,10 @@ Gaps between tiled windows and screen edges (points).
 | `fullscreenUsesOuterGaps` | boolean | `false` | Fullscreen layout frames keep the outer gaps. |
 | `outer.left` | float | `0.0` | Outer gap at the left screen edge. |
 | `outer.right` | float | `0.0` | Outer gap at the right screen edge. |
-| `outer.top` | float | `0.0` | Outer gap at the top screen edge. |
+| `outer.top` | float | `0.0` | Outer gap measured from the physical top edge of each display. The menu bar height is subtracted first and the result is clamped at 0, so a display without a menu bar needs a smaller value than the main display for the same visual gap below the menu bar. |
 | `outer.bottom` | float | `0.0` | Outer gap at the bottom screen edge. |
+
+Per-display values come from [`[[monitorGapOverrides]]`](#per-monitor-overrides). An override row is matched to a connected display by its display UUID first and otherwise by display id plus name, so a hand-edited row whose id or name no longer matches any display is silently ignored and the global values apply.
 
 ## niri
 
@@ -102,7 +104,7 @@ Options for the scrolling (Niri) layout.
 | `infiniteLoop` | boolean | `false` | Treats the column strip as a loop instead of a bounded row. |
 | `centerFocusedColumn` | string | `"never"` | When to center the focused column: `never`, `always`, `onOverflow`. |
 | `alwaysCenterSingleColumn` | boolean | `false` | Centers the column when a workspace holds only one. |
-| `singleWindowFit` | string | `"fill"` | Size of a lone window: border-safe `fill`, `container_primary_span`, or `WIDTHxHEIGHT`. |
+| `singleWindowFit` | string | `"fill"` | Size of a lone window: `fill` (the "Full Screen" fit, which uses the fullscreen layout frame and honors `fullscreenUsesOuterGaps`), `container_primary_span`, or `WIDTHxHEIGHT`. |
 | `containerPrimarySpanPresets` *(optional)* | float array | `[1/3, 1/2, 2/3]` | Span fractions the span-cycling actions step through. |
 | `defaultContainerPrimarySpan` *(optional)* | float | `0.5` | Primary-axis span fraction for new containers. |
 
@@ -115,7 +117,7 @@ Options for the Dwindle (BSP) layout.
 | `smartSplit` | boolean | `false` | Automatically chooses the split direction based on cursor position. |
 | `defaultSplitRatio` | float | `1.0` | `1.0` = equal split, `<1.0` = first window smaller, `>1.0` = first window larger. |
 | `splitWidthMultiplier` | float | `1.0` | Biases when vertical vs. horizontal splits are preferred. |
-| `singleWindowFit` | string | `"fill"` | Size of a lone window: border-safe `fill` or `WIDTHxHEIGHT` (no span mode in Dwindle). |
+| `singleWindowFit` | string | `"fill"` | Size of a lone window: `fill` (the "Full Screen" fit, which uses the fullscreen layout frame and honors `fullscreenUsesOuterGaps`) or `WIDTHxHEIGHT` (no span mode in Dwindle). |
 | `useGlobalGaps` | boolean | `true` | Uses the [`gaps`](#gaps) values; when `false`, the inner gap comes from a per-monitor `innerGap` override (falling back to `gaps.size`), clamped to the same 0–64 range as `gaps.size`. |
 | `moveToRootStable` | boolean | `true` | Keeps a window on the same screen side when moving it to the root. |
 
@@ -160,13 +162,13 @@ The per-monitor workspace bar. Per-monitor exceptions live in [`monitorBarOverri
 | `excludedBundleIDs` | string array | `[]` | Bundle IDs whose windows never contribute icons to the bar. |
 | `iconOverrides` | table | `{}` | Bundle ID → custom icon source (see below). |
 | `reserveLayoutSpace` | boolean | `false` | Reserves tiled layout space using the configured bar height. |
-| `revealModifier` | string | `"off"` | Reveal the bar by holding a modifier: `off`, `option`, `control`, `command`, `shift`, `controlOption`, `optionCommand`, `optionShift`, `controlCommand`, `controlShift`, `commandShift`, `controlOptionCommand`, `controlOptionShift`, `optionCommandShift`, `controlCommandShift`, `controlOptionCommandShift`. |
+| `revealModifier` | string | `"off"` | Reveal the bar by holding a modifier. Any value other than `off` makes the bar overlay-only: it reserves no layout space at all while the modifier is configured, not just while it is held. Values: `off`, `option`, `control`, `command`, `shift`, `controlOption`, `optionCommand`, `optionShift`, `controlCommand`, `controlShift`, `commandShift`, `controlOptionCommand`, `controlOptionShift`, `optionCommandShift`, `controlCommandShift`, `controlOptionCommandShift`. |
 | `revealHoldMilliseconds` | float | `200.0` | How long the modifier must be held before the bar reveals. |
 | `hideInNativeFullscreen` | boolean | `false` | Hides the bar while a native-fullscreen space is active. |
 | `height` | float | `24.0` | Bar height in points. |
 | `backgroundOpacity` | float | `0.1` | Bar background opacity (`0.0`–`1.0`). |
 | `xOffset` | float | `0.0` | Horizontal offset in points. |
-| `yOffset` | float | `0.0` | Vertical offset in points. |
+| `yOffset` | float | `0.0` | Vertical offset in points; positive values move the bar up, negative values move it down. |
 | `accentColor` *(optional)* | color table | unset | Accent color override; unset uses the built-in accent. |
 | `textColor` *(optional)* | color table | unset | Text color override; unset uses the built-in text color. |
 
