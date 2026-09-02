@@ -1412,6 +1412,11 @@ import QuartzCore
             previousTargetFrames: &previousTargetFrames
         )
         let windowTokens = snapshot.windows.map(\.token)
+        restoreInitialDwindlePlacementsIfNeeded(
+            windowTokens: windowTokens,
+            engine: engine,
+            workspaceId: snapshot.workspaceId
+        )
         let removedTokens = engine.syncWindows(
             windowTokens,
             in: snapshot.workspaceId,
@@ -1494,10 +1499,26 @@ import QuartzCore
                 plannedSeq: snapshot.plannedSeq
             ),
             diff: diff,
+            dwindleRestorePlacements: engine.persistedPlacements(in: snapshot.workspaceId),
             animationDirectives: directives,
             dwindleAnimationTargetDisposition: targetDisposition,
             isActiveWorkspace: snapshot.isActiveWorkspace
         )
+    }
+
+    private func restoreInitialDwindlePlacementsIfNeeded(
+        windowTokens: [WindowToken],
+        engine: DwindleLayoutEngine,
+        workspaceId: WorkspaceDescriptor.ID
+    ) {
+        guard let controller else { return }
+        var placements: [WindowToken: PersistedDwindlePlacement] = [:]
+        for token in windowTokens {
+            if let placement = controller.workspaceManager.restoreIntent(for: token)?.dwindlePlacement {
+                placements[token] = placement
+            }
+        }
+        engine.restoreInitialPlacements(placements, matching: windowTokens, in: workspaceId)
     }
 
     private func buildOnDemandLayoutPlan(

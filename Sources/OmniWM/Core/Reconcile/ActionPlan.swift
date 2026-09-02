@@ -21,6 +21,7 @@ struct PersistedHydrationMutation: Equatable {
     let floatingFrame: CGRect?
     let niriPlacement: PersistedNiriPlacement?
     let detachedNiriContainerSizingState: NiriContainerSizingState?
+    let dwindlePlacement: PersistedDwindlePlacement?
     let consumedKey: PersistedWindowRestoreKey
     let consumedEntry: PersistedWindowRestoreConsumptionKey
 }

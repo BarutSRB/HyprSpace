@@ -131,6 +131,7 @@ struct RestoreIntent: Equatable {
     var rescueEligible: Bool
     var niriPlacement: PersistedNiriPlacement? = nil
     var detachedNiriContainerSizingState: NiriContainerSizingState? = nil
+    var dwindlePlacement: PersistedDwindlePlacement? = nil
 }
 
 enum ReplacementCorrelation {

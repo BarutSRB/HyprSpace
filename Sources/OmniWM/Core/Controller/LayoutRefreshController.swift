@@ -256,6 +256,7 @@ import QuartzCore
             applySessionPatch(plan.sessionPatch)
             diffExecutor.execute(plan)
             controller.workspaceManager.setNiriRestorePlacements(plan.niriRestorePlacements)
+            controller.workspaceManager.setDwindleRestorePlacements(plan.dwindleRestorePlacements)
         }
         controller.surfaceReconciler.applyAcceptedNativeFullscreenSlots(
             plan.diff.nativeFullscreenSlots,

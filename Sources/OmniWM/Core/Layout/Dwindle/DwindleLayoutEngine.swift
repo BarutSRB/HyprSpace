@@ -5,7 +5,7 @@ import CoreGraphics
 import Foundation
 import QuartzCore
 
-private final class DwindleWorkspaceState {
+final class DwindleWorkspaceState {
     let root = DwindleNode(kind: .leaf(tile: nil))
     var leafByToken: [WindowToken: DwindleNode] = [:]
     var excludedTokens: Set<WindowToken> = []
@@ -49,7 +49,7 @@ final class DwindleLayoutEngine {
         states[workspaceId]?.root
     }
 
-    private func ensureState(for workspaceId: WorkspaceDescriptor.ID) -> DwindleWorkspaceState {
+    func ensureState(for workspaceId: WorkspaceDescriptor.ID) -> DwindleWorkspaceState {
         if let existing = states[workspaceId] {
             return existing
         }

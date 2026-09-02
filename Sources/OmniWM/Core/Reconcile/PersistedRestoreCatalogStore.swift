@@ -20,6 +20,7 @@ struct PersistedWindowRestoreCatalogBuildEntry: Sendable {
     let rescueEligible: Bool
     let niriPlacement: PersistedNiriPlacement?
     let detachedNiriContainerSizingState: NiriContainerSizingState?
+    let dwindlePlacement: PersistedDwindlePlacement?
 }
 
 enum PersistedWindowRestoreCatalogBuilder {
@@ -48,7 +49,8 @@ enum PersistedWindowRestoreCatalogBuilder {
                     restoreToFloating: snapshotEntry.restoreToFloating,
                     rescueEligible: snapshotEntry.rescueEligible,
                     niriPlacement: snapshotEntry.niriPlacement,
-                    detachedNiriContainerSizingState: snapshotEntry.detachedNiriContainerSizingState
+                    detachedNiriContainerSizingState: snapshotEntry.detachedNiriContainerSizingState,
+                    dwindlePlacement: snapshotEntry.dwindlePlacement
                 )
             )
             candidatesByBaseKey[key.baseKey, default: []].append(

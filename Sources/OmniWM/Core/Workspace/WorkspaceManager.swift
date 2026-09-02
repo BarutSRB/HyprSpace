@@ -419,6 +419,7 @@ final class WorkspaceManager {
              .nativeFullscreenPlaceholderSelected,
              .nativeFullscreenTransition,
              .niriPlacementsResolved,
+             .dwindlePlacementsResolved,
              .scratchpadMembershipChanged,
              .scratchpadRevealChanged,
              .selectionChanged,
@@ -646,6 +647,7 @@ final class WorkspaceManager {
             floatingFrame: hydrationPlan.floatingFrame,
             niriPlacement: hydrationPlan.niriPlacement,
             detachedNiriContainerSizingState: hydrationPlan.detachedNiriContainerSizingState,
+            dwindlePlacement: hydrationPlan.dwindlePlacement,
             consumedKey: hydrationPlan.consumedKey,
             consumedEntry: hydrationPlan.consumedEntry
         )
@@ -715,6 +717,7 @@ final class WorkspaceManager {
             var restoreIntent = StateReducer.restoreIntent(for: entry, monitors: monitors)
             restoreIntent.niriPlacement = hydration.niriPlacement
             restoreIntent.detachedNiriContainerSizingState = hydration.detachedNiriContainerSizingState
+            restoreIntent.dwindlePlacement = hydration.dwindlePlacement
             world.setRestoreIntent(restoreIntent, for: token)
         }
 
@@ -840,7 +843,8 @@ final class WorkspaceManager {
                     restoreToFloating: restoreIntent.restoreToFloating,
                     rescueEligible: restoreIntent.rescueEligible,
                     niriPlacement: restoreIntent.niriPlacement,
-                    detachedNiriContainerSizingState: restoreIntent.detachedNiriContainerSizingState
+                    detachedNiriContainerSizingState: restoreIntent.detachedNiriContainerSizingState,
+                    dwindlePlacement: restoreIntent.dwindlePlacement
                 )
             )
         }
@@ -2135,6 +2139,25 @@ final class WorkspaceManager {
         guard !changedPlacements.isEmpty else { return }
         recordReconcileEvent(
             .niriPlacementsResolved(
+                placements: changedPlacements,
+                source: .workspaceManager
+            )
+        )
+    }
+
+    func setDwindleRestorePlacements(_ placements: [WindowToken: PersistedDwindlePlacement]) {
+        var changedPlacements: [WindowToken: PersistedDwindlePlacement] = [:]
+        for (token, captured) in placements {
+            guard let entry = world.entry(for: token), entry.mode == .tiling else { continue }
+            let stored = StateReducer.restoreIntent(for: entry, monitors: monitors).dwindlePlacement
+            let placement = captured.preservingPrunedSteps(of: stored)
+            if placement != stored {
+                changedPlacements[token] = placement
+            }
+        }
+        guard !changedPlacements.isEmpty else { return }
+        recordReconcileEvent(
+            .dwindlePlacementsResolved(
                 placements: changedPlacements,
                 source: .workspaceManager
             )
@@ -3808,7 +3831,8 @@ extension WorkspaceManager {
              let .layoutOperationPerformed(workspaceId, _, _):
             noteInvalidation(workspaceId: workspaceId, domains: .layout)
 
-        case .niriPlacementsResolved:
+        case .niriPlacementsResolved,
+             .dwindlePlacementsResolved:
             break
 
         case .topLevelInventoryObserved:

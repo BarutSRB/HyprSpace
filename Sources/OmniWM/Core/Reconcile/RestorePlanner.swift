@@ -60,6 +60,7 @@ struct RestorePlanner {
         let floatingFrame: CGRect?
         let niriPlacement: PersistedNiriPlacement?
         let detachedNiriContainerSizingState: NiriContainerSizingState?
+        let dwindlePlacement: PersistedDwindlePlacement?
         let consumedKey: PersistedWindowRestoreKey
         let consumedEntry: PersistedWindowRestoreConsumptionKey
     }
@@ -128,6 +129,7 @@ struct RestorePlanner {
              .nativeFullscreenPlaceholderSelected,
              .nativeFullscreenTransition,
              .niriPlacementsResolved,
+             .dwindlePlacementsResolved,
              .scratchpadMembershipChanged,
              .scratchpadRevealChanged,
              .selectionChanged,
@@ -430,6 +432,7 @@ struct RestorePlanner {
             floatingFrame: floatingFrame,
             niriPlacement: persistedEntry.restoreIntent.niriPlacement,
             detachedNiriContainerSizingState: persistedEntry.restoreIntent.detachedNiriContainerSizingState,
+            dwindlePlacement: persistedEntry.restoreIntent.dwindlePlacement,
             consumedKey: persistedEntry.key,
             consumedEntry: PersistedWindowRestoreConsumptionKey(entry: persistedEntry)
         )

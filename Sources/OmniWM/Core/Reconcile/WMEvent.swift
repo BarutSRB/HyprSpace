@@ -176,6 +176,10 @@ enum WMEvent: Equatable {
         placements: [WindowToken: PersistedNiriPlacement],
         source: WMEventSource
     )
+    case dwindlePlacementsResolved(
+        placements: [WindowToken: PersistedDwindlePlacement],
+        source: WMEventSource
+    )
     case hiddenApplicationsChanged(
         pids: Set<pid_t>,
         affectedWorkspaceIds: Set<WorkspaceDescriptor.ID>,
@@ -408,6 +412,7 @@ enum WMEvent: Equatable {
              .nativeFocusOwnerChanged,
              .nativeFullscreenPlaceholderSelected,
              .niriPlacementsResolved,
+             .dwindlePlacementsResolved,
              .scratchpadMembershipChanged,
              .scratchpadRevealChanged,
              .selectionChanged,
@@ -452,6 +457,8 @@ enum WMEvent: Equatable {
             "window_admission_hints_changed token=\(token) workspace=\(workspaceId.uuidString) initial_niri_container_primary_span=\(admissionHints.initialNiriContainerPrimarySpan.map { String($0) } ?? "nil")"
         case let .niriPlacementsResolved(placements, _):
             "niri_placements_resolved count=\(placements.count)"
+        case let .dwindlePlacementsResolved(placements, _):
+            "dwindle_placements_resolved count=\(placements.count)"
         case let .hiddenApplicationsChanged(pids, affectedWorkspaceIds, _):
             "hidden_applications_changed pids=\(pids.count) workspaces=\(affectedWorkspaceIds.count)"
         case let .appVisibilityInvalidated(pid, affectedWorkspaceIds, _):

@@ -92,6 +92,28 @@ struct PersistedNiriPlacement: Codable, Equatable, Sendable {
     let window: PersistedNiriWindowState
 }
 
+struct PersistedDwindleSplitStep: Codable, Equatable, Sendable {
+    let orientation: DwindleOrientation
+    let ratio: CGFloat
+    let childIndex: Int
+}
+
+struct PersistedDwindlePlacement: Codable, Equatable, Sendable {
+    let steps: [PersistedDwindleSplitStep]
+    let memberIndex: Int
+    let isActiveMember: Bool
+
+    func preservingPrunedSteps(of stored: PersistedDwindlePlacement?) -> PersistedDwindlePlacement {
+        guard let stored, steps.count < stored.steps.count else { return self }
+        var remaining = stored.steps[...]
+        for step in steps {
+            guard let index = remaining.firstIndex(of: step) else { return self }
+            remaining = remaining[(index + 1)...]
+        }
+        return PersistedDwindlePlacement(steps: stored.steps, memberIndex: memberIndex, isActiveMember: isActiveMember)
+    }
+}
+
 struct PersistedRestoreIntent: Codable, Equatable, Sendable {
     let workspaceName: String
     let topologyProfile: TopologyProfile
@@ -102,6 +124,7 @@ struct PersistedRestoreIntent: Codable, Equatable, Sendable {
     let rescueEligible: Bool
     let niriPlacement: PersistedNiriPlacement?
     let detachedNiriContainerSizingState: NiriContainerSizingState?
+    let dwindlePlacement: PersistedDwindlePlacement?
 
     init(
         workspaceName: String,
@@ -112,7 +135,8 @@ struct PersistedRestoreIntent: Codable, Equatable, Sendable {
         restoreToFloating: Bool,
         rescueEligible: Bool,
         niriPlacement: PersistedNiriPlacement? = nil,
-        detachedNiriContainerSizingState: NiriContainerSizingState? = nil
+        detachedNiriContainerSizingState: NiriContainerSizingState? = nil,
+        dwindlePlacement: PersistedDwindlePlacement? = nil
     ) {
         self.workspaceName = workspaceName
         self.topologyProfile = topologyProfile
@@ -123,6 +147,7 @@ struct PersistedRestoreIntent: Codable, Equatable, Sendable {
         self.rescueEligible = rescueEligible
         self.niriPlacement = niriPlacement
         self.detachedNiriContainerSizingState = detachedNiriContainerSizingState
+        self.dwindlePlacement = dwindlePlacement
     }
 }
 

@@ -152,6 +152,7 @@ enum EventNormalizer {
              .windowAdmissionHintsChanged,
              .nativeFullscreenPlaceholderSelected,
              .niriPlacementsResolved,
+             .dwindlePlacementsResolved,
              .scratchpadMembershipChanged,
              .scratchpadRevealChanged,
              .selectionChanged,

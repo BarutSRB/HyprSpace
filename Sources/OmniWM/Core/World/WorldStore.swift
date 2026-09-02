@@ -335,6 +335,16 @@ final class WorldStore {
                 model.setRestoreIntent(restoreIntent, for: token)
             }
 
+        case let .dwindlePlacementsResolved(placements, _):
+            guard phase == .beforePlan else { return }
+            for (token, placement) in placements {
+                guard let entry = model.entry(for: token), entry.mode == .tiling else { continue }
+                var restoreIntent = StateReducer.restoreIntent(for: entry, monitors: monitors)
+                restoreIntent.dwindlePlacement = placement
+                guard entry.restoreIntent != restoreIntent else { continue }
+                model.setRestoreIntent(restoreIntent, for: token)
+            }
+
         case let .hiddenApplicationsChanged(pids, affectedWorkspaceIds, _):
             guard phase == .beforePlan else { return }
             for pid in hiddenAppPIDs.symmetricDifference(pids) {
@@ -488,6 +498,7 @@ private extension WMEvent {
              .nativeFullscreenPlaceholderSelected,
              .nativeFullscreenTransition,
              .niriPlacementsResolved,
+             .dwindlePlacementsResolved,
              .scratchpadMembershipChanged,
              .scratchpadRevealChanged,
              .selectionChanged,

@@ -144,6 +144,9 @@ enum StateReducer {
         case let .niriPlacementsResolved(placements, _):
             plan.notes = ["niri_placements=\(placements.count)"]
 
+        case let .dwindlePlacementsResolved(placements, _):
+            plan.notes = ["dwindle_placements=\(placements.count)"]
+
         case let .hiddenApplicationsChanged(pids, affectedWorkspaceIds, _):
             var focusSession = currentSnapshot.focusSession
             if let pendingToken = focusSession.pendingManagedFocus.token,
@@ -412,8 +415,8 @@ enum StateReducer {
         }
         let floatingState = entry.floatingState
         let hasDetachedNiriPlacement = entry.restoreIntent?.detachedNiriContainerSizingState != nil
-        let preservesNiriPlacement = hasDetachedNiriPlacement
-            || (entry.mode == .tiling && entry.restoreIntent?.workspaceId == entry.workspaceId)
+        let keepsTilingPlacement = entry.mode == .tiling && entry.restoreIntent?.workspaceId == entry.workspaceId
+        let preservesNiriPlacement = hasDetachedNiriPlacement || keepsTilingPlacement
         let niriPlacement = preservesNiriPlacement ? entry.restoreIntent?.niriPlacement : nil
         return RestoreIntent(
             topologyProfile: TopologyProfile(monitors: monitors),
@@ -424,7 +427,8 @@ enum StateReducer {
             restoreToFloating: entry.mode == .floating,
             rescueEligible: entry.desiredState.rescueEligible || floatingState?.restoreToFloating == true,
             niriPlacement: niriPlacement,
-            detachedNiriContainerSizingState: entry.restoreIntent?.detachedNiriContainerSizingState
+            detachedNiriContainerSizingState: entry.restoreIntent?.detachedNiriContainerSizingState,
+            dwindlePlacement: keepsTilingPlacement ? entry.restoreIntent?.dwindlePlacement : nil
         )
     }
 
