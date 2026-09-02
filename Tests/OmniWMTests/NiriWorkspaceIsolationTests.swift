@@ -154,7 +154,7 @@ final class NiriWorkspaceIsolationTests: XCTestCase {
             isFixed: false
         )
 
-        engine.updateWindowConstraints(for: token, constraints: constraints, in: workspaceA)
+        engine.updateWindowConstraints(for: token, constraints: constraints, in: workspaceA, motion: .enabled)
 
         XCTAssertEqual(nodeInA.constraints.minSize, CGSize(width: 320, height: 240))
         XCTAssertEqual(nodeInB.constraints, .unconstrained)

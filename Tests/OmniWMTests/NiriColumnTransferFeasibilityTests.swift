@@ -31,7 +31,8 @@ final class NiriColumnTransferFeasibilityTests: XCTestCase {
                     maxSize: .zero,
                     isFixed: false
                 ),
-                in: workspaceId
+                in: workspaceId,
+                motion: .enabled
             )
             windows.append(window)
         }
@@ -194,7 +195,8 @@ final class NiriColumnTransferFeasibilityTests: XCTestCase {
                     maxSize: .zero,
                     isFixed: false
                 ),
-                in: workspaceId
+                in: workspaceId,
+                motion: .enabled
             )
             windows.append(window)
         }

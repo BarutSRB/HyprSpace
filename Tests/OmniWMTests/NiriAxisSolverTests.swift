@@ -115,7 +115,8 @@ final class NiriAxisSolverTests: XCTestCase {
                 maxSize: .zero,
                 isFixed: false
             ),
-            in: fixture.workspaceId
+            in: fixture.workspaceId,
+            motion: .enabled
         )
 
         let constrainedFrames = layout(fixture)

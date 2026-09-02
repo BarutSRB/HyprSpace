@@ -884,7 +884,8 @@ enum StructuralMutationOutcome: Equatable {
             pass.engine.updateWindowConstraints(
                 for: window.token,
                 constraints: window.constraints,
-                in: pass.wsId
+                in: pass.wsId,
+                motion: controller?.motionPolicy.snapshot() ?? .enabled
             )
         }
     }

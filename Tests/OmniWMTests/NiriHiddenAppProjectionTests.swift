@@ -136,7 +136,8 @@ final class NiriHiddenAppProjectionTests: XCTestCase {
                 maxSize: .zero,
                 isFixed: false
             ),
-            in: workspaceId
+            in: workspaceId,
+            motion: .enabled
         )
 
         let frames = layout(

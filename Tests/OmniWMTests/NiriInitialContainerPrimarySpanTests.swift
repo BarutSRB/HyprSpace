@@ -294,7 +294,8 @@ final class NiriInitialContainerPrimarySpanTests: XCTestCase {
                 maxSize: .zero,
                 isFixed: false
             ),
-            in: workspaceId
+            in: workspaceId,
+            motion: .enabled
         )
         let column = try XCTUnwrap(engine.column(of: window))
 

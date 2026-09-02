@@ -30,7 +30,8 @@ extension NiriLayoutEngine {
     func updateWindowConstraints(
         for token: WindowToken,
         constraints: WindowSizeConstraints,
-        in workspaceId: WorkspaceDescriptor.ID
+        in workspaceId: WorkspaceDescriptor.ID,
+        motion: MotionSnapshot
     ) {
         assertSanctionedMutation()
         guard let node = states[workspaceId]?.nodesByToken[token] else { return }
@@ -53,7 +54,7 @@ extension NiriLayoutEngine {
                     clock: animationClock,
                     config: windowMovementAnimationConfig,
                     displayRefreshRate: displayRefreshRate(in: workspaceId),
-                    animated: true
+                    animated: motion.animationsEnabled
                 )
             }
         } else if column.cachedWidth > 0 {
