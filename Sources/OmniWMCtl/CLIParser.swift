@@ -548,15 +548,20 @@ enum CLIParser {
     }
 
     private static func parseWindowRequest(id: String, arguments: [String]) throws -> IPCRequest {
-        guard arguments.count == 2,
-              let action = IPCWindowActionName(rawValue: arguments[0])
+        guard let action = arguments.first.flatMap(IPCWindowActionName.init(rawValue:)),
+              let descriptor = IPCAutomationManifest.windowActionDescriptors.first(where: { $0.name == action }),
+              arguments.count == 1 + descriptor.arguments.count
         else {
             throw CLIParseError.usage(usageText)
         }
 
         return IPCRequest(
             id: id,
-            window: IPCWindowRequest(name: action, windowId: arguments[1])
+            window: IPCWindowRequest(
+                name: action,
+                windowId: arguments[1],
+                workspaceTarget: action == .moveToWorkspace ? WorkspaceTarget(resolvingInput: arguments[2]) : nil
+            )
         )
     }
 

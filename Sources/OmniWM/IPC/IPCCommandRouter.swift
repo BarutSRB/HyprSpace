@@ -316,8 +316,34 @@ final class IPCCommandRouter {
                 return controller.windowActionHandler.summonWindowRight(handle: handle)
                     ? .executed
                     : .notFound
+            case .moveToWorkspace:
+                guard let target = request.workspaceTarget else { return .invalidArguments }
+                guard let handle = controller.workspaceManager.handle(for: token) else { return .notFound }
+                return moveWindow(handle, to: target)
             }
         }
+    }
+
+    private func moveWindow(_ handle: WindowHandle, to target: WorkspaceTarget) -> ExternalCommandResult {
+        let rawWorkspaceID: String
+        switch resolveWorkspaceTarget(target) {
+        case let .failure(result):
+            return result
+        case let .success(resolved):
+            rawWorkspaceID = resolved
+        }
+        guard let targetWorkspaceId = controller.workspaceManager.workspaceId(
+            for: rawWorkspaceID,
+            createIfMissing: false
+        ) else { return .notFound }
+        guard !isAlreadyOnWorkspace(handle.id, rawWorkspaceID: rawWorkspaceID) else { return .noChange }
+        if case .changed = controller.workspaceNavigationHandler.commitWindowMove(
+            handle: handle,
+            toWorkspaceId: targetWorkspaceId
+        ) {
+            return .executed
+        }
+        return .workspaceStateConflict
     }
 
     private func validateControllerState() -> ExternalCommandResult? {

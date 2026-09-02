@@ -11,6 +11,7 @@ Operate on specific windows by their session-scoped opaque ID.
 
 ```
 omniwmctl window <action> <opaque-id>
+omniwmctl window move-to-workspace <opaque-id> <workspace>
 ```
 
 | Action | Description |
@@ -18,6 +19,7 @@ omniwmctl window <action> <opaque-id>
 | `focus` | Focus a managed window by opaque ID |
 | `navigate` | Navigate to a managed window (switches workspace if needed) |
 | `summon-right` | Summon a window to the right of the currently focused window |
+| `move-to-workspace` | Move a window to a workspace by raw workspace ID or unambiguous display name. Focus stays where it is; if the window is the focused one, the configured follow-focus behavior applies. A window already on the target returns `no_change`; an ambiguous display name returns `invalid_arguments` |
 
 Window IDs are session-scoped. They become stale after OmniWM restarts. Obtain IDs from query results (e.g., `omniwmctl query windows`).
 

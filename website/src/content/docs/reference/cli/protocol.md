@@ -125,6 +125,20 @@ Workspace requests use this flat wire shape. For `move-to-monitor`, `force` is o
 }
 ```
 
+**Window move:**
+```json
+{
+  "name": "move-to-workspace",
+  "windowId": "ow_...",
+  "workspaceTarget": {
+    "kind": "raw-id",
+    "value": "3"
+  }
+}
+```
+
+`workspaceTarget` is required by `move-to-workspace` and rejected by every other window action.
+
 ### Response Format
 
 ```json

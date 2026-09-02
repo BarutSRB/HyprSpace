@@ -12,6 +12,7 @@ final class WorkspaceNavigationHandler {
     private enum WorkspaceMoveFocusPolicy {
         case configured
         case alwaysFollow
+        case retainCurrent
     }
 
     init(controller: WMController) {
@@ -75,6 +76,13 @@ final class WorkspaceNavigationHandler {
 
         if let sourceMonitor = controller.workspaceManager.monitor(for: sourceWorkspaceId) {
             controller.layoutRefreshController.stopScrollAnimation(for: sourceMonitor.displayId)
+        }
+        if focusPolicy == .retainCurrent {
+            controller.layoutRefreshController.commitWorkspaceTransition(
+                affectedWorkspaces: mutation.affectedWorkspaceIds,
+                reason: .workspaceTransition
+            )
+            return
         }
 
         let gateWorkspaceIds: Set<WorkspaceDescriptor.ID>
@@ -914,18 +922,27 @@ final class WorkspaceNavigationHandler {
     }
 
     func moveFocusedWindow(toRawWorkspaceID rawWorkspaceID: String) {
-        guard let controller else { return }
-        guard let token = controller.workspaceManager.selectedManagedToken else { return }
-        guard let targetWorkspaceId = controller.workspaceManager.workspaceId(
-            for: rawWorkspaceID,
-            createIfMissing: false
-        ) else { return }
-        guard case let .changed(mutation) = moveWindow(
-            handle: WindowHandle(id: token),
-            toWorkspaceId: targetWorkspaceId
-        ) else { return }
+        guard let controller,
+              let token = controller.workspaceManager.selectedManagedToken,
+              let targetWorkspaceId = controller.workspaceManager.workspaceId(
+                  for: rawWorkspaceID,
+                  createIfMissing: false
+              )
+        else { return }
+        commitWindowMove(handle: WindowHandle(id: token), toWorkspaceId: targetWorkspaceId)
+    }
 
-        finishWorkspaceMove(mutation)
+    @discardableResult
+    func commitWindowMove(
+        handle: WindowHandle,
+        toWorkspaceId targetWorkspaceId: WorkspaceDescriptor.ID
+    ) -> StructuralMutationOutcome {
+        let outcome = moveWindow(handle: handle, toWorkspaceId: targetWorkspaceId)
+        if case let .changed(mutation) = outcome, let controller {
+            let movesSelection = controller.workspaceManager.selectedManagedToken == handle.id
+            finishWorkspaceMove(mutation, focusPolicy: movesSelection ? .configured : .retainCurrent)
+        }
+        return outcome
     }
 
     @discardableResult

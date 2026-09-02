@@ -1832,15 +1832,45 @@ public enum IPCWindowActionName: String, Codable, Equatable, Sendable {
     case focus
     case navigate
     case summonRight = "summon-right"
+    case moveToWorkspace = "move-to-workspace"
 }
 
 public struct IPCWindowRequest: Codable, Equatable, Sendable {
     public let name: IPCWindowActionName
     public let windowId: String
+    public let workspaceTarget: WorkspaceTarget?
 
-    public init(name: IPCWindowActionName, windowId: String) {
+    public init(name: IPCWindowActionName, windowId: String, workspaceTarget: WorkspaceTarget? = nil) {
         self.name = name
         self.windowId = windowId
+        self.workspaceTarget = workspaceTarget
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case name
+        case windowId
+        case workspaceTarget
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decode(IPCWindowActionName.self, forKey: .name)
+        windowId = try container.decode(String.self, forKey: .windowId)
+        workspaceTarget = try container.decodeIfPresent(WorkspaceTarget.self, forKey: .workspaceTarget)
+        guard (name == .moveToWorkspace) == (workspaceTarget != nil) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .workspaceTarget,
+                in: container,
+                debugDescription: "workspaceTarget is required by move-to-workspace and rejected by other actions"
+            )
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(name, forKey: .name)
+        try container.encode(windowId, forKey: .windowId)
+        try container.encodeIfPresent(workspaceTarget, forKey: .workspaceTarget)
     }
 }
 

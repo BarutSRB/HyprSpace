@@ -957,6 +957,12 @@ public enum IPCAutomationManifest {
             name: .summonRight,
             summary: "Summon a managed window to the right of the focused window.",
             arguments: ["opaque-id"]
+        ),
+        .init(
+            path: "window move-to-workspace <opaque-id> <workspace>",
+            name: .moveToWorkspace,
+            summary: "Move a managed window to a workspace by raw id or unambiguous display name without changing focus.",
+            arguments: ["opaque-id", "workspace"]
         )
     ]
 
