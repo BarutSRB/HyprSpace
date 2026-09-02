@@ -2307,33 +2307,23 @@ final class DwindleLayoutEngine {
         assertSanctionedMutation()
         guard let state = states[workspaceId],
               let selected = selectedNode(in: workspaceId),
-              let parent = firstVisibleSplitAncestor(
-                  from: selected,
-                  excluding: state.excludedTokens
-              )?.split,
-              case let .split(orientation, currentRatio) = parent.kind else { return false }
+              let ancestor = firstVisibleSplitAncestor(from: selected, excluding: state.excludedTokens),
+              case let .split(orientation, currentRatio) = ancestor.split.kind else { return false }
 
-        let presets: [CGFloat] = [0.3, 0.5, 0.7]
-
-        let currentIndex = presets.enumerated().min(by: {
-            abs($0.element - currentRatio) < abs($1.element - currentRatio)
-        })?.offset ?? 1
-
-        let newIndex: Int
-        if forward {
-            newIndex = (currentIndex + 1) % presets.count
-        } else {
-            newIndex = (currentIndex - 1 + presets.count) % presets.count
-        }
-
+        let presets = DwindleSettings.splitRatioPresets
+        let isFirst = ancestor.child.isFirstChild(of: ancestor.split)
+        let focusedRatio = isFirst ? currentRatio : 2 - currentRatio
+        let currentIndex = presets.indices
+            .min { abs(presets[$0] - focusedRatio) < abs(presets[$1] - focusedRatio) } ?? 1
+        let preset = presets[(currentIndex + (forward ? 1 : presets.count - 1)) % presets.count]
         let newRatio = clampedRatioRespectingMinimums(
-            presets[newIndex],
-            for: parent,
+            isFirst ? preset : 2 - preset,
+            for: ancestor.split,
             innerGap: settings.innerGap,
             excludedTokens: state.excludedTokens
         )
         guard newRatio != currentRatio else { return false }
-        parent.kind = .split(orientation: orientation, ratio: newRatio)
+        ancestor.split.kind = .split(orientation: orientation, ratio: newRatio)
         return true
     }
 

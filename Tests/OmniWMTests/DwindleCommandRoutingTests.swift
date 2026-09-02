@@ -322,6 +322,10 @@ final class DwindleCommandRoutingTests: XCTestCase {
                 for: fixture.sourceWorkspaceId,
                 screen: fixture.sourceMonitor.visibleFrame
             )
+            fixture.engine.setSelectedNode(
+                fixture.engine.findNode(for: fixture.firstToken, in: fixture.sourceWorkspaceId),
+                in: fixture.sourceWorkspaceId
+            )
         }
         let before = try XCTUnwrap(fixture.engine.root(for: fixture.sourceWorkspaceId)?.splitRatio)
         let blocker = blockLayoutRefresh(fixture)
@@ -335,7 +339,7 @@ final class DwindleCommandRoutingTests: XCTestCase {
 
         let after = try XCTUnwrap(fixture.engine.root(for: fixture.sourceWorkspaceId)?.splitRatio)
         XCTAssertNotEqual(after, before)
-        XCTAssertEqual(after, 0.3, accuracy: 0.000_001)
+        XCTAssertEqual(after, 1.4, accuracy: 0.000_001)
         XCTAssertEqual(
             fixture.controller.layoutRefreshController.layoutState.pendingRefresh?.reason,
             .layoutCommand

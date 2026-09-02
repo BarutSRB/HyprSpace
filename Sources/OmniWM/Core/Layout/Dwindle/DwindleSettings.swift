@@ -5,6 +5,8 @@ import CoreGraphics
 import Foundation
 
 struct DwindleSettings {
+    static let splitRatioPresets: [CGFloat] = [0.6, 1.0, 1.4]
+
     var defaultSplitRatio: CGFloat = 1.0
     var splitWidthMultiplier: CGFloat = 1.0
     var smartSplit: Bool = true

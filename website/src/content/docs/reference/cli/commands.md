@@ -173,8 +173,8 @@ Workspace IDs are positive numeric strings. Direct hotkeys stay limited to `1-9`
 | Command | Arguments | Layout | Description |
 |---------|-----------|--------|-------------|
 | `command balance-sizes` | — | shared | Balance layout sizes in the active workspace |
-| `command cycle-size forward` | — | shared | Cycle layout sizing presets forward |
-| `command cycle-size backward` | — | shared | Cycle layout sizing presets backward |
+| `command cycle-size forward` | — | shared | Cycle layout sizing presets forward (in Dwindle the focused window takes 30, 50, or 70 % of its split) |
+| `command cycle-size backward` | — | shared | Cycle layout sizing presets backward (in Dwindle the focused window takes 70, 50, or 30 % of its split) |
 | `command toggle-workspace-layout` | — | shared | Toggle the workspace between Niri and Dwindle |
 | `command set-workspace-layout` | `<default\|niri\|dwindle>` | shared | Set the workspace layout explicitly |
 | `command toggle-fullscreen` | — | shared | Toggle OmniWM-managed fullscreen |

@@ -154,10 +154,10 @@ final class DwindleMinimumSizeTests: XCTestCase {
         let (engine, ws, first, _) = makeTwoWindowEngine(firstMinWidth: 600)
         engine.setSelectedNode(engine.findNode(for: first, in: ws), in: ws)
 
-        XCTAssertTrue(engine.cycleSplitRatio(forward: true, in: ws))
+        XCTAssertTrue(engine.cycleSplitRatio(forward: false, in: ws))
         XCTAssertEqual(engine.root(for: ws)?.splitRatio ?? 0, 1.208, accuracy: 1e-6)
 
-        XCTAssertFalse(engine.cycleSplitRatio(forward: true, in: ws))
+        XCTAssertFalse(engine.cycleSplitRatio(forward: false, in: ws))
         XCTAssertEqual(engine.root(for: ws)?.splitRatio ?? 0, 1.208, accuracy: 1e-6)
     }
 
