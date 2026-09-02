@@ -270,7 +270,7 @@ enum CLIRenderer {
     }
 
     private static func formattedWindows(_ payload: IPCWindowsQueryResult, format: CLIOutputFormat) -> String {
-        let rows = payload.windows.map { window in
+        var rows = payload.windows.map { window in
             [
                 window.id ?? "-",
                 pidDescription(window.pid),
@@ -284,12 +284,15 @@ enum CLIRenderer {
                 window.scratchpadIndex.map(String.init) ?? boolDescription(window.isScratchpad)
             ]
         }
-
-        return formatRows(
-            headers: ["ID", "PID", "APP", "TITLE", "WORKSPACE", "DISPLAY", "MODE", "FOCUSED", "VISIBLE", "SCRATCHPAD"],
-            rows: rows,
-            format: format
+        var headers = ["ID", "PID", "APP", "TITLE", "WORKSPACE", "DISPLAY", "MODE", "FOCUSED", "VISIBLE", "SCRATCHPAD"]
+        appendColumn(
+            "WINDOW ID",
+            values: payload.windows.map { $0.windowId.map(String.init) },
+            headers: &headers,
+            rows: &rows
         )
+
+        return formatRows(headers: headers, rows: rows, format: format)
     }
 
     private static func formattedWorkspaces(_ payload: IPCWorkspacesQueryResult, format: CLIOutputFormat) -> String {
@@ -358,11 +361,7 @@ enum CLIRenderer {
         headers: inout [String],
         rows: inout [[String]]
     ) {
-        guard values.contains(where: { $0 != nil }) else { return }
-        headers.append(header)
-        for index in rows.indices {
-            rows[index].append(values[index].map { String($0) } ?? "-")
-        }
+        appendColumn(header, values: values.map { $0.map { String($0) } }, headers: &headers, rows: &rows)
     }
 
     private static func appendDisplayColumn(
@@ -371,10 +370,19 @@ enum CLIRenderer {
         headers: inout [String],
         rows: inout [[String]]
     ) {
+        appendColumn(header, values: values.map { $0.map(gapValueDescription) }, headers: &headers, rows: &rows)
+    }
+
+    private static func appendColumn(
+        _ header: String,
+        values: [String?],
+        headers: inout [String],
+        rows: inout [[String]]
+    ) {
         guard values.contains(where: { $0 != nil }) else { return }
         headers.append(header)
         for index in rows.indices {
-            rows[index].append(values[index].map { gapValueDescription($0) } ?? "-")
+            rows[index].append(values[index] ?? "-")
         }
     }
 

@@ -47,6 +47,18 @@ final class IPCProtocolEnvelopeTests: XCTestCase {
         )
     }
 
+    func testV14WindowIdFieldIsAdditiveOnWire() throws {
+        let legacy = IPCWindowQuerySnapshot(id: "ow_a", pid: 7)
+        let legacyData = try IPCWire.makeEncoder().encode(legacy)
+        XCTAssertFalse(String(decoding: legacyData, as: UTF8.self).contains("windowId"))
+        XCTAssertNil(try IPCWire.makeDecoder().decode(IPCWindowQuerySnapshot.self, from: legacyData).windowId)
+
+        let current = IPCWindowQuerySnapshot(id: "ow_a", pid: 7, windowId: 42)
+        let currentData = try IPCWire.makeEncoder().encode(current)
+        XCTAssertTrue(String(decoding: currentData, as: UTF8.self).contains("\"windowId\":42"))
+        XCTAssertEqual(try IPCWire.makeDecoder().decode(IPCWindowQuerySnapshot.self, from: currentData), current)
+    }
+
     func testV14WorkspaceBarAppBundleIdIsAdditiveOnWire() throws {
         let unknown = IPCWorkspaceBarApp(
             id: "ow_a",

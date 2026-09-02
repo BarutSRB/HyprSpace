@@ -95,6 +95,36 @@ final class CLIRendererOutputTests: XCTestCase {
         XCTAssertEqual(try IPCWire.decodeResponse(from: output.data), response)
     }
 
+    func testWindowIdColumnIsAppendedOnlyWhenPresent() throws {
+        let response = IPCResponse.success(
+            id: "1",
+            kind: .query,
+            result: IPCResult(windows: IPCWindowsQueryResult(windows: [IPCWindowQuerySnapshot(
+                id: "ow_a",
+                windowId: 42
+            )]))
+        )
+        let text = try XCTUnwrap(String(
+            data: try CLIRenderer.responseOutput(response, format: .tsv).data,
+            encoding: .utf8
+        ))
+        let lines = text.split(separator: "\n")
+        let headers = try XCTUnwrap(lines.first).split(separator: "\t", omittingEmptySubsequences: false)
+        let column = try XCTUnwrap(headers.firstIndex(of: "WINDOW ID"))
+        XCTAssertEqual(lines[1].split(separator: "\t", omittingEmptySubsequences: false)[column], "42")
+
+        let omitted = IPCResponse.success(
+            id: "2",
+            kind: .query,
+            result: IPCResult(windows: IPCWindowsQueryResult(windows: [IPCWindowQuerySnapshot(id: "ow_a")]))
+        )
+        let omittedText = try XCTUnwrap(String(
+            data: try CLIRenderer.responseOutput(omitted, format: .tsv).data,
+            encoding: .utf8
+        ))
+        XCTAssertFalse(omittedText.contains("WINDOW ID"))
+    }
+
     func testDisplayFullscreenGapsColumnUsesTrueFalseAndIsOmittedWhenUnrequested() throws {
         let response = IPCResponse.success(
             id: "1",

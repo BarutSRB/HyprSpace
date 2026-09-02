@@ -309,6 +309,7 @@ final class IPCQueryRouter {
         return IPCWindowQuerySnapshot(
             id: include("id", in: fields) ? windowIdentifier(entry.token) : nil,
             pid: include("pid", in: fields) ? entry.pid : nil,
+            windowId: include("window-id", in: fields) ? entry.windowId : nil,
             workspace: include("workspace", in: fields) ? workspaceDescriptor.map(workspaceRef(from:)) : nil,
             display: include("display", in: fields) ? monitor.map(displayRef(from:)) : nil,
             app: include("app", in: fields) ? appRef(from: appInfo) : nil,

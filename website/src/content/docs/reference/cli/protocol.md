@@ -244,9 +244,9 @@ This envelope is produced locally by the CLI, so it does not include IPC fields 
 **Table output example (windows):**
 
 ```
-ID    PID    APP       TITLE         WORKSPACE  DISPLAY   MODE     FOCUSED  VISIBLE  SCRATCHPAD
-ow_…  1234   Terminal  ~             main       Built-in  tiling   yes      yes      no
-ow_…  5678   Safari    GitHub        web        Built-in  tiling   no       yes      no
+ID    PID    APP       TITLE         WORKSPACE  DISPLAY   MODE     FOCUSED  VISIBLE  SCRATCHPAD  WINDOW ID
+ow_…  1234   Terminal  ~             main       Built-in  tiling   yes      yes      no          4021
+ow_…  5678   Safari    GitHub        web        Built-in  tiling   no       yes      no          4188
 ```
 
 ---

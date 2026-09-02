@@ -2401,6 +2401,7 @@ public struct IPCFocusedWindowQueryResult: Codable, Equatable, Sendable {
 public struct IPCWindowQuerySnapshot: Codable, Equatable, Sendable {
     public let id: String?
     public let pid: Int32?
+    public let windowId: Int?
     public let workspace: IPCWorkspaceRef?
     public let display: IPCDisplayRef?
     public let app: IPCAppRef?
@@ -2419,6 +2420,7 @@ public struct IPCWindowQuerySnapshot: Codable, Equatable, Sendable {
     public init(
         id: String? = nil,
         pid: Int32? = nil,
+        windowId: Int? = nil,
         workspace: IPCWorkspaceRef? = nil,
         display: IPCDisplayRef? = nil,
         app: IPCAppRef? = nil,
@@ -2436,6 +2438,7 @@ public struct IPCWindowQuerySnapshot: Codable, Equatable, Sendable {
     ) {
         self.id = id
         self.pid = pid
+        self.windowId = windowId
         self.workspace = workspace
         self.display = display
         self.app = app

@@ -329,6 +329,7 @@ public enum IPCAutomationManifest {
     public static let windowFieldCatalog: [String] = [
         "id",
         "pid",
+        "window-id",
         "workspace",
         "display",
         "app",
