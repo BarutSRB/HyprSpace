@@ -297,7 +297,7 @@ Array of workspace definitions.
 | `monitorAssignment` | table | `type` = `main`, `secondary`, or `specificDisplay` (the latter carries an `output` value identifying the display). |
 | `layoutType` | string | `default` (follow `general.defaultLayoutType`), `niri`, or `dwindle`. |
 
-Default: seven workspaces named `1`–`7`, all Niri — `1`–`5` on the main monitor, `6` (shown as ❤️) and `7` (shown as 🚀) on the secondary.
+Default: nine workspaces named `1`–`9`, all Niri — `1`–`5` and `8`–`9` on the main monitor, `6` (shown as ❤️) and `7` (shown as 🚀) on the secondary, matching the default `Option + 1`–`9` bindings.
 
 ```toml
 [[workspaces]]

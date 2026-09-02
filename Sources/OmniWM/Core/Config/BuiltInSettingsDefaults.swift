@@ -54,6 +54,18 @@ enum BuiltInSettingsDefaults {
             displayName: "\u{1F680}",
             monitorAssignment: .secondary,
             layoutType: .niri
+        ),
+        WorkspaceConfiguration(
+            id: uuid("0E18F6B0-345A-4078-8B21-33641F07A861"),
+            name: "8",
+            monitorAssignment: .main,
+            layoutType: .niri
+        ),
+        WorkspaceConfiguration(
+            id: uuid("8D4D711C-2B2F-4FEC-86BF-FA952037738A"),
+            name: "9",
+            monitorAssignment: .main,
+            layoutType: .niri
         )
     ]
 
