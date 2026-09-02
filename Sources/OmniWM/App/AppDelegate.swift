@@ -314,6 +314,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 "OmniWM has not started. Quit these window managers or stop their background services. "
                     + "OmniWM continues automatically once they are gone, or click Check Again:\n\n"
                     + conflicts.map { "• \($0.displayName)" }.joined(separator: "\n")
+        case let .unidentifiedProcess(pid):
+            alert.messageText = "Couldn’t Identify a Running Process"
+            alert.informativeText =
+                "OmniWM has not started because it could not identify process \(pid) "
+                    + "(see `ps -p \(pid)`). It retries every second; click Check Again to retry now, "
+                    + "or quit OmniWM."
         case .scanUnavailable:
             alert.messageText = "Couldn’t Check Running Processes"
             alert.informativeText =

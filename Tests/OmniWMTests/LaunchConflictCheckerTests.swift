@@ -238,6 +238,18 @@ final class LaunchConflictCheckerTests: XCTestCase {
         XCTAssertEqual(checker.scan(), .blocked(.scanUnavailable))
     }
 
+    func testScanReportsUnidentifiedProcessPID() {
+        let checker = LaunchConflictChecker(
+            environment: .init(
+                applicationSnapshots: { [] },
+                processSnapshots: { _ in throw LaunchProcessScanError.processIdentityUnavailable(4_242) },
+                currentPID: { 4_000 }
+            )
+        )
+
+        XCTAssertEqual(checker.scan(), .blocked(.unidentifiedProcess(4_242)))
+    }
+
     func testProcessScannerIgnoresProcessesThatExitDuringResolution() throws {
         let snapshots = try LaunchProcessScanner.snapshots(
             environment: .init(
@@ -285,6 +297,7 @@ final class LaunchConflictCheckerTests: XCTestCase {
         XCTAssertEqual(
             LaunchProcessScanner.unidentifiedResolution(
                 processStatus: UInt32(SZOMB),
+                processExiting: false,
                 processExited: false
             ),
             .exited
@@ -292,9 +305,21 @@ final class LaunchConflictCheckerTests: XCTestCase {
         XCTAssertEqual(
             LaunchProcessScanner.unidentifiedResolution(
                 processStatus: UInt32(SRUN),
+                processExiting: false,
                 processExited: false
             ),
             .unavailable
+        )
+    }
+
+    func testProcessScannerTreatsExitingProcessAsExited() {
+        XCTAssertEqual(
+            LaunchProcessScanner.unidentifiedResolution(
+                processStatus: UInt32(SRUN),
+                processExiting: true,
+                processExited: false
+            ),
+            .exited
         )
     }
 

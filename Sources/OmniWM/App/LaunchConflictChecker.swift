@@ -128,6 +128,7 @@ enum ConflictingWindowManager: CaseIterable, Equatable {
 
 enum LaunchConflictBlockReason: Equatable {
     case conflicts([ConflictingWindowManager])
+    case unidentifiedProcess(pid_t)
     case scanUnavailable
 }
 
@@ -245,6 +246,8 @@ struct LaunchConflictChecker {
         let processSnapshots: [LaunchProcessSnapshot]
         do {
             processSnapshots = try environment.processSnapshots(currentPID)
+        } catch let LaunchProcessScanError.processIdentityUnavailable(pid) {
+            return .blocked(.unidentifiedProcess(pid))
         } catch {
             return .blocked(.scanUnavailable)
         }
@@ -376,16 +379,20 @@ enum LaunchProcessScanner {
             }
         }
 
-        let status = processStatus(pid: pid)
-        let processExited = kill(pid, 0) == -1 && errno == ESRCH
-        return unidentifiedResolution(processStatus: status, processExited: processExited)
+        let info = kernelProcessInfo(pid: pid)
+        return unidentifiedResolution(
+            processStatus: info.map { UInt32($0.kp_proc.p_stat) },
+            processExiting: info.map { ($0.kp_proc.p_flag & P_WEXIT) != 0 } ?? false,
+            processExited: kill(pid, 0) == -1 && errno == ESRCH
+        )
     }
 
     nonisolated static func unidentifiedResolution(
         processStatus: UInt32?,
+        processExiting: Bool,
         processExited: Bool
     ) -> LaunchExecutableResolution {
-        if processStatus == UInt32(SZOMB) || processExited {
+        if processStatus == UInt32(SZOMB) || processExiting || processExited {
             .exited
         } else {
             .unavailable
@@ -393,13 +400,15 @@ enum LaunchProcessScanner {
     }
 
     static func processStatus(pid: pid_t) -> UInt32? {
+        kernelProcessInfo(pid: pid).map { UInt32($0.kp_proc.p_stat) }
+    }
+
+    private static func kernelProcessInfo(pid: pid_t) -> kinfo_proc? {
         var mib = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
         var info = kinfo_proc()
         var infoSize = MemoryLayout<kinfo_proc>.size
         let result = sysctl(&mib, UInt32(mib.count), &info, &infoSize, nil, 0)
-        return result == 0 && infoSize == MemoryLayout<kinfo_proc>.size
-            ? UInt32(info.kp_proc.p_stat)
-            : nil
+        return result == 0 && infoSize == MemoryLayout<kinfo_proc>.size ? info : nil
     }
 
     private static func decode(_ buffer: [CChar]) -> String? {
