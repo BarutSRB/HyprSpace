@@ -124,7 +124,7 @@ swift test                   # Default suite; live/private integration and measu
 
 `make build` first runs `Scripts/ghostty-preflight.sh`, which fails the build unless the GhosttyKit archive named in
 `Scripts/build-metadata.env` exists, is arm64-only, and matches the pinned SHA-256. `make format`/`make lint` pin exact
-tool versions (SwiftFormat 0.62.1, SwiftLint 0.65.1) and fail fast on any other version. SwiftFormat's `fileHeader`
+tool versions (SwiftFormat 0.63.0, SwiftLint 0.65.1) and fail fast on any other version. SwiftFormat's `fileHeader`
 rule also inserts and enforces the two-line SPDX/GPL-2.0 header that every Swift source and test file under
 `Sources/` and `Tests/` must carry; `Package.swift` is the exception, because its `swift-tools-version` directive
 must stay on line one.
