@@ -2119,7 +2119,14 @@ enum StructuralMutationOutcome: Equatable {
 
         state.selectedNodeId = node.id
         controller.workspaceManager.withEngineMutationScope {
-            if !options.ensureVisible, !options.preserveViewportAnchor {
+            let usesSingleWindowFit = engine.singleWindowLayoutContext(in: workspaceId) != nil
+            if usesSingleWindowFit {
+                if state.activeColumnIndex != 0 || state.viewOffset != 0
+                    || state.activatePrevColumnOnRemoval != nil || state.viewOffsetToRestore != nil
+                {
+                    resetViewportForSingleWindowFit(state: &state)
+                }
+            } else if !options.ensureVisible, !options.preserveViewportAnchor {
                 rebaseViewportAnchor(to: node, in: workspaceId, state: &state)
             }
 
@@ -2127,7 +2134,10 @@ enum StructuralMutationOutcome: Equatable {
                 engine.activateWindow(node.id, in: workspaceId)
             }
 
-            if options.ensureVisible, let monitor = controller.workspaceManager.monitor(for: workspaceId) {
+            if !usesSingleWindowFit,
+               options.ensureVisible,
+               let monitor = controller.workspaceManager.monitor(for: workspaceId)
+            {
                 let gap = controller.innerGap(for: monitor)
                 let workingFrame = controller.insetWorkingFrame(for: monitor)
                 engine.ensureSelectionVisible(
