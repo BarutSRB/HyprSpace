@@ -4,7 +4,7 @@
 import Foundation
 
 public enum OmniWMIPCProtocol {
-    public static let version = 13
+    public static let version = 14
 }
 
 public struct IPCRequestEnvelope: Decodable, Sendable {
@@ -84,6 +84,7 @@ public enum IPCErrorCode: String, Codable, Equatable, Sendable, Error {
     case unauthorized = "unauthorized"
     case staleWindowId = "stale_window_id"
     case notFound = "not_found"
+    case noChange = "no_change"
     case workspaceAssignmentConflict = "workspace_assignment_conflict"
     case workspaceStateConflict = "workspace_state_conflict"
     case captureStateConflict = "capture_state_conflict"

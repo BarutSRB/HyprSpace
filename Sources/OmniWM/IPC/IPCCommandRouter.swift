@@ -106,7 +106,7 @@ final class IPCCommandRouter {
                 onMonitor: direction(for: ipcDirection)
             )
         case let .moveToMonitor(ipcDirection):
-            return moveFocusedWindow(using: .moveWindowToMonitor(direction(for: ipcDirection)))
+            return moveFocusedWindowToMonitor(direction(for: ipcDirection))
         case .focusMonitorPrevious:
             return focusMonitor(previous: true)
         case .focusMonitorNext:
@@ -191,7 +191,7 @@ final class IPCCommandRouter {
             if let guardResult = validateControllerState() {
                 return guardResult
             }
-            return controller.commandHandler.setWorkspaceLayout(layoutType(for: layout)) ? .executed : .notFound
+            return controller.commandHandler.setWorkspaceLayout(layoutType(for: layout)) ? .executed : .noChange
         case .toggleFullscreen:
             return controller.commandHandler.performCommand(.toggleFullscreen)
         case .toggleNativeFullscreen:
@@ -243,6 +243,7 @@ final class IPCCommandRouter {
             return result
         }
 
+        guard controller.activeWorkspace()?.name != rawWorkspaceID else { return .noChange }
         return controller.windowActionHandler.focusWorkspaceFromBar(named: rawWorkspaceID) ? .executed : .notFound
     }
 
@@ -376,7 +377,7 @@ final class IPCCommandRouter {
         guard result == .executed else { return result }
         let currentMonitorId = controller.workspaceManager.interactionMonitorId ?? controller.monitorForInteraction()?
             .id
-        return currentMonitorId == previousMonitorId ? .notFound : .executed
+        return currentMonitorId == previousMonitorId ? .noChange : .executed
     }
 
     private func focusLastMonitor() -> ExternalCommandResult {
@@ -386,7 +387,7 @@ final class IPCCommandRouter {
         guard result == .executed else { return result }
         let currentMonitorId = controller.workspaceManager.interactionMonitorId ?? controller.monitorForInteraction()?
             .id
-        return currentMonitorId == previousMonitorId ? .notFound : .executed
+        return currentMonitorId == previousMonitorId ? .noChange : .executed
     }
 
     private func layoutType(for value: IPCWorkspaceLayout) -> LayoutType {
@@ -404,7 +405,7 @@ final class IPCCommandRouter {
         let previousWorkspaceId = controller.activeWorkspace()?.id
         let result = controller.commandHandler.performCommand(command)
         guard result == .executed else { return result }
-        return controller.activeWorkspace()?.id == previousWorkspaceId ? .notFound : .executed
+        return controller.activeWorkspace()?.id == previousWorkspaceId ? .noChange : .executed
     }
 
     private func moveFocusedWindow(using command: HotkeyCommand) -> ExternalCommandResult {
@@ -412,14 +413,33 @@ final class IPCCommandRouter {
         let previousWorkspaceId = controller.workspaceManager.workspace(for: token)
         let result = controller.commandHandler.performCommand(command)
         guard result == .executed else { return result }
-        return controller.workspaceManager.workspace(for: token) == previousWorkspaceId ? .notFound : .executed
+        return controller.workspaceManager.workspace(for: token) == previousWorkspaceId ? .noChange : .executed
+    }
+
+    private func moveFocusedWindowToMonitor(_ direction: Direction) -> ExternalCommandResult {
+        guard let token = controller.workspaceManager.selectedManagedToken,
+              let workspaceId = controller.workspaceManager.workspace(for: token),
+              let monitorId = controller.workspaceManager.monitorId(for: workspaceId),
+              controller.workspaceManager.adjacentMonitor(from: monitorId, direction: direction) != nil
+        else { return .notFound }
+        return moveFocusedWindow(using: .moveWindowToMonitor(direction))
+    }
+
+    private func isAlreadyOnWorkspace(_ token: WindowToken, rawWorkspaceID: String) -> Bool {
+        guard let targetId = controller.workspaceManager.workspaceId(for: rawWorkspaceID, createIfMissing: false)
+        else { return false }
+        return controller.workspaceManager.workspace(for: token) == targetId
     }
 
     private func swapWorkspaceWithMonitor(direction: Direction) -> ExternalCommandResult {
+        guard let monitorId = controller.workspaceManager.interactionMonitorId ?? controller.monitorForInteraction()?
+            .id,
+            controller.workspaceManager.adjacentMonitor(from: monitorId, direction: direction) != nil
+        else { return .notFound }
         let previousWorkspaceId = controller.activeWorkspace()?.id
         let result = controller.commandHandler.performCommand(.swapWorkspaceWithMonitor(direction))
         guard result == .executed else { return result }
-        return controller.activeWorkspace()?.id == previousWorkspaceId ? .notFound : .executed
+        return controller.activeWorkspace()?.id == previousWorkspaceId ? .noChange : .executed
     }
 
     private func raiseAllFloatingWindows() -> ExternalCommandResult {
@@ -427,7 +447,7 @@ final class IPCCommandRouter {
             return guardResult
         }
         guard controller.windowActionHandler.hasRaisableFloatingWindows() else {
-            return .notFound
+            return .noChange
         }
         return controller.commandHandler.performCommand(.raiseAllFloatingWindows)
     }
@@ -436,7 +456,7 @@ final class IPCCommandRouter {
         if let guardResult = validateControllerState() {
             return guardResult
         }
-        return controller.rescueOffscreenWindows() > 0 ? .executed : .notFound
+        return controller.rescueOffscreenWindows() > 0 ? .executed : .noChange
     }
 
     private func toggleFocusedWindowFloating() -> ExternalCommandResult {
@@ -463,6 +483,7 @@ final class IPCCommandRouter {
             rawWorkspaceID = resolved
         }
 
+        guard controller.activeWorkspace()?.name != rawWorkspaceID else { return .noChange }
         let previousWorkspaceId = controller.activeWorkspace()?.id
         controller.workspaceNavigationHandler.switchWorkspace(rawWorkspaceID: rawWorkspaceID)
         return controller.activeWorkspace()?.id == previousWorkspaceId ? .notFound : .executed
@@ -480,6 +501,7 @@ final class IPCCommandRouter {
             rawWorkspaceID = resolved
         }
 
+        guard controller.activeWorkspace()?.name != rawWorkspaceID else { return .noChange }
         let previousWorkspaceId = controller.activeWorkspace()?.id
         let previousMonitorId = controller.workspaceManager.interactionMonitorId ?? controller.monitorForInteraction()?
             .id
@@ -504,6 +526,7 @@ final class IPCCommandRouter {
             rawWorkspaceID = resolved
         }
 
+        guard !isAlreadyOnWorkspace(token, rawWorkspaceID: rawWorkspaceID) else { return .noChange }
         let previousWorkspaceId = controller.workspaceManager.workspace(for: token)
         controller.workspaceNavigationHandler.moveFocusedWindow(toRawWorkspaceID: rawWorkspaceID)
         return controller.workspaceManager.workspace(for: token) == previousWorkspaceId ? .notFound : .executed
@@ -525,6 +548,7 @@ final class IPCCommandRouter {
             rawWorkspaceID = resolved
         }
 
+        guard !isAlreadyOnWorkspace(token, rawWorkspaceID: rawWorkspaceID) else { return .noChange }
         let previousWorkspaceId = controller.workspaceManager.workspace(for: token)
         controller.workspaceNavigationHandler.moveWindowToWorkspaceOnMonitor(
             rawWorkspaceID: rawWorkspaceID,

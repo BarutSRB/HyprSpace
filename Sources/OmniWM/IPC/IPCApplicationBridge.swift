@@ -348,6 +348,8 @@ actor IPCApplicationBridge {
             return .failure(id: id, kind: kind, code: .workspaceStateConflict)
         case .notFound:
             return .failure(id: id, kind: kind, code: .notFound)
+        case .noChange:
+            return .failure(id: id, kind: kind, status: .ignored, code: .noChange)
         case .invalidArguments:
             return .failure(id: id, kind: kind, code: .invalidArguments)
         }

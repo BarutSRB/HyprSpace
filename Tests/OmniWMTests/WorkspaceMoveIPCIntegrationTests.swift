@@ -53,6 +53,15 @@ final class WorkspaceMoveIPCIntegrationTests: XCTestCase {
         XCTAssertEqual(response.code, .workspaceStateConflict)
     }
 
+    func testBridgeMapsNoChangeToIgnoredStatus() {
+        let response = IPCApplicationBridge.response(for: .noChange, id: "switch", kind: .command)
+
+        XCTAssertFalse(response.ok)
+        XCTAssertEqual(response.id, "switch")
+        XCTAssertEqual(response.status, .ignored)
+        XCTAssertEqual(response.code, .noChange)
+    }
+
     func testHotkeyMovesActiveConfiguredWorkspaceWithRuntimeOverrideWithoutSwap() throws {
         let fixture = try makeFixture()
         defer { fixture.controller.layoutRefreshController.resetState() }

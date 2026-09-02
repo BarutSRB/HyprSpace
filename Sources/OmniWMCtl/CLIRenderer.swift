@@ -61,6 +61,7 @@ enum CLIRenderer {
              .unauthorized,
              .staleWindowId,
              .notFound,
+             .noChange,
              .workspaceAssignmentConflict,
              .workspaceStateConflict,
              .captureStateConflict,

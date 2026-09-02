@@ -12,5 +12,6 @@ enum ExternalCommandResult: Equatable, Sendable, Error {
     case workspaceAssignmentConflict
     case workspaceStateConflict
     case notFound
+    case noChange
     case invalidArguments
 }

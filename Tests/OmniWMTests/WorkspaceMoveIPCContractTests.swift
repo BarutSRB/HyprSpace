@@ -173,6 +173,16 @@ final class WorkspaceMoveIPCContractTests: XCTestCase {
         }
     }
 
+    func testNoChangeRendering() throws {
+        let response = IPCResponse.failure(id: "switch", kind: .command, status: .ignored, code: .noChange)
+        let output = try CLIRenderer.responseOutput(response, format: .text)
+
+        XCTAssertFalse(response.ok)
+        XCTAssertEqual(response.status, .ignored)
+        XCTAssertEqual(CLIRenderer.exitCode(for: response), .rejected)
+        XCTAssertEqual(String(decoding: output.data, as: UTF8.self), "ignored: no_change\n")
+    }
+
     func testWorkspaceAssignmentConflictRendering() throws {
         let response = IPCResponse.failure(
             id: "move",
