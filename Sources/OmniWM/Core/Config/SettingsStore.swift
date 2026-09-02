@@ -1312,7 +1312,7 @@ final class SettingsStore {
             splitWidthMultiplier: CGFloat(override?.splitWidthMultiplier ?? dwindleSplitWidthMultiplier),
             singleWindowFit: override?.singleWindowFit ?? dwindleSingleWindowFit,
             useGlobalGaps: useGlobalGaps,
-            innerGap: useGlobalGaps ? sharedInnerGap : CGFloat(override?.innerGap ?? gapSize)
+            innerGap: useGlobalGaps ? sharedInnerGap : resolvedInnerGap(override?.innerGap)
         )
     }
 

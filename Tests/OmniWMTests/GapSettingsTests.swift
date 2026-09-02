@@ -247,6 +247,35 @@ final class GapSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testDwindleOwnInnerGapClampsToRuntimeBounds() {
+        let settings = makeSettingsStore()
+        let monitor = makeMonitor(displayId: 1, name: "Built-in")
+        settings.dwindleUseGlobalGaps = false
+        settings.gapSize = 100
+        XCTAssertEqual(settings.resolvedDwindleSettings(for: monitor).innerGap, 64)
+
+        for (override, expected) in [(100.0, 64.0), (-5.0, 0.0), (12.0, 12.0)] {
+            settings.updateDwindleSettings(
+                MonitorDwindleSettings(
+                    monitorName: monitor.name,
+                    monitorDisplayId: monitor.displayId,
+                    useGlobalGaps: false,
+                    innerGap: override
+                ),
+                for: monitor
+            )
+            XCTAssertEqual(settings.resolvedDwindleSettings(for: monitor).innerGap, CGFloat(expected))
+        }
+
+        settings.gapSize = 16
+        settings.updateDwindleSettings(
+            MonitorDwindleSettings(monitorName: monitor.name, monitorDisplayId: monitor.displayId, useGlobalGaps: true),
+            for: monitor
+        )
+        XCTAssertEqual(settings.resolvedDwindleSettings(for: monitor).innerGap, 16)
+    }
+
+    @MainActor
     func testDisplaysQueryProjectsOnlyRequestedResolvedGapSettings() throws {
         let settings = makeSettingsStore()
         let monitor = makeMonitor(displayId: 1, name: "Built-in")

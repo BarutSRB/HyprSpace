@@ -116,7 +116,7 @@ Options for the Dwindle (BSP) layout.
 | `defaultSplitRatio` | float | `1.0` | `1.0` = equal split, `<1.0` = first window smaller, `>1.0` = first window larger. |
 | `splitWidthMultiplier` | float | `1.0` | Biases when vertical vs. horizontal splits are preferred. |
 | `singleWindowFit` | string | `"fill"` | Size of a lone window: border-safe `fill` or `WIDTHxHEIGHT` (no span mode in Dwindle). |
-| `useGlobalGaps` | boolean | `true` | Uses the [`gaps`](#gaps) values; when `false`, the inner gap comes from a per-monitor `innerGap` override (falling back to `gaps.size`). |
+| `useGlobalGaps` | boolean | `true` | Uses the [`gaps`](#gaps) values; when `false`, the inner gap comes from a per-monitor `innerGap` override (falling back to `gaps.size`), clamped to the same 0–64 range as `gaps.size`. |
 | `moveToRootStable` | boolean | `true` | Keeps a window on the same screen side when moving it to the root. |
 
 ## borders
