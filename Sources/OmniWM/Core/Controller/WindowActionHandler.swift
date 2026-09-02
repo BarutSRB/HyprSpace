@@ -71,7 +71,7 @@ final class WindowActionHandler {
             self?.activateWindowFromOverview(handle: handle, workspaceId: workspaceId)
         }
         oc.onCloseWindow = { [weak self] handle in
-            self?.closeWindowFromOverview(handle: handle) ?? false
+            self?.closeWindow(handle: handle) ?? false
         }
         overviewControllerStorage = oc
         return oc
@@ -147,7 +147,7 @@ final class WindowActionHandler {
         navigateToWindowInternal(token: handle.id, workspaceId: workspaceId)
     }
 
-    private func closeWindowFromOverview(handle: WindowHandle) -> Bool {
+    func closeWindow(handle: WindowHandle) -> Bool {
         guard let controller else { return false }
         guard let entry = controller.workspaceManager.entry(for: handle) else { return false }
 

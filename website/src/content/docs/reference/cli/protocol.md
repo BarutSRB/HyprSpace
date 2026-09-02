@@ -224,6 +224,7 @@ This envelope is produced locally by the CLI, so it does not include IPC fields 
 | `unauthorized` | Missing or invalid authorization token |
 | `stale_window_id` | Window ID is from a previous session or no longer valid |
 | `not_found` | Target window, workspace, monitor, or rule does not exist |
+| `window_action_failed` | The window exists but its close button is missing or refused the action |
 | `no_change` | Request resolved to the current state (workspace already active, window already on the target, nothing to raise or rescue); status is `ignored` |
 | `workspace_assignment_conflict` | Configured monitor assignment prevents the requested workspace move |
 | `workspace_state_conflict` | Current fullscreen, scratchpad, or pending focus state prevents the requested workspace move |

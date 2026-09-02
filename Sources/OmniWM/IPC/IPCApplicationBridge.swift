@@ -355,6 +355,8 @@ actor IPCApplicationBridge {
             return .failure(id: id, kind: kind, code: .notFound)
         case .noChange:
             return .failure(id: id, kind: kind, status: .ignored, code: .noChange)
+        case .windowActionFailed:
+            return .failure(id: id, kind: kind, code: .windowActionFailed)
         case .invalidArguments:
             return .failure(id: id, kind: kind, code: .invalidArguments)
         }

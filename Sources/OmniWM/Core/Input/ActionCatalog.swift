@@ -865,6 +865,13 @@ enum ActionCatalog {
                 keywords: ["float", "floating"]
             ),
             action(
+                id: "closeFocusedWindow",
+                command: .closeFocusedWindow,
+                category: .focus,
+                binding: .unassigned,
+                keywords: ["close", "quit", "window"]
+            ),
+            action(
                 id: "openMenuAnywhere",
                 command: .openMenuAnywhere,
                 category: .focus,
@@ -1023,6 +1030,7 @@ enum ActionCatalog {
              .raiseAllFloatingWindows,
              .rescueOffscreenWindows,
              .toggleFocusedWindowFloating,
+             .closeFocusedWindow,
              .assignFocusedWindowToScratchpad,
              .toggleScratchpad,
              .openMenuAnywhere,
@@ -1111,6 +1119,7 @@ enum ActionCatalog {
         case .raiseAllFloatingWindows: "Raise All Floating Windows"
         case .rescueOffscreenWindows: "Rescue Off-Screen Floating Windows"
         case .toggleFocusedWindowFloating: "Toggle Focused Window Floating"
+        case .closeFocusedWindow: "Close Focused Window"
         case let .assignFocusedWindowToScratchpad(index): "Assign Focused Window to Scratchpad \(index)"
         case let .toggleScratchpad(index): "Toggle Scratchpad \(index)"
         case .openMenuAnywhere: "Open Menu Anywhere"
@@ -1281,6 +1290,8 @@ enum ActionCatalog {
             .hiddenBarPanel
         case .toggleFocusedWindowFloating:
             .toggleFocusedWindowFloating
+        case .closeFocusedWindow:
+            .closeFocusedWindow
         case .assignFocusedWindowToScratchpad:
             .scratchpadAssign
         case .toggleScratchpad:

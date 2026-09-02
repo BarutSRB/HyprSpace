@@ -208,6 +208,8 @@ final class IPCCommandRouter {
             return controller.commandHandler.performCommand(.toggleHiddenBarPanel)
         case .toggleFocusedWindowFloating:
             return toggleFocusedWindowFloating()
+        case .closeFocusedWindow:
+            return controller.commandHandler.performCommand(.closeFocusedWindow)
         case let .scratchpadAssign(index):
             return assignFocusedWindowToScratchpad(index)
         case let .scratchpadToggle(index):
@@ -316,6 +318,9 @@ final class IPCCommandRouter {
                 return controller.windowActionHandler.summonWindowRight(handle: handle)
                     ? .executed
                     : .notFound
+            case .close:
+                guard let handle = controller.workspaceManager.handle(for: token) else { return .notFound }
+                return controller.windowActionHandler.closeWindow(handle: handle) ? .executed : .windowActionFailed
             case .moveToWorkspace:
                 guard let target = request.workspaceTarget else { return .invalidArguments }
                 guard let handle = controller.workspaceManager.handle(for: token) else { return .notFound }

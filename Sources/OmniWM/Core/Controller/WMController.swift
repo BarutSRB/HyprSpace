@@ -3209,6 +3209,13 @@ final class WMController {
         )
     }
 
+    func closeFocusedWindow() -> ExternalCommandResult {
+        guard let token = focusedManagedTokenForCommand(),
+              let handle = workspaceManager.handle(for: token)
+        else { return .notFound }
+        return windowActionHandler.closeWindow(handle: handle) ? .executed : .windowActionFailed
+    }
+
     func toggleFocusedWindowFloating() -> ExternalCommandResult {
         let token = focusedManagedTokenForCommand()
         guard let token,

@@ -189,6 +189,8 @@ enum SettingsTOMLCodec {
         })
     }
 
+    static let hotkeyIDsAddedAfterVersionZero: Set<String> = ["closeFocusedWindow"]
+
     private static func migrateVersionZeroHotkeys(
         in raw: inout [String: TOMLNode]
     ) throws -> SettingsHotkeyMigrationResult {
@@ -213,7 +215,7 @@ enum SettingsTOMLCodec {
         ]
         let addedHotkeyIDs = Set(ScratchpadIndex.range.flatMap { index in
             ["toggleScratchpad.\(index)", "assignFocusedWindowToScratchpad.\(index)"]
-        })
+        }).union(Self.hotkeyIDsAddedAfterVersionZero)
         let retirements = [
             "consumeOrExpelWindowLeft": ["consumeWindowIntoColumn", "expelWindowFromColumn"],
             "consumeOrExpelWindowRight": ["consumeWindowIntoColumn", "expelWindowFromColumn"]

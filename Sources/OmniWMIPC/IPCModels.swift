@@ -85,6 +85,7 @@ public enum IPCErrorCode: String, Codable, Equatable, Sendable, Error {
     case staleWindowId = "stale_window_id"
     case notFound = "not_found"
     case noChange = "no_change"
+    case windowActionFailed = "window_action_failed"
     case workspaceAssignmentConflict = "workspace_assignment_conflict"
     case workspaceStateConflict = "workspace_state_conflict"
     case captureStateConflict = "capture_state_conflict"
@@ -291,6 +292,7 @@ public enum IPCCommandName: String, Codable, CaseIterable, Equatable, Sendable {
     case toggleWorkspaceBar = "toggle-workspace-bar"
     case hiddenBarPanel = "hidden-bar-panel"
     case toggleFocusedWindowFloating = "toggle-focused-window-floating"
+    case closeFocusedWindow = "close-focused-window"
     case scratchpadAssign = "scratchpad-assign"
     case scratchpadToggle = "scratchpad-toggle"
     case openMenuAnywhere = "open-menu-anywhere"
@@ -424,6 +426,7 @@ public enum IPCCommandRequest: Equatable, Sendable {
     case toggleWorkspaceBar
     case hiddenBarPanel
     case toggleFocusedWindowFloating
+    case closeFocusedWindow
     case scratchpadAssign(index: Int)
     case scratchpadToggle(index: Int)
     case openMenuAnywhere
@@ -590,6 +593,8 @@ public enum IPCCommandRequest: Equatable, Sendable {
             .hiddenBarPanel
         case .toggleFocusedWindowFloating:
             .toggleFocusedWindowFloating
+        case .closeFocusedWindow:
+            .closeFocusedWindow
         case .scratchpadAssign:
             .scratchpadAssign
         case .scratchpadToggle:
@@ -887,6 +892,9 @@ public enum IPCCommandRequest: Equatable, Sendable {
         case .toggleFocusedWindowFloating:
             try requireNoArguments()
             self = .toggleFocusedWindowFloating
+        case .closeFocusedWindow:
+            try requireNoArguments()
+            self = .closeFocusedWindow
         case .scratchpadAssign:
             self = try .scratchpadAssign(index: requireInteger())
         case .scratchpadToggle:
@@ -1131,6 +1139,8 @@ extension IPCCommandRequest: Codable {
             self = .hiddenBarPanel
         case .toggleFocusedWindowFloating:
             self = .toggleFocusedWindowFloating
+        case .closeFocusedWindow:
+            self = .closeFocusedWindow
         case .scratchpadAssign:
             let arguments = try container.decode(IPCScratchpadIndexArguments.self, forKey: .arguments)
             self = .scratchpadAssign(index: arguments.scratchpadIndex)
@@ -1312,6 +1322,8 @@ extension IPCCommandRequest: Codable {
         case .hiddenBarPanel:
             break
         case .toggleFocusedWindowFloating:
+            break
+        case .closeFocusedWindow:
             break
         case let .scratchpadAssign(index):
             try container.encode(IPCScratchpadIndexArguments(scratchpadIndex: index), forKey: .arguments)
@@ -1833,6 +1845,7 @@ public enum IPCWindowActionName: String, Codable, Equatable, Sendable {
     case navigate
     case summonRight = "summon-right"
     case moveToWorkspace = "move-to-workspace"
+    case close
 }
 
 public struct IPCWindowRequest: Codable, Equatable, Sendable {

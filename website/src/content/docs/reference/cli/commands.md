@@ -185,6 +185,7 @@ Workspace IDs are positive numeric strings. Direct hotkeys stay limited to `1-9`
 | Command | Arguments | Layout | Description |
 |---------|-----------|--------|-------------|
 | `command toggle-focused-window-floating` | — | shared | Toggle focused window between tiled and floating |
+| `command close-focused-window` | — | shared | Close the focused managed window through its close button; returns `window_action_failed` when the window has no close button or refuses the press |
 | `command raise-all-floating-windows` | — | shared | Raise all visible floating windows |
 | `command rescue-offscreen-windows` | — | shared | Clamp tracked floating windows back onto their visible monitors |
 | `command scratchpad assign <number>` | — | shared | Assign the focused window to scratchpad 1-10, or remove it when already there |

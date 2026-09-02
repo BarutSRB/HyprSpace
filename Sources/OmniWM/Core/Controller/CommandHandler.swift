@@ -206,6 +206,8 @@ final class CommandHandler {
             _ = controller.rescueOffscreenWindows()
         case .toggleFocusedWindowFloating:
             return controller.toggleFocusedWindowFloating()
+        case .closeFocusedWindow:
+            return controller.closeFocusedWindow()
         case let .assignFocusedWindowToScratchpad(index):
             guard let index = ScratchpadIndex(index) else { return .invalidArguments }
             return controller.assignFocusedWindowToScratchpad(index)

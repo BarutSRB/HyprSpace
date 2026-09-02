@@ -876,6 +876,11 @@ public enum IPCAutomationManifest {
             summary: "Toggle the focused managed window between tiled and floating."
         ),
         command(
+            ["close-focused-window"],
+            name: .closeFocusedWindow,
+            summary: "Close the focused managed window through its close button."
+        ),
+        command(
             ["scratchpad", "assign"],
             name: .scratchpadAssign,
             summary: "Assign the focused managed window to a scratchpad, or remove it when already there.",
@@ -957,6 +962,12 @@ public enum IPCAutomationManifest {
             path: "window summon-right <opaque-id>",
             name: .summonRight,
             summary: "Summon a managed window to the right of the focused window.",
+            arguments: ["opaque-id"]
+        ),
+        .init(
+            path: "window close <opaque-id>",
+            name: .close,
+            summary: "Close a managed window by session-scoped opaque id through its close button.",
             arguments: ["opaque-id"]
         ),
         .init(

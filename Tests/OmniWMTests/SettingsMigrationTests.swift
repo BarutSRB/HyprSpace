@@ -54,7 +54,7 @@ final class SettingsMigrationTests: XCTestCase {
             XCTAssertEqual(migration.fromVersion, 0, testCase.name)
             XCTAssertEqual(migration.toVersion, 1, testCase.name)
             XCTAssertEqual(Set(migration.defaultedPaths), testCase.defaultedPaths, testCase.name)
-            XCTAssertEqual(Set(migration.addedHotkeyIDs), expectedAddedScratchpadIDs, testCase.name)
+            XCTAssertEqual(Set(migration.addedHotkeyIDs), expectedAddedHotkeyIDs, testCase.name)
             XCTAssertEqual(
                 Set(migration.retiredHotkeys.map(\.id)),
                 testCase.retired,
@@ -104,7 +104,7 @@ final class SettingsMigrationTests: XCTestCase {
                 "Option+K",
                 testCase.name
             )
-            for id in expectedAddedScratchpadIDs {
+            for id in expectedAddedHotkeyIDs {
                 XCTAssertTrue(hotkey(id, in: export)?.binding.isUnassigned == true, "\(testCase.name): \(id)")
             }
             XCTAssertNil(hotkey("assignFocusedWindowToScratchpad", in: export), testCase.name)
@@ -735,10 +735,10 @@ final class SettingsMigrationTests: XCTestCase {
         assertNoCorruptFiles(in: fixture, file: #filePath, line: #line)
     }
 
-    private var expectedAddedScratchpadIDs: Set<String> {
+    private var expectedAddedHotkeyIDs: Set<String> {
         Set((2 ... 10).flatMap { index in
             ["toggleScratchpad.\(index)", "assignFocusedWindowToScratchpad.\(index)"]
-        })
+        }).union(SettingsTOMLCodec.hotkeyIDsAddedAfterVersionZero)
     }
 
     private func hotkey(_ id: String, in export: SettingsExport) -> HotkeyBinding? {

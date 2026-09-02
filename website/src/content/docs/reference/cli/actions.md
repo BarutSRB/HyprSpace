@@ -19,6 +19,7 @@ omniwmctl window move-to-workspace <opaque-id> <workspace>
 | `focus` | Focus a managed window by opaque ID |
 | `navigate` | Navigate to a managed window (switches workspace if needed) |
 | `summon-right` | Summon a window to the right of the currently focused window |
+| `close` | Close a managed window through its close button; returns `window_action_failed` when the window has no close button or refuses the press. The window leaves the managed set only when macOS reports it destroyed |
 | `move-to-workspace` | Move a window to a workspace by raw workspace ID or unambiguous display name. Focus stays where it is; if the window is the focused one, the configured follow-focus behavior applies. A window already on the target returns `no_change`; an ambiguous display name returns `invalid_arguments` |
 
 Window IDs are session-scoped. They become stale after OmniWM restarts. Obtain IDs from query results (e.g., `omniwmctl query windows`).
