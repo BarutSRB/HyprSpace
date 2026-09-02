@@ -18,14 +18,14 @@ final class DisplayConfigurationObserver: NSObject {
     private var onEvent: EventHandler?
     private var previousMonitors: [Monitor.ID: Monitor] = [:]
     private var debounceTask: Task<Void, Never>?
+    private let monitorSampler: @MainActor () -> [Monitor]
 
     private let debounceInterval: UInt64 = 100_000_000
 
-    override nonisolated init() {
+    init(monitorSampler: @escaping @MainActor () -> [Monitor] = { Monitor.current() }) {
+        self.monitorSampler = monitorSampler
         super.init()
-        MainActor.assumeIsolated {
-            self.updatePreviousMonitors(Monitor.current())
-        }
+        updatePreviousMonitors(monitorSampler())
 
         NotificationCenter.default.addObserver(
             self,
@@ -55,12 +55,13 @@ final class DisplayConfigurationObserver: NSObject {
         debounceTask = Task {
             try? await Task.sleep(nanoseconds: debounceInterval)
             guard !Task.isCancelled else { return }
-            handleDisplayChange()
+            sampleNow()
         }
     }
 
-    private func handleDisplayChange() {
-        let currentMonitors = Monitor.current()
+    func sampleNow() {
+        let currentMonitors = monitorSampler()
+        guard Monitor.isUsableConfiguration(currentMonitors) else { return }
         let currentById = Dictionary(uniqueKeysWithValues: currentMonitors.map { ($0.id, $0) })
         let currentIds = Set(currentById.keys)
         let previousIds = Set(previousMonitors.keys)

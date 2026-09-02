@@ -280,3 +280,10 @@ extension CGPoint {
         return monitors.min(by: { $0.frame.distanceSquared(to: self) < $1.frame.distanceSquared(to: self) })
     }
 }
+
+extension Monitor {
+    static func isUsableConfiguration(_ monitors: [Monitor]) -> Bool {
+        !monitors.isEmpty
+            && monitors.allSatisfy { $0.frame.width > 1 && $0.frame.height > 1 }
+    }
+}

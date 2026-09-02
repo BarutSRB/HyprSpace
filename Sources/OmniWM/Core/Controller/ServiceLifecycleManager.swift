@@ -165,6 +165,7 @@ final class ServiceLifecycleManager {
     private var topologyInventoryRequest: NativeSpaceInventoryRequest?
     private var performanceCounters: PerformanceCounters?
     var topologyInventorySampleProvider: (@MainActor () -> NativeSpaceTopologySample?)?
+    var currentMonitorsProvider: @MainActor () -> [Monitor] = { Monitor.current() }
     var topologyInventorySleeper: @MainActor (Duration) async throws -> Void = {
         try await Task.sleep(for: $0)
     }
@@ -269,7 +270,7 @@ final class ServiceLifecycleManager {
 
     private func startServices() {
         guard let controller, !controller.hasStartedServices else { return }
-        if refreshMonitorConfigurationForServiceStart(currentMonitors: Monitor.current()) {
+        if refreshMonitorConfigurationForServiceStart(currentMonitors: currentMonitorsProvider()) {
             controller.syncMonitorsToNiriEngine()
         }
         controller.hasStartedServices = true
@@ -388,14 +389,14 @@ final class ServiceLifecycleManager {
     }
 
     func handleDisplayEvent(_ event: DisplayConfigurationObserver.DisplayEvent) {
-        switch event {
-        case let .disconnected(monitorId):
+        let currentMonitors = currentMonitorsProvider()
+        if case let .disconnected(monitorId) = event,
+           Monitor.isUsableConfiguration(currentMonitors),
+           !currentMonitors.contains(where: { $0.id == monitorId })
+        {
             handleMonitorDisconnect(monitorId: monitorId)
-        case .connected,
-             .reconfigured:
-            break
         }
-        handleMonitorConfigurationChanged()
+        applyMonitorConfigurationChanged(currentMonitors: currentMonitors)
     }
 
     private func handleMonitorDisconnect(monitorId: Monitor.ID) {
@@ -410,14 +411,10 @@ final class ServiceLifecycleManager {
         }
     }
 
-    private func handleMonitorConfigurationChanged() {
-        applyMonitorConfigurationChanged(currentMonitors: Monitor.current())
-    }
-
     @discardableResult
     func refreshMonitorConfigurationForServiceStart(currentMonitors: [Monitor]) -> Bool {
         guard let controller else { return false }
-        guard isUsableMonitorConfiguration(currentMonitors) else { return false }
+        guard Monitor.isUsableConfiguration(currentMonitors) else { return false }
         guard controller.workspaceManager.monitors != currentMonitors else { return false }
         controller.workspaceManager.applyMonitorConfigurationChange(currentMonitors)
         return true
@@ -428,7 +425,7 @@ final class ServiceLifecycleManager {
         performPostUpdateActions: Bool = true
     ) {
         guard let controller else { return }
-        guard isUsableMonitorConfiguration(currentMonitors) else {
+        guard Monitor.isUsableConfiguration(currentMonitors) else {
             if performPostUpdateActions {
                 scheduleStableTopologyInventory(reason: .monitorConfigurationChanged)
             }
@@ -453,11 +450,6 @@ final class ServiceLifecycleManager {
 
         scheduleStableTopologyInventory(reason: .monitorConfigurationChanged)
         controller.reapplyQuakeTerminalGeometryForMonitorChange()
-    }
-
-    private func isUsableMonitorConfiguration(_ monitors: [Monitor]) -> Bool {
-        !monitors.isEmpty
-            && monitors.allSatisfy { $0.frame.width > 1 && $0.frame.height > 1 }
     }
 
     func handleAppTerminated(pid: pid_t, frontmostPID: pid_t? = nil) {
