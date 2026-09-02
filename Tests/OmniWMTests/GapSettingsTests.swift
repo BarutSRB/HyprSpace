@@ -398,6 +398,116 @@ final class GapSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testTopGapIsMeasuredFromPhysicalTopAcrossDisplays() {
+        let settings = makeSettingsStore()
+        settings.bordersEnabled = false
+        settings.workspaceBarEnabled = false
+        settings.outerGapLeft = 0
+        settings.outerGapRight = 0
+        settings.outerGapBottom = 0
+        settings.outerGapTop = 50
+        let builtIn = Monitor(
+            id: .init(displayId: 1),
+            displayId: 1,
+            frame: CGRect(x: 0, y: 0, width: 1440, height: 900),
+            visibleFrame: CGRect(x: 0, y: 0, width: 1440, height: 867),
+            hasNotch: false,
+            name: "Built-in"
+        )
+        let external = makeMonitor(displayId: 2, name: "External", originX: 1440)
+        settings.updateGapSettings(
+            MonitorGapSettings(monitorName: external.name, monitorDisplayId: external.displayId, outerGapTop: 41),
+            for: external
+        )
+        let controller = WMController(settings: settings)
+
+        let builtInFrame = controller.layoutRefreshController.buildMonitorSnapshot(for: builtIn).workingFrame
+        let externalFrame = controller.layoutRefreshController.buildMonitorSnapshot(for: external).workingFrame
+
+        XCTAssertEqual(builtIn.frame.maxY - builtInFrame.maxY, 50)
+        XCTAssertEqual(builtIn.visibleFrame.maxY - builtInFrame.maxY, 17)
+        XCTAssertEqual(external.frame.maxY - externalFrame.maxY, 41)
+        XCTAssertEqual(builtInFrame, CGRect(x: 0, y: 0, width: 1440, height: 850))
+        XCTAssertEqual(externalFrame, CGRect(x: 1440, y: 0, width: 1440, height: 859))
+    }
+
+    @MainActor
+    func testLiveReloadOfDisplayTopGapOverrideMovesNextLayout() throws {
+        let settings = makeSettingsStore()
+        settings.bordersEnabled = false
+        settings.workspaceBarEnabled = false
+        settings.gapSize = 0
+        settings.outerGapTop = 50
+        let left = makeMonitor(displayId: 1, name: "Left", originX: 0)
+        let right = makeMonitor(displayId: 2, name: "Right", originX: 1440)
+        settings.workspaceConfigurations = [
+            WorkspaceConfiguration(
+                name: "1",
+                monitorAssignment: .specificDisplay(OutputId(from: left)),
+                layoutType: .niri
+            ),
+            WorkspaceConfiguration(
+                name: "2",
+                monitorAssignment: .specificDisplay(OutputId(from: right)),
+                layoutType: .niri
+            )
+        ]
+        let controller = WMController(settings: settings)
+        controller.workspaceManager.applyMonitorConfigurationChange([left, right])
+        controller.workspaceManager.applySettings()
+        controller.niriLayoutHandler.enableNiriLayout()
+        controller.syncMonitorsToNiriEngine()
+        controller.applyPersistedSettings(settings, startServices: false)
+        controller.layoutRefreshController.resetState()
+        let leftWorkspace = try XCTUnwrap(controller.workspaceManager.workspaceId(named: "1"))
+        let rightWorkspace = try XCTUnwrap(controller.workspaceManager.workspaceId(named: "2"))
+        XCTAssertTrue(controller.workspaceManager.setActiveWorkspace(leftWorkspace, on: left.id))
+        XCTAssertTrue(controller.workspaceManager.setActiveWorkspace(rightWorkspace, on: right.id))
+        let leftToken = addWindow(pid: 105, windowId: 205, to: leftWorkspace, controller: controller)
+        _ = addWindow(pid: 105, windowId: 206, to: leftWorkspace, controller: controller)
+        let rightToken = addWindow(pid: 106, windowId: 207, to: rightWorkspace, controller: controller)
+        _ = addWindow(pid: 106, windowId: 208, to: rightWorkspace, controller: controller)
+
+        var frames = laidOutFrames(controller: controller, workspaces: [leftWorkspace, rightWorkspace])
+        XCTAssertEqual(frames[leftToken]?.maxY, 850)
+        XCTAssertEqual(frames[rightToken]?.maxY, 850)
+
+        var export = settings.toExport()
+        export.monitorGapSettings = [
+            MonitorGapSettings(monitorName: right.name, monitorDisplayId: right.displayId, outerGapTop: 41)
+        ]
+        settings.applyExport(export)
+        controller.layoutRefreshController.resetState()
+        controller.applyPersistedSettings(settings, startServices: false)
+
+        XCTAssertNotNil(controller.layoutRefreshController.layoutState.pendingRefresh)
+        XCTAssertEqual(settings.resolvedGapSettings(for: right).outerGapTop, 41)
+        frames = laidOutFrames(controller: controller, workspaces: [leftWorkspace, rightWorkspace])
+        XCTAssertEqual(frames[rightToken]?.maxY, 859)
+        XCTAssertEqual(frames[leftToken]?.maxY ?? 850, 850)
+
+        let projected = IPCQueryRouter(controller: controller, appVersion: nil, sessionToken: "gap-tests")
+            .displaysResult(IPCQueryRequest(name: .displays, fields: ["id", "outer-gap-top"]))
+            .displays
+        XCTAssertEqual(projected.map { $0.outerGapTop }, [50, 41])
+    }
+
+    @MainActor
+    private func laidOutFrames(
+        controller: WMController,
+        workspaces: [WorkspaceDescriptor.ID]
+    ) -> [WindowToken: CGRect] {
+        let plans = controller.workspaceManager.withBatchedLayoutBuild {
+            controller.niriLayoutHandler.layoutWithNiriEngine(activeWorkspaces: Set(workspaces))
+        }
+        var frames: [WindowToken: CGRect] = [:]
+        for change in plans.flatMap({ $0.diff.frameChanges }) {
+            frames[change.token] = change.frame
+        }
+        return frames
+    }
+
+    @MainActor
     func testBorderClearanceFloorsRuntimeGapsWithoutMutatingStoredValues() {
         let settings = makeSettingsStore()
         let monitor = makeMonitor(displayId: 1, name: "Built-in")
