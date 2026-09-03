@@ -2494,7 +2494,7 @@ final class RuntimeArchitectureTests: XCTestCase {
             config: BorderConfig.from(settings: controller.settings)
         )
         var boundsQueryCount = 0
-        let world = WorldView(controller: controller, borderFrameResolver: { _ in
+        let world = WorldView(controller: controller, liveBoundsProvider: { _ in
             boundsQueryCount += 1
             return nil
         })

@@ -406,7 +406,7 @@ final class ManagedFocusAdmissionTests: XCTestCase {
             )
         )
         let parentFrame = CGRect(x: 1_280, y: 70, width: 1_200, height: 1_350)
-        let managedWorld = WorldView(controller: controller, borderFrameResolver: { windowId in
+        let managedWorld = WorldView(controller: controller, liveBoundsProvider: { windowId in
             windowId == parentToken.windowId ? parentFrame : nil
         })
         XCTAssertEqual(SurfaceDerivation.deriveBorder(world: managedWorld)?.token, parentToken)
@@ -482,7 +482,7 @@ final class ManagedFocusAdmissionTests: XCTestCase {
         XCTAssertNil(controller.workspaceManager.renderableFocusToken)
         XCTAssertEqual(controller.workspaceManager.borderFocusToken, parentToken)
         XCTAssertFalse(controller.isSystemModalFocusActive)
-        let externalWorld = WorldView(controller: controller, borderFrameResolver: { windowId in
+        let externalWorld = WorldView(controller: controller, liveBoundsProvider: { windowId in
             windowId == parentToken.windowId ? parentFrame : nil
         })
         XCTAssertEqual(SurfaceDerivation.deriveBorder(world: externalWorld)?.token, parentToken)
@@ -629,7 +629,7 @@ final class ManagedFocusAdmissionTests: XCTestCase {
 
     func testUnverifiedAndOwnedExternalFocusRemainBorderless() {
         let controller = WindowAdmissionTestSupport.controller()
-        let world = WorldView(controller: controller, borderFrameResolver: { _ in
+        let world = WorldView(controller: controller, liveBoundsProvider: { _ in
             CGRect(x: 40, y: 40, width: 800, height: 600)
         })
 
@@ -959,7 +959,7 @@ final class ManagedFocusAdmissionTests: XCTestCase {
     }
 
     private func parentContinuityWorld(_ fixture: ParentContinuityFixture) -> WorldView {
-        WorldView(controller: fixture.controller, borderFrameResolver: { windowId in
+        WorldView(controller: fixture.controller, liveBoundsProvider: { windowId in
             windowId == fixture.parent.windowId ? fixture.frame : nil
         })
     }

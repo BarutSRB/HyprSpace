@@ -181,7 +181,7 @@ final class ForeignTransientFocusRecoveryTests: XCTestCase {
             to: otherWorkspaceId
         )
         let frame = CGRect(x: 120, y: 90, width: 800, height: 600)
-        let world = WorldView(controller: fixture.controller, borderFrameResolver: { windowId in
+        let world = WorldView(controller: fixture.controller, liveBoundsProvider: { windowId in
             windowId == fixture.mainToken.windowId ? frame : nil
         })
 

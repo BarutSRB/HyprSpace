@@ -7,22 +7,18 @@ import Foundation
 @MainActor
 struct WorldView {
     private let controller: WMController
-    private let borderFrameResolver: ((Int) -> CGRect?)?
     private let liveBoundsProvider: ((Int) -> CGRect?)?
 
     /// Creates a world view over the window-manager controller.
     /// - Parameters:
     ///   - controller: The window manager this view reads state from.
-    ///   - borderFrameResolver: Optional override for resolving the border frame.
     ///   - liveBoundsProvider: Injectable source of live window bounds (defaults to
     ///     querying the WindowServer); lets tests supply synthetic bounds.
     init(
         controller: WMController,
-        borderFrameResolver: ((Int) -> CGRect?)? = nil,
         liveBoundsProvider: ((Int) -> CGRect?)? = nil
     ) {
         self.controller = controller
-        self.borderFrameResolver = borderFrameResolver
         self.liveBoundsProvider = liveBoundsProvider
     }
 
@@ -171,17 +167,14 @@ struct WorldView {
     /// - Returns: The frame to draw the border around, or `nil` when the window has
     ///   no usable geometry from any source.
     func borderFrame(for entry: WindowState) -> CGRect? {
-        // The ring hugs what is actually presented: live WindowServer bounds are the
-        // ground truth for overlay placement, even while an AX write is still pending
-        // (apps may apply writes late or constrain themselves — issues #211/#223/#380).
-        // Pending writes and layout caches only backfill when live bounds are unavailable.
         if let observed = observedWindowBounds(windowId: entry.windowId) {
             return observed
         }
+        BorderOpMetricsRecorder.shared.noteBoundsQueryFallback()
         if let pending = controller.axManager.pendingFrameWrite(for: entry.windowId) {
             return pending
         }
-        return cachedBorderFrame(for: entry) ?? borderFrameResolver?(entry.windowId)
+        return cachedBorderFrame(for: entry)
     }
 
     func cachedBorderFrame(for entry: WindowState) -> CGRect? {

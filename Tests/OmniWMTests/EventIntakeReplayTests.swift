@@ -888,7 +888,7 @@ final class EventIntakeReplayTests: XCTestCase {
         scenario.drainToQuiescence()
 
         controller.workspaceManager.setSystemModalFocus(scenario.tokenA)
-        let world = WorldView(controller: controller, borderFrameResolver: { windowId in
+        let world = WorldView(controller: controller, liveBoundsProvider: { windowId in
             windowId == scenario.tokenB.windowId ? CGRect(x: 0, y: 0, width: 200, height: 150) : nil
         })
 
@@ -910,13 +910,13 @@ final class EventIntakeReplayTests: XCTestCase {
         scenario.drainToQuiescence()
 
         let frame = CGRect(x: 0, y: 0, width: 200, height: 150)
-        let enabledWorld = WorldView(controller: controller, borderFrameResolver: { _ in frame })
+        let enabledWorld = WorldView(controller: controller, liveBoundsProvider: { _ in frame })
         let border = try XCTUnwrap(SurfaceDerivation.deriveBorder(world: enabledWorld))
         XCTAssertEqual(border.windowId, scenario.tokenB.windowId)
         XCTAssertEqual(border.frame, frame)
 
         controller.settings.bordersEnabled = false
-        let disabledWorld = WorldView(controller: controller, borderFrameResolver: { _ in frame })
+        let disabledWorld = WorldView(controller: controller, liveBoundsProvider: { _ in frame })
         XCTAssertNil(SurfaceDerivation.deriveBorder(world: disabledWorld))
     }
 
@@ -931,7 +931,7 @@ final class EventIntakeReplayTests: XCTestCase {
         controller.eventIntake.enqueue(.axFocusedWindowChanged(pid: pid, callbackGeneration: nil))
         scenario.drainToQuiescence()
 
-        let world = WorldView(controller: controller, borderFrameResolver: { _ in .zero })
+        let world = WorldView(controller: controller, liveBoundsProvider: { _ in .zero })
         XCTAssertNil(SurfaceDerivation.deriveBorder(world: world))
     }
 

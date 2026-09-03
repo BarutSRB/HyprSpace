@@ -1056,8 +1056,6 @@ final class WindowCornerRadiiTests: XCTestCase {
     /// reading: the sample must fall through to raw radii, or to nil, so a square
     /// ring is never cached while rapidly cycling focus.
     func testCornerSampleTreatsZeroRadiiAsInvalidReading() {
-        // Server queries can transiently report zero radii for unrealized windows;
-        // the sample must fall through to raw (or nil) so a square ring never caches.
         let zeroResolved = [
             NSNumber(value: 0),
             NSNumber(value: 0),
