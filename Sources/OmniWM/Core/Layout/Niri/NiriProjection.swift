@@ -133,6 +133,13 @@ extension NiriLayoutEngine {
     ) -> Int {
         guard !projectedColumns.isEmpty else { return 0 }
 
+        // `viewOffset` is anchored to the durable `activeColumnIndex`; the selection is only a
+        // fallback for when the anchor column is fully excluded from the projection.
+        let durableIndex = state.activeColumnIndex
+        if let exactIndex = projectedColumns.firstIndex(where: { $0.durableIndex == durableIndex }) {
+            return exactIndex
+        }
+
         if let selectedNodeId = state.selectedNodeId,
            let selectedWindow = findNode(by: selectedNodeId, in: workspaceId) as? NiriWindow,
            !isExcludedFromProjection(selectedWindow.token, in: workspaceId),
@@ -140,11 +147,6 @@ extension NiriLayoutEngine {
            let projectedIndex = projectedColumns.firstIndex(where: { $0.column === selectedColumn })
         {
             return projectedIndex
-        }
-
-        let durableIndex = state.activeColumnIndex
-        if let exactIndex = projectedColumns.firstIndex(where: { $0.durableIndex == durableIndex }) {
-            return exactIndex
         }
 
         return projectedColumns.indices.min { lhs, rhs in
