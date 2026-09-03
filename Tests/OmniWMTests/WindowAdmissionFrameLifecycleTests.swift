@@ -1253,6 +1253,103 @@ final class WindowAdmissionFrameLifecycleTests: XCTestCase {
         XCTAssertFalse(controller.workspaceManager.nativeFocusOwner.isExternal)
     }
 
+    func testRememberedTerminalRefusalStopsReissuingTheSameTarget() throws {
+        let pid: pid_t = 467_331
+        let window = AXWindowRef(element: AXUIElementCreateApplication(pid), windowId: 467_431)
+        let target = CGRect(x: 100, y: 60, width: 900, height: 400)
+        let observed = CGRect(x: 100, y: 60, width: 900, height: 492)
+        let ledger = try refusedTargetLedger(pid: pid, window: window, target: target, observed: observed)
+
+        XCTAssertNil(
+            WindowAdmissionTestSupport.frameRequest(ledger, pid: pid, window: window, frame: target)
+        )
+        XCTAssertFalse(ledger.hasPendingFrameWrite(for: window.windowId))
+
+        var observerResults: [AXFrameApplyResult] = []
+        let declined = ledger.prepareFrameApplication(
+            pid: pid,
+            windowId: window.windowId,
+            expectedWindow: window,
+            frame: target,
+            isRetry: false,
+            terminalObserver: { observerResults.append($0) }
+        )
+        XCTAssertNil(declined.request)
+        XCTAssertFalse(declined.shouldCancelPendingRetry)
+        XCTAssertEqual(declined.deliveries.count, 1)
+        for delivery in declined.deliveries {
+            delivery.deliver()
+        }
+        let refused = try XCTUnwrap(observerResults.first)
+        XCTAssertEqual(observerResults.count, 1)
+        XCTAssertEqual(refused.targetFrame, target)
+        XCTAssertEqual(refused.writeResult.failureReason, .verificationMismatch)
+        XCTAssertEqual(refused.writeResult.observedFrame, observed)
+        XCTAssertNil(refused.confirmedFrame)
+        XCTAssertFalse(ledger.hasPendingFrameWrite(for: window.windowId))
+    }
+
+    func testRememberedTerminalRefusalReleasesOnTargetChangeForceApplyAndInvalidation() throws {
+        let pid: pid_t = 467_332
+        let window = AXWindowRef(element: AXUIElementCreateApplication(pid), windowId: 467_432)
+        let target = CGRect(x: 100, y: 60, width: 900, height: 400)
+        let observed = CGRect(x: 100, y: 60, width: 900, height: 492)
+
+        let targetChangeLedger = try refusedTargetLedger(
+            pid: pid, window: window, target: target, observed: observed
+        )
+        let tallerTarget = CGRect(x: 100, y: 60, width: 900, height: 560)
+        XCTAssertNotNil(
+            WindowAdmissionTestSupport.frameRequest(
+                targetChangeLedger, pid: pid, window: window, frame: tallerTarget
+            )
+        )
+
+        let forceApplyLedger = try refusedTargetLedger(
+            pid: pid, window: window, target: target, observed: observed
+        )
+        forceApplyLedger.forceApplyNextFrame(for: window.windowId)
+        XCTAssertNotNil(
+            WindowAdmissionTestSupport.frameRequest(
+                forceApplyLedger, pid: pid, window: window, frame: target
+            )
+        )
+
+        let invalidationLedger = try refusedTargetLedger(
+            pid: pid, window: window, target: target, observed: observed
+        )
+        invalidationLedger.invalidateAppliedFrame(for: window.windowId)
+        XCTAssertNotNil(
+            WindowAdmissionTestSupport.frameRequest(
+                invalidationLedger, pid: pid, window: window, frame: target
+            )
+        )
+
+        let removalLedger = try refusedTargetLedger(
+            pid: pid, window: window, target: target, observed: observed
+        )
+        XCTAssertTrue(removalLedger.removeWindowState(windowId: window.windowId).isEmpty)
+        XCTAssertNotNil(
+            WindowAdmissionTestSupport.frameRequest(
+                removalLedger, pid: pid, window: window, frame: target
+            )
+        )
+    }
+
+    private func refusedTargetLedger(
+        pid: pid_t,
+        window: AXWindowRef,
+        target: CGRect,
+        observed: CGRect
+    ) throws -> AXFrameApplicationLedger {
+        let ledger = AXFrameApplicationLedger()
+        let outcome = try exhaustFrameFailure(ledger, pid: pid, window: window, target: target) {
+            WindowAdmissionTestSupport.verificationMismatchFrameResult(request: $0, observed: observed)
+        }
+        XCTAssertEqual(outcome.terminalRefusals.count, 1)
+        return ledger
+    }
+
     private func settleSizeConvergence(
         _ ledger: AXFrameApplicationLedger,
         pid: pid_t,

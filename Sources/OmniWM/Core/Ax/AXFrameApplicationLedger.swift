@@ -121,6 +121,7 @@ final class AXFrameApplicationLedger {
         let observedFrame: CGRect?
         let settersSucceeded: Bool
         let components: AXFrameComponents
+        var isTerminalRefusal = false
     }
 
     private struct PendingFrameObserver {
@@ -228,6 +229,7 @@ final class AXFrameApplicationLedger {
 
     func invalidateAppliedFrame(for windowId: Int) {
         appliedFrameStates.removeValue(forKey: windowId)
+        recentFrameWriteFailures[windowId]?.isTerminalRefusal = false
     }
 
     func invalidateAllAppliedFrames() {
@@ -284,6 +286,9 @@ final class AXFrameApplicationLedger {
                 }
                 if let failure = recentFrameWriteFailures[windowId] {
                     parts.append("failure=\(failure.reason.traceDescription)")
+                    if failure.isTerminalRefusal {
+                        parts.append("refusedTarget=\(TraceFormat.rect(failure.targetFrame))")
+                    }
                 }
                 if let retry = retryBudgetByWindowId[windowId] { parts.append("retryBudget=\(retry)") }
                 return parts.joined(separator: " ")
@@ -550,6 +555,43 @@ final class AXFrameApplicationLedger {
                     return AXFrameEnqueueDecision()
                 }
             } else if pendingFrame == nil,
+                      let refusal = rememberedTerminalRefusal(
+                          windowId: windowId,
+                          expectedWindow: expectedWindow,
+                          frame: frame,
+                          components: effectiveComponents
+                      )
+            {
+                let refusedRequestId = terminalObserver == nil ? 0 : makeNextFrameApplicationRequestId()
+                recordTraceDecision(
+                    traceRequestId: traceRequestId,
+                    effectOrigin: traceOrigin,
+                    parentTraceRequestId: parentTraceRequestId,
+                    requestId: refusedRequestId,
+                    pid: pid,
+                    windowId: windowId,
+                    frame: frame,
+                    outcome: "ledger-refused/\(refusal.reason.traceDescription)"
+                )
+                guard let terminalObserver else { return AXFrameEnqueueDecision() }
+                return AXFrameEnqueueDecision(
+                    deliveries: [
+                        AXFrameTerminalDelivery(
+                            result: refusedFrameApplyResult(
+                                requestId: refusedRequestId,
+                                pid: pid,
+                                windowId: windowId,
+                                expectedWindow: expectedWindow,
+                                frame: frame,
+                                currentFrameHint: cachedFrame,
+                                refusal: refusal,
+                                traceRequestId: traceRequestId
+                            ),
+                            observers: [terminalObserver]
+                        )
+                    ]
+                )
+            } else if pendingFrame == nil,
                       let cachedState,
                       frameWithinConvergence(state: cachedState, target: frame, components: effectiveComponents),
                       !hasRecentFailure,
@@ -806,6 +848,7 @@ final class AXFrameApplicationLedger {
                         clearSettledRekeyMappings(to: resolvedWindowId)
                         continue
                     }
+                    recentFrameWriteFailures[resolvedWindowId]?.isTerminalRefusal = true
                     outcome.terminalRefusals.append(
                         AXFrameTerminalRefusal(
                             pid: resolvedResult.pid,
@@ -1006,6 +1049,51 @@ final class AXFrameApplicationLedger {
                 positionError: .success,
                 failureReason: nil,
                 components: components
+            ),
+            traceRequestId: traceRequestId
+        )
+    }
+
+    private func rememberedTerminalRefusal(
+        windowId: Int,
+        expectedWindow: AXWindowRef,
+        frame: CGRect,
+        components: AXFrameComponents
+    ) -> RecentFrameWriteFailure? {
+        guard let failure = recentFrameWriteFailures[windowId],
+              failure.isTerminalRefusal,
+              failure.components == components,
+              sameAXWindowIdentity(failure.expectedWindow, expectedWindow),
+              failure.targetFrame.approximatelyEqual(to: frame, tolerance: FrameTolerance.frameWrite)
+        else {
+            return nil
+        }
+        return failure
+    }
+
+    private func refusedFrameApplyResult(
+        requestId: AXFrameRequestId,
+        pid: pid_t,
+        windowId: Int,
+        expectedWindow: AXWindowRef,
+        frame: CGRect,
+        currentFrameHint: CGRect?,
+        refusal: RecentFrameWriteFailure,
+        traceRequestId: UInt64
+    ) -> AXFrameApplyResult {
+        AXFrameApplyResult(
+            requestId: requestId,
+            pid: pid,
+            windowId: windowId,
+            expectedWindow: expectedWindow,
+            targetFrame: frame,
+            currentFrameHint: currentFrameHint,
+            writeResult: .skipped(
+                targetFrame: frame,
+                currentFrameHint: currentFrameHint,
+                failureReason: refusal.reason,
+                observedFrame: refusal.observedFrame,
+                components: refusal.components
             ),
             traceRequestId: traceRequestId
         )
