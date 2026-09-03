@@ -3276,6 +3276,31 @@ final class RuntimeArchitectureTests: XCTestCase {
     }
 
     @MainActor
+    func testAnimationFrameChangeRoutesTrustedSizesToPositionOnlyWrites() {
+        let manager = AXManager()
+        let token = WindowToken(pid: 4_733, windowId: 4_734)
+        let frame = CGRect(x: 40, y: 50, width: 300, height: 200)
+        let change = LayoutFrameChange(token: token, frame: frame, forceApply: false)
+
+        let untracked = manager.animationFrameChange(change)
+        XCTAssertEqual(untracked.components, .all)
+        XCTAssertEqual(untracked.frame, frame)
+
+        manager.confirmFrameWrite(for: token.windowId, frame: frame)
+        let translated = manager.animationFrameChange(
+            change.writing(frame.offsetBy(dx: 30, dy: 0), components: .all)
+        )
+        XCTAssertEqual(translated.components, .position)
+        XCTAssertEqual(translated.frame, frame.offsetBy(dx: 30, dy: 0))
+
+        let resized = manager.animationFrameChange(
+            change.writing(frame.insetBy(dx: -20, dy: 0), components: .all)
+        )
+        XCTAssertEqual(resized.components, .all)
+        XCTAssertEqual(resized.frame, frame.insetBy(dx: -20, dy: 0))
+    }
+
+    @MainActor
     func testAXFrameLedgerRekeysPendingRequestBeforeCompletion() throws {
         let ledger = AXFrameApplicationLedger()
         let frame = CGRect(x: 10, y: 20, width: 300, height: 200)

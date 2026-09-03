@@ -178,6 +178,16 @@ struct LayoutFrameChange {
         self.forceApply = forceApply
         self.allowsTerminalRecovery = allowsTerminalRecovery
     }
+
+    func writing(_ frame: CGRect, components: FrameMutationComponents) -> Self {
+        Self(
+            token: token,
+            frame: frame,
+            components: components,
+            forceApply: forceApply,
+            allowsTerminalRecovery: allowsTerminalRecovery
+        )
+    }
 }
 
 struct LayoutRestoreChange {

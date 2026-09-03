@@ -1336,6 +1336,85 @@ final class WindowAdmissionFrameLifecycleTests: XCTestCase {
         )
     }
 
+    func testEnforcedSizePlacementAnchorsTheRefusedSizeToTheTargetTopLeft() throws {
+        let pid: pid_t = 467_333
+        let window = AXWindowRef(element: AXUIElementCreateApplication(pid), windowId: 467_433)
+        let target = CGRect(x: 2_409, y: 1_113, width: 1_257, height: 280)
+        let observed = CGRect(x: 2_409, y: 901, width: 1_257, height: 492)
+        let ledger = try refusedTargetLedger(pid: pid, window: window, target: target, observed: observed)
+
+        let scrolled = CGRect(x: 1_286, y: 1_113, width: 1_257, height: 280)
+        XCTAssertEqual(
+            ledger.enforcedSizePlacement(for: window.windowId, targetFrame: scrolled),
+            CGRect(x: 1_286, y: 901, width: 1_257, height: 492)
+        )
+        XCTAssertEqual(
+            ledger.enforcedSizePlacement(for: window.windowId, targetFrame: target),
+            observed
+        )
+        XCTAssertNil(
+            ledger.enforcedSizePlacement(
+                for: window.windowId,
+                targetFrame: CGRect(x: 1_286, y: 1_113, width: 1_257, height: 560)
+            )
+        )
+    }
+
+    func testPositionOnlyWriteKeepsTheTerminalSizeRefusalRemembered() throws {
+        let pid: pid_t = 467_334
+        let window = AXWindowRef(element: AXUIElementCreateApplication(pid), windowId: 467_434)
+        let target = CGRect(x: 2_409, y: 1_113, width: 1_257, height: 280)
+        let observed = CGRect(x: 2_409, y: 901, width: 1_257, height: 492)
+        let ledger = try refusedTargetLedger(pid: pid, window: window, target: target, observed: observed)
+
+        let scrolled = CGRect(x: 1_286, y: 1_113, width: 1_257, height: 280)
+        let placement = try XCTUnwrap(
+            ledger.enforcedSizePlacement(for: window.windowId, targetFrame: scrolled)
+        )
+        let positionRequest = try XCTUnwrap(
+            ledger.prepareFrameApplication(
+                pid: pid,
+                windowId: window.windowId,
+                expectedWindow: window,
+                frame: placement,
+                components: .position,
+                isRetry: false,
+                terminalObserver: nil
+            ).request
+        )
+        XCTAssertEqual(positionRequest.components, .position)
+        let outcome = ledger.handleFrameApplyResults([
+            AXFrameApplyResult(
+                requestId: positionRequest.requestId,
+                pid: pid,
+                windowId: window.windowId,
+                expectedWindow: window,
+                targetFrame: placement,
+                currentFrameHint: positionRequest.currentFrameHint,
+                writeResult: AXFrameWriteResult(
+                    observedFrame: placement,
+                    writeOrder: .sizeThenPosition,
+                    sizeError: .success,
+                    positionError: .success,
+                    failureReason: nil,
+                    components: .position
+                )
+            )
+        ])
+        XCTAssertTrue(outcome.terminalFailures.isEmpty)
+        XCTAssertEqual(ledger.lastAppliedFrame(for: window.windowId), placement)
+        XCTAssertEqual(
+            ledger.enforcedSizePlacement(for: window.windowId, targetFrame: scrolled),
+            placement
+        )
+
+        let tallerTarget = CGRect(x: 1_286, y: 1_113, width: 1_257, height: 560)
+        XCTAssertNotNil(
+            WindowAdmissionTestSupport.frameRequest(ledger, pid: pid, window: window, frame: tallerTarget)
+        )
+        XCTAssertNil(ledger.enforcedSizePlacement(for: window.windowId, targetFrame: scrolled))
+    }
+
     private func refusedTargetLedger(
         pid: pid_t,
         window: AXWindowRef,

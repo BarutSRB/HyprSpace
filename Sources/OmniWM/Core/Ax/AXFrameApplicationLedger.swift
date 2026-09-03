@@ -156,7 +156,7 @@ final class AXFrameApplicationLedger {
 
     private static let maxAcceptedSizeSnap: CGFloat = 16
 
-    private static func isBoundedAXTopLeftSizeConvergence(target: CGRect, observed: CGRect) -> Bool {
+    private static func isAXTopLeftAnchoredSizeClamp(target: CGRect, observed: CGRect) -> Bool {
         guard !target.isNull,
               !observed.isNull,
               target.origin.x.isFinite,
@@ -176,15 +176,14 @@ final class AXFrameApplicationLedger {
         else {
             return false
         }
-        let widthDelta = abs(observed.width - target.width)
-        let heightDelta = abs(observed.height - target.height)
-        guard widthDelta <= Self.maxAcceptedSizeSnap,
-              heightDelta <= Self.maxAcceptedSizeSnap
-        else {
-            return false
-        }
-        return widthDelta >= FrameTolerance.frameWrite
-            || heightDelta >= FrameTolerance.frameWrite
+        return abs(observed.width - target.width) >= FrameTolerance.frameWrite
+            || abs(observed.height - target.height) >= FrameTolerance.frameWrite
+    }
+
+    private static func isBoundedAXTopLeftSizeConvergence(target: CGRect, observed: CGRect) -> Bool {
+        isAXTopLeftAnchoredSizeClamp(target: target, observed: observed)
+            && abs(observed.width - target.width) <= Self.maxAcceptedSizeSnap
+            && abs(observed.height - target.height) <= Self.maxAcceptedSizeSnap
     }
 
     private func isStableSizeConvergence(
@@ -247,6 +246,24 @@ final class AXFrameApplicationLedger {
             return nil
         }
         return state.frame.size
+    }
+
+    func enforcedSizePlacement(for windowId: Int, targetFrame: CGRect) -> CGRect? {
+        guard let failure = recentFrameWriteFailures[windowId],
+              failure.isTerminalRefusal,
+              failure.components.contains(.size),
+              let observedFrame = failure.observedFrame,
+              Self.isAXTopLeftAnchoredSizeClamp(target: failure.targetFrame, observed: observedFrame),
+              axFrameMatches(targetFrame, target: failure.targetFrame, components: .size)
+        else {
+            return nil
+        }
+        return CGRect(
+            x: targetFrame.minX,
+            y: targetFrame.maxY - observedFrame.height,
+            width: observedFrame.width,
+            height: observedFrame.height
+        )
     }
 
     func recentFrameWriteFailure(for windowId: Int) -> AXFrameWriteFailureReason? {
@@ -674,7 +691,7 @@ final class AXFrameApplicationLedger {
             requestId: requestId,
             traceRequestId: traceRequestId
         )
-        if !isRetry {
+        if !isRetry, !retainsTerminalSizeRefusal(windowId: windowId, components: effectiveComponents) {
             recentFrameWriteFailures.removeValue(forKey: windowId)
         }
         if let existingObserverRequestId,
@@ -788,7 +805,12 @@ final class AXFrameApplicationLedger {
                     verifiedComponents: verifiedComponents,
                     convergedTargetFrame: nil
                 )
-                recentFrameWriteFailures.removeValue(forKey: resolvedWindowId)
+                if !retainsTerminalSizeRefusal(
+                    windowId: resolvedWindowId,
+                    components: resolvedResult.writeResult.components
+                ) {
+                    recentFrameWriteFailures.removeValue(forKey: resolvedWindowId)
+                }
                 retryBudgetByWindowId.removeValue(forKey: resolvedWindowId)
                 onAcceptedSuccess(resolvedResult)
                 outcome.deliveries.append(contentsOf: notifyPendingFrameObserver(with: resolvedResult))
@@ -1052,6 +1074,13 @@ final class AXFrameApplicationLedger {
             ),
             traceRequestId: traceRequestId
         )
+    }
+
+    private func retainsTerminalSizeRefusal(windowId: Int, components: AXFrameComponents) -> Bool {
+        guard let failure = recentFrameWriteFailures[windowId], failure.isTerminalRefusal else {
+            return false
+        }
+        return !components.contains(.size)
     }
 
     private func rememberedTerminalRefusal(

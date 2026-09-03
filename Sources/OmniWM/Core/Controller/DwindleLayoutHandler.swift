@@ -1577,17 +1577,7 @@ import QuartzCore
         )
         if isAnimationTick, let axManager = controller?.axManager {
             for index in diff.frameChanges.indices {
-                let change = diff.frameChanges[index]
-                diff.frameChanges[index] = LayoutFrameChange(
-                    token: change.token,
-                    frame: change.frame,
-                    components: axManager.animationFrameComponents(
-                        for: change.token.windowId,
-                        targetFrame: change.frame
-                    ),
-                    forceApply: change.forceApply,
-                    allowsTerminalRecovery: change.allowsTerminalRecovery
-                )
+                diff.frameChanges[index] = axManager.animationFrameChange(diff.frameChanges[index])
             }
         }
         diff.tabRailGeometryCommands = dwindleTabRailGeometryCommands(

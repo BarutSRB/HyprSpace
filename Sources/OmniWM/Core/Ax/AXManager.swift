@@ -389,6 +389,23 @@ final class AXManager {
         return .position
     }
 
+    func animationFrameChange(_ change: LayoutFrameChange) -> LayoutFrameChange {
+        let windowId = change.token.windowId
+        let components = animationFrameComponents(for: windowId, targetFrame: change.frame)
+        if components != .all {
+            return change.writing(change.frame, components: components)
+        }
+        guard !change.forceApply,
+              let placement = frameLedger.enforcedSizePlacement(
+                  for: windowId,
+                  targetFrame: change.frame
+              )
+        else {
+            return change
+        }
+        return change.writing(placement, components: .position)
+    }
+
     private static func frameSizesMatch(_ lhs: CGSize, _ rhs: CGSize) -> Bool {
         abs(lhs.width - rhs.width) < FrameTolerance.frameWrite
             && abs(lhs.height - rhs.height) < FrameTolerance.frameWrite
