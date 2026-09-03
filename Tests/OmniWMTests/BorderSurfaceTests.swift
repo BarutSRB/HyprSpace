@@ -1052,6 +1052,9 @@ final class WindowCornerRadiiTests: XCTestCase {
     }
 
     @MainActor
+    /// Zero radii reported by the server are an invalid (not-yet-materialized)
+    /// reading: the sample must fall through to raw radii, or to nil, so a square
+    /// ring is never cached while rapidly cycling focus.
     func testCornerSampleTreatsZeroRadiiAsInvalidReading() {
         // Server queries can transiently report zero radii for unrealized windows;
         // the sample must fall through to raw (or nil) so a square ring never caches.
@@ -1161,6 +1164,8 @@ final class WindowCornerRadiiTests: XCTestCase {
     }
 
     @MainActor
+    /// Live bounds win for border placement even while an AX write is still pending,
+    /// because apps apply writes late and the ring must hug what is presented.
     func testBorderFramePrefersLiveBoundsEvenWhileAXWriteIsPending() throws {
         let fixture = try borderFrameFixture()
         let pending = CGRect(x: 10, y: 20, width: 900, height: 600)
@@ -1183,6 +1188,8 @@ final class WindowCornerRadiiTests: XCTestCase {
     }
 
     @MainActor
+    /// When live bounds cannot be queried, a pending AX write is the next best
+    /// authority for the border frame.
     func testBorderFrameFallsBackToPendingAXWriteWhenLiveBoundsAreUnavailable() throws {
         let fixture = try borderFrameFixture()
         let pending = CGRect(x: 10, y: 20, width: 900, height: 600)
@@ -1198,6 +1205,7 @@ final class WindowCornerRadiiTests: XCTestCase {
     }
 
     @MainActor
+    /// After an AX write settles, a divergent live frame is used for the border.
     func testBorderFrameUsesDivergentLiveBoundsAfterAXWriteSettles() throws {
         let fixture = try borderFrameFixture()
         let live = CGRect(x: 40, y: 50, width: 800, height: 500)
@@ -1211,6 +1219,8 @@ final class WindowCornerRadiiTests: XCTestCase {
     }
 
     @MainActor
+    /// With no live bounds and no pending write, the cached layout frame backs up
+    /// border placement.
     func testBorderFrameFallsBackToCacheWhenLiveBoundsAreUnavailable() throws {
         let fixture = try borderFrameFixture()
         let world = WorldView(controller: fixture.controller, liveBoundsProvider: { _ in nil })
@@ -1219,6 +1229,8 @@ final class WindowCornerRadiiTests: XCTestCase {
     }
 
     @MainActor
+    /// Animation keeps the cached frame during ticks but the completed derivation
+    /// returns to live bounds.
     func testCompletedBorderDerivationReturnsToLiveBoundsAfterAnimation() throws {
         let fixture = try borderFrameFixture()
         fixture.controller.hasStartedServices = true

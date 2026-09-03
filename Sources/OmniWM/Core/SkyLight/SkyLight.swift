@@ -450,6 +450,11 @@ final class SkyLight {
         return Self.cornerSample(resolved: nil, raw: raw, observedSize: observedSize)
     }
 
+    /// Builds a corner sample from resolved and/or raw SkyLight radii arrays,
+    /// preferring resolved radii but falling back to raw ones. Zero radii are
+    /// treated as an invalid (not-yet-materialized) reading, not a square window.
+    /// - Returns: A sample when a non-zero radii array parses against the observed
+    ///   size; `nil` when neither array yields a usable reading.
     static func cornerSample(
         resolved: CFArray?,
         raw: CFArray?,
