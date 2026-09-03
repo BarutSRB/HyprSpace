@@ -493,6 +493,24 @@ final class AXManager {
         frameLedger.pendingFrameWrite(for: windowId)
     }
 
+    /// Stages a frame application through the shared pending-write ledger so tests
+    /// exercise the same lifecycle as production frame applications.
+    /// - Returns: The prepared AX frame application request, or `nil` if the ledger
+    ///   declined to stage a write for the given target.
+    @discardableResult
+    func stageFrameWrite(for target: AXFrameApplicationTarget) -> AXFrameApplicationRequest? {
+        frameLedger.prepareFrameApplication(
+            pid: target.pid,
+            windowId: target.windowId,
+            expectedWindow: target.expectedWindow,
+            frame: target.frame,
+            components: target.components,
+            isRetry: false,
+            verify: true,
+            terminalObserver: nil
+        ).request
+    }
+
     func frameStateDump() -> String {
         var sections = ["Ledger:\n\(frameLedger.stateDump())"]
         let inactive = inactiveWorkspaceWindowIds.sorted()

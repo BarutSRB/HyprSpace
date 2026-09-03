@@ -1052,6 +1052,38 @@ final class WindowCornerRadiiTests: XCTestCase {
     }
 
     @MainActor
+    /// Zero radii reported by the server are an invalid (not-yet-materialized)
+    /// reading: the sample must fall through to raw radii, or to nil, so a square
+    /// ring is never cached while rapidly cycling focus.
+    func testCornerSampleTreatsZeroRadiiAsInvalidReading() {
+        // Server queries can transiently report zero radii for unrealized windows;
+        // the sample must fall through to raw (or nil) so a square ring never caches.
+        let zeroResolved = [
+            NSNumber(value: 0),
+            NSNumber(value: 0),
+            NSNumber(value: 0),
+            NSNumber(value: 0)
+        ] as CFArray
+        let raw = [NSNumber(value: 11.5)] as CFArray
+        let observedSize = CGSize(width: 800, height: 600)
+
+        XCTAssertEqual(
+            SkyLight.cornerSample(resolved: zeroResolved, raw: raw, observedSize: observedSize),
+            WindowCornerSample(
+                radii: WindowCornerRadii(uniform: 11.5),
+                observedSize: observedSize,
+                source: .raw
+            )
+        )
+        XCTAssertNil(
+            SkyLight.cornerSample(resolved: zeroResolved, raw: nil, observedSize: observedSize)
+        )
+        XCTAssertNil(
+            SkyLight.cornerSample(resolved: zeroResolved, raw: zeroResolved, observedSize: observedSize)
+        )
+    }
+
+    @MainActor
     func testCornerSampleRejectsInvalidObservedSize() {
         let raw = [NSNumber(value: 11.5)] as CFArray
 
@@ -1110,6 +1142,114 @@ final class WindowCornerRadiiTests: XCTestCase {
         )
 
         XCTAssertTrue(path.isEmpty)
+    }
+
+    @MainActor
+    private func borderFrameFixture() throws -> (controller: WMController, entry: WindowState) {
+        let controller = WindowAdmissionTestSupport.controller(prefix: "BorderSurfaceTests")
+        let workspaceId = try XCTUnwrap(
+            controller.workspaceManager.workspaceId(for: "1", createIfMissing: true)
+        )
+        let token = WindowToken(pid: 813_101, windowId: 813_102)
+        _ = controller.workspaceManager.addWindow(
+            WindowAdmissionTestSupport.axRef(for: token),
+            pid: token.pid,
+            windowId: token.windowId,
+            to: workspaceId,
+            mode: .floating
+        )
+        let cached = CGRect(x: 80, y: 90, width: 700, height: 500)
+        controller.workspaceManager.updateFloatingGeometry(frame: cached, for: token)
+        return (controller, try XCTUnwrap(controller.workspaceManager.entry(for: token)))
+    }
+
+    @MainActor
+    /// Live bounds win for border placement even while an AX write is still pending,
+    /// because apps apply writes late and the ring must hug what is presented.
+    func testBorderFramePrefersLiveBoundsEvenWhileAXWriteIsPending() throws {
+        let fixture = try borderFrameFixture()
+        let pending = CGRect(x: 10, y: 20, width: 900, height: 600)
+        let live = CGRect(x: 40, y: 50, width: 800, height: 500)
+        let target = AXFrameApplicationTarget(
+            pid: fixture.entry.pid,
+            window: fixture.entry.axRef,
+            frame: pending
+        )
+        XCTAssertNotNil(fixture.controller.axManager.stageFrameWrite(for: target))
+
+        let world = WorldView(controller: fixture.controller, liveBoundsProvider: { _ in live })
+        XCTAssertEqual(world.borderFrame(for: fixture.entry), live)
+
+        fixture.controller.axManager.cancelPendingFrameJobs([
+            (pid: fixture.entry.pid, windowId: fixture.entry.windowId)
+        ])
+        XCTAssertNil(fixture.controller.axManager.pendingFrameWrite(for: fixture.entry.windowId))
+        XCTAssertEqual(world.borderFrame(for: fixture.entry), live)
+    }
+
+    @MainActor
+    /// When live bounds cannot be queried, a pending AX write is the next best
+    /// authority for the border frame.
+    func testBorderFrameFallsBackToPendingAXWriteWhenLiveBoundsAreUnavailable() throws {
+        let fixture = try borderFrameFixture()
+        let pending = CGRect(x: 10, y: 20, width: 900, height: 600)
+        let target = AXFrameApplicationTarget(
+            pid: fixture.entry.pid,
+            window: fixture.entry.axRef,
+            frame: pending
+        )
+        XCTAssertNotNil(fixture.controller.axManager.stageFrameWrite(for: target))
+
+        let world = WorldView(controller: fixture.controller, liveBoundsProvider: { _ in nil })
+        XCTAssertEqual(world.borderFrame(for: fixture.entry), pending)
+    }
+
+    @MainActor
+    /// After an AX write settles, a divergent live frame is used for the border.
+    func testBorderFrameUsesDivergentLiveBoundsAfterAXWriteSettles() throws {
+        let fixture = try borderFrameFixture()
+        let live = CGRect(x: 40, y: 50, width: 800, height: 500)
+        fixture.controller.axManager.confirmFrameWrite(
+            for: fixture.entry.windowId,
+            frame: CGRect(x: 10, y: 20, width: 900, height: 600)
+        )
+
+        let world = WorldView(controller: fixture.controller, liveBoundsProvider: { _ in live })
+        XCTAssertEqual(world.borderFrame(for: fixture.entry), live)
+    }
+
+    @MainActor
+    /// With no live bounds and no pending write, the cached layout frame backs up
+    /// border placement.
+    func testBorderFrameFallsBackToCacheWhenLiveBoundsAreUnavailable() throws {
+        let fixture = try borderFrameFixture()
+        let world = WorldView(controller: fixture.controller, liveBoundsProvider: { _ in nil })
+
+        XCTAssertEqual(world.borderFrame(for: fixture.entry), fixture.entry.floatingState?.lastFrame)
+    }
+
+    @MainActor
+    /// Animation keeps the cached frame during ticks but the completed derivation
+    /// returns to live bounds.
+    func testCompletedBorderDerivationReturnsToLiveBoundsAfterAnimation() throws {
+        let fixture = try borderFrameFixture()
+        fixture.controller.hasStartedServices = true
+        fixture.controller.settings.bordersEnabled = true
+        XCTAssertTrue(fixture.controller.workspaceManager.setManagedFocus(
+            fixture.entry.token,
+            in: fixture.entry.workspaceId
+        ))
+        let cached = try XCTUnwrap(fixture.entry.floatingState?.lastFrame)
+        let live = CGRect(x: 140, y: 150, width: 800, height: 500)
+        let world = WorldView(controller: fixture.controller, liveBoundsProvider: { _ in live })
+        let previous = DesiredBorderSurface(
+            token: fixture.entry.token,
+            frame: cached,
+            config: BorderConfig.from(settings: fixture.controller.settings)
+        )
+
+        XCTAssertEqual(SurfaceDerivation.deriveAnimationBorder(world: world, previous: previous)?.frame, cached)
+        XCTAssertEqual(SurfaceDerivation.deriveBorder(world: world)?.frame, live)
     }
 
     @MainActor

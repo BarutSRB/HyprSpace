@@ -35,6 +35,14 @@ struct WindowCornerRadii: Equatable, Sendable {
 
     static let zero = WindowCornerRadii(uniform: 0)
 
+    /// Server radius queries can transiently report zero radii for windows whose
+    /// rounded-corner metadata is not yet materialized (observed when cycling focus
+    /// quickly across columns). Real macOS windows have nonzero radii, so a zero
+    /// sample is an invalid reading, not a square window.
+    var isEffectivelyZero: Bool {
+        topLeft < 1 && topRight < 1 && bottomLeft < 1 && bottomRight < 1
+    }
+
     func adding(_ value: CGFloat) -> WindowCornerRadii {
         WindowCornerRadii(
             topLeft: topLeft + value,
@@ -442,6 +450,11 @@ final class SkyLight {
         return Self.cornerSample(resolved: nil, raw: raw, observedSize: observedSize)
     }
 
+    /// Builds a corner sample from resolved and/or raw SkyLight radii arrays,
+    /// preferring resolved radii but falling back to raw ones. Zero radii are
+    /// treated as an invalid (not-yet-materialized) reading, not a square window.
+    /// - Returns: A sample when a non-zero radii array parses against the observed
+    ///   size; `nil` when neither array yields a usable reading.
     static func cornerSample(
         resolved: CFArray?,
         raw: CFArray?,
@@ -454,10 +467,10 @@ final class SkyLight {
         else {
             return nil
         }
-        if let radii = parseCornerRadii(resolved) {
+        if let radii = parseCornerRadii(resolved), !radii.isEffectivelyZero {
             return WindowCornerSample(radii: radii, observedSize: observedSize, source: .resolved)
         }
-        guard let radii = parseCornerRadii(raw) else { return nil }
+        guard let radii = parseCornerRadii(raw), !radii.isEffectivelyZero else { return nil }
         return WindowCornerSample(radii: radii, observedSize: observedSize, source: .raw)
     }
 
