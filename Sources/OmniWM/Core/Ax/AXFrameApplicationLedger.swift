@@ -248,7 +248,7 @@ final class AXFrameApplicationLedger {
         return state.frame.size
     }
 
-    func enforcedSizePlacement(for windowId: Int, targetFrame: CGRect) -> CGRect? {
+    private func enforcedSizeClamp(for windowId: Int, targetFrame: CGRect) -> CGRect? {
         guard let failure = recentFrameWriteFailures[windowId],
               failure.isTerminalRefusal,
               failure.components.contains(.size),
@@ -258,11 +258,18 @@ final class AXFrameApplicationLedger {
         else {
             return nil
         }
+        return observedFrame
+    }
+
+    func enforcedSizePlacement(for windowId: Int, targetFrame: CGRect) -> CGRect? {
+        guard let clamp = enforcedSizeClamp(for: windowId, targetFrame: targetFrame) else {
+            return nil
+        }
         return CGRect(
             x: targetFrame.minX,
-            y: targetFrame.maxY - observedFrame.height,
-            width: observedFrame.width,
-            height: observedFrame.height
+            y: targetFrame.maxY - clamp.height,
+            width: clamp.width,
+            height: clamp.height
         )
     }
 
@@ -691,7 +698,13 @@ final class AXFrameApplicationLedger {
             requestId: requestId,
             traceRequestId: traceRequestId
         )
-        if !isRetry, !retainsTerminalSizeRefusal(windowId: windowId, components: effectiveComponents) {
+        if !isRetry,
+           !retainsTerminalSizeRefusal(
+               windowId: windowId,
+               components: effectiveComponents,
+               enforcedSizeTarget: shouldForceApply ? nil : frame
+           )
+        {
             recentFrameWriteFailures.removeValue(forKey: windowId)
         }
         if let existingObserverRequestId,
@@ -805,7 +818,11 @@ final class AXFrameApplicationLedger {
                     verifiedComponents: verifiedComponents,
                     convergedTargetFrame: nil
                 )
-                if !retainsTerminalSizeRefusal(
+                let observedRefusedSize = observedFrameShowsRefusedSize(
+                    windowId: resolvedWindowId,
+                    result: resolvedResult
+                )
+                if observedRefusedSize || !retainsTerminalSizeRefusal(
                     windowId: resolvedWindowId,
                     components: resolvedResult.writeResult.components
                 ) {
@@ -828,7 +845,10 @@ final class AXFrameApplicationLedger {
                     observedFrame: resolvedResult.writeResult.observedFrame,
                     settersSucceeded: resolvedResult.writeResult.sizeError == .success
                         && resolvedResult.writeResult.positionError == .success,
-                    components: resolvedResult.writeResult.components
+                    components: resolvedResult.writeResult.components,
+                    isTerminalRefusal: priorFailure.map {
+                        $0.isTerminalRefusal && repeatsRefusedOutcome($0, result: resolvedResult)
+                    } ?? false
                 )
             }
 
@@ -1076,11 +1096,45 @@ final class AXFrameApplicationLedger {
         )
     }
 
-    private func retainsTerminalSizeRefusal(windowId: Int, components: AXFrameComponents) -> Bool {
+    private func retainsTerminalSizeRefusal(
+        windowId: Int,
+        components: AXFrameComponents,
+        enforcedSizeTarget: CGRect? = nil
+    ) -> Bool {
         guard let failure = recentFrameWriteFailures[windowId], failure.isTerminalRefusal else {
             return false
         }
-        return !components.contains(.size)
+        guard components.contains(.size) else { return true }
+        guard let enforcedSizeTarget else { return false }
+        return enforcedSizeClamp(for: windowId, targetFrame: enforcedSizeTarget) != nil
+    }
+
+    private func observedFrameShowsRefusedSize(windowId: Int, result: AXFrameApplyResult) -> Bool {
+        guard let failure = recentFrameWriteFailures[windowId],
+              failure.isTerminalRefusal,
+              let observedFrame = result.writeResult.observedFrame,
+              sameAXWindowIdentity(failure.expectedWindow, result.expectedWindow)
+        else {
+            return false
+        }
+        return axFrameMatches(observedFrame, target: failure.targetFrame, components: .size)
+    }
+
+    private func repeatsRefusedOutcome(
+        _ failure: RecentFrameWriteFailure,
+        result: AXFrameApplyResult
+    ) -> Bool {
+        guard failure.reason == result.writeResult.failureReason,
+              failure.components == result.writeResult.components,
+              sameAXWindowIdentity(failure.expectedWindow, result.expectedWindow),
+              axFrameMatches(result.targetFrame, target: failure.targetFrame, components: .size),
+              let priorObservedFrame = failure.observedFrame,
+              let observedFrame = result.writeResult.observedFrame
+        else {
+            return false
+        }
+        return axFrameMatches(observedFrame, target: priorObservedFrame, components: .size)
+            && Self.isAXTopLeftAnchoredSizeClamp(target: result.targetFrame, observed: observedFrame)
     }
 
     private func rememberedTerminalRefusal(

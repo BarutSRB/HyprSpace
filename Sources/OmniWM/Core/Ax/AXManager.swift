@@ -390,14 +390,17 @@ final class AXManager {
     }
 
     func animationFrameChange(_ change: LayoutFrameChange) -> LayoutFrameChange {
-        let windowId = change.token.windowId
-        let components = animationFrameComponents(for: windowId, targetFrame: change.frame)
+        let components = animationFrameComponents(for: change.token.windowId, targetFrame: change.frame)
         if components != .all {
             return change.writing(change.frame, components: components)
         }
+        return enforcedSizeFrameChange(change)
+    }
+
+    func enforcedSizeFrameChange(_ change: LayoutFrameChange) -> LayoutFrameChange {
         guard !change.forceApply,
               let placement = frameLedger.enforcedSizePlacement(
-                  for: windowId,
+                  for: change.token.windowId,
                   targetFrame: change.frame
               )
         else {

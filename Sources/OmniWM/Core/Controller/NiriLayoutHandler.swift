@@ -615,11 +615,11 @@ enum StructuralMutationOutcome: Equatable {
             excludedTokens: snapshot.excludedTokens,
             pendingParkWindowIds: controller?.axManager.pendingParkWindowIds ?? []
         )
-        if sampledAnimationTime != nil {
-            if let axManager = controller?.axManager {
-                for index in diff.frameChanges.indices {
-                    diff.frameChanges[index] = axManager.animationFrameChange(diff.frameChanges[index])
-                }
+        if let axManager = controller?.axManager {
+            for index in diff.frameChanges.indices {
+                diff.frameChanges[index] = sampledAnimationTime == nil
+                    ? axManager.enforcedSizeFrameChange(diff.frameChanges[index])
+                    : axManager.animationFrameChange(diff.frameChanges[index])
             }
         }
         if animationTime != nil {

@@ -1575,9 +1575,11 @@ import QuartzCore
             pendingParkWindowIds: controller?.axManager.pendingParkWindowIds ?? [],
             animationTime: targetTime
         )
-        if isAnimationTick, let axManager = controller?.axManager {
+        if let axManager = controller?.axManager {
             for index in diff.frameChanges.indices {
-                diff.frameChanges[index] = axManager.animationFrameChange(diff.frameChanges[index])
+                diff.frameChanges[index] = isAnimationTick
+                    ? axManager.animationFrameChange(diff.frameChanges[index])
+                    : axManager.enforcedSizeFrameChange(diff.frameChanges[index])
             }
         }
         diff.tabRailGeometryCommands = dwindleTabRailGeometryCommands(
