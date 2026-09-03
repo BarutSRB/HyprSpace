@@ -1084,6 +1084,30 @@ final class WindowCornerRadiiTests: XCTestCase {
     }
 
     @MainActor
+    /// OmniWM stores a user-selected square corner as `squareStoredRadius` (0.01),
+    /// so a small nonzero reading is the truth for that window and must survive the
+    /// zero-sample rejection instead of falling back to the default rounded radii.
+    func testCornerSampleKeepsUserSelectedSquareRadius() {
+        let square = GlobalWindowCornerPreferences.squareStoredRadius
+        let radii = [
+            NSNumber(value: square),
+            NSNumber(value: square),
+            NSNumber(value: square),
+            NSNumber(value: square)
+        ] as CFArray
+        let observedSize = CGSize(width: 800, height: 600)
+
+        XCTAssertEqual(
+            SkyLight.cornerSample(resolved: radii, raw: nil, observedSize: observedSize),
+            WindowCornerSample(
+                radii: WindowCornerRadii(uniform: square),
+                observedSize: observedSize,
+                source: .resolved
+            )
+        )
+    }
+
+    @MainActor
     func testCornerSampleRejectsInvalidObservedSize() {
         let raw = [NSNumber(value: 11.5)] as CFArray
 
