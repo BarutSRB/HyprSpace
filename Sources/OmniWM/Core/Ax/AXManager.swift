@@ -493,11 +493,12 @@ final class AXManager {
         frameLedger.pendingFrameWrite(for: windowId)
     }
 
-    /// Stages a frame application through the shared pending-write ledger so tests
-    /// exercise the same lifecycle as production frame applications.
+    /// Stages a single non-retry, verified frame application directly on the ledger,
+    /// giving tests a pending write without the enqueue path's tracing, batching,
+    /// deferred deliveries or pending-retry cancellation. The ledger is private, so
+    /// this cannot live in the test target without widening its access.
     /// - Returns: The prepared AX frame application request, or `nil` if the ledger
     ///   declined to stage a write for the given target.
-    @discardableResult
     func stageFrameWrite(for target: AXFrameApplicationTarget) -> AXFrameApplicationRequest? {
         frameLedger.prepareFrameApplication(
             pid: target.pid,
