@@ -87,7 +87,7 @@ final class IPCResizeCommandTests: XCTestCase {
                     return XCTFail("Expected command request")
                 }
 
-                XCTAssertEqual(parsed.request.version, 14)
+                XCTAssertEqual(parsed.request.version, 15)
                 XCTAssertEqual(request, .resize(axis: axis, operation: operation))
             }
         }

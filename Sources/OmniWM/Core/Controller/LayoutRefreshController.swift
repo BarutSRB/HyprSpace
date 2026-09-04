@@ -166,6 +166,7 @@ import QuartzCore
 
     var layoutState = LayoutRefreshState()
     private var layoutBuildMetrics = LayoutBuildMetrics()
+    var displayTickMetrics = DisplayTickMetrics()
     var performanceCounters: PerformanceCounters?
     var displayLinkActivationForTests: ((CGDirectDisplayID) -> Bool)?
     var displayLinkCreationAllowedForTests: ((CGDirectDisplayID) -> Bool)?
@@ -1028,6 +1029,14 @@ import QuartzCore
             visualIndex: visualIndex,
             expectedToken: expectedToken
         )
+    }
+
+    func displayTickMetricsSnapshot() -> DisplayTickMetrics {
+        displayTickMetrics
+    }
+
+    func layoutBuildMetricsCounts() -> (totalBuilds: Int, completedRelayoutCycles: Int) {
+        (layoutBuildMetrics.totalBuilds, layoutBuildMetrics.completedRelayoutCycles)
     }
 
     func layoutBuildMetricsDump() -> String {

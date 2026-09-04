@@ -66,6 +66,7 @@ The three workspace flags answer different questions. `is-focused` marks the wor
 | `active-workspace` | — | — | Current interaction monitor and active workspace |
 | `focused-monitor` | — | — | Current interaction monitor and its active workspace |
 | `apps` | — | — | Managed app summary |
+| `metrics` | — | — | Always-on runtime metrics: AX frame-write attempts and whole-attempt wall time (the setter plus its ordering/verification reads; enhanced-UI batch work and the retry element refresh are not counted) as since-launch totals plus live rows per app AX context, display tick timing, layout build counts, and process energy/CPU. Populated without an active `capture` session |
 | `focused-window` | — | — | Focused managed window snapshot |
 | `windows` | `--window`, `--workspace`, `--display`, `--focused`, `--visible`, `--floating`, `--scratchpad`, `--app`, `--bundle-id` | window fields | Managed windows |
 | `workspaces` | `--workspace`, `--display`, `--current`, `--visible`, `--focused` | workspace fields | Configured workspaces with occupancy |

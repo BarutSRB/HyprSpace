@@ -4,7 +4,7 @@
 import Foundation
 
 public enum OmniWMIPCProtocol {
-    public static let version = 14
+    public static let version = 15
 }
 
 public struct IPCRequestEnvelope: Decodable, Sendable {
@@ -1375,6 +1375,7 @@ public enum IPCQueryName: String, Codable, CaseIterable, Equatable, Sendable {
     case commands
     case subscriptions
     case capabilities
+    case metrics
 }
 
 public struct IPCQuerySelectors: Codable, Equatable, Sendable {
@@ -2131,6 +2132,168 @@ public struct IPCRequest: Codable, Equatable, Sendable {
     }
 }
 
+public struct IPCAXWriteMetricsBucket: Codable, Equatable, Sendable {
+    public let pid: Int32
+    public let context: UInt64
+    public let app: String?
+    public let bundleId: String?
+    public let lane: String
+    public let count: Int
+    public let failureCount: Int
+    public let meanMicroseconds: Double
+    public let maxMicroseconds: Double
+    public let totalMicroseconds: Double
+
+    public init(
+        pid: Int32,
+        context: UInt64,
+        app: String?,
+        bundleId: String?,
+        lane: String,
+        count: Int,
+        failureCount: Int,
+        meanMicroseconds: Double,
+        maxMicroseconds: Double,
+        totalMicroseconds: Double
+    ) {
+        self.pid = pid
+        self.context = context
+        self.app = app
+        self.bundleId = bundleId
+        self.lane = lane
+        self.count = count
+        self.failureCount = failureCount
+        self.meanMicroseconds = meanMicroseconds
+        self.maxMicroseconds = maxMicroseconds
+        self.totalMicroseconds = totalMicroseconds
+    }
+}
+
+public struct IPCAXWriteMetrics: Codable, Equatable, Sendable {
+    public let count: Int
+    public let failureCount: Int
+    public let meanMicroseconds: Double
+    public let maxMicroseconds: Double
+    public let totalMicroseconds: Double
+    public let byApp: [IPCAXWriteMetricsBucket]
+
+    public init(
+        count: Int,
+        failureCount: Int,
+        meanMicroseconds: Double,
+        maxMicroseconds: Double,
+        totalMicroseconds: Double,
+        byApp: [IPCAXWriteMetricsBucket]
+    ) {
+        self.count = count
+        self.failureCount = failureCount
+        self.meanMicroseconds = meanMicroseconds
+        self.maxMicroseconds = maxMicroseconds
+        self.totalMicroseconds = totalMicroseconds
+        self.byApp = byApp
+    }
+}
+
+public struct IPCProcessResourceMetrics: Codable, Equatable, Sendable {
+    public let energyNanojoules: UInt64
+    public let userTimeNanoseconds: UInt64
+    public let systemTimeNanoseconds: UInt64
+    public let packageIdleWakeups: UInt64
+    public let interruptWakeups: UInt64
+    public let residentSizeBytes: UInt64
+    public let physicalFootprintBytes: UInt64
+
+    public init(
+        energyNanojoules: UInt64,
+        userTimeNanoseconds: UInt64,
+        systemTimeNanoseconds: UInt64,
+        packageIdleWakeups: UInt64,
+        interruptWakeups: UInt64,
+        residentSizeBytes: UInt64,
+        physicalFootprintBytes: UInt64
+    ) {
+        self.energyNanojoules = energyNanojoules
+        self.userTimeNanoseconds = userTimeNanoseconds
+        self.systemTimeNanoseconds = systemTimeNanoseconds
+        self.packageIdleWakeups = packageIdleWakeups
+        self.interruptWakeups = interruptWakeups
+        self.residentSizeBytes = residentSizeBytes
+        self.physicalFootprintBytes = physicalFootprintBytes
+    }
+}
+
+public struct IPCDisplayTickMetrics: Codable, Equatable, Sendable {
+    public let tickCount: Int
+    public let timingAnomalyCount: Int
+    public let longTimestampGapCount: Int
+    public let workExceededNominalPeriodCount: Int
+    public let completionPastTargetCount: Int
+    public let timingAnomalyPercent: Double
+    public let meanWorkMicroseconds: Double
+    public let maxWorkMicroseconds: Double
+    public let maxIntervalMicroseconds: Double
+    public let minEntrySlackMicroseconds: Double
+    public let minCompletionSlackMicroseconds: Double
+
+    public init(
+        tickCount: Int,
+        timingAnomalyCount: Int,
+        longTimestampGapCount: Int,
+        workExceededNominalPeriodCount: Int,
+        completionPastTargetCount: Int,
+        timingAnomalyPercent: Double,
+        meanWorkMicroseconds: Double,
+        maxWorkMicroseconds: Double,
+        maxIntervalMicroseconds: Double,
+        minEntrySlackMicroseconds: Double,
+        minCompletionSlackMicroseconds: Double
+    ) {
+        self.tickCount = tickCount
+        self.timingAnomalyCount = timingAnomalyCount
+        self.longTimestampGapCount = longTimestampGapCount
+        self.workExceededNominalPeriodCount = workExceededNominalPeriodCount
+        self.completionPastTargetCount = completionPastTargetCount
+        self.timingAnomalyPercent = timingAnomalyPercent
+        self.meanWorkMicroseconds = meanWorkMicroseconds
+        self.maxWorkMicroseconds = maxWorkMicroseconds
+        self.maxIntervalMicroseconds = maxIntervalMicroseconds
+        self.minEntrySlackMicroseconds = minEntrySlackMicroseconds
+        self.minCompletionSlackMicroseconds = minCompletionSlackMicroseconds
+    }
+}
+
+public struct IPCLayoutBuildMetrics: Codable, Equatable, Sendable {
+    public let totalBuilds: Int
+    public let completedRelayoutCycles: Int
+
+    public init(totalBuilds: Int, completedRelayoutCycles: Int) {
+        self.totalBuilds = totalBuilds
+        self.completedRelayoutCycles = completedRelayoutCycles
+    }
+}
+
+public struct IPCMetricsQueryResult: Codable, Equatable, Sendable {
+    public let traceCaptureActive: Bool
+    public let axWrites: IPCAXWriteMetrics
+    public let displayTicks: IPCDisplayTickMetrics
+    public let layoutBuilds: IPCLayoutBuildMetrics
+    public let process: IPCProcessResourceMetrics?
+
+    public init(
+        traceCaptureActive: Bool,
+        axWrites: IPCAXWriteMetrics,
+        displayTicks: IPCDisplayTickMetrics,
+        layoutBuilds: IPCLayoutBuildMetrics,
+        process: IPCProcessResourceMetrics?
+    ) {
+        self.traceCaptureActive = traceCaptureActive
+        self.axWrites = axWrites
+        self.displayTicks = displayTicks
+        self.layoutBuilds = layoutBuilds
+        self.process = process
+    }
+}
+
 public enum IPCResultKind: String, Codable, Equatable, Sendable {
     case pong
     case version
@@ -2150,6 +2313,7 @@ public enum IPCResultKind: String, Codable, Equatable, Sendable {
     case subscriptions
     case capabilities
     case subscribed
+    case metrics
 }
 
 public struct IPCPingResult: Codable, Equatable, Sendable {
@@ -2803,6 +2967,7 @@ public struct IPCResult: Codable, Equatable, Sendable {
         case subscriptions(IPCSubscriptionsQueryResult)
         case capabilities(IPCCapabilitiesQueryResult)
         case subscribed(IPCSubscribeResult)
+        case metrics(IPCMetricsQueryResult)
     }
 
     public let kind: IPCResultKind
@@ -2885,6 +3050,10 @@ public struct IPCResult: Codable, Equatable, Sendable {
         self.init(kind: .subscribed, payload: .subscribed(subscribed))
     }
 
+    public init(metrics: IPCMetricsQueryResult) {
+        self.init(kind: .metrics, payload: .metrics(metrics))
+    }
+
     private enum CodingKeys: String, CodingKey {
         case kind
         case payload
@@ -2931,6 +3100,8 @@ public struct IPCResult: Codable, Equatable, Sendable {
             payload = .capabilities(try container.decode(IPCCapabilitiesQueryResult.self, forKey: .payload))
         case .subscribed:
             payload = .subscribed(try container.decode(IPCSubscribeResult.self, forKey: .payload))
+        case .metrics:
+            payload = .metrics(try container.decode(IPCMetricsQueryResult.self, forKey: .payload))
         }
     }
 
@@ -2974,6 +3145,8 @@ public struct IPCResult: Codable, Equatable, Sendable {
         case let .capabilities(payload):
             try container.encode(payload, forKey: .payload)
         case let .subscribed(payload):
+            try container.encode(payload, forKey: .payload)
+        case let .metrics(payload):
             try container.encode(payload, forKey: .payload)
         }
     }

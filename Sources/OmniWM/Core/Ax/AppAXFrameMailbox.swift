@@ -7,7 +7,7 @@ import Foundation
 import os
 import Synchronization
 
-enum AppAXFrameLane: Sendable {
+enum AppAXFrameLane: Hashable, Sendable {
     case ordinary
     case park
     case closing

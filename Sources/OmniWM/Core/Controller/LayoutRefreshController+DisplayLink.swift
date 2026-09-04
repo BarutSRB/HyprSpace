@@ -91,6 +91,7 @@ extension LayoutRefreshController {
     }
 
     @objc private func displayLinkFired(_ displayLink: CADisplayLink) {
+        let entryTime = CACurrentMediaTime()
         guard let displayId = layoutState.displayLinksByDisplay.first(where: { $0.value === displayLink })?.key
         else { return }
         performanceCounters?.displayLinkCallbacks &+= 1
@@ -113,14 +114,9 @@ extension LayoutRefreshController {
                 FrameEffectTraceContext.restore(previousTraceOrigin)
             }
         }
-        let previousTimestamp = traceActive
-            ? layoutState.replaceDisplayLinkTraceTimestamp(
-                displayLink.timestamp,
-                for: displayId,
-                captureGeneration: FrameEffectTraceContext.captureGeneration(of: traceOrigin.effectId)
-            )
-            : nil
-        let startTime = traceActive ? CACurrentMediaTime() : 0
+        let previousTickTimestamp = layoutState.lastTickTimestampByDisplay
+            .updateValue(displayLink.timestamp, forKey: displayId)
+        let intervalMs = previousTickTimestamp.map { (displayLink.timestamp - $0) * 1000 } ?? 0
         var scrollEndTime: CFTimeInterval = 0
         var dwindleEndTime: CFTimeInterval = 0
         var closingEndTime: CFTimeInterval = 0
@@ -137,28 +133,36 @@ extension LayoutRefreshController {
         stopDisplayLinkIfIdle(for: displayId)
         auditParkVisibility(displayId: displayId)
 
-        guard traceActive else { return }
-        let endTime = CACurrentMediaTime()
-
+        let completionTime = CACurrentMediaTime()
         let expectedMs = displayLink.duration * 1000
-        let intervalMs = previousTimestamp.map { (displayLink.timestamp - $0) * 1000 } ?? 0
-        let totalMs = (endTime - startTime) * 1000
-        let dropped = previousTimestamp != nil && intervalMs > 1.5 * expectedMs
-            || expectedMs > 0 && totalMs > expectedMs
+        let totalMs = (completionTime - entryTime) * 1000
+        let entrySlackMs = (displayLink.targetTimestamp - entryTime) * 1000
+        let completionSlackMs = (displayLink.targetTimestamp - completionTime) * 1000
+        let classification = displayTickMetrics.record(
+            intervalMs: intervalMs,
+            expectedMs: expectedMs,
+            workMs: totalMs,
+            hasPreviousTick: previousTickTimestamp != nil,
+            entrySlackMs: entrySlackMs,
+            completionSlackMs: completionSlackMs
+        )
 
+        guard traceActive else { return }
         AnimationTickTrace.shared.record(
             AnimationTickTrace.Record(
-                mediaTime: endTime,
+                mediaTime: completionTime,
                 effectId: traceOrigin.effectId,
                 displayId: displayId,
                 intervalMs: intervalMs,
                 expectedMs: expectedMs,
-                scrollMs: (scrollEndTime - startTime) * 1000,
+                entrySlackMs: entrySlackMs,
+                completionSlackMs: completionSlackMs,
+                scrollMs: (scrollEndTime - entryTime) * 1000,
                 dwindleMs: (dwindleEndTime - scrollEndTime) * 1000,
                 closingMs: (closingEndTime - dwindleEndTime) * 1000,
-                reconcileMs: (endTime - closingEndTime) * 1000,
+                reconcileMs: (completionTime - closingEndTime) * 1000,
                 totalMs: totalMs,
-                dropped: dropped
+                classification: classification
             )
         )
     }
@@ -402,7 +406,7 @@ extension LayoutRefreshController {
     ) {
         guard let link = layoutState.displayLinksByDisplay.removeValue(forKey: displayId) else { return }
         link.invalidate()
-        layoutState.endDisplayLinkTraceSession(for: displayId)
+        layoutState.lastTickTimestampByDisplay.removeValue(forKey: displayId)
         performanceCounters?.displayLinksInvalidated &+= 1
         performanceCounters?.activeDisplayLinks = layoutState.displayLinksByDisplay.count
         switch reason {

@@ -41,8 +41,7 @@ struct LayoutRefreshState {
     var isIncrementalRefreshInProgress: Bool = false
     var activeFullEnumerationCount: Int = 0
     var displayLinksByDisplay: [CGDirectDisplayID: CADisplayLink] = [:]
-    var lastDisplayLinkTimestampByDisplay: [CGDirectDisplayID: CFTimeInterval] = [:]
-    var displayLinkTraceCaptureGeneration: UInt64 = 0
+    var lastTickTimestampByDisplay: [CGDirectDisplayID: CFTimeInterval] = [:]
     var lastParkAuditTime: CFTimeInterval = 0
     var trailingAuditTask: Task<Void, Never>?
     var refreshRateByDisplay: [CGDirectDisplayID: Double] = [:]
@@ -58,20 +57,4 @@ struct LayoutRefreshState {
     var inventoryStabilityBarrierActive = false
     var inventoryStabilityHoldFullRescans = false
     var inventoryStabilityHeldFullRescan: LayoutRefreshController.ScheduledRefresh?
-
-    mutating func replaceDisplayLinkTraceTimestamp(
-        _ timestamp: CFTimeInterval,
-        for displayId: CGDirectDisplayID,
-        captureGeneration: UInt64
-    ) -> CFTimeInterval? {
-        if displayLinkTraceCaptureGeneration != captureGeneration {
-            lastDisplayLinkTimestampByDisplay.removeAll(keepingCapacity: true)
-            displayLinkTraceCaptureGeneration = captureGeneration
-        }
-        return lastDisplayLinkTimestampByDisplay.updateValue(timestamp, forKey: displayId)
-    }
-
-    mutating func endDisplayLinkTraceSession(for displayId: CGDirectDisplayID) {
-        lastDisplayLinkTimestampByDisplay.removeValue(forKey: displayId)
-    }
 }

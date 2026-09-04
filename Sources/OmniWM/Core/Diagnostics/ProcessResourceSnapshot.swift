@@ -133,14 +133,30 @@ struct ProcessResourceSnapshot: Equatable, Sendable {
         )
     }
 
-    private static let timebase: mach_timebase_info_data_t = {
+    private static func seconds(fromMachTicks ticks: UInt64) -> Double {
+        MachTimebase.current.seconds(fromMachTicks: ticks)
+    }
+}
+
+struct MachTimebase: Equatable, Sendable {
+    let numerator: UInt32
+    let denominator: UInt32
+
+    static let current: MachTimebase = {
         var value = mach_timebase_info_data_t()
         mach_timebase_info(&value)
-        return value
+        return MachTimebase(numerator: value.numer, denominator: value.denom)
     }()
 
-    private static func seconds(fromMachTicks ticks: UInt64) -> Double {
-        Double(ticks) * Double(timebase.numer) / Double(timebase.denom) / 1_000_000_000
+    func nanoseconds(fromMachTicks ticks: UInt64) -> UInt64 {
+        let product = ticks.multipliedFullWidth(by: UInt64(numerator))
+        let divisor = UInt64(denominator)
+        guard product.high < divisor else { return .max }
+        return divisor.dividingFullWidth(product).quotient
+    }
+
+    func seconds(fromMachTicks ticks: UInt64) -> Double {
+        Double(ticks) * Double(numerator) / Double(denominator) / 1_000_000_000
     }
 }
 

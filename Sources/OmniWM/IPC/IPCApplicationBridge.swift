@@ -235,6 +235,8 @@ actor IPCApplicationBridge {
             )
         case .apps:
             return .success(id: id, kind: .query, result: IPCResult(apps: queryRouter.appsResult()))
+        case .metrics:
+            return .success(id: id, kind: .query, result: IPCResult(metrics: queryRouter.metricsResult()))
         case .focusedWindow:
             return .success(
                 id: id,

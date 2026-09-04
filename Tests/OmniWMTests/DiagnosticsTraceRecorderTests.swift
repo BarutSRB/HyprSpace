@@ -169,55 +169,6 @@ final class DiagnosticsTraceRecorderTests: XCTestCase {
         XCTAssertFalse(recorder.isVerboseStoragePrepared)
     }
 
-    func testLiveDisplayLinkTimestampRestartsAtCaptureGenerationBoundary() {
-        var state = LayoutRefreshState()
-        let displayId: CGDirectDisplayID = 17
-
-        XCTAssertNil(
-            state.replaceDisplayLinkTraceTimestamp(1, for: displayId, captureGeneration: 41)
-        )
-        XCTAssertEqual(
-            state.replaceDisplayLinkTraceTimestamp(1.01, for: displayId, captureGeneration: 41),
-            1
-        )
-        XCTAssertNil(
-            state.replaceDisplayLinkTraceTimestamp(30, for: displayId, captureGeneration: 42)
-        )
-        XCTAssertEqual(state.displayLinkTraceCaptureGeneration, 42)
-        XCTAssertEqual(state.lastDisplayLinkTimestampByDisplay[displayId], 30)
-    }
-
-    func testStoppedDisplayLinkDoesNotSeedRestartedTraceInterval() {
-        var state = LayoutRefreshState()
-        let displayId: CGDirectDisplayID = 18
-        let captureGeneration: UInt64 = 43
-
-        XCTAssertNil(
-            state.replaceDisplayLinkTraceTimestamp(1, for: displayId, captureGeneration: captureGeneration)
-        )
-        XCTAssertEqual(
-            state.replaceDisplayLinkTraceTimestamp(1.00695, for: displayId, captureGeneration: captureGeneration),
-            1
-        )
-
-        state.endDisplayLinkTraceSession(for: displayId)
-
-        let previousTimestamp = state.replaceDisplayLinkTraceTimestamp(
-            30,
-            for: displayId,
-            captureGeneration: captureGeneration
-        )
-        let expectedMs = 6.95
-        let intervalMs = previousTimestamp.map { (30 - $0) * 1_000 } ?? 0
-        let totalMs = 1.4
-        let dropped = previousTimestamp != nil && intervalMs > 1.5 * expectedMs
-            || totalMs > expectedMs
-
-        XCTAssertNil(previousTimestamp)
-        XCTAssertEqual(intervalMs, 0)
-        XCTAssertFalse(dropped)
-    }
-
     @MainActor
     func testDelayedPriorCaptureLineageIsZeroedDuringNextCapture() {
         let firstGeneration: UInt64 = 101
@@ -822,12 +773,18 @@ final class DiagnosticsTraceRecorderTests: XCTestCase {
                 displayId: 1,
                 intervalMs: 99,
                 expectedMs: 6,
+                entrySlackMs: 2.5,
+                completionSlackMs: -3.5,
                 scrollMs: 5,
                 dwindleMs: 0,
                 closingMs: 0,
                 reconcileMs: 1,
                 totalMs: 6,
-                dropped: true
+                classification: DisplayTickClassification(
+                    longTimestampGap: true,
+                    workExceededNominalPeriod: false,
+                    completionPastTarget: true
+                )
             )
         )
         BorderOpMetricsRecorder.shared.noteApply()
@@ -893,7 +850,10 @@ final class DiagnosticsTraceRecorderTests: XCTestCase {
         XCTAssertTrue(appVisibilityDump.contains("source=service"))
         XCTAssertTrue(RawAXNotificationTrace.shared.dump().contains("ax.during"))
         XCTAssertTrue(NiriLayoutTrace.shared.dump().contains("jump 0→10"))
-        XCTAssertTrue(AnimationTickTrace.shared.dump().contains("DROPPED"))
+        let tickDump = AnimationTickTrace.shared.dump()
+        XCTAssertTrue(tickDump.contains("entry_slack=2.50ms completion_slack=-3.50ms"))
+        XCTAssertTrue(tickDump.hasSuffix(" LONG_GAP COMPLETION_PAST_TARGET"))
+        XCTAssertFalse(tickDump.contains("WORK_OVER_PERIOD"))
         XCTAssertTrue(BorderOpMetricsRecorder.shared.dump().contains("applyCalls=1"))
         XCTAssertTrue(ScrollTickTrace.shared.dump().contains("commit=290.00ms"))
         XCTAssertTrue(AXWriteLatencyTrace.shared.dump().contains("pid=4242"))

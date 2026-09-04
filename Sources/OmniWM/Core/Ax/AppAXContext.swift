@@ -415,6 +415,7 @@ final class AppAXContext {
     private let axObserverCallbackKey: UInt?
     private let focusedWindowObserverCallbackKey: UInt?
     let callbackGeneration: UInt64
+    let writeMetricsToken: AXWriteMetrics.ContextToken
 
     @MainActor static var contexts: [pid_t: AppAXContext] = [:]
     @MainActor private static var macOSHiddenPIDs: Set<pid_t> = []
@@ -461,6 +462,12 @@ final class AppAXContext {
         self.focusedWindowObserverCallbackKey = focusedWindowObserverCallbackKey
         self.callbackGeneration = callbackGeneration
         self.thread = thread
+        writeMetricsToken = AXWriteMetrics.ContextToken(pid: pid, callbackGeneration: callbackGeneration)
+        AXWriteMetrics.shared.register(
+            writeMetricsToken,
+            app: nsApp.localizedName,
+            bundleId: nsApp.bundleIdentifier
+        )
     }
 
     @MainActor
@@ -2347,7 +2354,7 @@ final class AppAXContext {
             AppAXContextRuntimeMetrics.shared.noteClosingStarted(drain.requests.count)
             var cancelledCount = 0
             for request in drain.requests {
-                let applied = applyClosingFrameWriteRequest(
+                let outcome = applyClosingFrameWriteRequest(
                     request,
                     generations: closingFrameWriteGenerations,
                     isCancelled: {
@@ -2358,8 +2365,16 @@ final class AppAXContext {
                     request.generation,
                     for: request.target.animationId
                 )
-                if !applied {
+                switch outcome {
+                case .ineligible:
                     cancelledCount += 1
+                case let .attempted(result, nanoseconds):
+                    AXWriteMetrics.shared.record(
+                        writeMetricsToken,
+                        lane: .closing,
+                        nanoseconds: nanoseconds,
+                        succeeded: result.failureReason == nil
+                    )
                 }
             }
             scheduleOnMainRunLoop { [weak self] in
@@ -2550,6 +2565,7 @@ final class AppAXContext {
                     applyFrameWriteRequest(
                         request,
                         pid: currentPid,
+                        callbackGeneration: callbackGeneration,
                         generations: generations,
                         traceLane: lane
                     ) { attempt, attemptStartNs, timing, result in
@@ -2596,7 +2612,9 @@ final class AppAXContext {
                 results.append(applyFrameWriteRequest(
                     request,
                     pid: currentPid,
-                    generations: generations
+                    callbackGeneration: callbackGeneration,
+                    generations: generations,
+                    traceLane: lane
                 ))
             }
         }
@@ -2691,6 +2709,7 @@ final class AppAXContext {
         if AppAXContext.contexts[pid] === self {
             AppAXContext.contexts.removeValue(forKey: pid)
         }
+        AXWriteMetrics.shared.retire(writeMetricsToken)
         LockedEnhancedUIStateMap.shared.invalidate(pid)
 
         for (_, job) in activeFrameBatchJobs {
@@ -2769,7 +2788,11 @@ func frameWriteSkipReason(
     return nil
 }
 
-@discardableResult
+enum AXClosingFrameWriteOutcome: Equatable {
+    case ineligible
+    case attempted(AXFrameWriteResult, nanoseconds: UInt64)
+}
+
 func applyClosingFrameWriteRequest(
     _ request: AppAXClosingFrameWriteRequest,
     generations: LockedClosingFrameGenerationMap,
@@ -2777,24 +2800,26 @@ func applyClosingFrameWriteRequest(
     writeFrame: (AXWindowRef, CGRect, CGRect?, Bool) -> AXFrameWriteResult = {
         AXWindowService.setFrame($0, frame: $1, currentFrameHint: $2, verify: $3)
     }
-) -> Bool {
+) -> AXClosingFrameWriteOutcome {
     guard !isCancelled(),
           generations.isCurrent(request.generation, for: request.target.animationId)
     else {
-        return false
+        return .ineligible
     }
-    _ = writeFrame(
+    let startedNs = DispatchTime.now().uptimeNanoseconds
+    let result = writeFrame(
         request.target.expectedWindow,
         request.target.frame,
         request.target.currentFrameHint,
         false
     )
-    return true
+    return .attempted(result, nanoseconds: DispatchTime.now().uptimeNanoseconds &- startedNs)
 }
 
 func applyFrameWriteRequest(
     _ request: AppAXFrameWriteRequest,
     pid: pid_t,
+    callbackGeneration: UInt64 = 0,
     generations: LockedWindowGenerationMap,
     writeFrame: (AXWindowRef, CGRect, CGRect?, AXFrameComponents, Bool) -> AXFrameWriteResult = {
         AXWindowService.setFrame($0, frame: $1, currentFrameHint: $2, components: $3, verify: $4)
@@ -2809,9 +2834,13 @@ func applyFrameWriteRequest(
     let currentFrameHint = request.currentFrameHint
     let windowId = request.windowId
 
+    let metricsToken = AXWriteMetrics.ContextToken(pid: pid, callbackGeneration: callbackGeneration)
+
     func performWrite(_ window: AXWindowRef, attempt: UInt8) -> AXFrameWriteResult {
         guard let traceAttempt else {
-            return writeFrame(window, targetFrame, currentFrameHint, request.components, request.verify)
+            return AXWriteMetrics.shared.measure(metricsToken, lane: traceLane) {
+                writeFrame(window, targetFrame, currentFrameHint, request.components, request.verify)
+            } succeeded: { $0.failureReason == nil }
         }
         let startedNs = DispatchTime.now().uptimeNanoseconds
         FrameEffectObservationTracker.shared.register(
@@ -2824,13 +2853,15 @@ func applyFrameWriteRequest(
             target: targetFrame,
             startedNs: startedNs
         )
-        let traced = AXWindowService.setFrameTraced(
-            window,
-            frame: targetFrame,
-            currentFrameHint: currentFrameHint,
-            components: request.components,
-            verify: request.verify
-        )
+        let traced = AXWriteMetrics.shared.measure(metricsToken, lane: traceLane) {
+            AXWindowService.setFrameTraced(
+                window,
+                frame: targetFrame,
+                currentFrameHint: currentFrameHint,
+                components: request.components,
+                verify: request.verify
+            )
+        } succeeded: { $0.result.failureReason == nil }
         traceAttempt(attempt, startedNs, traced.timing, traced.result)
         return traced.result
     }

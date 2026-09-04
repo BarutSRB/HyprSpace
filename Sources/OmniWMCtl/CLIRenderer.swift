@@ -193,6 +193,8 @@ enum CLIRenderer {
             return formattedCapture(payload, format: format)
         case let .subscribed(payload):
             return "subscribed: \(payload.channels.map(\.rawValue).joined(separator: ", "))"
+        case let .metrics(payload):
+            return formattedMetrics(payload, format: format)
         }
     }
 
@@ -555,6 +557,74 @@ enum CLIRenderer {
             ],
             format: format
         )
+    }
+
+    private static func formattedMetrics(_ payload: IPCMetricsQueryResult, format: CLIOutputFormat) -> String {
+        let rows = payload.axWrites.byApp.map { bucket in
+            [
+                bucket.app ?? String(bucket.pid),
+                String(bucket.context),
+                bucket.lane,
+                String(bucket.count),
+                String(bucket.failureCount),
+                String(format: "%.1f", bucket.meanMicroseconds / 1_000),
+                String(format: "%.1f", bucket.maxMicroseconds / 1_000)
+            ]
+        }
+        let table = formatRows(
+            headers: ["APP", "CONTEXT", "LANE", "WRITES", "FAILED", "MEAN MS", "MAX MS"],
+            rows: rows,
+            format: format
+        )
+        guard format == .text || format == .table else { return table }
+
+        var lines: [String] = []
+        lines.append(
+            "ax frame writes since launch: \(payload.axWrites.count) attempts"
+                + " mean \(String(format: "%.2f", payload.axWrites.meanMicroseconds / 1_000)) ms"
+                + " max \(String(format: "%.2f", payload.axWrites.maxMicroseconds / 1_000)) ms"
+                + " failed \(payload.axWrites.failureCount)"
+        )
+        lines.append(
+            "  counted: whole-attempt wall time around each frame setter, including its ordering"
+                + " and verification reads; not counted: enhanced-UI batch work and the retry element refresh"
+        )
+        let ticks = payload.displayTicks
+        lines.append(
+            "display ticks: \(ticks.tickCount)"
+                + " timing anomalies \(ticks.timingAnomalyCount)"
+                + " (\(String(format: "%.1f", ticks.timingAnomalyPercent))%)"
+                + " long-gap \(ticks.longTimestampGapCount)"
+                + " work-over-period \(ticks.workExceededNominalPeriodCount)"
+                + " completion-past-target \(ticks.completionPastTargetCount)"
+        )
+        lines.append(
+            "  work mean \(String(format: "%.2f", ticks.meanWorkMicroseconds / 1_000)) ms"
+                + " max \(String(format: "%.2f", ticks.maxWorkMicroseconds / 1_000)) ms;"
+                + " max interval \(String(format: "%.2f", ticks.maxIntervalMicroseconds / 1_000)) ms;"
+                + " min slack at entry \(String(format: "%.2f", ticks.minEntrySlackMicroseconds / 1_000)) ms"
+                + " at completion \(String(format: "%.2f", ticks.minCompletionSlackMicroseconds / 1_000)) ms"
+                + " (negative = past the frame's target timestamp)"
+        )
+        lines.append(
+            "layout builds: \(payload.layoutBuilds.totalBuilds)"
+                + " cycles \(payload.layoutBuilds.completedRelayoutCycles)"
+        )
+        if let process = payload.process {
+            lines.append(
+                "energy: \(process.energyNanojoules / 1_000_000) mJ"
+                    + " cpu \(String(format: "%.1f", Double(process.userTimeNanoseconds + process.systemTimeNanoseconds) / 1_000_000_000)) s"
+                    + " wakeups \(process.packageIdleWakeups)"
+                    + " footprint \(process.physicalFootprintBytes / 1_048_576) MB"
+            )
+        }
+        lines.append("trace capture active: \(payload.traceCaptureActive)")
+        if !rows.isEmpty {
+            lines.append("")
+            lines.append("live app contexts (rows retire with the app's AX context):")
+            lines.append(table)
+        }
+        return lines.joined(separator: "\n")
     }
 
     private static func formatAppSummary(_ apps: [IPCManagedAppSummary], format: CLIOutputFormat) -> String {

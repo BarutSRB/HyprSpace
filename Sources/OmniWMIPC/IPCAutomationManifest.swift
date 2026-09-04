@@ -400,6 +400,10 @@ public enum IPCAutomationManifest {
             summary: "Return the managed app summary used by OmniWM surfaces."
         ),
         IPCQueryDescriptor(
+            name: .metrics,
+            summary: "Return always-on runtime metrics: AX frame-write attempts and wall time per app context, display tick timing, layout builds, and process energy."
+        ),
+        IPCQueryDescriptor(
             name: .focusedWindow,
             summary: "Return the focused managed window snapshot."
         ),
