@@ -1,61 +1,121 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Copyright (C) 2026 BarutSRB — https://github.com/BarutSRB/OmniWM
 
+import Darwin
 import Foundation
 import OmniWMIPC
 
 actor IPCConnection {
-    private enum ReadLoopError: Error {
+    enum ReadLoopError: Error {
         case requestTooLarge
     }
 
+    struct Limits: Sendable {
+        var maxPendingWriteBytes: Int
+        var writeStallTimeout: DispatchTimeInterval
+
+        init(maxPendingWriteBytes: Int = 1 << 20, writeStallTimeout: DispatchTimeInterval = .seconds(5)) {
+            self.maxPendingWriteBytes = maxPendingWriteBytes
+            self.writeStallTimeout = writeStallTimeout
+        }
+
+        static let `default` = Limits()
+    }
+
+    enum FlushOutcome {
+        case drained
+        case wouldBlock
+        case failed
+    }
+
     static let maxRequestLineBytes = 64 * 1024
+    static let readBudgetPerFiring = 64 * 1024
 
     nonisolated let id = UUID()
 
-    private let handle: FileHandle
+    let ioQueue = DispatchSerialQueue(
+        label: "com.barut.OmniWM.ipc.connection",
+        qos: .userInitiated
+    )
+
+    nonisolated var unownedExecutor: UnownedSerialExecutor {
+        ioQueue.asUnownedSerialExecutor()
+    }
+
+    let handle: FileHandle
+    let fileDescriptor: Int32
+    let limits: Limits
     private let bridge: IPCApplicationBridge
     private let onClose: @Sendable (UUID) -> Void
-    private var readTask: Task<Void, Never>?
-    private var eventTasks: [IPCSubscriptionChannel: Task<Void, Never>] = [:]
-    private var isClosed = false
+
+    var readSource: DispatchSourceRead?
+    var writeSource: DispatchSourceWrite?
+    var readsSuspended = false
+    var writesSuspended = true
+    var pendingSourceCancellations = 0
+
+    var readBuffer = Data()
+    var pendingWrites: [Data] = []
+    var pendingWriteOffset = 0
+    var pendingWriteBytes = 0
+    var backlogStartedAt: DispatchTime?
+    var stallWatchdogScheduled = false
+
+    var eventTasks: [IPCSubscriptionChannel: Task<Void, Never>] = [:]
+    var isProcessing = false
+    var inputFinished = false
+    var isClosing = false
+    var isClosed = false
 
     init(
         handle: FileHandle,
         bridge: IPCApplicationBridge,
+        limits: Limits = .default,
         onClose: @escaping @Sendable (UUID) -> Void
     ) {
         self.handle = handle
+        fileDescriptor = handle.fileDescriptor
         self.bridge = bridge
+        self.limits = limits
         self.onClose = onClose
+        IPCServer.configureSocket(fileDescriptor, nonBlocking: true)
     }
 
     func start() {
-        guard readTask == nil else { return }
-        let fileDescriptor = handle.fileDescriptor
-        readTask = Task(priority: .userInitiated) {
-            await Self.runReadLoop(fileDescriptor: fileDescriptor, owner: self)
+        guard readSource == nil, !isClosed else { return }
+
+        let read = DispatchSource.makeReadSource(fileDescriptor: fileDescriptor, queue: ioQueue)
+        read.setEventHandler { [weak self] in
+            self?.assumeIsolated { $0.handleReadable() }
         }
+        read.setCancelHandler { [self] in
+            assumeIsolated { $0.sourceDidCancel() }
+        }
+
+        let write = DispatchSource.makeWriteSource(fileDescriptor: fileDescriptor, queue: ioQueue)
+        write.setEventHandler { [weak self] in
+            self?.assumeIsolated { $0.handleWritable() }
+        }
+        write.setCancelHandler { [self] in
+            assumeIsolated { $0.sourceDidCancel() }
+        }
+
+        readSource = read
+        writeSource = write
+        pendingSourceCancellations = 2
+        readsSuspended = false
+        writesSuspended = true
+        read.resume()
+
+        drainRequests()
     }
 
     func stop() {
-        closeIfNeeded()
+        closeImmediately()
     }
 
-    private nonisolated static func runReadLoop(fileDescriptor: Int32, owner: IPCConnection) async {
-        var readBuffer = Data()
-        do {
-            while let line = try readNextLine(from: fileDescriptor, buffer: &readBuffer) {
-                if Task.isCancelled {
-                    break
-                }
-                await owner.process(line)
-            }
-        } catch {
-            await owner.handleReadLoopError(error)
-        }
-
-        await owner.finishReadLoop()
+    func notifyClosed() {
+        onClose(id)
     }
 
     func process(_ line: String) async {
@@ -68,7 +128,7 @@ actor IPCConnection {
             do {
                 try send(response)
             } catch {
-                closeIfNeeded()
+                closeImmediately()
             }
             return
         }
@@ -124,112 +184,28 @@ actor IPCConnection {
             do {
                 try send(IPCResponse.failure(id: "", kind: .error, code: .invalidRequest))
             } catch {
-                closeIfNeeded()
+                closeImmediately()
             }
         }
     }
 
-    private func handleReadLoopError(_ error: Error) {
-        guard let readLoopError = error as? ReadLoopError else {
-            return
-        }
-
-        switch readLoopError {
-        case .requestTooLarge:
-            try? send(IPCResponse.failure(id: "", kind: .error, code: .invalidRequest))
-        }
-    }
-
-    private func send(_ response: IPCResponse) throws {
+    func send(_ response: IPCResponse) throws {
         guard !isClosed else { throw POSIXError(.ECANCELED) }
-        try handle.write(contentsOf: IPCWire.encodeResponseLine(response))
-    }
-
-    private func send(_ event: IPCEventEnvelope) throws {
+        enqueue(try IPCWire.encodeResponseLine(response))
         guard !isClosed else { throw POSIXError(.ECANCELED) }
-        try handle.write(contentsOf: IPCWire.encodeEventLine(event))
     }
 
-    private func finishReadLoop() {
-        closeIfNeeded()
+    func send(_ event: IPCEventEnvelope) throws {
+        guard !isClosed else { throw POSIXError(.ECANCELED) }
+        enqueue(try IPCWire.encodeEventLine(event))
+        guard !isClosed else { throw POSIXError(.ECANCELED) }
     }
 
-    private nonisolated static func readNextLine(from fileDescriptor: Int32, buffer: inout Data) throws -> String? {
-        while true {
-            if let newlineIndex = buffer.firstIndex(of: 0x0A) {
-                let lineByteCount = buffer.distance(from: buffer.startIndex, to: newlineIndex)
-                guard lineByteCount <= maxRequestLineBytes else {
-                    throw ReadLoopError.requestTooLarge
-                }
-                let line = try decodeUTF8(buffer.span.extracting(first: lineByteCount))
-                buffer.removeSubrange(...newlineIndex)
-                return line
-            }
-
-            guard let chunk = try readChunk(from: fileDescriptor), !chunk.isEmpty else {
-                guard !buffer.isEmpty else { return nil }
-                let line = try decodeUTF8(buffer.span)
-                buffer.removeAll(keepingCapacity: true)
-                return line
-            }
-
-            buffer.append(chunk)
-
-            if let newlineIndex = buffer.firstIndex(of: 0x0A) {
-                guard newlineIndex <= maxRequestLineBytes else {
-                    throw ReadLoopError.requestTooLarge
-                }
-                continue
-            }
-
-            if buffer.count > maxRequestLineBytes {
-                throw ReadLoopError.requestTooLarge
-            }
-        }
-    }
-
-    private nonisolated static func decodeUTF8(_ bytes: Span<UInt8>) throws -> String {
+    nonisolated static func decodeUTF8(_ bytes: Span<UInt8>) throws -> String {
         do {
             return String(copying: try UTF8Span(validating: bytes))
         } catch {
             throw POSIXError(.EINVAL)
         }
-    }
-
-    private nonisolated static func readChunk(from fileDescriptor: Int32) throws -> Data? {
-        var buffer = [UInt8](repeating: 0, count: 4096)
-        while true {
-            let count = Darwin.read(fileDescriptor, &buffer, buffer.count)
-            if count > 0 {
-                return Data(buffer[0 ..< count])
-            }
-            if count == 0 {
-                return nil
-            }
-            if errno == EINTR {
-                continue
-            }
-            let error = POSIXErrorCode(rawValue: errno) ?? .EIO
-            throw POSIXError(error)
-        }
-    }
-
-    private func closeIfNeeded() {
-        guard !isClosed else { return }
-        isClosed = true
-
-        let tasks = Array(eventTasks.values)
-        eventTasks.removeAll()
-
-        let currentReadTask = readTask
-        readTask = nil
-        currentReadTask?.cancel()
-
-        for task in tasks {
-            task.cancel()
-        }
-
-        try? handle.close()
-        onClose(id)
     }
 }

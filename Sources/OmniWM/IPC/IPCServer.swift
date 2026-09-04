@@ -294,7 +294,7 @@ final class IPCServer: IPCServerLifecycle {
         authorized: Bool
     ) -> FileHandle? {
         guard authorized else { return nil }
-        configureSocket(socket.rawValue, nonBlocking: false)
+        configureSocket(socket.rawValue, nonBlocking: true)
         return FileHandle(
             fileDescriptor: socket.relinquish(),
             closeOnDealloc: true
@@ -321,7 +321,7 @@ final class IPCServer: IPCServerLifecycle {
         return address
     }
 
-    private static func configureSocket(_ fd: Int32, nonBlocking: Bool) {
+    static func configureSocket(_ fd: Int32, nonBlocking: Bool) {
         let existingFlags = fcntl(fd, F_GETFL, 0)
         if existingFlags >= 0 {
             let updatedFlags = nonBlocking ? (existingFlags | O_NONBLOCK) : (existingFlags & ~O_NONBLOCK)
