@@ -2590,11 +2590,6 @@ import QuartzCore
         }
     }
 
-    struct WindowPositionPlan {
-        let entry: WindowState
-        let frame: CGRect
-    }
-
     fileprivate enum HideOperationResolution {
         case movable(WindowPositionPlan, hiddenState: HiddenState)
         case alreadyHidden(WindowPositionPlan, hiddenState: HiddenState)
@@ -2608,10 +2603,12 @@ import QuartzCore
         reason: HideReason,
         hiddenPlacementMonitors: [HiddenPlacementMonitorContext]? = nil,
         animationTick: Bool = false,
-        preserveWorkspaceInactive: Bool = true
+        preserveWorkspaceInactive: Bool = true,
+        observedFrame: CGRect? = nil
     ) -> HideOperationResolution {
         guard let controller else { return .unavailable }
-        var resolvedFrame = fastFrame(for: entry.token, axRef: entry.axRef)
+        var resolvedFrame = observedFrame
+            ?? fastFrame(for: entry.token, axRef: entry.axRef)
             ?? controller.axManager.lastAppliedFrame(for: entry.windowId)
         if resolvedFrame == nil, !animationTick {
             resolvedFrame = try? AXWindowService.frame(entry.axRef)
@@ -2744,7 +2741,8 @@ import QuartzCore
         monitor: Monitor,
         side: HideSide,
         reason: HideReason,
-        hiddenPlacementMonitors: [HiddenPlacementMonitorContext]? = nil
+        hiddenPlacementMonitors: [HiddenPlacementMonitorContext]? = nil,
+        observedFrame: CGRect? = nil
     ) -> Bool {
         guard let controller else { return false }
         let frameEntry = (pid: entry.pid, windowId: entry.windowId)
@@ -2753,7 +2751,8 @@ import QuartzCore
             monitor: monitor,
             side: side,
             reason: reason,
-            hiddenPlacementMonitors: hiddenPlacementMonitors
+            hiddenPlacementMonitors: hiddenPlacementMonitors,
+            observedFrame: observedFrame
         ) {
         case let .movable(plan, hiddenState):
             controller.workspaceManager.setHiddenState(hiddenState, for: entry.token)

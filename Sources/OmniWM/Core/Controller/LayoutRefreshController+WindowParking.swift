@@ -5,6 +5,37 @@ import Foundation
 
 @MainActor
 extension LayoutRefreshController {
+    struct WindowPositionPlan {
+        let entry: WindowState
+        let frame: CGRect
+    }
+
+    func repairWorkspaceInactivePark(for entry: WindowState, observedFrame: CGRect) {
+        guard let controller,
+              entry.layoutReason == .standard,
+              let verifiedFrame = controller.axManager.verifiedParkFrame(for: entry.windowId),
+              abs(observedFrame.minX - verifiedFrame.minX) >= FrameTolerance.frameWrite
+              || abs(observedFrame.minY - verifiedFrame.minY) >= FrameTolerance.frameWrite,
+              let monitor = controller.workspaceManager.monitor(for: entry.workspaceId),
+              controller.workspaceManager.activeWorkspaceOrFirst(on: monitor.id)?.id != entry.workspaceId
+        else { return }
+
+        controller.axManager.markParkPending(for: entry.windowId, pid: entry.pid)
+
+        guard !controller.workspaceManager.isAppHidden(pid: entry.pid),
+              !controller.axManager.macOSHiddenAppPIDs.contains(entry.pid),
+              !controller.workspaceManager.spaceTopology.isWindowOnKnownInactiveSpace(entry.windowId)
+        else { return }
+
+        hideWindow(
+            entry,
+            monitor: monitor,
+            side: preferredHideSide(for: monitor),
+            reason: .workspaceInactive,
+            observedFrame: observedFrame
+        )
+    }
+
     @discardableResult
     func applyPositionPlans(
         _ plans: [WindowPositionPlan],
@@ -60,6 +91,10 @@ extension LayoutRefreshController {
                     window: plan.entry.axRef,
                     frame: plan.frame
                 ))
+            }
+        } else {
+            for plan in movablePlans where controller.axManager.verifiedParkFrame(for: plan.entry.windowId) != nil {
+                controller.axManager.markParkPending(for: plan.entry.windowId, pid: plan.entry.pid)
             }
         }
 

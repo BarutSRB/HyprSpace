@@ -927,6 +927,306 @@ final class DurableParkTests: XCTestCase {
         XCTAssertNil(manager.verifiedParkFrame(for: pendingTarget.windowId))
     }
 
+    func testFrameChangedRepairsVerifiedInactiveParkWithoutChangingWorldOrRestoreGeometry() throws {
+        let fixture = try Self.parkDriftFixture()
+        let controller = fixture.controller
+        let worldSeq = controller.workspaceManager.worldSeq
+        let focusedToken = controller.workspaceManager.nativeManagedFocusToken
+        var fastFrameReads = 0
+        controller.layoutRefreshController.fastFrameProvider = { _, _ in
+            fastFrameReads += 1
+            return nil
+        }
+        FrameApplyTrace.shared.beginCapture()
+        defer { FrameApplyTrace.shared.endCapture() }
+
+        Self.sendFrameEvent(fixture, observedFrame: fixture.visibleFrame)
+
+        let trace = FrameApplyTrace.shared.dump()
+        XCTAssertNil(controller.axManager.verifiedParkFrame(for: fixture.token.windowId))
+        XCTAssertTrue(controller.axManager.pendingParkWindowIds.contains(fixture.token.windowId))
+        XCTAssertTrue(trace.contains("outcome=sls-parked/settled"), trace)
+        XCTAssertTrue(trace.contains("outcome=ax-park-failed/contextUnavailable"), trace)
+        XCTAssertTrue(trace.contains("target=\(TraceFormat.rect(fixture.parkFrame))"), trace)
+        XCTAssertEqual(fastFrameReads, 0)
+        XCTAssertEqual(controller.workspaceManager.worldSeq, worldSeq)
+        XCTAssertEqual(controller.workspaceManager.nativeManagedFocusToken, focusedToken)
+        XCTAssertEqual(controller.workspaceManager.workspace(for: fixture.token), fixture.workspaceId)
+        XCTAssertEqual(controller.workspaceManager.hiddenState(for: fixture.token), fixture.hiddenState)
+        XCTAssertNil(controller.axManager.lastAppliedFrame(for: fixture.token.windowId))
+        XCTAssertFalse(controller.axManager.hasPendingFrameWrite(for: fixture.token.windowId))
+        XCTAssertNil(controller.layoutRefreshController.layoutState.pendingRefresh)
+    }
+
+    func testInactiveNativeSpaceDriftWaitsForMovableOrAlreadyHiddenSettlement() throws {
+        for alreadyHidden in [false, true] {
+            let fixture = try Self.parkDriftFixture()
+            let controller = fixture.controller
+            Self.setNativeDesktopCurrent(false, fixture: fixture)
+            FrameApplyTrace.shared.beginCapture()
+            defer { FrameApplyTrace.shared.endCapture() }
+
+            Self.sendFrameEvent(fixture, observedFrame: fixture.visibleFrame)
+
+            XCTAssertNil(controller.axManager.verifiedParkFrame(for: fixture.token.windowId))
+            XCTAssertTrue(controller.axManager.pendingParkWindowIds.contains(fixture.token.windowId))
+            XCTAssertNil(controller.axManager.pendingParkFrameRequest(for: fixture.token.windowId))
+            XCTAssertEqual(FrameApplyTrace.shared.dump(), "none")
+            XCTAssertEqual(controller.axManager.lastAppliedFrame(for: fixture.token.windowId), fixture.visibleFrame)
+            Self.setNativeDesktopCurrent(true, fixture: fixture)
+            var fastFrameReads = 0
+            controller.layoutRefreshController.fastFrameProvider = { _, _ in
+                fastFrameReads += 1
+                return nil
+            }
+            let entry = try XCTUnwrap(controller.workspaceManager.entry(for: fixture.token))
+
+            XCTAssertTrue(controller.layoutRefreshController.hideWindow(
+                entry,
+                monitor: fixture.monitor,
+                side: .right,
+                reason: .workspaceInactive,
+                observedFrame: alreadyHidden ? fixture.parkFrame : fixture.visibleFrame
+            ))
+
+            let trace = FrameApplyTrace.shared.dump()
+            XCTAssertTrue(trace.contains("outcome=ax-park-failed/contextUnavailable"), trace)
+            XCTAssertFalse(trace.contains("park-ledger-noop/verified/terminal"), trace)
+            XCTAssertEqual(fastFrameReads, 0)
+            XCTAssertEqual(controller.workspaceManager.hiddenState(for: fixture.token), fixture.hiddenState)
+            XCTAssertNil(controller.axManager.lastAppliedFrame(for: fixture.token.windowId))
+        }
+    }
+
+    func testParkFrameEventsInvalidateOnlyAtOrBeyondFrameWriteTolerance() throws {
+        for offset in [
+            CGPoint.zero,
+            CGPoint(x: -0.5, y: 0),
+            CGPoint(x: 0, y: 0.5),
+            CGPoint(x: -1, y: 0),
+            CGPoint(x: 0, y: 1)
+        ] {
+            let fixture = try Self.parkDriftFixture()
+            FrameApplyTrace.shared.beginCapture()
+            defer { FrameApplyTrace.shared.endCapture() }
+            Self.sendFrameEvent(
+                fixture,
+                observedFrame: fixture.parkFrame.offsetBy(dx: offset.x, dy: offset.y)
+            )
+            if abs(offset.x) >= 1 || abs(offset.y) >= 1 {
+                XCTAssertNil(fixture.controller.axManager.verifiedParkFrame(for: fixture.token.windowId))
+                XCTAssertTrue(fixture.controller.axManager.pendingParkWindowIds.contains(fixture.token.windowId))
+                XCTAssertTrue(FrameApplyTrace.shared.dump().contains("outcome=ax-park-failed/contextUnavailable"))
+            } else {
+                XCTAssertEqual(
+                    fixture.controller.axManager.verifiedParkFrame(for: fixture.token.windowId),
+                    fixture.parkFrame
+                )
+                XCTAssertFalse(fixture.controller.axManager.pendingParkWindowIds.contains(fixture.token.windowId))
+                XCTAssertEqual(FrameApplyTrace.shared.dump(), "none")
+            }
+        }
+    }
+
+    func testRepeatedFrameEventsAndSettledMovesPreservePendingParkRequest() throws {
+        let fixture = try Self.parkDriftFixture()
+        let manager = fixture.controller.axManager
+        manager.markParkPending(for: fixture.token.windowId, pid: fixture.token.pid)
+        let pending = try XCTUnwrap(manager.prepareParkFrameApplications([fixture.target]).first)
+        FrameApplyTrace.shared.beginCapture()
+        defer { FrameApplyTrace.shared.endCapture() }
+
+        Self.sendFrameEvent(fixture, observedFrame: fixture.visibleFrame)
+        Self.sendFrameEvent(fixture, observedFrame: fixture.visibleFrame)
+
+        XCTAssertEqual(FrameApplyTrace.shared.dump(), "none")
+        XCTAssertEqual(manager.pendingParkFrameRequest(for: fixture.token.windowId), pending)
+        let entry = try XCTUnwrap(fixture.controller.workspaceManager.entry(for: fixture.token))
+        let plan = LayoutRefreshController.WindowPositionPlan(entry: entry, frame: fixture.parkFrame)
+        fixture.controller.layoutRefreshController.applyParkPositionPlans(
+            [plan], movablePlans: [plan], animationTick: false
+        )
+
+        XCTAssertEqual(manager.pendingParkFrameRequest(for: fixture.token.windowId), pending)
+        XCTAssertFalse(FrameApplyTrace.shared.dump().contains("outcome=ax-park-failed"))
+        XCTAssertTrue(manager.processParkFrameApplyResults([
+            WindowAdmissionTestSupport.successfulFrameResult(request: pending)
+        ]).isEmpty)
+        XCTAssertEqual(manager.verifiedParkFrame(for: fixture.token.windowId), fixture.parkFrame)
+    }
+
+    func testSettledMovableParkInvalidatesVerificationWithoutFrameEvent() throws {
+        let fixture = try Self.parkDriftFixture()
+        let entry = try XCTUnwrap(fixture.controller.workspaceManager.entry(for: fixture.token))
+        FrameApplyTrace.shared.beginCapture()
+        defer { FrameApplyTrace.shared.endCapture() }
+
+        XCTAssertTrue(fixture.controller.layoutRefreshController.hideWindow(
+            entry,
+            monitor: fixture.monitor,
+            side: .right,
+            reason: .workspaceInactive,
+            observedFrame: fixture.visibleFrame
+        ))
+
+        XCTAssertNil(fixture.controller.axManager.verifiedParkFrame(for: fixture.token.windowId))
+        XCTAssertTrue(FrameApplyTrace.shared.dump().contains("outcome=ax-park-failed/contextUnavailable"))
+        XCTAssertNil(fixture.controller.axManager.lastAppliedFrame(for: fixture.token.windowId))
+    }
+
+    func testParkFrameCorrectionHonorsWorkspaceLayoutAndAppVisibilityExclusions() throws {
+        for exclusion in [
+            "active-workspace",
+            "native-fullscreen",
+            "layout-transient",
+            "scratchpad",
+            "app-hidden",
+            "ax-hidden"
+        ] {
+            let fixture = try Self.parkDriftFixture()
+            let controller = fixture.controller
+            switch exclusion {
+            case "active-workspace":
+                _ = controller.workspaceManager.focusWorkspace(named: "2")
+            case "native-fullscreen":
+                controller.workspaceManager.setLayoutReason(.nativeFullscreen, for: fixture.token)
+            case "layout-transient",
+                 "scratchpad":
+                controller.workspaceManager.setHiddenState(
+                    HiddenState(
+                        proportionalPosition: fixture.hiddenState.proportionalPosition,
+                        referenceMonitorId: fixture.monitor.id,
+                        reason: exclusion == "scratchpad" ? .scratchpad : .layoutTransient(.right)
+                    ),
+                    for: fixture.token
+                )
+            case "app-hidden":
+                controller.workspaceManager.setAppHidden(true, pid: fixture.token.pid, source: .service)
+            default:
+                controller.axManager.setMacOSAppHidden(
+                    true,
+                    pid: fixture.token.pid,
+                    entries: [(pid: fixture.token.pid, windowId: fixture.token.windowId)]
+                )
+            }
+            defer {
+                controller.axManager.setMacOSAppHidden(
+                    false,
+                    pid: fixture.token.pid,
+                    entries: [(pid: fixture.token.pid, windowId: fixture.token.windowId)]
+                )
+            }
+            try Self.verifyPark(fixture)
+            FrameApplyTrace.shared.beginCapture()
+            defer { FrameApplyTrace.shared.endCapture() }
+
+            Self.sendFrameEvent(fixture, observedFrame: fixture.visibleFrame)
+
+            XCTAssertEqual(FrameApplyTrace.shared.dump(), "none", exclusion)
+            if exclusion == "app-hidden" || exclusion == "ax-hidden" {
+                XCTAssertNil(controller.axManager.verifiedParkFrame(for: fixture.token.windowId), exclusion)
+                XCTAssertTrue(controller.axManager.pendingParkWindowIds.contains(fixture.token.windowId), exclusion)
+            } else {
+                XCTAssertEqual(
+                    controller.axManager.verifiedParkFrame(for: fixture.token.windowId),
+                    fixture.parkFrame,
+                    exclusion
+                )
+            }
+        }
+    }
+
+    private struct ParkDriftFixture {
+        let controller: WMController
+        let monitor: Monitor
+        let token: WindowToken
+        let workspaceId: WorkspaceDescriptor.ID
+        let hiddenState: HiddenState
+        let visibleFrame: CGRect
+        let target: AXFrameApplicationTarget
+
+        var parkFrame: CGRect {
+            target.frame
+        }
+    }
+
+    private static func parkDriftFixture() throws -> ParkDriftFixture {
+        let controller = controller()
+        let monitor = monitor()
+        let manager = controller.workspaceManager
+        manager.applyMonitorConfigurationChange([monitor])
+        let activeId = try XCTUnwrap(manager.workspaceId(for: "1", createIfMissing: true))
+        let inactiveId = try XCTUnwrap(manager.workspaceId(for: "2", createIfMissing: true))
+        _ = manager.focusWorkspace(named: "1")
+        let active = manager.addWindow(
+            AXWindowRef(element: AXUIElementCreateApplication(963_001), windowId: 963_101),
+            pid: 963_001, windowId: 963_101, to: activeId
+        )
+        XCTAssertTrue(manager.setManagedFocus(active, in: activeId))
+        let axRef = AXWindowRef(element: AXUIElementCreateApplication(963_002), windowId: 963_102)
+        let token = manager.addWindow(axRef, pid: 963_002, windowId: 963_102, to: inactiveId)
+        let hidden = HiddenState(
+            proportionalPosition: CGPoint(x: 0.25, y: 0.5),
+            referenceMonitorId: monitor.id,
+            reason: .workspaceInactive
+        )
+        manager.setHiddenState(hidden, for: token)
+        let visibleFrame = CGRect(x: 100, y: 16, width: 800, height: 600)
+        controller.axManager.markWindowInactive(token.windowId)
+        controller.axManager.suppressFrameWrites([(pid: token.pid, windowId: token.windowId)])
+        controller.axManager.confirmFrameWrite(for: token.windowId, frame: visibleFrame)
+        let fixture = ParkDriftFixture(
+            controller: controller,
+            monitor: monitor,
+            token: token,
+            workspaceId: inactiveId,
+            hiddenState: hidden,
+            visibleFrame: visibleFrame,
+            target: AXFrameApplicationTarget(
+                pid: token.pid,
+                window: axRef,
+                frame: CGRect(x: monitor.visibleFrame.maxX - 1, y: 16, width: 800, height: 600)
+            )
+        )
+        try verifyPark(fixture)
+        return fixture
+    }
+
+    private static func verifyPark(_ fixture: ParkDriftFixture) throws {
+        let manager = fixture.controller.axManager
+        guard manager.verifiedParkFrame(for: fixture.token.windowId) == nil else { return }
+        let request = try XCTUnwrap(manager.prepareParkFrameApplications([fixture.target]).first)
+        XCTAssertTrue(manager.processParkFrameApplyResults([
+            WindowAdmissionTestSupport.successfulFrameResult(request: request)
+        ]).isEmpty)
+    }
+
+    private static func sendFrameEvent(_ fixture: ParkDriftFixture, observedFrame: CGRect) {
+        let pid = fixture.token.pid
+        let frame = ScreenCoordinateSpace.toWindowServer(rect: observedFrame)
+        fixture.controller.axEventHandler.windowInfoProvider = { windowId in
+            WindowServerInfo(id: windowId, pid: pid, level: 0, frame: frame)
+        }
+        fixture.controller.axEventHandler.handleCGSEvent(
+            .frameChanged(windowId: UInt32(fixture.token.windowId))
+        )
+    }
+
+    private static func setNativeDesktopCurrent(_ current: Bool, fixture: ParkDriftFixture) {
+        fixture.controller.workspaceManager.commitSpaceTopology(
+            SpaceTopology(
+                displays: [.init(
+                    displayIdentifier: String(fixture.monitor.displayId),
+                    spaceIds: [1, 2],
+                    currentSpaceId: current ? 1 : 2
+                )],
+                activeSpaceId: current ? 1 : 2,
+                fullscreenSpaceIds: [2],
+                windowSpace: [fixture.token.windowId: 1]
+            )
+        )
+    }
+
     private static func hidePlan(
         workspaceId: WorkspaceDescriptor.ID,
         monitor: Monitor,

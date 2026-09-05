@@ -978,7 +978,7 @@ final class AXEventHandler {
         {
             return
         }
-        guard case let .exact(windowServerToken, _) = resolveWindowServerIdentity(windowId) else { return }
+        guard case let .exact(windowServerToken, windowInfo) = resolveWindowServerIdentity(windowId) else { return }
         if let retryState = admissionRetryStateByWindowId[windowId] {
             guard retryState.expectedToken.map({ $0 == windowServerToken }) ?? true else { return }
             if retryAdmissionAfterFrameChangeRequiresEarlyReturn(windowId: windowId) { return }
@@ -987,6 +987,13 @@ final class AXEventHandler {
         if entry.mode == .tiling,
            controller.mouseEventHandler.handleNativeTitleBarDragFrameChanged(for: entry)
         {
+            return
+        }
+        if controller.workspaceManager.hiddenState(for: entry.token)?.workspaceInactive == true {
+            controller.layoutRefreshController.repairWorkspaceInactivePark(
+                for: entry,
+                observedFrame: ScreenCoordinateSpace.toAppKit(rect: windowInfo.frame)
+            )
             return
         }
         let focusedObservedFrame = observedFrameForFocusedFrameChange(
