@@ -32,28 +32,40 @@ struct WindowFocusOperations {
 
     static let live = WindowFocusOperations(
         activateApp: { pid in
-            if let runningApp = NSRunningApplication(processIdentifier: pid) {
-                runningApp.activate(options: [])
+            MainThreadAXSpanTrace.measure(.activateApp, pid: pid) {
+                if let runningApp = NSRunningApplication(processIdentifier: pid) {
+                    runningApp.activate(options: [])
+                }
             }
         },
         focusSpecificWindow: { pid, windowId, element in
-            OmniWM.focusWindow(pid: pid, windowId: windowId, windowRef: element)
+            MainThreadAXSpanTrace.measure(.privateFocus, pid: pid, windowId: Int(windowId)) {
+                OmniWM.focusWindow(pid: pid, windowId: windowId, windowRef: element)
+            }
         },
         deactivateSameAppWindow: { pid, windowId in
-            OmniWM.deactivateSameAppWindow(pid: pid, windowId: windowId)
+            MainThreadAXSpanTrace.measure(.sameAppDeactivate, pid: pid, windowId: Int(windowId)) {
+                OmniWM.deactivateSameAppWindow(pid: pid, windowId: windowId)
+            } succeeded: { $0 }
         },
         activateAndFocusSameAppWindow: { pid, windowId, element in
-            OmniWM.activateAndFocusSameAppWindow(
-                pid: pid,
-                windowId: windowId,
-                windowRef: element
-            )
+            MainThreadAXSpanTrace.measure(.sameAppHandoff, pid: pid, windowId: Int(windowId)) {
+                OmniWM.activateAndFocusSameAppWindow(
+                    pid: pid,
+                    windowId: windowId,
+                    windowRef: element
+                )
+            } succeeded: { $0 }
         },
         raiseWindow: { element in
-            performAXAction(element, kAXRaiseAction as CFString, noteKey: "performRaiseFailed")
+            _ = MainThreadAXSpanTrace.measure(.axRaise) {
+                performAXAction(element, kAXRaiseAction as CFString, noteKey: "performRaiseFailed")
+            } succeeded: { $0 }
         },
         orderWindow: { windowId in
-            SkyLight.shared.orderWindow(windowId, relativeTo: 0, order: .above)
+            MainThreadAXSpanTrace.measure(.orderWindow, windowId: Int(windowId)) {
+                SkyLight.shared.orderWindow(windowId, relativeTo: 0, order: .above)
+            }
         }
     )
 }

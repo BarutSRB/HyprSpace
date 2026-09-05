@@ -475,47 +475,54 @@ enum AXWindowService {
     }
 
     static func processIdentifier(_ window: AXWindowRef) -> pid_t? {
-        var pid: pid_t = 0
-        guard AXUIElementGetPid(window.element, &pid) == .success else { return nil }
-        return pid
+        return MainThreadAXSpanTrace.measure(.readProcessIdentifier, windowId: window.windowId) {
+            var pid: pid_t = 0
+            guard AXUIElementGetPid(window.element, &pid) == .success else { return nil }
+            return pid
+        } succeeded: { $0 != nil }
     }
 
     static func isSizeSettable(_ window: AXWindowRef) -> Bool {
-        var settable = DarwinBoolean(false)
-        return AXUIElementIsAttributeSettable(
-            window.element,
-            kAXSizeAttribute as CFString,
-            &settable
-        ) == .success && settable.boolValue
+        return MainThreadAXSpanTrace.measure(.readSizeSettable, windowId: window.windowId) {
+            var settable = DarwinBoolean(false)
+            return AXUIElementIsAttributeSettable(
+                window.element,
+                kAXSizeAttribute as CFString,
+                &settable
+            ) == .success && settable.boolValue
+        }
     }
 
     static func frame(_ window: AXWindowRef) throws(AXErrorWrapper) -> CGRect {
-        let attributes = [
-            kAXPositionAttribute as CFString,
-            kAXSizeAttribute as CFString
-        ] as CFArray
-        var valuesPtr: CFArray?
-        let result = AXUIElementCopyMultipleAttributeValues(
-            window.element,
-            attributes,
-            .init(),
-            &valuesPtr
-        )
-        guard result == .success,
-              let values = valuesPtr,
-              CFArrayGetCount(values) == 2,
-              let posRaw = value(at: 0, in: values),
-              let sizeRaw = value(at: 1, in: values)
-        else { throw .cannotGetAttribute }
-        guard CFGetTypeID(posRaw) == AXValueGetTypeID(),
-              CFGetTypeID(sizeRaw) == AXValueGetTypeID()
-        else { throw .cannotGetAttribute }
-        var pos = CGPoint.zero
-        var size = CGSize.zero
-        guard AXValueGetValue(unsafeDowncast(posRaw, to: AXValue.self), .cgPoint, &pos),
-              AXValueGetValue(unsafeDowncast(sizeRaw, to: AXValue.self), .cgSize, &size)
-        else { throw .cannotGetAttribute }
-        return convertFromAX(CGRect(origin: pos, size: size))
+        try MainThreadAXSpanTrace
+            .measure(.readFrame, windowId: window.windowId) { () throws(AXErrorWrapper) -> CGRect in
+                let attributes = [
+                    kAXPositionAttribute as CFString,
+                    kAXSizeAttribute as CFString
+                ] as CFArray
+                var valuesPtr: CFArray?
+                let result = AXUIElementCopyMultipleAttributeValues(
+                    window.element,
+                    attributes,
+                    .init(),
+                    &valuesPtr
+                )
+                guard result == .success,
+                      let values = valuesPtr,
+                      CFArrayGetCount(values) == 2,
+                      let posRaw = value(at: 0, in: values),
+                      let sizeRaw = value(at: 1, in: values)
+                else { throw .cannotGetAttribute }
+                guard CFGetTypeID(posRaw) == AXValueGetTypeID(),
+                      CFGetTypeID(sizeRaw) == AXValueGetTypeID()
+                else { throw .cannotGetAttribute }
+                var pos = CGPoint.zero
+                var size = CGSize.zero
+                guard AXValueGetValue(unsafeDowncast(posRaw, to: AXValue.self), .cgPoint, &pos),
+                      AXValueGetValue(unsafeDowncast(sizeRaw, to: AXValue.self), .cgSize, &size)
+                else { throw .cannotGetAttribute }
+                return convertFromAX(CGRect(origin: pos, size: size))
+            }
     }
 
     @MainActor
@@ -686,24 +693,28 @@ enum AXWindowService {
     }
 
     static func subrole(_ window: AXWindowRef) -> String? {
-        var value: CFTypeRef?
-        let result = AXUIElementCopyAttributeValue(window.element, kAXSubroleAttribute as CFString, &value)
-        guard result == .success, let subrole = value as? String else { return nil }
-        return subrole
+        MainThreadAXSpanTrace.measure(.readSubrole, windowId: window.windowId) {
+            var value: CFTypeRef?
+            let result = AXUIElementCopyAttributeValue(window.element, kAXSubroleAttribute as CFString, &value)
+            guard result == .success, let subrole = value as? String else { return nil }
+            return subrole
+        } succeeded: { $0 != nil }
     }
 
     static func roleAndSubrole(_ window: AXWindowRef) -> (role: String?, subrole: String?) {
-        let attributes = [
-            kAXRoleAttribute as CFString,
-            kAXSubroleAttribute as CFString
-        ] as CFArray
-        var valuesPtr: CFArray?
-        let result = AXUIElementCopyMultipleAttributeValues(window.element, attributes, .init(), &valuesPtr)
-        guard result == .success, let values = valuesPtr, CFArrayGetCount(values) == 2 else { return (nil, nil) }
-        return (
-            stringValue(value(at: 0, in: values)),
-            stringValue(value(at: 1, in: values))
-        )
+        MainThreadAXSpanTrace.measure(.readRoleAndSubrole, windowId: window.windowId) {
+            let attributes = [
+                kAXRoleAttribute as CFString,
+                kAXSubroleAttribute as CFString
+            ] as CFArray
+            var valuesPtr: CFArray?
+            let result = AXUIElementCopyMultipleAttributeValues(window.element, attributes, .init(), &valuesPtr)
+            guard result == .success, let values = valuesPtr, CFArrayGetCount(values) == 2 else { return (nil, nil) }
+            return (
+                stringValue(value(at: 0, in: values)),
+                stringValue(value(at: 1, in: values))
+            )
+        } succeeded: { $0.role != nil }
     }
 
     static func isSystemModalSurface(role: String?, subrole: String?) -> Bool {
@@ -722,55 +733,61 @@ enum AXWindowService {
     }
 
     static func isFullscreen(_ window: AXWindowRef, subrole: String?) -> Bool {
-        if subrole == "AXFullScreenWindow" {
-            return true
-        }
+        MainThreadAXSpanTrace.measure(.readFullscreen, windowId: window.windowId) {
+            if subrole == "AXFullScreenWindow" {
+                return true
+            }
 
-        var value: CFTypeRef?
-        let fullScreenAttribute = "AXFullScreen" as CFString
-        let result = AXUIElementCopyAttributeValue(
-            window.element,
-            fullScreenAttribute,
-            &value
-        )
-        if result == .success, let boolValue = value as? Bool {
-            return boolValue
-        }
+            var value: CFTypeRef?
+            let fullScreenAttribute = "AXFullScreen" as CFString
+            let result = AXUIElementCopyAttributeValue(
+                window.element,
+                fullScreenAttribute,
+                &value
+            )
+            if result == .success, let boolValue = value as? Bool {
+                return boolValue
+            }
 
-        if let frame = try? frame(window) {
-            return isFullscreenFrame(frame)
-        }
+            if let frame = try? frame(window) {
+                return isFullscreenFrame(frame)
+            }
 
-        return false
+            return false
+        }
     }
 
     static func isFullscreenAttributeSet(_ window: AXWindowRef) -> Bool {
-        if let subrole = subrole(window), subrole == "AXFullScreenWindow" {
-            return true
-        }
+        MainThreadAXSpanTrace.measure(.readFullscreenAttribute, windowId: window.windowId) {
+            if let subrole = subrole(window), subrole == "AXFullScreenWindow" {
+                return true
+            }
 
-        var value: CFTypeRef?
-        let fullScreenAttribute = "AXFullScreen" as CFString
-        let result = AXUIElementCopyAttributeValue(
-            window.element,
-            fullScreenAttribute,
-            &value
-        )
-        if result == .success, let boolValue = value as? Bool {
-            return boolValue
-        }
+            var value: CFTypeRef?
+            let fullScreenAttribute = "AXFullScreen" as CFString
+            let result = AXUIElementCopyAttributeValue(
+                window.element,
+                fullScreenAttribute,
+                &value
+            )
+            if result == .success, let boolValue = value as? Bool {
+                return boolValue
+            }
 
-        return false
+            return false
+        }
     }
 
     static func setNativeFullscreen(_ window: AXWindowRef, fullscreen: Bool) -> Bool {
-        let fullScreenAttribute = "AXFullScreen" as CFString
-        let result = AXUIElementSetAttributeValue(
-            window.element,
-            fullScreenAttribute,
-            fullscreen as CFBoolean
-        )
-        return result == .success
+        MainThreadAXSpanTrace.measure(.setNativeFullscreen, windowId: window.windowId) {
+            let fullScreenAttribute = "AXFullScreen" as CFString
+            let result = AXUIElementSetAttributeValue(
+                window.element,
+                fullScreenAttribute,
+                fullscreen as CFBoolean
+            )
+            return result == .success
+        } succeeded: { $0 }
     }
 
     private static func isFullscreenFrame(_ frame: CGRect) -> Bool {
@@ -787,82 +804,84 @@ enum AXWindowService {
         bundleId: String? = nil,
         includeTitle: Bool
     ) -> AXWindowFacts {
-        var attributes: [CFString] = [
-            kAXRoleAttribute as CFString,
-            kAXSubroleAttribute as CFString,
-            kAXCloseButtonAttribute as CFString,
-            kAXFullScreenButtonAttribute as CFString,
-            kAXZoomButtonAttribute as CFString,
-            kAXMinimizeButtonAttribute as CFString,
-            kAXMainAttribute as CFString,
-            kAXModalAttribute as CFString
-        ]
-        if includeTitle {
-            attributes.append(kAXTitleAttribute as CFString)
-        }
+        MainThreadAXSpanTrace.measure(.readWindowFacts, windowId: window.windowId) {
+            var attributes: [CFString] = [
+                kAXRoleAttribute as CFString,
+                kAXSubroleAttribute as CFString,
+                kAXCloseButtonAttribute as CFString,
+                kAXFullScreenButtonAttribute as CFString,
+                kAXZoomButtonAttribute as CFString,
+                kAXMinimizeButtonAttribute as CFString,
+                kAXMainAttribute as CFString,
+                kAXModalAttribute as CFString
+            ]
+            if includeTitle {
+                attributes.append(kAXTitleAttribute as CFString)
+            }
 
-        var values: CFArray?
-        let result = AXUIElementCopyMultipleAttributeValues(
-            window.element,
-            attributes as CFArray,
-            AXCopyMultipleAttributeOptions(rawValue: 0),
-            &values
-        )
-
-        guard result == .success,
-              let values,
-              CFArrayGetCount(values) > WindowTypeAttributeIndex.modal.rawValue
-        else {
-            return AXWindowDecisionEvidence.unavailable(
-                appPolicy: appPolicy,
-                bundleId: bundleId
-            ).facts
-        }
-
-        func attributeValue(_ index: WindowTypeAttributeIndex) -> CFTypeRef? {
-            value(at: index.rawValue, in: values)
-        }
-
-        let fullscreenButtonValue = attributeValue(.fullScreenButton)
-        let fullscreenButtonEvidence = fullscreenButtonEvidence(fullscreenButtonValue)
-        var attributeFetchSucceeded = fullscreenButtonEvidence.succeeded
-
-        var fullscreenButtonEnabled: Bool?
-        if let buttonElement = fullscreenButtonEvidence.element {
-            var enabledValue: CFTypeRef?
-            let enabledResult = AXUIElementCopyAttributeValue(
-                buttonElement,
-                kAXEnabledAttribute as CFString,
-                &enabledValue
+            var values: CFArray?
+            let result = AXUIElementCopyMultipleAttributeValues(
+                window.element,
+                attributes as CFArray,
+                AXCopyMultipleAttributeOptions(rawValue: 0),
+                &values
             )
-            if enabledResult == .success {
-                if let enabledValue {
-                    if let resolvedEnabled = enabledValue as? Bool {
-                        fullscreenButtonEnabled = resolvedEnabled
-                    } else {
-                        attributeFetchSucceeded = false
+
+            guard result == .success,
+                  let values,
+                  CFArrayGetCount(values) > WindowTypeAttributeIndex.modal.rawValue
+            else {
+                return AXWindowDecisionEvidence.unavailable(
+                    appPolicy: appPolicy,
+                    bundleId: bundleId
+                ).facts
+            }
+
+            func attributeValue(_ index: WindowTypeAttributeIndex) -> CFTypeRef? {
+                value(at: index.rawValue, in: values)
+            }
+
+            let fullscreenButtonValue = attributeValue(.fullScreenButton)
+            let fullscreenButtonEvidence = fullscreenButtonEvidence(fullscreenButtonValue)
+            var attributeFetchSucceeded = fullscreenButtonEvidence.succeeded
+
+            var fullscreenButtonEnabled: Bool?
+            if let buttonElement = fullscreenButtonEvidence.element {
+                var enabledValue: CFTypeRef?
+                let enabledResult = AXUIElementCopyAttributeValue(
+                    buttonElement,
+                    kAXEnabledAttribute as CFString,
+                    &enabledValue
+                )
+                if enabledResult == .success {
+                    if let enabledValue {
+                        if let resolvedEnabled = enabledValue as? Bool {
+                            fullscreenButtonEnabled = resolvedEnabled
+                        } else {
+                            attributeFetchSucceeded = false
+                        }
                     }
                 }
             }
-        }
 
-        return makeWindowFacts(
-            AXWindowFactAttributeValues(
-                role: stringValue(attributeValue(.role)),
-                subrole: stringValue(attributeValue(.subrole)),
-                title: includeTitle ? stringValue(attributeValue(.title)) : nil,
-                closeButton: attributeValue(.closeButton),
-                fullscreenButton: fullscreenButtonValue,
-                fullscreenButtonEnabled: fullscreenButtonEnabled,
-                zoomButton: attributeValue(.zoomButton),
-                minimizeButton: attributeValue(.minimizeButton),
-                main: attributeValue(.main),
-                modal: attributeValue(.modal)
-            ),
-            appPolicy: appPolicy,
-            bundleId: bundleId,
-            attributeFetchSucceeded: attributeFetchSucceeded
-        )
+            return makeWindowFacts(
+                AXWindowFactAttributeValues(
+                    role: stringValue(attributeValue(.role)),
+                    subrole: stringValue(attributeValue(.subrole)),
+                    title: includeTitle ? stringValue(attributeValue(.title)) : nil,
+                    closeButton: attributeValue(.closeButton),
+                    fullscreenButton: fullscreenButtonValue,
+                    fullscreenButtonEnabled: fullscreenButtonEnabled,
+                    zoomButton: attributeValue(.zoomButton),
+                    minimizeButton: attributeValue(.minimizeButton),
+                    main: attributeValue(.main),
+                    modal: attributeValue(.modal)
+                ),
+                appPolicy: appPolicy,
+                bundleId: bundleId,
+                attributeFetchSucceeded: attributeFetchSucceeded
+            )
+        }
     }
 
     static func makeWindowFacts(
@@ -1037,7 +1056,9 @@ enum AXWindowService {
     }
 
     static func sizeConstraints(_ window: AXWindowRef, currentSize: CGSize? = nil) -> WindowSizeConstraints {
-        fetchSizeConstraintsBatched(window, currentSize: currentSize)
+        MainThreadAXSpanTrace.measure(.readSizeConstraints, windowId: window.windowId) {
+            fetchSizeConstraintsBatched(window, currentSize: currentSize)
+        }
     }
 
     private static func fetchSizeConstraintsBatched(
@@ -1079,34 +1100,36 @@ enum AXWindowService {
     }
 
     static func axWindowRef(for windowId: UInt32, pid: pid_t) -> AXWindowRef? {
-        if let pinned = pinnedAXElement(for: windowId) {
-            var winId: CGWindowID = 0
-            if _AXUIElementGetWindow(pinned, &winId) == .success, winId == windowId {
-                return AXWindowRef(element: pinned, windowId: Int(winId))
+        MainThreadAXSpanTrace.measure(.lookupWindowRef, pid: pid, windowId: Int(windowId)) {
+            if let pinned = pinnedAXElement(for: windowId) {
+                var winId: CGWindowID = 0
+                if _AXUIElementGetWindow(pinned, &winId) == .success, winId == windowId {
+                    return AXWindowRef(element: pinned, windowId: Int(winId))
+                }
+                unpinAXElement(for: windowId)
             }
-            unpinAXElement(for: windowId)
-        }
 
-        let appElement = AXUIElementCreateApplication(pid)
-        var windowsRef: CFTypeRef?
-        let result = AXUIElementCopyAttributeValue(
-            appElement,
-            kAXWindowsAttribute as CFString,
-            &windowsRef
-        )
+            let appElement = AXUIElementCreateApplication(pid)
+            var windowsRef: CFTypeRef?
+            let result = AXUIElementCopyAttributeValue(
+                appElement,
+                kAXWindowsAttribute as CFString,
+                &windowsRef
+            )
 
-        guard result == .success, let windows = windowsRef as? [AXUIElement] else {
+            guard result == .success, let windows = windowsRef as? [AXUIElement] else {
+                return nil
+            }
+
+            for window in windows {
+                var winId: CGWindowID = 0
+                if _AXUIElementGetWindow(window, &winId) == .success, winId == windowId {
+                    return AXWindowRef(element: window, windowId: Int(winId))
+                }
+            }
+
             return nil
-        }
-
-        for window in windows {
-            var winId: CGWindowID = 0
-            if _AXUIElementGetWindow(window, &winId) == .success, winId == windowId {
-                return AXWindowRef(element: window, windowId: Int(winId))
-            }
-        }
-
-        return nil
+        } succeeded: { $0 != nil }
     }
 
     private enum FrameWriteAttribute {

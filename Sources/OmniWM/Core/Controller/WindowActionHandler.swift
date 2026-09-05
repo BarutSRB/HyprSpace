@@ -152,18 +152,20 @@ final class WindowActionHandler {
         guard let entry = controller.workspaceManager.entry(for: handle) else { return false }
 
         let element = entry.axRef.element
-        var closeButton: CFTypeRef?
-        if AXUIElementCopyAttributeValue(element, kAXCloseButtonAttribute as CFString, &closeButton) == .success,
-           let closeButton,
-           CFGetTypeID(closeButton) == AXUIElementGetTypeID()
-        {
-            return performAXAction(
-                closeButton as! AXUIElement,
-                kAXPressAction as CFString,
-                noteKey: "performPressFailed"
-            )
-        }
-        return false
+        return MainThreadAXSpanTrace.measure(.closeButtonPress, pid: entry.pid, windowId: entry.windowId) {
+            var closeButton: CFTypeRef?
+            if AXUIElementCopyAttributeValue(element, kAXCloseButtonAttribute as CFString, &closeButton) == .success,
+               let closeButton,
+               CFGetTypeID(closeButton) == AXUIElementGetTypeID()
+            {
+                return performAXAction(
+                    closeButton as! AXUIElement,
+                    kAXPressAction as CFString,
+                    noteKey: "performPressFailed"
+                )
+            }
+            return false
+        } succeeded: { $0 }
     }
 
     func raiseAllFloatingWindows() {
