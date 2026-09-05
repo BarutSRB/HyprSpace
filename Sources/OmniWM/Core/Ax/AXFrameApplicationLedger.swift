@@ -98,6 +98,7 @@ struct AXFrameApplyOutcome {
     var retries: [AXFrameRetryRequest] = []
     var terminalRefusals: [AXFrameTerminalRefusal] = []
     var terminalFailures: [AXFrameApplyResult] = []
+    var stableSizeClamps: [AXFrameApplyResult] = []
 }
 
 struct AXFrameJobCancellationOutcome {
@@ -186,12 +187,13 @@ final class AXFrameApplicationLedger {
             && abs(observed.height - target.height) <= Self.maxAcceptedSizeSnap
     }
 
-    private func isStableSizeConvergence(
-        priorFailure: RecentFrameWriteFailure,
+    private func isStableSizeClamp(
+        priorFailure: RecentFrameWriteFailure?,
         result: AXFrameApplyResult,
         observedFrame: CGRect
     ) -> Bool {
-        guard priorFailure.pid == result.pid,
+        guard let priorFailure,
+              priorFailure.pid == result.pid,
               sameAXWindowIdentity(priorFailure.expectedWindow, result.expectedWindow),
               priorFailure.components == .all,
               result.writeResult.components == .all,
@@ -209,14 +211,14 @@ final class AXFrameApplicationLedger {
                   to: observedFrame,
                   tolerance: FrameTolerance.frameWrite
               ),
-              Self.isBoundedAXTopLeftSizeConvergence(
+              Self.isAXTopLeftAnchoredSizeClamp(
                   target: priorFailure.targetFrame,
                   observed: priorObservedFrame
               )
         else {
             return false
         }
-        return Self.isBoundedAXTopLeftSizeConvergence(
+        return Self.isAXTopLeftAnchoredSizeClamp(
             target: result.targetFrame,
             observed: observedFrame
         )
@@ -868,12 +870,29 @@ final class AXFrameApplicationLedger {
                    priorFailure?.reason == failureReason,
                    let observedFrame = resolvedResult.writeResult.observedFrame
                 {
-                    if failureReason == .verificationMismatch,
+                    let stableSizeClamp = isStableSizeClamp(
+                        priorFailure: priorFailure,
+                        result: resolvedResult,
+                        observedFrame: observedFrame
+                    )
+                    if stableSizeClamp,
+                       observedFrame.width >= resolvedResult.targetFrame.width - FrameTolerance.frameWrite,
+                       observedFrame.height >= resolvedResult.targetFrame.height - FrameTolerance.frameWrite,
+                       observedFrame.width > resolvedResult.targetFrame.width + FrameTolerance.frameWrite
+                       || observedFrame.height > resolvedResult.targetFrame.height + FrameTolerance.frameWrite
+                    {
+                        outcome.stableSizeClamps.append(resolvedResult)
+                    }
+                    if stableSizeClamp,
                        let priorFailure,
-                       isStableSizeConvergence(
-                           priorFailure: priorFailure,
-                           result: resolvedResult,
-                           observedFrame: observedFrame
+                       let priorObservedFrame = priorFailure.observedFrame,
+                       Self.isBoundedAXTopLeftSizeConvergence(
+                           target: priorFailure.targetFrame,
+                           observed: priorObservedFrame
+                       ),
+                       Self.isBoundedAXTopLeftSizeConvergence(
+                           target: resolvedResult.targetFrame,
+                           observed: observedFrame
                        )
                     {
                         appliedFrameStates[resolvedWindowId] = AppliedFrameState(

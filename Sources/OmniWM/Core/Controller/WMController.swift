@@ -1503,6 +1503,28 @@ final class WMController {
         }
     }
 
+    func adoptObservedMinimumAfterStableSizeClamp(_ result: AXFrameApplyResult) {
+        guard let entry = workspaceManager.entry(forPid: result.pid, windowId: result.windowId),
+              sameAXWindowIdentity(entry.axRef, result.expectedWindow),
+              entry.mode == .tiling,
+              entry.layoutReason == .standard,
+              entry.hiddenState == nil,
+              !workspaceManager.isAppHidden(pid: entry.pid),
+              let observed = result.writeResult.observedFrame?.size
+        else {
+            return
+        }
+        let target = result.targetFrame.size
+        let existing = workspaceManager.observedMinSize(for: entry.token) ?? CGSize(width: 1, height: 1)
+        let observedMin = CGSize(
+            width: observed.width > target.width + FrameTolerance.frameWrite
+                ? max(existing.width, observed.width) : existing.width,
+            height: observed.height > target.height + FrameTolerance.frameWrite
+                ? max(existing.height, observed.height) : existing.height
+        )
+        adoptObservedMinimum(observedMin, for: entry)
+    }
+
     func adoptObservedMinimumAfterTerminalSizeWriteFailure(_ refusal: AXFrameTerminalRefusal) {
         guard case .sizeWriteFailed = refusal.failureReason,
               let entry = workspaceManager.entry(forWindowId: refusal.windowId),
@@ -1529,8 +1551,11 @@ final class WMController {
             )
         )
         guard observedMin.width > 1 || observedMin.height > 1 else { return }
+        adoptObservedMinimum(observedMin, for: entry)
+    }
 
-        guard workspaceManager.setObservedMinSize(observedMin, for: token) else { return }
+    private func adoptObservedMinimum(_ observedMin: CGSize, for entry: WindowState) {
+        guard workspaceManager.setObservedMinSize(observedMin, for: entry.token) else { return }
         workspaceManager.invalidateLayout(for: [entry.workspaceId])
         layoutRefreshController.requestRelayout(
             reason: .observedConstraintsChanged,

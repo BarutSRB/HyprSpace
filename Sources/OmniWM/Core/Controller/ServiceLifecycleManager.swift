@@ -303,6 +303,9 @@ final class ServiceLifecycleManager {
         controller.axManager.onFrameApplySucceeded = { [weak self] result in
             self?.handleFrameApplySucceeded(result)
         }
+        controller.axManager.onStableSizeClamp = { [weak controller] result in
+            controller?.adoptObservedMinimumAfterStableSizeClamp(result)
+        }
         controller.axManager.onManagedWindowBindingFailed = { [weak controller] pid in
             controller?.layoutRefreshController.requestFullRescan(
                 reason: .staleFullRescan,
@@ -882,6 +885,7 @@ final class ServiceLifecycleManager {
         controller.axManager.onTerminalFrameRefusal = nil
         controller.axManager.onFrameApplyTerminated = nil
         controller.axManager.onFrameApplySucceeded = nil
+        controller.axManager.onStableSizeClamp = nil
         controller.axManager.onManagedWindowBindingFailed = nil
         controller.workspaceManager.onGapsChanged = nil
 

@@ -207,6 +207,7 @@ final class AXManager {
     var onTerminalFrameRefusal: ((AXFrameTerminalRefusal) -> Void)?
     var onFrameApplyTerminated: ((AXFrameApplyResult) -> Void)?
     var onFrameApplySucceeded: ((AXFrameApplyResult) -> Void)?
+    var onStableSizeClamp: ((AXFrameApplyResult) -> Void)?
     var onManagedWindowBindingFailed: ((pid_t) -> Void)?
     var managedWindowBindingRetryDelayProvider: (Int) -> Duration? = {
         AXManager.managedWindowBindingRetryDelay(afterFailure: $0)
@@ -2879,6 +2880,9 @@ final class AXManager {
         }
         for terminalFailure in outcome.terminalFailures {
             handleTerminalFrameApplyFailure(terminalFailure)
+        }
+        for result in outcome.stableSizeClamps {
+            onStableSizeClamp?(result)
         }
     }
 
