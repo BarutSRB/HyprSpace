@@ -4,6 +4,26 @@
 import Foundation
 
 extension AXEventHandler {
+    func probeFocusedWindowAfterFronting(
+        expectedToken: WindowToken,
+        workspaceId _: WorkspaceDescriptor.ID
+    ) {
+        let requestId = controller?.intentLedger.activeManagedRequest(for: expectedToken)?.requestId
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            if let requestId,
+               self.controller?.intentLedger.activeManagedRequest(requestId: requestId) == nil
+            {
+                return
+            }
+            self.handleAppActivation(
+                pid: expectedToken.pid,
+                source: .focusedWindowChanged,
+                origin: .probe
+            )
+        }
+    }
+
     func acceptsActivationObservation(
         pid: pid_t,
         source: ActivationEventSource,

@@ -668,24 +668,24 @@ final class AXEventHandler {
         trackPreparedCreate(candidate)
     }
 
-    func probeFocusedWindowAfterFronting(
-        expectedToken: WindowToken,
-        workspaceId _: WorkspaceDescriptor.ID
-    ) {
-        let requestId = controller?.intentLedger.activeManagedRequest(for: expectedToken)?.requestId
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            if let requestId,
-               self.controller?.intentLedger.activeManagedRequest(requestId: requestId) == nil
-            {
-                return
-            }
-            self.handleAppActivation(
-                pid: expectedToken.pid,
-                source: .focusedWindowChanged,
-                origin: .probe
-            )
-        }
+    func probeUnresolvedNativeFocus(after token: WindowToken) {
+        guard let controller, controller.hasStartedServices,
+              let identity = controller.workspaceManager.externalFocusIdentity,
+              let pid = identity.pid,
+              identity.windowId == nil,
+              controller.intentLedger.activeManagedRequest == nil,
+              controller.workspaceManager.pendingFocusedToken == nil,
+              managedWindowTokenUsingCachedIdentity(token, matchesObservedPid: pid),
+              let frontmostPID = frontmostApplicationPIDProvider(),
+              managedWindowTokenUsingCachedIdentity(token, matchesObservedPid: frontmostPID)
+        else { return }
+
+        handleAppActivation(
+            pid: pid,
+            source: .focusedWindowChanged,
+            origin: .probe,
+            causalObservationGeneration: latestActivationObservationGeneration
+        )
     }
 
     @discardableResult

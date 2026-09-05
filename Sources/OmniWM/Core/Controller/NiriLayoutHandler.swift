@@ -1047,13 +1047,21 @@ enum StructuralMutationOutcome: Equatable {
     ) -> ArrivalContext {
         let wasEmpty = existingHandleIds.subtracting(snapshot.excludedTokens).isEmpty
         let newTokens = insertion.newTokens
+        let nativeArrival = controller.flatMap { controller -> WindowToken? in
+            guard controller.workspaceManager.pendingFocusedToken == nil,
+                  controller.intentLedger.activeManagedRequest == nil,
+                  let token = controller.workspaceManager.nativeManagedFocusToken,
+                  newTokens.contains(token)
+            else { return nil }
+            return token
+        }
 
         var activateWindowToken: WindowToken?
         var rememberedFocusToken: WindowToken?
         var hasNewWindowArrival = false
         var shouldStartScrollForNewWindow = false
         if snapshot.hasCompletedInitialRefresh,
-           let newToken = newTokens.last,
+           let newToken = nativeArrival ?? newTokens.last,
            let newNode = pass.engine.findNode(for: newToken, in: pass.wsId),
            snapshot.isActiveWorkspace
         {

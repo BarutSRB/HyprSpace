@@ -8,6 +8,231 @@ import XCTest
 
 @MainActor
 final class NativeFocusAdmissionTests: XCTestCase {
+    func testCreateAdmissionRechecksExactFocusBeforeTwoWindowRelayout() async throws {
+        for focusedIndex in 0 ... 1 {
+            let operations = FocusOperationRecorder()
+            let (controller, workspaceId) = try await Self.niriController(operations: operations)
+            defer { Self.stopFocusObservation(controller) }
+            let manager = controller.workspaceManager
+            let tokens = [
+                WindowToken(pid: 510_501, windowId: 510_502),
+                WindowToken(pid: 510_501, windowId: 510_503)
+            ]
+            let focusedToken = tokens[focusedIndex]
+            Self.startUnresolvedFocusObservation(controller, pid: focusedToken.pid)
+            XCTAssertEqual(manager.nativeFocusOwner, .external(pid: focusedToken.pid, windowId: nil))
+
+            controller.factResolver.factProvider = { _ in Self.focusedFact(for: focusedToken) }
+            for token in tokens {
+                controller.axEventHandler.trackPreparedCreate(Self.preparedCreate(
+                    token: token,
+                    workspaceId: workspaceId
+                ))
+            }
+            controller.eventIntake.drainNow()
+            XCTAssertEqual(manager.nativeManagedFocusToken, focusedToken)
+            await WindowAdmissionTestSupport.drainLayoutRefreshes(controller)
+
+            XCTAssertEqual(manager.nativeManagedFocusToken, focusedToken)
+            XCTAssertEqual(manager.borderFocusToken, focusedToken)
+            XCTAssertNil(manager.pendingFocusedToken)
+            XCTAssertNil(controller.intentLedger.activeManagedRequest)
+            XCTAssertTrue(operations.values.isEmpty, "focusedIndex=\(focusedIndex): \(operations.values)")
+        }
+    }
+
+    func testCreateAdmissionRechecksFocusAfterRelayoutAndRestoresMouseFocus() async throws {
+        let operations = FocusOperationRecorder()
+        let (controller, workspaceId) = try await Self.niriController(operations: operations)
+        defer { Self.stopFocusObservation(controller) }
+        let manager = controller.workspaceManager
+        let token = WindowToken(pid: 510_511, windowId: 510_512)
+        Self.startUnresolvedFocusObservation(controller, pid: token.pid)
+        let gate = NativeAdmissionFocusGate()
+        let readFinished = expectation(description: "Admission focus read finished")
+        controller.factResolver.factProvider = nil
+        controller.factResolver.deferredFactProvider = { _ in
+            await gate.wait()
+            readFinished.fulfill()
+            return Self.focusedFact(for: token)
+        }
+        controller.axEventHandler.trackPreparedCreate(Self.preparedCreate(token: token, workspaceId: workspaceId))
+        await WindowAdmissionTestSupport.drainLayoutRefreshes(controller)
+        controller.focusPolicyEngine.endLease(owner: .nativeAppSwitch)
+        controller.setFocusFollowsMouse(true)
+        let monitor = try XCTUnwrap(manager.monitor(for: workspaceId))
+        let pointer = CGPoint(x: monitor.frame.midX, y: monitor.frame.midY)
+        controller.mouseEventHandler.dispatchMouseMoved(at: pointer, windowIdUnderPointer: token.windowId)
+        XCTAssertNil(controller.mouseEventHandler.latestFocusFollowsMouseToken())
+        XCTAssertNil(manager.borderFocusToken)
+        XCTAssertTrue(operations.values.isEmpty)
+
+        gate.release()
+        await fulfillment(of: [readFinished], timeout: 2)
+        controller.eventIntake.drainNow()
+        await WindowAdmissionTestSupport.drainLayoutRefreshes(controller)
+
+        XCTAssertEqual(manager.nativeManagedFocusToken, token)
+        XCTAssertEqual(manager.borderFocusToken, token)
+        XCTAssertEqual(controller.mouseEventHandler.latestFocusFollowsMouseToken(), token)
+        XCTAssertNil(manager.pendingFocusedToken)
+        XCTAssertTrue(operations.values.isEmpty)
+    }
+
+    func testAdmissionProbeUsesKnownOwnerAliasesWithoutWindowServerQueries() throws {
+        for ownerPID: pid_t in [510_521, 510_522, 510_523] {
+            let operations = FocusOperationRecorder()
+            let controller = Self.controller(operations: operations)
+            defer { Self.stopFocusObservation(controller) }
+            let manager = controller.workspaceManager
+            let workspaceId = try XCTUnwrap(manager.workspaceId(for: "1", createIfMissing: true))
+            let token = WindowToken(pid: 510_521, windowId: 510_524)
+            let axRef = AXWindowRef(element: AXUIElementCreateApplication(510_522), windowId: token.windowId)
+            controller.axEventHandler.updateIdentityAliases([token.windowId: .init(pids: [510_523], axRefs: [])])
+            Self.startUnresolvedFocusObservation(controller, pid: ownerPID)
+            controller.axEventHandler.frontmostApplicationPIDProvider = { 510_522 }
+            var queriedPIDs: [pid_t] = []
+            var windowQueries = 0
+            controller.axEventHandler.windowInfoProvider = { _ in
+                windowQueries += 1
+                return nil
+            }
+            controller.factResolver.factProvider = {
+                queriedPIDs.append($0)
+                return FocusedWindowFact(axRef: axRef, isFullscreen: false, isSystemModalSurface: false)
+            }
+
+            _ = manager.addWindow(axRef, pid: token.pid, windowId: token.windowId, to: workspaceId)
+            controller.eventIntake.drainNow()
+
+            XCTAssertEqual(queriedPIDs, [ownerPID])
+            XCTAssertEqual(windowQueries, 0)
+            XCTAssertEqual(manager.nativeManagedFocusToken, token)
+            XCTAssertEqual(manager.borderFocusToken, token)
+            XCTAssertTrue(operations.values.isEmpty)
+        }
+    }
+
+    func testAdmissionProbeFollowsExactFocusToAssignedInactiveWorkspace() async throws {
+        let operations = FocusOperationRecorder()
+        let (controller, initialWorkspaceId) = try await Self.niriController(operations: operations)
+        defer { Self.stopFocusObservation(controller) }
+        let manager = controller.workspaceManager
+        let assignedWorkspaceId = try XCTUnwrap(manager.workspaceId(for: "2", createIfMissing: true))
+        let token = WindowToken(pid: 510_525, windowId: 510_526)
+        Self.startUnresolvedFocusObservation(controller, pid: token.pid)
+        controller.factResolver.factProvider = { _ in Self.focusedFact(for: token) }
+        XCTAssertEqual(controller.activeWorkspace()?.id, initialWorkspaceId)
+
+        controller.axEventHandler.trackPreparedCreate(
+            Self.preparedCreate(token: token, workspaceId: assignedWorkspaceId)
+        )
+        controller.eventIntake.drainNow()
+        await WindowAdmissionTestSupport.drainLayoutRefreshes(controller)
+
+        XCTAssertEqual(controller.activeWorkspace()?.id, assignedWorkspaceId)
+        XCTAssertEqual(manager.nativeManagedFocusToken, token)
+        XCTAssertEqual(manager.borderFocusToken, token)
+        XCTAssertNil(manager.pendingFocusedToken)
+        XCTAssertTrue(operations.values.isEmpty)
+    }
+
+    func testAdmissionProbePreservesUnavailableFocusWithoutRepeatingReads() throws {
+        let operations = FocusOperationRecorder()
+        let controller = Self.controller(operations: operations)
+        defer { Self.stopFocusObservation(controller) }
+        let manager = controller.workspaceManager
+        let workspaceId = try XCTUnwrap(manager.workspaceId(for: "1", createIfMissing: true))
+        let token = WindowToken(pid: 510_531, windowId: 510_532)
+        Self.startUnresolvedFocusObservation(controller, pid: token.pid)
+        var reads = 0
+        controller.factResolver.factProvider = { _ in
+            reads += 1
+            return nil
+        }
+
+        _ = WindowAdmissionTestSupport.track(token, in: workspaceId, controller: controller)
+        controller.eventIntake.drainNow()
+        controller.eventIntake.drainNow()
+
+        XCTAssertEqual(reads, 1)
+        XCTAssertEqual(manager.nativeFocusOwner, .external(pid: token.pid, windowId: nil))
+        XCTAssertNil(manager.borderFocusToken)
+        XCTAssertTrue(operations.values.isEmpty)
+    }
+
+    func testAdmissionProbeCannotOverrideNewerAppActivation() throws {
+        let operations = FocusOperationRecorder()
+        let controller = Self.controller(operations: operations)
+        defer { Self.stopFocusObservation(controller) }
+        let manager = controller.workspaceManager
+        let workspaceId = try XCTUnwrap(manager.workspaceId(for: "1", createIfMissing: true))
+        let token = WindowToken(pid: 510_541, windowId: 510_542)
+        let newerPID: pid_t = 510_543
+        Self.startUnresolvedFocusObservation(controller, pid: token.pid)
+        controller.factResolver.factProvider = { pid in pid == token.pid ? Self.focusedFact(for: token) : nil }
+
+        _ = WindowAdmissionTestSupport.track(token, in: workspaceId, controller: controller)
+        controller.axEventHandler.frontmostApplicationPIDProvider = { newerPID }
+        controller.axEventHandler.handleAppActivation(pid: newerPID)
+        controller.eventIntake.drainNow()
+
+        XCTAssertEqual(manager.nativeFocusOwner, .external(pid: newerPID, windowId: nil))
+        XCTAssertNil(manager.selectedManagedToken)
+        XCTAssertNil(manager.borderFocusToken)
+        XCTAssertTrue(operations.values.isEmpty)
+    }
+
+    func testAdmissionProbeRequiresUnresolvedFrontmostOwnerWithoutEitherPendingRequest() throws {
+        enum Blocker: CaseIterable {
+            case stopped, anonymous, owned, exact, unrelatedOwner, background, ledgerRequest, worldRequest
+        }
+        for blocker in Blocker.allCases {
+            let operations = FocusOperationRecorder()
+            let controller = Self.controller(operations: operations)
+            defer { Self.stopFocusObservation(controller) }
+            let manager = controller.workspaceManager
+            let workspaceId = try XCTUnwrap(manager.workspaceId(for: "1", createIfMissing: true))
+            let token = WindowToken(pid: 510_551, windowId: 510_552)
+            let pendingToken = WindowToken(pid: token.pid, windowId: token.windowId + 2)
+            _ = WindowAdmissionTestSupport.track(pendingToken, in: workspaceId, controller: controller)
+            Self.startUnresolvedFocusObservation(controller, pid: token.pid)
+            switch blocker {
+            case .stopped:
+                controller.hasStartedServices = false
+            case .anonymous:
+                _ = manager.recordExternalFocus()
+            case .owned:
+                _ = manager.recordOwnedSurfaceFocus()
+            case .exact:
+                _ = manager.recordExternalFocus(pid: token.pid, windowId: token.windowId + 1)
+            case .unrelatedOwner:
+                _ = manager.recordExternalFocus(pid: token.pid + 1)
+            case .background:
+                controller.axEventHandler.frontmostApplicationPIDProvider = { token.pid + 1 }
+            case .ledgerRequest:
+                _ = controller.intentLedger.beginManagedRequest(token: pendingToken, workspaceId: workspaceId)
+            case .worldRequest:
+                _ = manager.beginManagedFocusRequest(pendingToken, in: workspaceId, requestId: 1)
+            }
+            var reads = 0
+            controller.factResolver.factProvider = { _ in
+                reads += 1
+                return nil
+            }
+            let expectedOwner = manager.nativeFocusOwner
+            let expectedPending = manager.pendingFocusedToken
+
+            _ = WindowAdmissionTestSupport.track(token, in: workspaceId, controller: controller)
+            controller.eventIntake.drainNow()
+
+            XCTAssertEqual(reads, 0, "\(blocker)")
+            XCTAssertEqual(manager.nativeFocusOwner, expectedOwner, "\(blocker)")
+            XCTAssertEqual(manager.pendingFocusedToken, expectedPending, "\(blocker)")
+            XCTAssertTrue(operations.values.isEmpty, "\(blocker)")
+        }
+    }
+
     func testExactExternalFocusIsAdoptedAtomicallyWithoutPlatformFocusOperations() throws {
         let operations = FocusOperationRecorder()
         let controller = Self.controller(operations: operations)
@@ -366,6 +591,31 @@ final class NativeFocusAdmissionTests: XCTestCase {
         XCTAssertNil(existingEntryPlan.focusSession)
     }
 
+    private static func focusedFact(for token: WindowToken) -> FocusedWindowFact {
+        FocusedWindowFact(
+            axRef: WindowAdmissionTestSupport.axRef(for: token),
+            isFullscreen: false,
+            isSystemModalSurface: false
+        )
+    }
+
+    private static func startUnresolvedFocusObservation(_ controller: WMController, pid: pid_t) {
+        controller.factResolver.factProvider = { _ in nil }
+        controller.axEventHandler.frontmostApplicationPIDProvider = { pid }
+        controller.eventIntake.open(sink: controller.eventInterpreter)
+        controller.hasStartedServices = true
+        controller.axEventHandler.handleAppActivation(pid: pid)
+        controller.eventIntake.drainNow()
+    }
+
+    private static func stopFocusObservation(_ controller: WMController) {
+        controller.hasStartedServices = false
+        controller.factResolver.stop()
+        controller.eventIntake.close()
+        controller.deadlineWheel.stop()
+        controller.layoutRefreshController.resetState()
+    }
+
     private static func controller(operations: FocusOperationRecorder) -> WMController {
         WindowAdmissionTestSupport.controller(
             prefix: "OmniWMNativeFocusAdmissionTests",
@@ -450,4 +700,21 @@ final class NativeFocusAdmissionTests: XCTestCase {
 @MainActor
 private final class FocusOperationRecorder {
     var values: [String] = []
+}
+
+@MainActor
+private final class NativeAdmissionFocusGate {
+    private var released = false
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func wait() async {
+        guard !released else { return }
+        await withCheckedContinuation { continuation = $0 }
+    }
+
+    func release() {
+        released = true
+        continuation?.resume()
+        continuation = nil
+    }
 }

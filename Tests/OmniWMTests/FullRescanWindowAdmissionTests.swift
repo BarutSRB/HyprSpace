@@ -62,6 +62,86 @@ final class FullRescanWindowAdmissionTests: XCTestCase {
         )
     }
 
+    func testFullRescanAdmissionRechecksUnresolvedNativeFocusWithoutFronting() async throws {
+        var focusOperations: [String] = []
+        let controller = WindowAdmissionTestSupport.controller(
+            windowFocusOperations: WindowFocusOperations(
+                activateApp: { _ in focusOperations.append("activate") },
+                focusSpecificWindow: { _, _, _ in focusOperations.append("focus") },
+                raiseWindow: { _ in focusOperations.append("raise") },
+                orderWindow: { _ in focusOperations.append("order") }
+            )
+        )
+        defer {
+            controller.hasStartedServices = false
+            controller.factResolver.stop()
+            controller.eventIntake.close()
+            controller.layoutRefreshController.fullRescanEnumerationSnapshotForTests = nil
+            controller.layoutRefreshController.resetState()
+            controller.axManager.cleanup()
+        }
+        let manager = controller.workspaceManager
+        let workspaceId = try XCTUnwrap(manager.workspaceId(for: "1", createIfMissing: true))
+        _ = manager.focusWorkspace(id: workspaceId)
+        controller.motionPolicy.animationsEnabled = false
+        controller.niriLayoutHandler.enableNiriLayout()
+        await WindowAdmissionTestSupport.drainLayoutRefreshes(controller)
+        controller.layoutRefreshController.layoutState.hasCompletedInitialRefresh = true
+
+        let token = WindowToken(pid: 467_320, windowId: 467_321)
+        let axRef = WindowAdmissionTestSupport.axRef(for: token)
+        let frame = CGRect(x: 120, y: 80, width: 720, height: 520)
+        let facts = replacementFacts(
+            token: token,
+            bundleId: "org.example.launch-focus",
+            frame: frame
+        )
+        controller.layoutRefreshController.fullRescanEnumerationSnapshotForTests = enumerationSnapshot(
+            for: candidate(
+                pid: token.pid,
+                windowId: token.windowId,
+                axRef: axRef,
+                decisionEvidence: AXWindowDecisionEvidence(facts: facts.ax, sizeConstraints: .unconstrained),
+                admissionGeometry: WindowAdmissionGeometryEvidence(isSizeSettable: true, frame: frame),
+                fullscreenAttribute: false,
+                windowServerInfo: facts.windowServer
+            )
+        )
+        var focusedWindow: FocusedWindowFact?
+        var resolvedPIDs: [pid_t] = []
+        controller.factResolver.factProvider = { pid in
+            resolvedPIDs.append(pid)
+            return focusedWindow
+        }
+        controller.axEventHandler.frontmostApplicationPIDProvider = { token.pid }
+        controller.eventIntake.open(sink: controller.eventInterpreter)
+        controller.hasStartedServices = true
+
+        controller.axEventHandler.handleAppActivation(pid: token.pid, source: .workspaceDidActivateApplication)
+        controller.eventIntake.drainNow()
+
+        XCTAssertEqual(manager.nativeFocusOwner, .external(pid: token.pid, windowId: nil))
+        XCTAssertNil(manager.borderFocusToken)
+        XCTAssertNil(manager.entry(for: token))
+        XCTAssertEqual(resolvedPIDs, [token.pid])
+
+        focusedWindow = FocusedWindowFact(axRef: axRef, isFullscreen: false, isSystemModalSurface: false)
+        controller.layoutRefreshController.requestFullRescan(reason: .appRulesChanged)
+        await WindowAdmissionTestSupport.drainLayoutRefreshes(controller)
+        controller.eventIntake.drainNow()
+        await WindowAdmissionTestSupport.drainLayoutRefreshes(controller)
+
+        XCTAssertEqual(manager.entry(for: token)?.mode, .tiling)
+        XCTAssertEqual(manager.entry(for: token)?.lifetimeAuthority, .axTopLevelInventory)
+        XCTAssertEqual(manager.nativeManagedFocusToken, token)
+        XCTAssertEqual(manager.selectedManagedToken, token)
+        XCTAssertEqual(manager.borderFocusToken, token)
+        XCTAssertNil(manager.pendingFocusedToken)
+        XCTAssertNil(controller.intentLedger.activeManagedRequest)
+        XCTAssertEqual(resolvedPIDs, [token.pid, token.pid])
+        XCTAssertTrue(focusOperations.isEmpty)
+    }
+
     func testFullRescanExactHighLevelEvidenceRetiresEntryAfterRuleRemoval() async throws {
         let controller = WindowAdmissionTestSupport.controller()
         defer {

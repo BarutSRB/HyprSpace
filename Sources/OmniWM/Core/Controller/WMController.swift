@@ -415,6 +415,7 @@ final class WMController {
         }
         workspaceManager.onWindowPresenceObserved = { [weak self] handle in
             self?.layoutRefreshController.recordWindowPresence(handle)
+            self?.axEventHandler.probeUnresolvedNativeFocus(after: handle.token)
         }
         workspaceManager.onWindowRemoved = { [weak self] entry in
             self?.windowActionHandlerStorage?.handleOverviewWindowRemoved(entry)
