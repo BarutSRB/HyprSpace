@@ -2549,7 +2549,7 @@ import QuartzCore
             }
         }
         if !inactiveWindowJobs.isEmpty {
-            controller.axManager.cancelPendingFrameJobs(inactiveWindowJobs)
+            controller.axManager.cancelPendingFrameJobs(inactiveWindowJobs, reason: "inactive-workspace-hide")
         }
 
         let preferredSides = preferredHideSides(for: controller.workspaceManager.monitors)
@@ -2757,18 +2757,18 @@ import QuartzCore
         ) {
         case let .movable(plan, hiddenState):
             controller.workspaceManager.setHiddenState(hiddenState, for: entry.token)
-            controller.axManager.cancelPendingFrameJobs([frameEntry])
+            controller.axManager.cancelPendingFrameJobs([frameEntry], reason: "hide")
             controller.axManager.suppressFrameWrites([frameEntry])
             applyParkPositionPlans([plan], movablePlans: [plan], animationTick: false)
             return true
         case let .alreadyHidden(plan, hiddenState):
             controller.workspaceManager.setHiddenState(hiddenState, for: entry.token)
-            controller.axManager.cancelPendingFrameJobs([frameEntry])
+            controller.axManager.cancelPendingFrameJobs([frameEntry], reason: "hide")
             controller.axManager.suppressFrameWrites([frameEntry])
             applyParkPositionPlans([plan], movablePlans: [], animationTick: false)
             return true
         case .unavailable:
-            controller.axManager.cancelPendingFrameJobs([frameEntry])
+            controller.axManager.cancelPendingFrameJobs([frameEntry], reason: "hide-unavailable")
             controller.axManager.suppressFrameWrites([frameEntry])
             return false
         }
@@ -2816,7 +2816,7 @@ import QuartzCore
         }
 
         if !hiddenJobs.isEmpty {
-            controller.axManager.cancelPendingFrameJobs(hiddenJobs)
+            controller.axManager.cancelPendingFrameJobs(hiddenJobs, reason: "hide-batch")
             controller.axManager.suppressFrameWrites(hiddenJobs)
         }
         if !parkPlans.isEmpty {
@@ -3224,7 +3224,10 @@ import QuartzCore
         }
         pendingRevealTransactionsByWindowId.removeValue(forKey: token.windowId)
         pendingRevealVerificationTasksByWindowId.removeValue(forKey: token.windowId)?.cancel()
-        controller?.axManager.cancelPendingFrameJobs([(transaction.pid, transaction.windowId)])
+        controller?.axManager.cancelPendingFrameJobs(
+            [(transaction.pid, transaction.windowId)],
+            reason: "scratchpad-reveal-cancelled"
+        )
     }
 
     func completePendingRevealTransaction(
@@ -3310,9 +3313,10 @@ import QuartzCore
         }
         pendingRevealVerificationTasksByWindowId.removeValue(forKey: windowId)?.cancel()
         guard !controller.workspaceManager.isAppHidden(pid: pendingTransaction.pid) else {
-            controller.axManager.cancelPendingFrameJobs([
-                (pendingTransaction.pid, pendingTransaction.windowId)
-            ])
+            controller.axManager.cancelPendingFrameJobs(
+                [(pendingTransaction.pid, pendingTransaction.windowId)],
+                reason: "scratchpad-reveal-app-hidden"
+            )
             return
         }
 
@@ -3458,7 +3462,7 @@ import QuartzCore
             return
         }
 
-        controller.axManager.cancelPendingFrameJobs(frameEntries)
+        controller.axManager.cancelPendingFrameJobs(frameEntries, reason: "scratchpad-reveal-stale")
         controller.axManager.suppressFrameWrites(frameEntries)
 
         let monitor = stalePendingRevealMonitor(

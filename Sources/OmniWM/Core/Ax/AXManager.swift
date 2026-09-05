@@ -362,7 +362,7 @@ final class AXManager {
     func beginNativeTitleBarDrag(for token: WindowToken) {
         let hadPendingFrameWrite = frameLedger.hasPendingFrameWrite(for: token.windowId)
         nativeTitleBarDrag = (token: token, excludedFrameWrite: hadPendingFrameWrite)
-        cancelPendingFrameJobs([(pid: token.pid, windowId: token.windowId)])
+        cancelPendingFrameJobs([(pid: token.pid, windowId: token.windowId)], reason: "native-drag-begin")
     }
 
     func endNativeTitleBarDrag(for token: WindowToken) -> Bool {
@@ -2558,10 +2558,14 @@ final class AXManager {
         }
     }
 
-    func cancelPendingFrameJobs(_ entries: [(pid: pid_t, windowId: Int)]) {
+    func cancelPendingFrameJobs(_ entries: [(pid: pid_t, windowId: Int)], reason: String) {
         var deliveries: [AXFrameTerminalDelivery] = []
         var terminalFailures: [AXFrameApplyResult] = []
+        let traceActive = FrameApplyTrace.shared.isActive
         for (pid, windowId) in uniqueFrameEntries(entries) {
+            if traceActive {
+                recordFrameJobCancellation(pid: pid, windowId: windowId, reason: reason)
+            }
             AppAXContext.contexts[pid]?.cancelFrameJob(for: windowId)
             let cancellation = frameLedger.cancelFrameJob(pid: pid, windowId: windowId)
             let retryCancellation = cancelPendingFrameRetry(for: windowId)
@@ -2576,6 +2580,21 @@ final class AXManager {
         for terminalFailure in terminalFailures {
             handleTerminalFrameApplyFailure(terminalFailure)
         }
+    }
+
+    private func recordFrameJobCancellation(pid: pid_t, windowId: Int, reason: String) {
+        let pendingFrame = frameLedger.pendingFrameWrite(for: windowId)
+        let state = [
+            pendingFrame != nil ? "pending" : nil,
+            frameLedger.hasTerminalRefusal(for: windowId) ? "refusal" : nil
+        ].compactMap(\.self)
+        guard !state.isEmpty else { return }
+        FrameApplyTrace.recordEvent(
+            pid: pid,
+            windowId: windowId,
+            outcome: "outcome=cancelled/\(reason)/\(state.joined(separator: "+"))",
+            target: pendingFrame
+        )
     }
 
     @discardableResult

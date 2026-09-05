@@ -277,6 +277,10 @@ final class AXFrameApplicationLedger {
         recentFrameWriteFailures[windowId]?.reason
     }
 
+    func hasTerminalRefusal(for windowId: Int) -> Bool {
+        recentFrameWriteFailures[windowId]?.isTerminalRefusal == true
+    }
+
     func recentFrameWriteFailureComponents(for windowId: Int) -> AXFrameComponents? {
         recentFrameWriteFailures[windowId]?.components
     }

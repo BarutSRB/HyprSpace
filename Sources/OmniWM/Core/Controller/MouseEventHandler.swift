@@ -1695,9 +1695,10 @@ final class MouseEventHandler {
         let priorTerminalFailureRequestId = drag.terminalFailureRetryRequestId
         var correctionScheduledDuringCancellation = false
         if controller.axManager.pendingFrameWrite(for: entry.windowId) != nil {
-            controller.axManager.cancelPendingFrameJobs([
-                (pid: entry.pid, windowId: entry.windowId)
-            ])
+            controller.axManager.cancelPendingFrameJobs(
+                [(pid: entry.pid, windowId: entry.windowId)],
+                reason: "native-drag-end"
+            )
             if let currentDrag = state.nativeTitleBarDrag,
                currentDrag.token == drag.token,
                currentDrag.terminalFailureRetryRequestId != nil,

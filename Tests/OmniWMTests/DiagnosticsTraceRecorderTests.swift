@@ -637,13 +637,38 @@ final class DiagnosticsTraceRecorderTests: XCTestCase {
             )
         )
 
-        manager.cancelPendingFrameJobs([(pid: pid, windowId: windowId)])
+        manager.cancelPendingFrameJobs([(pid: pid, windowId: windowId)], reason: "test")
 
         XCTAssertEqual(FrameEffectObservationTracker.shared.pendingCount, 0)
         let trace = FrameApplyTrace.shared.dump()
         XCTAssertTrue(trace.contains("event=outcome=skip/cancelled"))
         XCTAssertTrue(trace.contains("event=server-observation/write-terminal/terminal"))
         XCTAssertFalse(trace.contains("server-observation/timeout"))
+    }
+
+    @MainActor
+    func testFrameJobCancellationRecordsItsCauseAndWhatItCleared() {
+        let manager = AXManager()
+        let pid: pid_t = 705_002
+        let windowId = 705_102
+        let target = CGRect(x: 10, y: 20, width: 300, height: 200)
+        let window = AXWindowRef(element: AXUIElementCreateApplication(pid), windowId: windowId)
+        manager.cancelPendingFrameJobs([(pid: pid, windowId: windowId)], reason: "before-capture")
+
+        FrameApplyTrace.shared.beginCapture()
+        defer {
+            manager.cleanup()
+            FrameApplyTrace.shared.endCapture()
+        }
+        manager.cancelPendingFrameJobs([(pid: pid, windowId: windowId)], reason: "idle")
+        XCTAssertNotNil(manager.stageFrameWrite(for: AXFrameApplicationTarget(pid: pid, window: window, frame: target)))
+        manager.cancelPendingFrameJobs([(pid: pid, windowId: windowId)], reason: "invalidation")
+
+        let trace = FrameApplyTrace.shared.dump()
+        XCTAssertFalse(trace.contains("cancelled/before-capture"))
+        XCTAssertFalse(trace.contains("cancelled/idle"))
+        XCTAssertTrue(trace.contains("event=outcome=cancelled/invalidation/pending target=(10,20 300x200)"))
+        XCTAssertFalse(manager.hasPendingFrameWrite(for: windowId))
     }
 
     @MainActor

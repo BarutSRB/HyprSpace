@@ -1204,7 +1204,7 @@ final class WindowCornerRadiiTests: XCTestCase {
 
         fixture.controller.axManager.cancelPendingFrameJobs([
             (pid: fixture.entry.pid, windowId: fixture.entry.windowId)
-        ])
+        ], reason: "test")
         XCTAssertNil(fixture.controller.axManager.pendingFrameWrite(for: fixture.entry.windowId))
         XCTAssertEqual(world.borderFrame(for: fixture.entry), live)
     }

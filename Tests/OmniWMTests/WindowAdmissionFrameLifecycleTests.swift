@@ -421,7 +421,7 @@ final class WindowAdmissionFrameLifecycleTests: XCTestCase {
         XCTAssertTrue(observerResults.isEmpty)
         XCTAssertTrue(genericFailures.isEmpty)
 
-        manager.cancelPendingFrameJobs([(pid: pid, windowId: window.windowId)])
+        manager.cancelPendingFrameJobs([(pid: pid, windowId: window.windowId)], reason: "test")
         await Task.yield()
 
         let observerResult = try XCTUnwrap(observerResults.first)
@@ -1413,6 +1413,19 @@ final class WindowAdmissionFrameLifecycleTests: XCTestCase {
             WindowAdmissionTestSupport.frameRequest(ledger, pid: pid, window: window, frame: tallerTarget)
         )
         XCTAssertNil(ledger.enforcedSizePlacement(for: window.windowId, targetFrame: scrolled))
+    }
+
+    func testTerminalRefusalIsVisibleUntilCancellationClearsIt() throws {
+        let pid: pid_t = 467_341
+        let window = AXWindowRef(element: AXUIElementCreateApplication(pid), windowId: 467_441)
+        let target = CGRect(x: 2_409, y: 1_113, width: 1_257, height: 280)
+        let observed = CGRect(x: 2_409, y: 901, width: 1_257, height: 492)
+        let ledger = try refusedTargetLedger(pid: pid, window: window, target: target, observed: observed)
+
+        XCTAssertTrue(ledger.hasTerminalRefusal(for: window.windowId))
+        XCTAssertFalse(ledger.hasTerminalRefusal(for: window.windowId + 1))
+        _ = ledger.cancelFrameJob(pid: pid, windowId: window.windowId)
+        XCTAssertFalse(ledger.hasTerminalRefusal(for: window.windowId))
     }
 
     func testObservedFrameAtTheRefusedSizeReleasesTheRefusal() throws {

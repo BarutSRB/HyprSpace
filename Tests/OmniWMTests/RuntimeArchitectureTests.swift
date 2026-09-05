@@ -3782,7 +3782,7 @@ final class RuntimeArchitectureTests: XCTestCase {
         _ = controller.workspaceManager.beginManagedFocusRequest(token, in: workspaceId, requestId: 7)
         XCTAssertTrue(terminalResults.isEmpty)
 
-        controller.axManager.cancelPendingFrameJobs([(pid, windowId)])
+        controller.axManager.cancelPendingFrameJobs([(pid, windowId)], reason: "test")
         XCTAssertEqual(terminalResults.map(\.writeResult.failureReason), [.cancelled])
     }
 
@@ -3811,7 +3811,7 @@ final class RuntimeArchitectureTests: XCTestCase {
         controller.workspaceManager.setManualLayoutOverride(.forceFloat, for: token)
         XCTAssertTrue(terminalResults.isEmpty)
 
-        controller.axManager.cancelPendingFrameJobs([(pid, windowId)])
+        controller.axManager.cancelPendingFrameJobs([(pid, windowId)], reason: "test")
         XCTAssertEqual(terminalResults.map(\.writeResult.failureReason), [.cancelled])
     }
 
@@ -3849,7 +3849,7 @@ final class RuntimeArchitectureTests: XCTestCase {
         }
         XCTAssertTrue(terminalResults.isEmpty)
 
-        controller.axManager.cancelPendingFrameJobs([(pid, windowId)])
+        controller.axManager.cancelPendingFrameJobs([(pid, windowId)], reason: "test")
         XCTAssertEqual(terminalResults.map(\.writeResult.failureReason), [.cancelled])
     }
 

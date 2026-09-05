@@ -1414,7 +1414,7 @@ final class WMController {
     func cancelPendingFrameJobsForInvalidation(workspaceId: WorkspaceDescriptor.ID?) {
         let entries = workspaceId.map { workspaceManager.entries(in: $0) } ?? workspaceManager.allEntries()
         guard !entries.isEmpty else { return }
-        axManager.cancelPendingFrameJobs(entries.map { ($0.pid, $0.windowId) })
+        axManager.cancelPendingFrameJobs(entries.map { ($0.pid, $0.windowId) }, reason: "invalidation")
     }
 
     func activeWorkspace() -> WorkspaceDescriptor? {
@@ -1862,7 +1862,7 @@ final class WMController {
     func cleanupScratchpadWindowResources(for token: WindowToken) {
         layoutRefreshController.cancelPendingScratchpadReveal(for: token)
         let frameEntry = [(pid: token.pid, windowId: token.windowId)]
-        axManager.cancelPendingFrameJobs(frameEntry)
+        axManager.cancelPendingFrameJobs(frameEntry, reason: "scratchpad-cleanup")
         axManager.unsuppressFrameWrites(frameEntry)
         AXWindowService.unpinAXElement(for: UInt32(token.windowId))
         if workspaceManager.clearScratchpadIfMatches(token) {
@@ -1906,7 +1906,7 @@ final class WMController {
                 return false
             }
             let frameEntry = [(entry.pid, entry.windowId)]
-            axManager.cancelPendingFrameJobs(frameEntry)
+            axManager.cancelPendingFrameJobs(frameEntry, reason: "scratchpad-hide")
             axManager.suppressFrameWrites(frameEntry)
             workspaceManager.setHiddenState(hiddenState, for: entry.token)
             return true
