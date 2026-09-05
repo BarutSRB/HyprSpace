@@ -1796,7 +1796,7 @@ final class AXFullRescanBoundaryTests: XCTestCase {
         )
     }
 
-    func testExactFullRescanWindowServerEvidenceRejectsPIDReuseAndQueryFailure() throws {
+    func testExactFullRescanWindowServerEvidenceRejectsPIDReuseAndQueryFailure() async throws {
         let manager = AXManager()
         defer { manager.cleanup() }
         let exactWindowId = 72_310
@@ -1827,30 +1827,28 @@ final class AXFullRescanBoundaryTests: XCTestCase {
             ]
         }
 
-        let partial = try XCTUnwrap(
-            manager.queryFullRescanWindowServerEvidence(
-                windowIds: [exactWindowId, missingWindowId, mismatchedWindowId],
-                excludingWindowIds: [],
-                expectedPIDsByWindowId: [
-                    exactWindowId: exactPID,
-                    missingWindowId: exactPID,
-                    mismatchedWindowId: exactPID
-                ]
-            )
+        let partialResult = try await manager.queryFullRescanWindowServerEvidence(
+            windowIds: [exactWindowId, missingWindowId, mismatchedWindowId],
+            excludingWindowIds: [],
+            expectedPIDsByWindowId: [
+                exactWindowId: exactPID,
+                missingWindowId: exactPID,
+                mismatchedWindowId: exactPID
+            ]
         )
+        let partial = try XCTUnwrap(partialResult)
 
         XCTAssertEqual(Set(partial.keys), [exactWindowId])
         manager.fullRescanWindowInfoProvider = { _ in
             queryCount += 1
             return nil
         }
-        XCTAssertNil(
-            manager.queryFullRescanWindowServerEvidence(
-                windowIds: [exactWindowId],
-                excludingWindowIds: [],
-                expectedPIDsByWindowId: [exactWindowId: exactPID]
-            )
+        let failedResult = try await manager.queryFullRescanWindowServerEvidence(
+            windowIds: [exactWindowId],
+            excludingWindowIds: [],
+            expectedPIDsByWindowId: [exactWindowId: exactPID]
         )
+        XCTAssertNil(failedResult)
         XCTAssertEqual(queryCount, 2)
     }
 
@@ -2296,6 +2294,116 @@ final class AXFullRescanBoundaryTests: XCTestCase {
             windowServerOwnerPID: nil,
             enumerationRoute: route
         )
+    }
+
+    func testDeferredWindowInfoReadAllowsMainThreadProgress() async throws {
+        let started = expectation(description: "background query entered")
+        let gate = DispatchSemaphore(value: 0)
+        let read = Task {
+            try await SkyLight.performWindowInfoQuery {
+                XCTAssertFalse(Thread.isMainThread)
+                started.fulfill()
+                XCTAssertEqual(gate.wait(timeout: .now() + 2), .success)
+                return [77: WindowServerInfo(id: 77, pid: 1234, level: 8, frame: .zero)]
+            }
+        }
+        await fulfillment(of: [started], timeout: 1)
+        XCTAssertTrue(Thread.isMainThread)
+        gate.signal()
+        let result = try await read.value
+        XCTAssertEqual(result?[77]?.level, 8)
+    }
+
+    func testDeferredWindowInfoReadDiscardsCancelledInFlightResult() async {
+        let started = expectation(description: "background query blocked")
+        let gate = DispatchSemaphore(value: 0)
+        let read = Task {
+            try await SkyLight.performWindowInfoQuery {
+                started.fulfill()
+                _ = gate.wait(timeout: .now() + 2)
+                return [77: WindowServerInfo(id: 77, pid: 1234, level: 8, frame: .zero)]
+            }
+        }
+        await fulfillment(of: [started], timeout: 1)
+        read.cancel()
+        gate.signal()
+        do {
+            _ = try await read.value
+            XCTFail("Cancelled read must not publish evidence")
+        } catch is CancellationError {
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
+    func testDeferredFullRescanRejectsEvidenceReturnedAfterCancellation() async {
+        let manager = AXManager()
+        defer { manager.cleanup() }
+        let entered = expectation(description: "rescan query entered")
+        let gate = AXBoundaryAsyncGate()
+        manager.fullRescanWindowInfoProvider = { ids in
+            entered.fulfill()
+            await gate.wait()
+            return Dictionary(uniqueKeysWithValues: ids.map {
+                ($0, WindowServerInfo(id: $0, pid: 1234, level: 8, frame: .zero))
+            })
+        }
+        let scan = Task {
+            try await manager.fullRescanEnumerationSnapshot(
+                scope: .targeted(appPIDs: [1234], nativeSpaceIds: []),
+                preservingPIDsByWindowId: [77: 1234]
+            )
+        }
+        await fulfillment(of: [entered], timeout: 1)
+        scan.cancel()
+        await gate.releaseAll()
+        do {
+            _ = try await scan.value
+            XCTFail("Cancelled scan must not merge returned evidence")
+        } catch is CancellationError {
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
+    func testDeferredFullRescanCannotApplyAfterWindowChangesWorkspace() async throws {
+        let controller = WindowAdmissionTestSupport.controller()
+        let source = try XCTUnwrap(controller.workspaceManager.workspaceId(for: "1", createIfMissing: true))
+        let destination = try XCTUnwrap(controller.workspaceManager.workspaceId(for: "2", createIfMissing: true))
+        let pid: pid_t = 2_147_483_497
+        let windowId = 72_399
+        let token = controller.workspaceManager.addWindow(
+            AXWindowRef(element: AXUIElementCreateApplication(pid), windowId: windowId),
+            pid: pid, windowId: windowId, to: source, mode: .tiling
+        )
+        let refresh = controller.layoutRefreshController
+        defer { refresh.resetState() }
+        let entered = expectation(description: "inventory read awaiting result")
+        let gate = AXBoundaryAsyncGate()
+        controller.axManager.fullRescanWindowInfoProvider = { ids in
+            entered.fulfill()
+            await gate.wait()
+            return Dictionary(uniqueKeysWithValues: ids.map {
+                ($0, WindowServerInfo(id: $0, pid: pid, level: 0, frame: .zero))
+            })
+        }
+        refresh.beginPerformanceCapture()
+        refresh.layoutState.pendingRefresh = .init(
+            kind: .fullRescan, reason: .appLaunched,
+            rescanScope: .targeted(appPIDs: [pid], nativeSpaceIds: [])
+        )
+        refresh.startNextRefreshIfNeeded()
+        await fulfillment(of: [entered], timeout: 1)
+        let active = try XCTUnwrap(refresh.layoutState.activeRefreshTask)
+        refresh.layoutState.inventoryStabilityHoldFullRescans = true
+        controller.workspaceManager.setWorkspace(for: token, to: destination)
+        await gate.releaseAll()
+        await active.value
+        XCTAssertEqual(refresh.performanceSnapshot()?.refreshesIncomplete, 1)
+        XCTAssertEqual(refresh.performanceSnapshot()?.refreshesCompleted, 0)
+        XCTAssertEqual(controller.workspaceManager.workspace(for: token), destination)
+        XCTAssertNotNil(controller.workspaceManager.entry(for: token))
+        XCTAssertFalse(refresh.layoutState.didExecuteEffectPlan)
     }
 }
 

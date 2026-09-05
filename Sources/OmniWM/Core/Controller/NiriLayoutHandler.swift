@@ -432,7 +432,11 @@ enum StructuralMutationOutcome: Equatable {
         controller?.workspaceManager.recordLayoutOperation(operation, in: workspaceId, source: source)
     }
 
-    func focusSelectedWindowAndRequestRelayout(in workspaceId: WorkspaceDescriptor.ID) {
+    func focusSelectedWindowAndRequestRelayout(
+        in workspaceId: WorkspaceDescriptor.ID,
+        raisesWindow: Bool = true,
+        defersRetryRaise: Bool = false
+    ) {
         guard let controller else { return }
         let viewportState = controller.workspaceManager.niriViewportState(for: workspaceId)
         if let selectedNodeId = viewportState.selectedNodeId,
@@ -443,7 +447,11 @@ enum StructuralMutationOutcome: Equatable {
            controller.workspaceManager.entry(for: selectedWindow.token)?.workspaceId == workspaceId,
            !controller.isManagedWindowSuppressedByMacOSHide(selectedWindow.token)
         {
-            controller.focusWindow(selectedWindow.token)
+            controller.focusWindow(
+                selectedWindow.token,
+                raisesWindow: raisesWindow,
+                defersRetryRaise: defersRetryRaise
+            )
         }
         requestLayoutCommandRelayout(in: workspaceId)
     }
@@ -1712,7 +1720,12 @@ enum StructuralMutationOutcome: Equatable {
                 plannedSeq: controller.workspaceManager.worldSeq
             )
         )
-        focusSelectedWindowAndRequestRelayout(in: wsId)
+        let isPrimaryNavigation = direction.primaryStep(for: orientation) != nil
+        focusSelectedWindowAndRequestRelayout(
+            in: wsId,
+            raisesWindow: !isPrimaryNavigation,
+            defersRetryRaise: isPrimaryNavigation
+        )
         return true
     }
 

@@ -1666,13 +1666,10 @@ final class AXEventHandler {
         }
 
         let activeRequest = controller.intentLedger.activeManagedRequest
-        let conflictsWithActiveRequest = activeRequest.map {
-            !managedWindowToken($0.token, matchesObservedPid: pid)
-        } ?? true
         let focusedToken = controller.workspaceManager.selectedManagedToken
         if origin == .external,
            source != .focusedWindowChanged,
-           conflictsWithActiveRequest,
+           activeRequest.map({ !managedWindowToken($0.token, matchesObservedPid: pid) }) ?? true,
            activeRequest != nil || focusedToken.map({ !managedWindowToken($0, matchesObservedPid: pid) }) ?? true
         {
             if let activeRequest {

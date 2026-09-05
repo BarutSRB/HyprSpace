@@ -63,13 +63,16 @@ extension WMController {
     func performWindowFronting(
         pid: pid_t,
         windowId: Int,
-        axRef: AXWindowRef
+        axRef: AXWindowRef,
+        raisesWindow: Bool = true
     ) -> Bool {
         guard canFocusWindow(pid: pid, windowId: windowId) else { return false }
         MainThreadAXSpanTrace.measure(.fronting, pid: pid, windowId: windowId) {
             windowFocusOperations.activateApp(pid)
             windowFocusOperations.focusSpecificWindow(pid, UInt32(windowId), axRef.element)
-            windowFocusOperations.raiseWindow(axRef.element)
+            if raisesWindow {
+                windowFocusOperations.raiseWindow(axRef.element)
+            }
         }
         return true
     }
@@ -92,6 +95,47 @@ extension WMController {
             return
         }
         windowFocusOperations.orderWindow(UInt32(windowId))
+    }
+
+    func deferManagedFocusRetry(_ request: ManagedFocusRequest) -> Bool {
+        guard intentLedger.defersRetryRaise(for: request) else { return false }
+        guard let entry = workspaceManager.entry(for: request.token),
+              entry.workspaceId == request.workspaceId,
+              let handle = workspaceManager.handle(for: request.token),
+              !isManagedWindowSuppressedByMacOSHide(request.token),
+              let job = intentLedger.beginDeferredRetryRaise(for: request)
+        else { return true }
+        let handleIdentity = ObjectIdentifier(handle)
+        let expectedWindow = entry.axRef
+        let applied = applyManagedFocusRequest(
+            request, entry: entry, validatesPointer: true, isRetry: true, raisesWindow: false
+        )
+        let completion: @MainActor @Sendable () -> Void = { [weak self] in
+            guard let self,
+                  let liveRequest = intentLedger.completeDeferredRetryRaise(job: job),
+                  let currentEntry = workspaceManager.entry(for: liveRequest.token),
+                  currentEntry.workspaceId == liveRequest.workspaceId,
+                  sameAXWindowIdentity(currentEntry.axRef, expectedWindow),
+                  workspaceManager.handle(for: liveRequest.token).map(ObjectIdentifier.init) == handleIdentity,
+                  !isManagedWindowSuppressedByMacOSHide(liveRequest.token),
+                  workspaceManager.pendingManagedFocusMatches(
+                      token: liveRequest.token,
+                      workspaceId: liveRequest.workspaceId,
+                      requestId: liveRequest.requestId
+                  )
+            else { return }
+            axEventHandler.handleAppActivation(
+                pid: liveRequest.token.pid,
+                source: liveRequest.lastActivationSource ?? .focusedWindowChanged,
+                origin: .retry
+            )
+        }
+        if !applied || job.isCancelled
+            || !windowFocusOperations.enqueueRetryRaise(entry.pid, expectedWindow, job, completion)
+        {
+            completion()
+        }
+        return true
     }
 
     func retryManagedFocusFronting(_ request: ManagedFocusRequest) {
@@ -117,7 +161,8 @@ extension WMController {
         entry: WindowState,
         validatesPointer: Bool,
         isRetry: Bool = false,
-        preferredSameAppSourceToken: WindowToken? = nil
+        preferredSameAppSourceToken: WindowToken? = nil,
+        raisesWindow: Bool = true
     ) -> Bool {
         guard let liveRequest = intentLedger.activeManagedRequest(requestId: request.requestId),
               liveRequest.token == entry.token,
@@ -155,7 +200,8 @@ extension WMController {
             let applied = performWindowFronting(
                 pid: entry.pid,
                 windowId: entry.windowId,
-                axRef: entry.axRef
+                axRef: entry.axRef,
+                raisesWindow: raisesWindow
             )
             if applied, case .awaitingSameAppActivation = liveRequest.phase {
                 _ = intentLedger.completeSameAppActivationHandoff(
@@ -498,7 +544,9 @@ extension WMController {
     @discardableResult
     func focusWindow(
         _ token: WindowToken,
-        origin: ManagedFocusOrigin = .keyboardOrProgrammatic
+        origin: ManagedFocusOrigin = .keyboardOrProgrammatic,
+        raisesWindow: Bool = true,
+        defersRetryRaise: Bool = false
     ) -> ManagedFocusRequest? {
         guard origin != .focusFollowsMouse || focusFollowsMouseEnabled else { return nil }
         if origin == .focusFollowsMouse,
@@ -549,6 +597,9 @@ extension WMController {
             workspaceId: workspaceId,
             origin: origin
         )
+        if defersRetryRaise {
+            intentLedger.enableDeferredRetryRaise(for: request)
+        }
         if let previousRequestId {
             abortScratchpadStacking(matching: previousRequestId)
         }
@@ -570,7 +621,8 @@ extension WMController {
             request,
             entry: entry,
             validatesPointer: false,
-            preferredSameAppSourceToken: preferredSameAppSourceToken
+            preferredSameAppSourceToken: preferredSameAppSourceToken,
+            raisesWindow: raisesWindow
         )
         if let promotedHandoffSourceToken,
            request.origin != .focusFollowsMouse,

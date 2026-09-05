@@ -188,7 +188,7 @@ final class SurfaceReconciler {
     private(set) var reconcileScheduled = false
     private(set) var forceOrderingOnNextReconcile = false
     private(set) var pendingReconcileScope: ReconcileScope?
-    private let borderApplier = BorderSurfaceApplier()
+    private let borderApplier: BorderSurfaceApplier
     private let parkingEdgeMaskManager = ParkingEdgeMaskManager()
     private let applyTabRails: TabRailApply
     private let applyNativeFullscreenPlaceholders: NativeFullscreenPlaceholderApply
@@ -267,6 +267,7 @@ final class SurfaceReconciler {
 
     init(
         controller: WMController,
+        borderApplier: BorderSurfaceApplier = BorderSurfaceApplier(),
         applyTabRails: @escaping TabRailApply = { controller, infos, forceOrdering in
             controller.tabRailManager.updateRails(infos, forceOrdering: forceOrdering)
         },
@@ -281,9 +282,16 @@ final class SurfaceReconciler {
         }
     ) {
         self.controller = controller
+        self.borderApplier = borderApplier
         self.applyTabRails = applyTabRails
         self.applyNativeFullscreenPlaceholders = applyNativeFullscreenPlaceholders
+        borderApplier.onWindowLevelResolved = { [weak self] in
+            self?.noteBorderChanged()
+        }
         borderApplier.onDisplayScaleInvalidated = { [weak self] in
+            self?.noteBorderChanged()
+        }
+        borderApplier.onCornerSampleResolved = { [weak self] in
             self?.noteBorderChanged()
         }
     }
@@ -347,7 +355,7 @@ final class SurfaceReconciler {
             refreshCornerRadii: false
         )
         appliedScene.border = outcome.didApply ? desiredBorder : nil
-        if outcome.needsCornerRadiiRetry || outcome.needsWindowLevelRetry {
+        if outcome.needsWindowLevelRetry {
             noteBorderChanged()
         }
     }
@@ -536,16 +544,13 @@ final class SurfaceReconciler {
             }
             return resolved
         }
-        let refreshCornerRadii = desired.border.map {
-            !controller.axManager.hasPendingFrameWrite(for: $0.windowId)
-        } ?? true
         let outcome = applyFull(
             desired,
             on: controller,
             forceOrdering: forceOrdering,
-            refreshCornerRadii: refreshCornerRadii
+            refreshCornerRadii: shouldRefreshCornerRadii(for: desired.border, controller: controller)
         )
-        if outcome.needsCornerRadiiRetry || outcome.needsWindowLevelRetry {
+        if outcome.needsWindowLevelRetry {
             noteBorderChanged()
         }
     }
@@ -557,22 +562,30 @@ final class SurfaceReconciler {
         let desiredBorder = world.hasStartedServices
             ? SurfaceDerivation.deriveBorder(world: world)
             : nil
-        let refreshCornerRadii = desiredBorder.map {
-            !controller.axManager.hasPendingFrameWrite(for: $0.windowId)
-        } ?? true
         let outcome = borderApplier.apply(
             desiredBorder,
             forceOrdering: forceOrdering,
-            refreshCornerRadii: refreshCornerRadii
+            refreshCornerRadii: shouldRefreshCornerRadii(for: desiredBorder, controller: controller)
         )
         if forceOrdering {
             applyTabRails(controller, appliedScene.tabRails, true)
             applyNativeFullscreenPlaceholders(controller, appliedScene.placeholders, true)
         }
         appliedScene.border = outcome.didApply ? desiredBorder : nil
-        if outcome.needsCornerRadiiRetry || outcome.needsWindowLevelRetry {
+        if outcome.needsWindowLevelRetry {
             noteBorderChanged()
         }
+    }
+
+    private func shouldRefreshCornerRadii(
+        for border: DesiredBorderSurface?,
+        controller: WMController
+    ) -> Bool {
+        guard let border,
+              let entry = controller.workspaceManager.entry(for: border.token)
+        else { return false }
+        return !controller.workspaceManager.animationDriver.hasMotion(in: entry.workspaceId)
+            && !controller.axManager.hasPendingFrameWrite(for: border.windowId)
     }
 
     private func applyFull(

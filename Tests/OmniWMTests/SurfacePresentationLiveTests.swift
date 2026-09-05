@@ -107,49 +107,6 @@ final class SurfacePresentationLiveTests: XCTestCase {
         }
     }
 
-    @MainActor
-    private final class LiveBorderOperationsRecorder {
-        private let live = BorderWindow.Operations.live
-        private(set) var createdWindowCount = 0
-        private(set) var releasedWindowCount = 0
-        private(set) var contextCount = 0
-        private(set) var shapeCount = 0
-        private(set) var flushCount = 0
-
-        func operations() -> BorderWindow.Operations {
-            var operations = live
-            operations.createBorderWindow = { [weak self] frame in
-                guard let self else { return 0 }
-                let windowId = live.createBorderWindow(frame)
-                if windowId != 0 {
-                    createdWindowCount += 1
-                }
-                return windowId
-            }
-            operations.releaseBorderWindow = { [weak self] windowId in
-                self?.releasedWindowCount += 1
-                self?.live.releaseBorderWindow(windowId)
-            }
-            operations.createWindowContext = { [weak self] windowId in
-                guard let self else { return nil }
-                let context = live.createWindowContext(windowId)
-                if context != nil {
-                    contextCount += 1
-                }
-                return context
-            }
-            operations.setWindowShape = { [weak self] windowId, frame in
-                self?.shapeCount += 1
-                self?.live.setWindowShape(windowId, frame)
-            }
-            operations.flushWindow = { [weak self] windowId in
-                self?.flushCount += 1
-                self?.live.flushWindow(windowId)
-            }
-            return operations
-        }
-    }
-
     func testLiveBorderPresentsConfiguredColorsAcrossResize() async throws {
         try requireLiveMeasurementsEnabled()
         guard CGPreflightScreenCaptureAccess() else {
@@ -169,7 +126,6 @@ final class SurfacePresentationLiveTests: XCTestCase {
             frame: smallFrame,
             backgroundColor: NSColor(srgbRed: 0.25, green: 0.25, blue: 0.25, alpha: 1)
         )
-        let operationRecorder = LiveBorderOperationsRecorder()
         let borderWidth: CGFloat = 12
         let cornerRadii = WindowCornerRadii(uniform: 12)
         let redConfig = BorderConfig(
@@ -187,7 +143,7 @@ final class SurfacePresentationLiveTests: XCTestCase {
             width: borderWidth,
             color: SettingsColor(red: 0, green: 1, blue: 0, alpha: 1)
         )
-        let borderWindow = BorderWindow(config: redConfig, operations: operationRecorder.operations())
+        let borderWindow = BorderWindow(config: redConfig)
         defer {
             borderWindow.destroy()
             clientWindow.close()
@@ -230,9 +186,6 @@ final class SurfacePresentationLiveTests: XCTestCase {
             )
         )
         let initialWindowId = try XCTUnwrap(borderWindow.windowId)
-        XCTAssertEqual(operationRecorder.createdWindowCount, 1)
-        XCTAssertEqual(operationRecorder.contextCount, 1)
-        XCTAssertEqual(operationRecorder.flushCount, 1)
         try await assertBorderPresentation(
             borderWindow,
             expected: BorderPresentationRGB(red: 255, green: 0, blue: 0),
@@ -246,9 +199,7 @@ final class SurfacePresentationLiveTests: XCTestCase {
             label: "border-red-small"
         )
 
-        let flushesBeforeBlue = operationRecorder.flushCount
         borderWindow.updateConfig(blueConfig)
-        XCTAssertEqual(operationRecorder.flushCount, flushesBeforeBlue)
         XCTAssertTrue(
             borderWindow.update(
                 frame: smallFrame,
@@ -256,7 +207,6 @@ final class SurfacePresentationLiveTests: XCTestCase {
                 cornerRadii: cornerRadii
             )
         )
-        XCTAssertEqual(operationRecorder.flushCount, flushesBeforeBlue + 1)
         XCTAssertEqual(borderWindow.windowId, initialWindowId)
         try await assertBorderPresentation(
             borderWindow,
@@ -271,7 +221,6 @@ final class SurfacePresentationLiveTests: XCTestCase {
             label: "border-blue-small"
         )
 
-        let flushesBeforeIdenticalUpdate = operationRecorder.flushCount
         XCTAssertTrue(
             borderWindow.update(
                 frame: smallFrame,
@@ -279,10 +228,7 @@ final class SurfacePresentationLiveTests: XCTestCase {
                 cornerRadii: cornerRadii
             )
         )
-        XCTAssertEqual(operationRecorder.flushCount, flushesBeforeIdenticalUpdate)
 
-        let flushesBeforeGrowth = operationRecorder.flushCount
-        let shapesBeforeGrowth = operationRecorder.shapeCount
         clientWindow.setFrame(largeFrame, display: true)
         XCTAssertTrue(
             borderWindow.update(
@@ -291,8 +237,6 @@ final class SurfacePresentationLiveTests: XCTestCase {
                 cornerRadii: cornerRadii
             )
         )
-        XCTAssertEqual(operationRecorder.flushCount, flushesBeforeGrowth + 1)
-        XCTAssertEqual(operationRecorder.shapeCount, shapesBeforeGrowth + 1)
         XCTAssertEqual(borderWindow.windowId, initialWindowId)
         try await assertBorderPresentation(
             borderWindow,
@@ -307,7 +251,6 @@ final class SurfacePresentationLiveTests: XCTestCase {
             label: "border-blue-large"
         )
 
-        let flushesBeforeGreen = operationRecorder.flushCount
         borderWindow.updateConfig(greenConfig)
         XCTAssertTrue(
             borderWindow.update(
@@ -316,7 +259,6 @@ final class SurfacePresentationLiveTests: XCTestCase {
                 cornerRadii: cornerRadii
             )
         )
-        XCTAssertEqual(operationRecorder.flushCount, flushesBeforeGreen + 1)
         try await assertBorderPresentation(
             borderWindow,
             expected: BorderPresentationRGB(red: 0, green: 255, blue: 0),
@@ -330,8 +272,6 @@ final class SurfacePresentationLiveTests: XCTestCase {
             label: "border-green-large"
         )
 
-        let flushesBeforeResizeCycle = operationRecorder.flushCount
-        let shapesBeforeResizeCycle = operationRecorder.shapeCount
         clientWindow.setFrame(smallFrame, display: true)
         XCTAssertTrue(
             borderWindow.update(
@@ -348,10 +288,6 @@ final class SurfacePresentationLiveTests: XCTestCase {
                 cornerRadii: cornerRadii
             )
         )
-        XCTAssertEqual(operationRecorder.flushCount, flushesBeforeResizeCycle + 2)
-        XCTAssertEqual(operationRecorder.shapeCount, shapesBeforeResizeCycle + 2)
-        XCTAssertEqual(operationRecorder.createdWindowCount, 1)
-        XCTAssertEqual(operationRecorder.releasedWindowCount, 0)
         XCTAssertEqual(borderWindow.windowId, initialWindowId)
         try await assertBorderPresentation(
             borderWindow,

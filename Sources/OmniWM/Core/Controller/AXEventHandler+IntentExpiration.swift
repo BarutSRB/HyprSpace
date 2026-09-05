@@ -52,6 +52,7 @@ extension AXEventHandler {
             case .awaitingSameAppActivation:
                 controller.completeSameAppFocusHandoff(liveRequest)
             case .awaitingConfirmation:
+                if controller.deferManagedFocusRetry(liveRequest) { return }
                 controller.retryManagedFocusFronting(liveRequest)
                 guard controller.intentLedger.activeManagedRequest(
                     requestId: liveRequest.requestId

@@ -234,7 +234,8 @@ final class AnimationDriver {
         workspaceId: WorkspaceDescriptor.ID,
         previous: ViewportState?,
         next: ViewportState,
-        transition: OffsetTransition
+        transition: OffsetTransition,
+        at time: TimeInterval = CACurrentMediaTime()
     ) {
         recordViewportCommitTrace(
             workspaceId: workspaceId,
@@ -254,7 +255,6 @@ final class AnimationDriver {
             }
         }
 
-        let time = CACurrentMediaTime()
         let origin = gestureCommitOrigin(
             workspaceId: workspaceId,
             previous: previous,

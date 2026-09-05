@@ -15,7 +15,7 @@ extension AXEventHandler {
               origin == .external,
               let focusedToken,
               let entry = controller?.workspaceManager.entry(for: focusedToken),
-              managedWindowToken(focusedToken, matchesObservedPid: pid)
+              managedWindowTokenUsingCachedIdentity(focusedToken, matchesObservedPid: pid)
         else {
             return nil
         }

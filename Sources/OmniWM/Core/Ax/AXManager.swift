@@ -213,8 +213,8 @@ final class AXManager {
         AXManager.managedWindowBindingRetryDelay(afterFailure: $0)
     }
 
-    var fullRescanWindowInfoProvider: (Set<UInt32>) -> [UInt32: WindowServerInfo]? = {
-        SkyLight.shared.queryWindowInfo(windowIds: $0)
+    var fullRescanWindowInfoProvider: @MainActor (Set<UInt32>) async throws -> [UInt32: WindowServerInfo]? = {
+        try await SkyLight.shared.queryWindowInfoDeferred(windowIds: $0)
     }
 
     private let frameLedger = AXFrameApplicationLedger()
@@ -1135,7 +1135,7 @@ final class AXManager {
         switch scope {
         case .all:
             discoveryEvidence = fullRescanDiscoveryEvidence()
-            _ = mergeFullRescanWindowServerEvidence(
+            _ = try await mergeFullRescanWindowServerEvidence(
                 windowIds: Set(preservingPIDsByWindowId.keys),
                 expectedPIDsByWindowId: preservingPIDsByWindowId,
                 into: &discoveryEvidence
@@ -1223,7 +1223,7 @@ final class AXManager {
                     : nil
             }
         )
-        var windowServerEvidenceSucceeded = mergeFullRescanWindowServerEvidence(
+        var windowServerEvidenceSucceeded = try await mergeFullRescanWindowServerEvidence(
             windowIds: preservedTargetWindowIds,
             into: &discoveryEvidence
         )
@@ -1286,7 +1286,7 @@ final class AXManager {
                 callbackGeneration: result.callbackGeneration
             )
         }
-        if !mergeFullRescanWindowServerEvidence(
+        if try await !mergeFullRescanWindowServerEvidence(
             for: results,
             into: &discoveryEvidence
         ) {
@@ -1336,7 +1336,7 @@ final class AXManager {
                     callbackGeneration: result.callbackGeneration
                 )
             }
-            if !mergeFullRescanWindowServerEvidence(
+            if try await !mergeFullRescanWindowServerEvidence(
                 for: dependencyResults,
                 into: &discoveryEvidence
             ) {
@@ -1390,9 +1390,9 @@ final class AXManager {
     private func mergeFullRescanWindowServerEvidence(
         for results: [FullRescanAppEnumerationResult],
         into evidence: inout FullRescanDiscoveryEvidence
-    ) -> Bool {
+    ) async throws -> Bool {
         let windowIds = Set(results.lazy.flatMap(\.windows).map(\.axRef.windowId))
-        return mergeFullRescanWindowServerEvidence(windowIds: windowIds, into: &evidence)
+        return try await mergeFullRescanWindowServerEvidence(windowIds: windowIds, into: &evidence)
     }
 
     @discardableResult
@@ -1400,8 +1400,8 @@ final class AXManager {
         windowIds: Set<Int>,
         expectedPIDsByWindowId: [Int: pid_t]? = nil,
         into evidence: inout FullRescanDiscoveryEvidence
-    ) -> Bool {
-        guard let windowInfoById = queryFullRescanWindowServerEvidence(
+    ) async throws -> Bool {
+        guard let windowInfoById = try await queryFullRescanWindowServerEvidence(
             windowIds: windowIds,
             excludingWindowIds: Set(evidence.windowServerInfoByWindowId.keys),
             expectedPIDsByWindowId: expectedPIDsByWindowId
@@ -1420,12 +1420,14 @@ final class AXManager {
         windowIds: Set<Int>,
         excludingWindowIds: Set<Int>,
         expectedPIDsByWindowId: [Int: pid_t]? = nil
-    ) -> [Int: WindowServerInfo]? {
+    ) async throws -> [Int: WindowServerInfo]? {
         let missingWindowIds = Set(
             windowIds.subtracting(excludingWindowIds).compactMap(UInt32.init(exactly:))
         )
         guard !missingWindowIds.isEmpty else { return [:] }
-        guard let queriedInfoById = fullRescanWindowInfoProvider(missingWindowIds) else {
+        let queriedInfoById = try await fullRescanWindowInfoProvider(missingWindowIds)
+        try Task.checkCancellation()
+        guard let queriedInfoById else {
             return nil
         }
         return Dictionary(

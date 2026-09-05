@@ -901,6 +901,8 @@ final class ServiceLifecycleManager {
 
         controller.axManager.cleanup()
 
+        SkyLight.shared.stopWindowInfoQueries()
+
         displayObserver = nil
 
         if let observer = appActivationObserver {

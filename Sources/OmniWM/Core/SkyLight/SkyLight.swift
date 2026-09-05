@@ -3,6 +3,7 @@
 
 import CoreGraphics
 import Foundation
+import Synchronization
 
 enum SkyLightWindowOrder: Int32 {
     case below = -1
@@ -118,6 +119,8 @@ final class SkyLight {
     static let shared = SkyLight()
 
     private typealias MainConnectionIDFunc = @convention(c) () -> Int32
+    private typealias NewConnectionFunc = @convention(c) (Int32, UnsafeMutablePointer<Int32>) -> CGError
+    private typealias ReleaseConnectionFunc = @convention(c) (Int32) -> CGError
     private typealias WindowQueryWindowsFunc = @convention(c) (Int32, CFArray, UInt32) -> Unmanaged<CFTypeRef>?
     private typealias WindowQueryResultCopyWindowsFunc = @convention(c) (CFTypeRef) -> Unmanaged<CFTypeRef>?
     private typealias WindowIteratorGetCountFunc = @convention(c) (CFTypeRef) -> Int32
@@ -226,6 +229,9 @@ final class SkyLight {
     ) -> Int32
 
     private let mainConnectionID: MainConnectionIDFunc
+    private let newConnection: NewConnectionFunc?
+    private let releaseConnection: ReleaseConnectionFunc?
+    private var deferredWindowInfoConnection: WindowInfoConnection?
     private let windowQueryWindows: WindowQueryWindowsFunc
     private let windowQueryResultCopyWindows: WindowQueryResultCopyWindowsFunc
     private let windowIteratorGetCount: WindowIteratorGetCountFunc
@@ -311,6 +317,8 @@ final class SkyLight {
         }
 
         mainConnectionID = resolve("SLSMainConnectionID", as: MainConnectionIDFunc.self)
+        newConnection = resolveOptional("SLSNewConnection", as: NewConnectionFunc.self)
+        releaseConnection = resolveOptional("SLSReleaseConnection", as: ReleaseConnectionFunc.self)
         windowQueryWindows = resolve("SLSWindowQueryWindows", as: WindowQueryWindowsFunc.self)
         windowQueryResultCopyWindows = resolve(
             "SLSWindowQueryResultCopyWindows",
@@ -406,6 +414,33 @@ final class SkyLight {
         }
     }
 
+    func cornerSampleDeferred(for token: WindowToken) async throws -> WindowCornerSample? {
+        try Task.checkCancellation()
+        guard let wid = UInt32(exactly: token.windowId), wid != 0,
+              let connection = windowInfoConnection()
+        else { return nil }
+        return try await connection.perform { [
+            windowQueryWindows, windowQueryResultCopyWindows, windowIteratorAdvance,
+            windowIteratorGetWindowID, windowIteratorGetPID, windowIteratorGetBounds,
+            windowIteratorGetResolvedCornerRadii, windowIteratorGetCornerRadii
+        ] cid in
+            let windowNumbers = [NSNumber(value: wid)] as CFArray
+            guard let query = windowQueryWindows(cid, windowNumbers, 1)?.takeRetainedValue(),
+                  let iterator = windowQueryResultCopyWindows(query)?.takeRetainedValue(),
+                  windowIteratorAdvance(iterator),
+                  windowIteratorGetWindowID(iterator) == wid,
+                  windowIteratorGetPID(iterator) == token.pid
+            else { return nil }
+            let observedSize = windowIteratorGetBounds(iterator).size
+            let resolved = windowIteratorGetResolvedCornerRadii?(iterator, 0)?.takeRetainedValue()
+            if let sample = Self.cornerSample(resolved: resolved, raw: nil, observedSize: observedSize) {
+                return sample
+            }
+            let raw = windowIteratorGetCornerRadii(iterator, 0)?.takeRetainedValue()
+            return Self.cornerSample(resolved: nil, raw: raw, observedSize: observedSize)
+        }
+    }
+
     func diagnosticCornerSamples(
         forWindowId wid: Int
     ) -> (resolved: WindowCornerSample?, raw: WindowCornerSample?) {
@@ -455,7 +490,7 @@ final class SkyLight {
     /// treated as an invalid (not-yet-materialized) reading, not a square window.
     /// - Returns: A sample when a non-zero radii array parses against the observed
     ///   size; `nil` when neither array yields a usable reading.
-    static func cornerSample(
+    nonisolated static func cornerSample(
         resolved: CFArray?,
         raw: CFArray?,
         observedSize: CGSize
@@ -485,7 +520,7 @@ final class SkyLight {
         )
     }
 
-    static func parseCornerRadii(_ values: CFArray?) -> WindowCornerRadii? {
+    nonisolated static func parseCornerRadii(_ values: CFArray?) -> WindowCornerRadii? {
         guard let values else { return nil }
         let count = CFArrayGetCount(values)
         guard count == 1 || count == 4 else { return nil }
@@ -662,37 +697,162 @@ final class SkyLight {
         return .authoritative(inventory)
     }
 
-    func queryWindowInfo(
-        windowIds: Set<UInt32>
-    ) -> [UInt32: WindowServerInfo]? {
-        guard !windowIds.isEmpty else { return [:] }
-        let cid = getMainConnectionID()
-        guard cid != 0,
-              let windowCount = UInt32(exactly: windowIds.count)
-        else {
-            return nil
+    private struct WindowInfoQuery: Sendable {
+        let windowIds: Set<UInt32>
+        let windowQueryWindows: WindowQueryWindowsFunc
+        let windowQueryResultCopyWindows: WindowQueryResultCopyWindowsFunc
+        let windowIteratorAdvance: WindowIteratorAdvanceFunc
+        let windowIteratorGetWindowID: WindowIteratorGetWindowIDFunc
+        let windowIteratorGetPID: WindowIteratorGetPIDFunc
+        let windowIteratorGetLevel: WindowIteratorGetLevelFunc
+        let windowIteratorGetBounds: WindowIteratorGetBoundsFunc
+        let windowIteratorGetTags: WindowIteratorGetTagsFunc
+        let windowIteratorGetAttributes: WindowIteratorGetAttributesFunc
+        let windowIteratorGetParentID: WindowIteratorGetParentIDFunc
+
+        nonisolated func read(connectionId cid: Int32) -> [UInt32: WindowServerInfo]? {
+            guard !windowIds.isEmpty else { return [:] }
+            guard cid != 0,
+                  let windowCount = UInt32(exactly: windowIds.count)
+            else {
+                return nil
+            }
+
+            let windowNumbers = windowIds.map { NSNumber(value: $0) } as CFArray
+            guard let query = windowQueryWindows(cid, windowNumbers, windowCount)?.takeRetainedValue()
+            else { return nil }
+            guard let iterator = windowQueryResultCopyWindows(query)?.takeRetainedValue() else { return nil }
+
+            var windowInfoById: [UInt32: WindowServerInfo] = [:]
+            windowInfoById.reserveCapacity(windowIds.count)
+            while windowIteratorAdvance(iterator) {
+                let windowId = windowIteratorGetWindowID(iterator)
+                guard windowIds.contains(windowId) else { continue }
+                windowInfoById[windowId] = WindowServerInfo(
+                    id: windowId,
+                    pid: windowIteratorGetPID(iterator),
+                    level: windowIteratorGetLevel(iterator),
+                    frame: windowIteratorGetBounds(iterator),
+                    tags: windowIteratorGetTags(iterator),
+                    attributes: windowIteratorGetAttributes(iterator),
+                    parentId: windowIteratorGetParentID(iterator)
+                )
+            }
+            return windowInfoById
         }
+    }
 
-        let windowNumbers = windowIds.map { NSNumber(value: $0) } as CFArray
-        guard let query = windowQueryWindows(cid, windowNumbers, windowCount)?.takeRetainedValue() else { return nil }
-        guard let iterator = windowQueryResultCopyWindows(query)?.takeRetainedValue() else { return nil }
+    private func windowInfoQuery(_ windowIds: Set<UInt32>) -> WindowInfoQuery {
+        WindowInfoQuery(
+            windowIds: windowIds,
+            windowQueryWindows: windowQueryWindows,
+            windowQueryResultCopyWindows: windowQueryResultCopyWindows,
+            windowIteratorAdvance: windowIteratorAdvance,
+            windowIteratorGetWindowID: windowIteratorGetWindowID,
+            windowIteratorGetPID: windowIteratorGetPID,
+            windowIteratorGetLevel: windowIteratorGetLevel,
+            windowIteratorGetBounds: windowIteratorGetBounds,
+            windowIteratorGetTags: windowIteratorGetTags,
+            windowIteratorGetAttributes: windowIteratorGetAttributes,
+            windowIteratorGetParentID: windowIteratorGetParentID
+        )
+    }
 
-        var windowInfoById: [UInt32: WindowServerInfo] = [:]
-        windowInfoById.reserveCapacity(windowIds.count)
-        while windowIteratorAdvance(iterator) {
-            let windowId = windowIteratorGetWindowID(iterator)
-            guard windowIds.contains(windowId) else { continue }
-            windowInfoById[windowId] = WindowServerInfo(
-                id: windowId,
-                pid: windowIteratorGetPID(iterator),
-                level: windowIteratorGetLevel(iterator),
-                frame: windowIteratorGetBounds(iterator),
-                tags: windowIteratorGetTags(iterator),
-                attributes: windowIteratorGetAttributes(iterator),
-                parentId: windowIteratorGetParentID(iterator)
+    func queryWindowInfo(windowIds: Set<UInt32>) -> [UInt32: WindowServerInfo]? {
+        guard !windowIds.isEmpty else { return [:] }
+        return windowInfoQuery(windowIds).read(connectionId: getMainConnectionID())
+    }
+
+    func queryWindowInfoDeferred(windowIds: Set<UInt32>) async throws -> [UInt32: WindowServerInfo]? {
+        try Task.checkCancellation()
+        guard !windowIds.isEmpty else { return [:] }
+        guard let connection = windowInfoConnection() else { return nil }
+        let query = windowInfoQuery(windowIds)
+        return try await connection.perform { query.read(connectionId: $0) }
+    }
+
+    private func windowInfoConnection() -> WindowInfoConnection? {
+        if deferredWindowInfoConnection == nil {
+            guard let newConnection, let releaseConnection else { return nil }
+            deferredWindowInfoConnection = WindowInfoConnection(
+                mainConnectionId: getMainConnectionID(),
+                create: {
+                    var cid: Int32 = 0
+                    let error = newConnection(0, &cid)
+                    return (error, cid)
+                },
+                release: { _ = releaseConnection($0) }
             )
         }
-        return windowInfoById
+        return deferredWindowInfoConnection
+    }
+
+    func stopWindowInfoQueries() {
+        deferredWindowInfoConnection = nil
+    }
+
+    final class WindowInfoConnection: Sendable {
+        private let mainConnectionId: Int32
+        private let create: @Sendable () -> (CGError, Int32)
+        private let release: @Sendable (Int32) -> Void
+        private let connectionId = Mutex<Int32?>(nil)
+
+        nonisolated init(
+            mainConnectionId: Int32,
+            create: @escaping @Sendable () -> (CGError, Int32),
+            release: @escaping @Sendable (Int32) -> Void
+        ) {
+            self.mainConnectionId = mainConnectionId
+            self.create = create
+            self.release = release
+        }
+
+        deinit {
+            guard let cid = connectionId.withLock({ $0 }) else { return }
+            let release = release
+            windowInfoQueue.async {
+                release(cid)
+            }
+        }
+
+        nonisolated func perform<Result: Sendable>(
+            _ read: @escaping @Sendable (Int32) -> Result?
+        ) async throws -> Result? {
+            try await SkyLight.performWindowInfoQuery { [self] in
+                connectionId.withLock { cid in
+                    if cid == nil {
+                        let (error, created) = create()
+                        guard error == .success, created != 0, created != mainConnectionId else { return nil }
+                        cid = created
+                    }
+                    guard let cid else { return nil }
+                    return read(cid)
+                }
+            }
+        }
+    }
+
+    private nonisolated static let windowInfoQueue = DispatchQueue(
+        label: "OmniWM-WindowServerMetadata", qos: .userInteractive
+    )
+
+    nonisolated static func performWindowInfoQuery<Result: Sendable>(
+        _ read: @escaping @Sendable () -> Result?
+    ) async throws -> Result? {
+        try Task.checkCancellation()
+        let job = RunLoopJob()
+        let result = await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                windowInfoQueue.async {
+                    let result = job.isCancelled ? nil : autoreleasepool(invoking: read)
+                    continuation.resume(returning: result)
+                }
+            }
+        } onCancel: {
+            job.cancel()
+        }
+        try Task.checkCancellation()
+        return result
     }
 
     private func nativeSpaceWindowIds(

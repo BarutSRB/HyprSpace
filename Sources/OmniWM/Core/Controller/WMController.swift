@@ -13,6 +13,7 @@ struct WindowFocusOperations {
     let activateAndFocusSameAppWindow: (pid_t, UInt32, AXUIElement) -> Bool
     let raiseWindow: (AXUIElement) -> Void
     let orderWindow: (UInt32) -> Void
+    let enqueueRetryRaise: (pid_t, AXWindowRef, RunLoopJob, @escaping @MainActor @Sendable () -> Void) -> Bool
 
     init(
         activateApp: @escaping (pid_t) -> Void,
@@ -20,7 +21,13 @@ struct WindowFocusOperations {
         deactivateSameAppWindow: @escaping (pid_t, UInt32) -> Bool = { _, _ in false },
         activateAndFocusSameAppWindow: @escaping (pid_t, UInt32, AXUIElement) -> Bool = { _, _, _ in false },
         raiseWindow: @escaping (AXUIElement) -> Void,
-        orderWindow: @escaping (UInt32) -> Void = { _ in }
+        orderWindow: @escaping (UInt32) -> Void = { _ in },
+        enqueueRetryRaise: @escaping (
+            pid_t, AXWindowRef, RunLoopJob, @escaping @MainActor @Sendable () -> Void
+        ) -> Bool = { pid, window, job, completion in
+            guard let context = AppAXContext.contexts[pid] else { return false }
+            return context.enqueueRetryRaise(window, job: job, completion: completion)
+        }
     ) {
         self.activateApp = activateApp
         self.focusSpecificWindow = focusSpecificWindow
@@ -28,6 +35,7 @@ struct WindowFocusOperations {
         self.activateAndFocusSameAppWindow = activateAndFocusSameAppWindow
         self.raiseWindow = raiseWindow
         self.orderWindow = orderWindow
+        self.enqueueRetryRaise = enqueueRetryRaise
     }
 
     static let live = WindowFocusOperations(

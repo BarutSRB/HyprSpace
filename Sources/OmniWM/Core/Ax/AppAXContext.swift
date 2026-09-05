@@ -399,6 +399,9 @@ final class AppAXContext {
 
     private var activeFrameBatchJobs: [UUID: RunLoopJob] = [:]
     private var activeParkFrameBatchJob: RunLoopJob?
+    private var pendingRetryRaise: (
+        window: AXWindowRef, job: RunLoopJob, completion: @MainActor @Sendable () -> Void
+    )?
     private var activeClosingFrameBatchJobs: [UUID: RunLoopJob] = [:]
     private let frameMailbox = AppAXFrameMailbox()
     private let parkFrameMailbox = AppAXFrameMailbox(lane: .park)
@@ -1387,7 +1390,58 @@ final class AppAXContext {
     }
 
     func invalidateWindowIdentity() {
+        cancelRetryRaise()
         _ = windowBindingEpoch.advance()
+    }
+
+    func enqueueRetryRaise(
+        _ window: AXWindowRef,
+        job: RunLoopJob,
+        completion: @escaping @MainActor @Sendable () -> Void
+    ) -> Bool {
+        guard let thread, !job.isCancelled else { return false }
+        cancelRetryRaise()
+        pendingRetryRaise = (window, job, completion)
+        thread.runInLoopAsync(job: job) { [weak self, windows, frameWriteSuppression] job in
+            _ = Self.performRetryRaise(
+                window, windows: windows, suppression: frameWriteSuppression, job: job
+            )
+            scheduleOnMainRunLoop { [weak self] in
+                self?.finishRetryRaise(job: job)
+            }
+        }
+        return true
+    }
+
+    nonisolated static func performRetryRaise(
+        _ window: AXWindowRef,
+        windows: ThreadGuardedValue<[Int: AXUIElement]>,
+        suppression: LockedWindowIdSet,
+        job: RunLoopJob,
+        raiseWindow: (AXUIElement) -> Bool = {
+            performAXAction($0, kAXRaiseAction as CFString, noteKey: "performRaiseFailed")
+        }
+    ) -> Bool {
+        guard !job.isCancelled, !suppression.contains(window.windowId),
+              let element = windows.valueIfExists?[window.windowId],
+              CFEqual(element, window.element), !job.isCancelled
+        else { return false }
+        return raiseWindow(element)
+    }
+
+    private func finishRetryRaise(job: RunLoopJob) {
+        guard let pending = pendingRetryRaise, pending.job === job else { return }
+        pendingRetryRaise = nil
+        pending.completion()
+    }
+
+    private func cancelRetryRaise(for windowId: Int? = nil) {
+        guard let pending = pendingRetryRaise,
+              windowId == nil || pending.window.windowId == windowId
+        else { return }
+        pendingRetryRaise = nil
+        pending.job.cancel()
+        scheduleOnMainRunLoop(pending.completion)
     }
 
     nonisolated static func preservesCrossIdentitySubscription(
@@ -1442,6 +1496,15 @@ final class AppAXContext {
         timeoutSeconds: TimeInterval,
         completion: @escaping @MainActor @Sendable (AppAXWindowBindingResult) -> Void
     ) {
+        if let pending = pendingRetryRaise {
+            if let replacement = boundWindows[pending.window.windowId] {
+                if !CFEqual(replacement.element, pending.window.element) {
+                    cancelRetryRaise()
+                }
+            } else if pruningUnboundState {
+                cancelRetryRaise()
+            }
+        }
         guard pruningUnboundState || !boundWindows.isEmpty else {
             completion(.bound)
             return
@@ -2034,6 +2097,8 @@ final class AppAXContext {
     }
 
     func prepareWindowRebind(from oldWindowId: Int, to newWindowId: Int) {
+        cancelRetryRaise(for: oldWindowId)
+        cancelRetryRaise(for: newWindowId)
         frameWriteGenerations.invalidateAndMoveValue(from: oldWindowId, to: newWindowId)
         parkFrameWriteGenerations.invalidateAndMoveValue(from: oldWindowId, to: newWindowId)
         frameWriteSuppression.moveIfPresent(from: oldWindowId, to: newWindowId)
@@ -2041,12 +2106,16 @@ final class AppAXContext {
     }
 
     func prepareWindowRemoval(for windowId: Int) {
+        cancelRetryRaise(for: windowId)
         frameWriteGenerations.invalidateAndRemove(windowId)
         parkFrameWriteGenerations.invalidateAndRemove(windowId)
         frameWriteSuppression.remove(windowId)
     }
 
     func retainFrameState(only windowIds: Set<Int>) {
+        if let pending = pendingRetryRaise, !windowIds.contains(pending.window.windowId) {
+            cancelRetryRaise()
+        }
         frameWriteGenerations.retainOnly(windowIds)
         parkFrameWriteGenerations.retainOnly(windowIds)
         frameWriteSuppression.retainOnly(windowIds)
@@ -2133,6 +2202,7 @@ final class AppAXContext {
     func suppressFrameWrites(for windowIds: [Int]) {
         guard !windowIds.isEmpty else { return }
         for windowId in windowIds {
+            cancelRetryRaise(for: windowId)
             _ = frameWriteGenerations.nextGeneration(for: windowId)
             frameWriteSuppression.insert(windowId)
         }
@@ -2148,6 +2218,7 @@ final class AppAXContext {
     func setMacOSAppHidden(_ hidden: Bool, for windowIds: [Int]) {
         frameWriteSuppression.setHardSuppressed(hidden)
         if hidden {
+            cancelRetryRaise()
             closingFrameWriteGenerations.invalidateAll()
         }
         for windowId in windowIds {
@@ -2689,6 +2760,7 @@ final class AppAXContext {
     }
 
     func destroy() {
+        cancelRetryRaise()
         if thread != nil {
             WindowAdmissionTrace.record(
                 .init(
