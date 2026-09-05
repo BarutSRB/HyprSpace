@@ -222,7 +222,7 @@ enum CLIRenderer {
             "protocol \(version.protocolVersion)",
             version.gitHash.map { "build \($0)" },
             version.buildConfiguration,
-            version.executableSHA256.map { "sha256 \($0)" }
+            version.executableSHA256.map { "sha256 \($0.prefix(12))" }
         ].compactMap(\.self).joined(separator: ", ")
         if let appVersion = version.appVersion {
             return "\(appVersion) (\(detail))"
@@ -590,10 +590,6 @@ enum CLIRenderer {
                 + " mean \(String(format: "%.2f", payload.axWrites.meanMicroseconds / 1_000)) ms"
                 + " max \(String(format: "%.2f", payload.axWrites.maxMicroseconds / 1_000)) ms"
                 + " failed \(payload.axWrites.failureCount)"
-        )
-        lines.append(
-            "  counted: whole-attempt wall time around each frame setter, including its ordering"
-                + " and verification reads; not counted: enhanced-UI batch work and the retry element refresh"
         )
         let ticks = payload.displayTicks
         lines.append(

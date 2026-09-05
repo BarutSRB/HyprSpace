@@ -120,7 +120,7 @@ Turning **Enable IPC** on starts the server immediately and creates the Unix soc
 
 ## IPC Protocol
 
-**Protocol version:** 14
+**Protocol version:** 15
 
 The client and server versions must match exactly. A mismatched client can still call `version`, but every other remote request returns `protocol_mismatch`; there is no cross-version compatibility path.
 

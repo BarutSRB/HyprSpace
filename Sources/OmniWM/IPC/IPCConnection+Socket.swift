@@ -129,7 +129,7 @@ extension IPCConnection {
             suspendWrites()
             if isClosing { finalizeClose() }
         case .wouldBlock:
-            if pendingWriteBytes > limits.maxPendingWriteBytes { closeImmediately() }
+            break
         case .failed:
             closeImmediately()
         }
