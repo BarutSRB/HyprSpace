@@ -1405,6 +1405,16 @@ final class AXEventHandler {
         return true
     }
 
+    private func isTiledInActiveLayout(_ entry: WindowState) -> Bool {
+        guard let controller, entry.mode == .tiling else { return false }
+        switch controller.workspaceManager.activeLayoutKind(for: entry.workspaceId) {
+        case .niri:
+            return controller.niriEngine?.findNode(for: entry.token, in: entry.workspaceId) != nil
+        case .dwindle:
+            return controller.dwindleEngine?.containsWindow(entry.token, in: entry.workspaceId) == true
+        }
+    }
+
     private func shouldDeferSameAppActivationForCloseProbe(
         entry observedEntry: WindowState,
         requestDisposition: ActivationRequestDisposition,
@@ -1416,28 +1426,14 @@ final class AXEventHandler {
         guard case .unrelatedNoRequest = requestDisposition else { return false }
         guard let controller else { return false }
         guard !hasRecentMouseFocusIntent(for: observedEntry.token) else { return false }
-        guard observedEntry.mode == .tiling,
-              controller.workspaceManager.activeLayoutKind(for: observedEntry.workspaceId) == .niri,
-              controller.niriEngine?.findNode(for: observedEntry.token, in: observedEntry.workspaceId) != nil
-        else {
-            return false
-        }
+        guard isTiledInActiveLayout(observedEntry) else { return false }
 
         guard let focusedToken = controller.workspaceManager.selectedManagedToken,
               focusedToken != observedEntry.token,
               focusedToken.pid == observedEntry.pid,
               let focusedEntry = controller.workspaceManager.entry(for: focusedToken),
-              focusedEntry.mode == .tiling,
-              controller.niriEngine?.findNode(for: focusedToken, in: focusedEntry.workspaceId) != nil,
-              let focusedWorkspace = controller.workspaceManager.descriptor(for: focusedEntry.workspaceId)
+              isTiledInActiveLayout(focusedEntry)
         else {
-            return false
-        }
-        switch controller.settings.layoutType(for: focusedWorkspace.name) {
-        case .niri,
-             .defaultLayout:
-            break
-        case .dwindle:
             return false
         }
 
