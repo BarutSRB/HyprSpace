@@ -414,6 +414,9 @@
       <a href="https://github.com/llwt" title="Steven Nance">
         <img src="https://github.com/llwt.png?size=96" width="72" alt="Steven Nance">
       </a>
+      <a href="https://github.com/tayiorbeii" title="Taylor Bell">
+        <img src="https://github.com/tayiorbeii.png?size=96" width="72" alt="Taylor Bell">
+      </a>
       <a href="https://github.com/chenhaozhenss" title="Williamufo">
         <img src="https://github.com/chenhaozhenss.png?size=96" width="72" alt="Williamufo">
       </a>

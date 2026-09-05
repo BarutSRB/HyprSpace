@@ -33,6 +33,7 @@ export const contributors: Contributor[] = [
   { name: 'rPio', handle: '1Pio' },
   { name: 'Ryan Hecht', handle: 'RyanHecht' },
   { name: 'Steven Nance', handle: 'llwt' },
+  { name: 'Taylor Bell', handle: 'tayiorbeii' },
   { name: 'Williamufo', handle: 'chenhaozhenss' },
   { name: 'Yang-Yiming', handle: 'Yang-Yiming' },
   { name: 'Yuri Chukhlib', handle: 'YuriNachos' },
