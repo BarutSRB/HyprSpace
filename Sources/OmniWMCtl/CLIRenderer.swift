@@ -218,10 +218,16 @@ enum CLIRenderer {
     }
 
     private static func humanReadableVersion(_ version: IPCVersionResult) -> String {
+        let detail = [
+            "protocol \(version.protocolVersion)",
+            version.gitHash.map { "build \($0)" },
+            version.buildConfiguration,
+            version.executableSHA256.map { "sha256 \($0)" }
+        ].compactMap(\.self).joined(separator: ", ")
         if let appVersion = version.appVersion {
-            return "\(appVersion) (protocol \(version.protocolVersion))"
+            return "\(appVersion) (\(detail))"
         }
-        return "protocol \(version.protocolVersion)"
+        return detail
     }
 
     private static func formattedActiveWorkspace(

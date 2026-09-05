@@ -75,6 +75,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     public func applicationDidFinishLaunching(_: Notification) {
         NSApplication.shared.setActivationPolicy(.accessory)
+        _ = OmniWMBuildInfo.executableSHA256
         bootstrapApplication()
     }
 

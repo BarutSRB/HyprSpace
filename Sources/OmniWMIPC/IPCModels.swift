@@ -2327,10 +2327,22 @@ public struct IPCPingResult: Codable, Equatable, Sendable {
 public struct IPCVersionResult: Codable, Equatable, Sendable {
     public let protocolVersion: Int
     public let appVersion: String?
+    public let gitHash: String?
+    public let buildConfiguration: String?
+    public let executableSHA256: String?
 
-    public init(protocolVersion: Int = OmniWMIPCProtocol.version, appVersion: String?) {
+    public init(
+        protocolVersion: Int = OmniWMIPCProtocol.version,
+        appVersion: String?,
+        gitHash: String? = nil,
+        buildConfiguration: String? = nil,
+        executableSHA256: String? = nil
+    ) {
         self.protocolVersion = protocolVersion
         self.appVersion = appVersion
+        self.gitHash = gitHash
+        self.buildConfiguration = buildConfiguration
+        self.executableSHA256 = executableSHA256
     }
 }
 

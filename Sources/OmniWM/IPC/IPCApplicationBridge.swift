@@ -135,13 +135,14 @@ actor IPCApplicationBridge {
     }
 
     private func versionResult() async -> IPCResult {
-        await MainActor.run {
+        let executableSHA256 = await OmniWMBuildInfo.executableSHA256.value
+        return await MainActor.run {
             let queryRouter = IPCQueryRouter(
                 controller: controller,
                 appVersion: appVersion,
                 sessionToken: sessionToken
             )
-            return IPCResult(version: queryRouter.versionResult())
+            return IPCResult(version: queryRouter.versionResult(executableSHA256: executableSHA256))
         }
     }
 

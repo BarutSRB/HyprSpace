@@ -235,6 +235,32 @@ final class IPCProtocolEnvelopeTests: XCTestCase {
         }
     }
 
+    func testVersionResultCarriesTheBuildFingerprintOnTheWire() throws {
+        let result = IPCVersionResult(
+            protocolVersion: 15,
+            appVersion: "0.6.5",
+            gitHash: "5a82c1f5",
+            buildConfiguration: "release",
+            executableSHA256: String(repeating: "ab", count: 32)
+        )
+
+        let encoded = try IPCWire.encodeResponseLine(
+            .success(id: "version", kind: .version, result: IPCResult(version: result))
+        )
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        let payload = try XCTUnwrap((object["result"] as? [String: Any])?["payload"] as? [String: Any])
+        XCTAssertEqual(payload["gitHash"] as? String, "5a82c1f5")
+        XCTAssertEqual(payload["buildConfiguration"] as? String, "release")
+        XCTAssertEqual(payload["executableSHA256"] as? String, String(repeating: "ab", count: 32))
+
+        let decoded = try IPCWire.decodeResponse(from: encoded)
+        guard case let .version(roundTripped) = try XCTUnwrap(decoded.result).payload else {
+            return XCTFail("Expected a version payload")
+        }
+        XCTAssertEqual(roundTripped, result)
+        XCTAssertNil(IPCVersionResult(appVersion: nil).executableSHA256)
+    }
+
     private func protocolVersion(in response: IPCResponse) -> Int? {
         guard case let .version(result) = response.result?.payload else { return nil }
         return result.protocolVersion
