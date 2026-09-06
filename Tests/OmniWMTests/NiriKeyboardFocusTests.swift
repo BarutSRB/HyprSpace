@@ -15,6 +15,7 @@ final class NiriKeyboardFocusTests: XCTestCase {
 
     private final class FocusRecorder {
         var operations: [FocusOperation] = []
+        var queuedRaises: [(job: RunLoopJob, completion: @MainActor @Sendable () -> Void)] = []
     }
 
     @MainActor private struct Fixture {
@@ -49,6 +50,64 @@ final class NiriKeyboardFocusTests: XCTestCase {
                     true
                 )
             }
+        }
+    }
+
+    func testSameAppPrimaryNavigationQueuesWorkerRaiseImmediately() throws {
+        for orientation in [Monitor.Orientation.horizontal, .vertical] {
+            try withFixture(orientation: orientation, sharedPid: true) { fixture in
+                let controller = fixture.controller
+                let source = fixture.windows[3].token
+                let target = fixture.windows[2].token
+                XCTAssertTrue(controller.workspaceManager.confirmManagedFocus(
+                    source, in: fixture.workspaceId, activateWorkspaceOnMonitor: false
+                ))
+                XCTAssertEqual(fixture.state.selectedNodeId, fixture.windows[3].id)
+                fixture.recorder.operations.removeAll()
+                let direction: Direction = orientation == .horizontal ? .left : .down
+
+                XCTAssertTrue(controller.niriLayoutHandler.focusNeighbor(direction: direction))
+
+                XCTAssertEqual(fixture.recorder.operations, [.activate(target.pid), .focus(target)])
+                XCTAssertEqual(fixture.recorder.queuedRaises.count, 1)
+                let queued = try XCTUnwrap(fixture.recorder.queuedRaises.first)
+                XCTAssertFalse(queued.job.isCancelled)
+                let request = try XCTUnwrap(controller.intentLedger.activeManagedRequest)
+                XCTAssertEqual(request.token, target)
+                XCTAssertEqual(request.phase, .awaitingConfirmation)
+                XCTAssertTrue(controller.intentLedger.defersRetryRaise(for: request))
+                XCTAssertEqual(controller.workspaceManager.nativeManagedFocusToken, source)
+
+                controller.axEventHandler.handleIntentExpired(request.requestId)
+
+                XCTAssertEqual(fixture.recorder.operations, [.activate(target.pid), .focus(target)])
+                XCTAssertEqual(fixture.recorder.queuedRaises.count, 1)
+            }
+        }
+    }
+
+    func testCrossAppPrimaryNavigationDefersWorkerRaiseUntilDeadline() throws {
+        try withFixture { fixture in
+            let controller = fixture.controller
+            XCTAssertTrue(controller.workspaceManager.confirmManagedFocus(
+                fixture.windows[3].token, in: fixture.workspaceId, activateWorkspaceOnMonitor: false
+            ))
+            fixture.recorder.operations.removeAll()
+            let target = fixture.windows[2].token
+
+            XCTAssertTrue(controller.niriLayoutHandler.focusNeighbor(direction: .left))
+
+            XCTAssertEqual(fixture.recorder.operations, [.activate(target.pid), .focus(target)])
+            XCTAssertTrue(fixture.recorder.queuedRaises.isEmpty)
+            let request = try XCTUnwrap(controller.intentLedger.activeManagedRequest)
+
+            controller.axEventHandler.handleIntentExpired(request.requestId)
+
+            XCTAssertEqual(
+                fixture.recorder.operations,
+                [.activate(target.pid), .focus(target), .activate(target.pid), .focus(target)]
+            )
+            XCTAssertEqual(fixture.recorder.queuedRaises.count, 1)
         }
     }
 
@@ -98,6 +157,7 @@ final class NiriKeyboardFocusTests: XCTestCase {
     private func withFixture(
         selection: Int = 3,
         orientation: Monitor.Orientation = .horizontal,
+        sharedPid: Bool = false,
         _ body: (Fixture) throws -> Void
     ) throws {
         let recorder = FocusRecorder()
@@ -108,7 +168,11 @@ final class NiriKeyboardFocusTests: XCTestCase {
                 focusSpecificWindow: { pid, windowId, _ in
                     recorder.operations.append(.focus(WindowToken(pid: pid, windowId: Int(windowId))))
                 },
-                raiseWindow: { _ in recorder.operations.append(.raise) }
+                raiseWindow: { _ in recorder.operations.append(.raise) },
+                enqueueRetryRaise: { _, _, job, completion in
+                    recorder.queuedRaises.append((job, completion))
+                    return true
+                }
             )
         )
         controller.settings.niriVisibleContainerCount = 3
@@ -141,7 +205,10 @@ final class NiriKeyboardFocusTests: XCTestCase {
         let engine = try XCTUnwrap(controller.niriEngine)
         var windows: [NiriWindow] = []
         for index in 0 ..< 4 {
-            let token = WindowToken(pid: 980_900 + pid_t(index), windowId: 981_000 + index)
+            let token = WindowToken(
+                pid: sharedPid ? 980_900 : 980_900 + pid_t(index),
+                windowId: 981_000 + index
+            )
             _ = WindowAdmissionTestSupport.track(token, in: workspaceId, controller: controller)
             windows.append(engine.addWindow(token: token, to: workspaceId, afterSelection: windows.last?.id))
         }

@@ -435,7 +435,7 @@ final class FocusWithoutRaiseTests: XCTestCase {
                 target, raisesWindow: false, defersRetryRaise: true
             ))
             XCTAssertEqual(fixture.recorder.operations, [.activate(target.pid), .focus(target)])
-            XCTAssertTrue(fixture.recorder.queuedRaises.isEmpty)
+            XCTAssertEqual(fixture.recorder.queuedRaises.count, sameApp ? 1 : 0)
             fixture.recorder.operations.removeAll()
             var probes = 0
             fixture.controller.hasStartedServices = true
@@ -446,7 +446,7 @@ final class FocusWithoutRaiseTests: XCTestCase {
             fixture.controller.axEventHandler.handleIntentExpired(request.requestId)
             fixture.controller.axEventHandler.handleIntentExpired(request.requestId)
 
-            XCTAssertEqual(fixture.recorder.operations, [.activate(target.pid), .focus(target)])
+            XCTAssertEqual(fixture.recorder.operations, sameApp ? [] : [.activate(target.pid), .focus(target)])
             XCTAssertEqual(fixture.recorder.queuedRaises.count, 1)
             XCTAssertEqual(probes, 0)
             XCTAssertEqual(fixture.controller.workspaceManager.nativeManagedFocusToken, source)
@@ -455,91 +455,161 @@ final class FocusWithoutRaiseTests: XCTestCase {
             queued.completion()
             XCTAssertEqual(probes, 1)
             XCTAssertFalse(fixture.recorder.operations.contains(.raise))
+            fixture.recorder.operations.removeAll()
+
+            fixture.controller.axEventHandler.handleIntentExpired(request.requestId)
+
+            XCTAssertEqual(fixture.recorder.operations, [.activate(target.pid), .focus(target)])
+            XCTAssertEqual(fixture.recorder.queuedRaises.count, 2)
+            XCTAssertEqual(probes, 1)
         }
     }
 
     func testDeferredRetryNativeConfirmationCancelsWorkerWithoutDelayingBorderOwnership() throws {
-        let fixture = try makeFixture()
-        let target = addWindow(pid: 830_003, windowId: 830_103, to: fixture.workspaceId, controller: fixture.controller)
-        let request = try XCTUnwrap(fixture.controller.focusWindow(
-            target, raisesWindow: false, defersRetryRaise: true
-        ))
-        fixture.controller.axEventHandler.handleIntentExpired(request.requestId)
-        let queued = try XCTUnwrap(fixture.recorder.queuedRaises.first)
-        let entry = try XCTUnwrap(fixture.controller.workspaceManager.entry(for: target))
-        fixture.controller.axEventHandler.handleManagedAppActivation(
-            entry: entry, isWorkspaceActive: true, appFullscreen: false, activeRequestId: request.requestId
-        )
-        XCTAssertTrue(queued.job.isCancelled)
-        XCTAssertNil(fixture.controller.intentLedger.activeManagedRequest)
-        XCTAssertEqual(fixture.controller.workspaceManager.nativeManagedFocusToken, target)
-        XCTAssertEqual(fixture.controller.workspaceManager.borderFocusToken, target)
-        var probes = 0
-        fixture.controller.hasStartedServices = true
-        fixture.controller.factResolver.factProvider = { _ in probes += 1
-            return nil
-        }
-        queued.completion()
-        XCTAssertEqual(probes, 0)
-    }
-
-    func testDeferredRetrySupersededOrReissuedRequestRejectsOldWorkerCompletion() throws {
-        for sameWindow in [false, true] {
+        for immediate in [false, true] {
             let fixture = try makeFixture()
             let target = addWindow(
-                pid: 830_004,
-                windowId: 830_104,
+                pid: 830_003,
+                windowId: 830_103,
                 to: fixture.workspaceId,
                 controller: fixture.controller
             )
-            let other = addWindow(
-                pid: 830_005,
-                windowId: 830_105,
-                to: fixture.workspaceId,
-                controller: fixture.controller
-            )
-            let first = try XCTUnwrap(fixture.controller.focusWindow(
+            if immediate {
+                let source = addWindow(
+                    pid: target.pid,
+                    windowId: 830_113,
+                    to: fixture.workspaceId,
+                    controller: fixture.controller
+                )
+                setFocused(source, in: fixture.workspaceId, controller: fixture.controller)
+            }
+            let request = try XCTUnwrap(fixture.controller.focusWindow(
                 target, raisesWindow: false, defersRetryRaise: true
             ))
-            fixture.controller.axEventHandler.handleIntentExpired(first.requestId)
-            let old = try XCTUnwrap(fixture.recorder.queuedRaises.first)
-            let current = try XCTUnwrap(fixture.controller.focusWindow(
-                sameWindow ? target : other, raisesWindow: false, defersRetryRaise: true
-            ))
-            XCTAssertTrue(old.job.isCancelled)
-            fixture.controller.axEventHandler.handleIntentExpired(current.requestId)
-            XCTAssertEqual(fixture.recorder.queuedRaises.count, 2)
+            if !immediate {
+                fixture.controller.axEventHandler.handleIntentExpired(request.requestId)
+            }
+            XCTAssertEqual(fixture.recorder.queuedRaises.count, 1)
+            let queued = try XCTUnwrap(fixture.recorder.queuedRaises.first)
+            let entry = try XCTUnwrap(fixture.controller.workspaceManager.entry(for: target))
+            fixture.controller.axEventHandler.handleManagedAppActivation(
+                entry: entry, isWorkspaceActive: true, appFullscreen: false, activeRequestId: request.requestId
+            )
+            XCTAssertTrue(queued.job.isCancelled)
+            XCTAssertNil(fixture.controller.intentLedger.activeManagedRequest)
+            XCTAssertEqual(fixture.controller.workspaceManager.nativeManagedFocusToken, target)
+            XCTAssertEqual(fixture.controller.workspaceManager.borderFocusToken, target)
             var probes = 0
             fixture.controller.hasStartedServices = true
             fixture.controller.factResolver.factProvider = { _ in probes += 1
                 return nil
             }
-            old.completion()
+            queued.completion()
             XCTAssertEqual(probes, 0)
-            XCTAssertEqual(fixture.controller.intentLedger.activeManagedRequest?.requestId, current.requestId)
-            fixture.recorder.queuedRaises[1].completion()
-            XCTAssertEqual(probes, 1)
         }
     }
 
-    func testDeferredRetryUnavailableWorkerStillProbesWithoutMainThreadRaise() throws {
+    func testDeferredRetrySupersededOrReissuedRequestRejectsOldWorkerCompletion() throws {
+        for immediate in [false, true] {
+            for sameWindow in [false, true] {
+                try assertSupersededOrReissuedRequestRejectsOldWorkerCompletion(
+                    immediate: immediate,
+                    sameWindow: sameWindow
+                )
+            }
+        }
+    }
+
+    private func assertSupersededOrReissuedRequestRejectsOldWorkerCompletion(
+        immediate: Bool,
+        sameWindow: Bool
+    ) throws {
         let fixture = try makeFixture()
-        fixture.recorder.workerAvailable = false
-        let target = addWindow(pid: 830_006, windowId: 830_106, to: fixture.workspaceId, controller: fixture.controller)
-        let request = try XCTUnwrap(fixture.controller.focusWindow(
+        let target = addWindow(
+            pid: 830_004,
+            windowId: 830_104,
+            to: fixture.workspaceId,
+            controller: fixture.controller
+        )
+        let other = addWindow(
+            pid: immediate ? target.pid : 830_005,
+            windowId: 830_105,
+            to: fixture.workspaceId,
+            controller: fixture.controller
+        )
+        if immediate {
+            let source = addWindow(
+                pid: target.pid,
+                windowId: 830_114,
+                to: fixture.workspaceId,
+                controller: fixture.controller
+            )
+            setFocused(source, in: fixture.workspaceId, controller: fixture.controller)
+        }
+        let first = try XCTUnwrap(fixture.controller.focusWindow(
             target, raisesWindow: false, defersRetryRaise: true
         ))
-        fixture.recorder.operations.removeAll()
+        if !immediate {
+            fixture.controller.axEventHandler.handleIntentExpired(first.requestId)
+        }
+        let old = try XCTUnwrap(fixture.recorder.queuedRaises.first)
+        let current = try XCTUnwrap(fixture.controller.focusWindow(
+            sameWindow ? target : other, raisesWindow: false, defersRetryRaise: true
+        ))
+        XCTAssertTrue(old.job.isCancelled)
+        if !immediate {
+            fixture.controller.axEventHandler.handleIntentExpired(current.requestId)
+        }
+        XCTAssertEqual(fixture.recorder.queuedRaises.count, 2)
         var probes = 0
         fixture.controller.hasStartedServices = true
         fixture.controller.factResolver.factProvider = { _ in probes += 1
             return nil
         }
-        fixture.controller.axEventHandler.handleIntentExpired(request.requestId)
-        XCTAssertEqual(fixture.recorder.operations, [.activate(target.pid), .focus(target)])
+        old.completion()
+        XCTAssertEqual(probes, 0)
+        XCTAssertEqual(fixture.controller.intentLedger.activeManagedRequest?.requestId, current.requestId)
+        fixture.recorder.queuedRaises[1].completion()
         XCTAssertEqual(probes, 1)
-        XCTAssertEqual(fixture.controller.intentLedger.activeManagedRequest?.requestId, request.requestId)
-        XCTAssertTrue(fixture.recorder.queuedRaises.isEmpty)
+    }
+
+    func testDeferredRetryUnavailableWorkerStillProbesWithoutMainThreadRaise() throws {
+        for immediate in [false, true] {
+            let fixture = try makeFixture()
+            fixture.recorder.workerAvailable = false
+            let target = addWindow(
+                pid: 830_006,
+                windowId: 830_106,
+                to: fixture.workspaceId,
+                controller: fixture.controller
+            )
+            if immediate {
+                let source = addWindow(
+                    pid: target.pid,
+                    windowId: 830_116,
+                    to: fixture.workspaceId,
+                    controller: fixture.controller
+                )
+                setFocused(source, in: fixture.workspaceId, controller: fixture.controller)
+            }
+            var probes = 0
+            fixture.controller.hasStartedServices = true
+            fixture.controller.factResolver.factProvider = { _ in probes += 1
+                return nil
+            }
+            let request = try XCTUnwrap(fixture.controller.focusWindow(
+                target, raisesWindow: false, defersRetryRaise: true
+            ))
+            if !immediate {
+                XCTAssertEqual(probes, 0)
+                fixture.recorder.operations.removeAll()
+                fixture.controller.axEventHandler.handleIntentExpired(request.requestId)
+            }
+            XCTAssertEqual(fixture.recorder.operations, [.activate(target.pid), .focus(target)])
+            XCTAssertEqual(probes, 1)
+            XCTAssertEqual(fixture.controller.intentLedger.activeManagedRequest?.requestId, request.requestId)
+            XCTAssertTrue(fixture.recorder.queuedRaises.isEmpty)
+        }
     }
 
     func testSkippingInitialRaisePreservesActivationExactFocusAndFullRetry() throws {

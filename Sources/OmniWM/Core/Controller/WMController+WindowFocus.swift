@@ -100,15 +100,20 @@ extension WMController {
 
     func deferManagedFocusRetry(_ request: ManagedFocusRequest) -> Bool {
         guard intentLedger.defersRetryRaise(for: request) else { return false }
+        dispatchRetryRaise(for: request, refronting: true)
+        return true
+    }
+
+    private func dispatchRetryRaise(for request: ManagedFocusRequest, refronting: Bool) {
         guard let entry = workspaceManager.entry(for: request.token),
               entry.workspaceId == request.workspaceId,
               let handle = workspaceManager.handle(for: request.token),
               !isManagedWindowSuppressedByMacOSHide(request.token),
               let job = intentLedger.beginDeferredRetryRaise(for: request)
-        else { return true }
+        else { return }
         let handleIdentity = ObjectIdentifier(handle)
         let expectedWindow = entry.axRef
-        let applied = applyManagedFocusRequest(
+        let applied = !refronting || applyManagedFocusRequest(
             request, entry: entry, validatesPointer: true, isRetry: true, raisesWindow: false
         )
         let completion: @MainActor @Sendable () -> Void = { [weak self] in
@@ -136,7 +141,6 @@ extension WMController {
         {
             completion()
         }
-        return true
     }
 
     func retryManagedFocusFronting(_ request: ManagedFocusRequest) {
@@ -648,6 +652,11 @@ extension WMController {
                 supersededHandoff.sourceToken,
                 canceledRequest: supersededHandoff.request
             )
+        }
+        if applied, defersRetryRaise,
+           (preferredSameAppSourceToken ?? workspaceManager.renderableFocusToken)?.pid == token.pid
+        {
+            dispatchRetryRaise(for: request, refronting: false)
         }
         if intentLedger.activeManagedRequest(requestId: request.requestId)?.phase == .awaitingConfirmation {
             axEventHandler.probeFocusedWindowAfterFronting(
