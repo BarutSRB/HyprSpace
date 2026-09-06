@@ -48,9 +48,18 @@ enum StatusMenuFocusItem: Hashable, Sendable {
     case control(StatusMenuControl)
 }
 
+struct StatusMenuControlHoverAction: Sendable {
+    let handler: @MainActor (Bool) -> Void
+
+    @MainActor
+    func callAsFunction(_ hovered: Bool) {
+        handler(hovered)
+    }
+}
+
 extension EnvironmentValues {
     @Entry var statusMenuFocus: FocusState<StatusMenuFocusItem?>.Binding? = nil
-    @Entry var statusMenuControlHover: (Bool) -> Void = { _ in }
+    @Entry var statusMenuControlHover = StatusMenuControlHoverAction(handler: { _ in })
 }
 
 struct StatusMenuFocusOrder: PreferenceKey {
@@ -109,9 +118,9 @@ struct StatusMenuPanelView: View {
                     ) {
                         onOpenSubmenu(destination, true)
                     }
-                    .environment(\.statusMenuControlHover) { hovered in
+                    .environment(\.statusMenuControlHover, StatusMenuControlHoverAction { hovered in
                         onHoverSubmenu(destination, hovered)
-                    }
+                    })
                     .onGeometryChange(for: CGRect.self) { proxy in
                         proxy.frame(in: .named(StatusMenuPage.root))
                     } action: { frame in
@@ -140,11 +149,11 @@ struct StatusMenuPanelView: View {
             )
         }
         .environment(\.statusMenuFocus, $focusedItem)
-        .environment(\.statusMenuControlHover) { hovered in
+        .environment(\.statusMenuControlHover, StatusMenuControlHoverAction { hovered in
             if page == .root {
                 onHoverSubmenu(nil, hovered)
             }
-        }
+        })
         .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
             onContentSizeChange(size)
         }
