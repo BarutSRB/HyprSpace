@@ -237,6 +237,8 @@ final class IPCCommandRouter {
                 direction: direction(for: ipcDirection),
                 force: force
             )
+        case let .rename(target, displayName):
+            return renameWorkspace(target, displayName: displayName)
         }
     }
 
@@ -289,6 +291,27 @@ final class IPCCommandRouter {
         case .notFound:
             return .notFound
         }
+    }
+
+    private func renameWorkspace(_ target: WorkspaceTarget, displayName: String) -> ExternalCommandResult {
+        guard !displayName.contains(where: \.isNewline) else { return .invalidArguments }
+        let rawWorkspaceID: String
+        switch resolveWorkspaceTarget(target) {
+        case let .success(resolved):
+            rawWorkspaceID = resolved
+        case let .failure(result):
+            return result
+        }
+
+        var configs = controller.settings.workspaceConfigurations
+        guard let index = configs.firstIndex(where: { $0.name == rawWorkspaceID }) else { return .notFound }
+        let normalized: String? = displayName.isEmpty || displayName == rawWorkspaceID ? nil : displayName
+        guard configs[index].displayName != normalized else { return .noChange }
+
+        configs[index].displayName = normalized
+        controller.settings.workspaceConfigurations = configs
+        controller.requestWorkspaceBarRefresh()
+        return .executed
     }
 
     func handle(_ request: IPCWindowRequest) -> ExternalCommandResult {

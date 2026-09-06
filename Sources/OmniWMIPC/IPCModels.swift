@@ -1802,11 +1802,13 @@ extension IPCRuleRequest: Codable {
 public enum IPCWorkspaceActionName: String, Codable, Equatable, Sendable {
     case focusName = "focus-name"
     case moveToMonitor = "move-to-monitor"
+    case rename
 }
 
 public enum IPCWorkspaceRequest: Equatable, Sendable {
     case focusName(target: WorkspaceTarget)
     case moveToMonitor(target: WorkspaceTarget, direction: IPCDirection, force: Bool = false)
+    case rename(target: WorkspaceTarget, displayName: String)
 
     public var name: IPCWorkspaceActionName {
         switch self {
@@ -1814,13 +1816,16 @@ public enum IPCWorkspaceRequest: Equatable, Sendable {
             .focusName
         case .moveToMonitor:
             .moveToMonitor
+        case .rename:
+            .rename
         }
     }
 
     public var target: WorkspaceTarget {
         switch self {
         case let .focusName(target),
-             let .moveToMonitor(target, _, _):
+             let .moveToMonitor(target, _, _),
+             let .rename(target, _):
             target
         }
     }
@@ -1832,6 +1837,7 @@ extension IPCWorkspaceRequest: Codable {
         case workspaceTarget
         case direction
         case force
+        case displayName
     }
 
     public init(from decoder: Decoder) throws {
@@ -1848,6 +1854,11 @@ extension IPCWorkspaceRequest: Codable {
                 direction: try container.decode(IPCDirection.self, forKey: .direction),
                 force: try container.decodeIfPresent(Bool.self, forKey: .force) ?? false
             )
+        case .rename:
+            self = .rename(
+                target: target,
+                displayName: try container.decode(String.self, forKey: .displayName)
+            )
         }
     }
 
@@ -1862,6 +1873,8 @@ extension IPCWorkspaceRequest: Codable {
         case let .moveToMonitor(_, direction, force):
             try container.encode(direction, forKey: .direction)
             try container.encode(force, forKey: .force)
+        case let .rename(_, displayName):
+            try container.encode(displayName, forKey: .displayName)
         }
     }
 }

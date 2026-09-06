@@ -141,6 +141,87 @@ final class WorkspaceMoveIPCContractTests: XCTestCase {
         }
     }
 
+    func testRenameWireShapeIsPreserved() throws {
+        let request = IPCWorkspaceRequest.rename(target: .rawID("3"), displayName: "🚨 Alerts")
+        let data = try JSONEncoder().encode(request)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let target = try XCTUnwrap(object["workspaceTarget"] as? [String: String])
+
+        XCTAssertEqual(object["name"] as? String, "rename")
+        XCTAssertEqual(target, ["kind": "raw-id", "value": "3"])
+        XCTAssertEqual(object["displayName"] as? String, "🚨 Alerts")
+        XCTAssertNil(object["direction"])
+        XCTAssertNil(object["force"])
+        XCTAssertEqual(try JSONDecoder().decode(IPCWorkspaceRequest.self, from: data), request)
+    }
+
+    func testRenameWireRoundTripPreservesEmptyDisplayName() throws {
+        let request = IPCWorkspaceRequest.rename(target: .displayName("Slack"), displayName: "")
+        let data = try JSONEncoder().encode(request)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        XCTAssertEqual(object["displayName"] as? String, "")
+        XCTAssertEqual(try JSONDecoder().decode(IPCWorkspaceRequest.self, from: data), request)
+    }
+
+    func testRenameDecodeRequiresDisplayName() {
+        let data = Data(
+            """
+            {
+              "name": "rename",
+              "workspaceTarget": {"kind": "raw-id", "value": "3"}
+            }
+            """.utf8
+        )
+
+        XCTAssertThrowsError(try JSONDecoder().decode(IPCWorkspaceRequest.self, from: data))
+    }
+
+    func testManifestDescribesWorkspaceRename() throws {
+        let descriptor = try XCTUnwrap(
+            IPCAutomationManifest.workspaceActionDescriptors.first { $0.name == .rename }
+        )
+
+        XCTAssertEqual(descriptor.actionWords, ["rename"])
+        XCTAssertEqual(descriptor.path, "workspace rename <workspace> <display-name>")
+        XCTAssertEqual(descriptor.arguments, ["workspace", "display-name"])
+        XCTAssertTrue(descriptor.optionalFlags.isEmpty)
+    }
+
+    func testParserBuildsWorkspaceRename() throws {
+        XCTAssertEqual(
+            try parseWorkspaceRequest(["workspace", "rename", "3", "Mail"]),
+            .rename(target: .rawID("3"), displayName: "Mail")
+        )
+        XCTAssertEqual(
+            try parseWorkspaceRequest(["workspace", "rename", "Slack", ""]),
+            .rename(target: .displayName("Slack"), displayName: "")
+        )
+    }
+
+    func testParserRejectsMalformedWorkspaceRenames() {
+        let invocations = [
+            ["workspace", "rename", "3"],
+            ["workspace", "rename", "3", "Mail", "extra"],
+            ["workspace", "rename", "3", "--clear"],
+            ["workspace", "rename", "--force", "3", "Mail"]
+        ]
+
+        for invocation in invocations {
+            XCTAssertThrowsError(try CLIParser.parse(arguments: ["omniwmctl"] + invocation)) { error in
+                XCTAssertEqual(error as? CLIParseError, .usage(CLIParser.usageText))
+            }
+        }
+    }
+
+    func testHelpAndCompletionsExposeWorkspaceRenameContract() {
+        XCTAssertTrue(CLIParser.usageText.contains("omniwmctl workspace rename <workspace> <display-name>"))
+
+        for shell in CLIShell.allCases {
+            XCTAssertTrue(CLICompletionGenerator.script(for: shell).contains("rename"))
+        }
+    }
+
     func testWorkspaceMoveCompletionsTrackNonFlagPositionals() throws {
         for shell in [CLIShell.zsh, .bash] {
             for completionCase in workspaceMoveCompletionCases {

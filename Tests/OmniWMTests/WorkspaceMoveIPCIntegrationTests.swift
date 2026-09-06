@@ -259,6 +259,102 @@ final class WorkspaceMoveIPCIntegrationTests: XCTestCase {
         XCTAssertEqual(manager.monitorForWorkspace(fixture.sourceWorkspaceId)?.id, initialMonitorId)
     }
 
+    func testRouterRenamesWorkspaceByRawIDAndDisplayName() throws {
+        let fixture = try makeFixture()
+        defer { fixture.controller.layoutRefreshController.resetState() }
+        let settings = fixture.controller.settings
+        let manager = fixture.controller.workspaceManager
+        let initialSeq = manager.worldSeq
+        let router = IPCCommandRouter(controller: fixture.controller, sessionToken: "test")
+
+        XCTAssertEqual(router.handle(.rename(target: .rawID("2"), displayName: "Mail")), .executed)
+        XCTAssertEqual(settings.displayName(for: "2"), "Mail")
+        XCTAssertEqual(router.handle(.rename(target: .displayName("slack"), displayName: "Chat")), .executed)
+        XCTAssertEqual(settings.displayName(for: "1"), "Chat")
+        XCTAssertEqual(router.handle(.rename(target: .rawID("1"), displayName: "Chat")), .noChange)
+        XCTAssertEqual(router.handle(.rename(target: .rawID("99"), displayName: "Nope")), .notFound)
+        XCTAssertEqual(router.handle(.rename(target: .displayName("Nope"), displayName: "x")), .notFound)
+        XCTAssertEqual(router.handle(.rename(target: .rawID("1"), displayName: "a\nb")), .invalidArguments)
+        XCTAssertEqual(settings.displayName(for: "1"), "Chat")
+        XCTAssertEqual(manager.worldSeq, initialSeq)
+    }
+
+    func testRouterClearsWorkspaceDisplayName() throws {
+        let fixture = try makeFixture()
+        defer { fixture.controller.layoutRefreshController.resetState() }
+        let settings = fixture.controller.settings
+        let router = IPCCommandRouter(controller: fixture.controller, sessionToken: "test")
+
+        XCTAssertEqual(router.handle(.rename(target: .rawID("1"), displayName: "")), .executed)
+        XCTAssertNil(settings.workspaceConfigurations.first { $0.name == "1" }?.displayName)
+        XCTAssertEqual(settings.displayName(for: "1"), "1")
+        XCTAssertEqual(router.handle(.rename(target: .rawID("1"), displayName: "")), .noChange)
+
+        XCTAssertEqual(router.handle(.rename(target: .rawID("1"), displayName: "Mail")), .executed)
+        XCTAssertEqual(router.handle(.rename(target: .rawID("1"), displayName: "1")), .executed)
+        XCTAssertNil(settings.workspaceConfigurations.first { $0.name == "1" }?.displayName)
+        XCTAssertEqual(router.handle(.rename(target: .rawID("1"), displayName: "")), .noChange)
+
+        var configurations = settings.workspaceConfigurations
+        configurations[0].displayName = "1"
+        settings.workspaceConfigurations = configurations
+        XCTAssertEqual(router.handle(.rename(target: .rawID("1"), displayName: "")), .executed)
+        XCTAssertNil(settings.workspaceConfigurations.first { $0.name == "1" }?.displayName)
+    }
+
+    func testRouterRejectsAmbiguousRenameTargetWithoutMutation() throws {
+        let fixture = try makeFixture()
+        defer { fixture.controller.layoutRefreshController.resetState() }
+        var configurations = fixture.controller.settings.workspaceConfigurations
+        configurations[1].displayName = "sLaCk"
+        fixture.controller.settings.workspaceConfigurations = configurations
+        fixture.controller.workspaceManager.applySettings()
+        let router = IPCCommandRouter(controller: fixture.controller, sessionToken: "test")
+
+        XCTAssertEqual(
+            router.handle(.rename(target: .displayName("SLACK"), displayName: "Mail")),
+            .invalidArguments
+        )
+        XCTAssertEqual(fixture.controller.settings.workspaceConfigurations, configurations)
+    }
+
+    func testRenamePreservesRuntimeMonitorOverride() throws {
+        let fixture = try makeFixture()
+        defer { fixture.controller.layoutRefreshController.resetState() }
+        let manager = fixture.controller.workspaceManager
+        let router = IPCCommandRouter(controller: fixture.controller, sessionToken: "test")
+
+        XCTAssertEqual(
+            router.handle(.moveToMonitor(target: .rawID("1"), direction: .right, force: true)),
+            .executed
+        )
+        XCTAssertEqual(
+            manager.descriptor(for: fixture.sourceWorkspaceId)?.runtimeMonitorOverride,
+            OutputId(from: fixture.center)
+        )
+
+        XCTAssertEqual(router.handle(.rename(target: .rawID("1"), displayName: "Mail")), .executed)
+        XCTAssertEqual(
+            manager.descriptor(for: fixture.sourceWorkspaceId)?.runtimeMonitorOverride,
+            OutputId(from: fixture.center)
+        )
+        XCTAssertEqual(manager.monitorForWorkspace(fixture.sourceWorkspaceId)?.id, fixture.center.id)
+    }
+
+    func testRenameIsVisibleToQueriesImmediately() throws {
+        let fixture = try makeFixture()
+        defer { fixture.controller.layoutRefreshController.resetState() }
+        let router = IPCCommandRouter(controller: fixture.controller, sessionToken: "test")
+        let queryRouter = IPCQueryRouter(controller: fixture.controller, appVersion: nil, sessionToken: "test")
+
+        XCTAssertEqual(router.handle(.rename(target: .rawID("1"), displayName: "Mail")), .executed)
+
+        let workspaces = queryRouter.workspacesResult(IPCQueryRequest(name: .workspaces)).workspaces
+        XCTAssertEqual(workspaces.first { $0.rawName == "1" }?.displayName, "Mail")
+        let barWorkspaces = queryRouter.workspaceBarResult().monitors.flatMap(\.workspaces)
+        XCTAssertEqual(barWorkspaces.first { $0.rawName == "1" }?.displayName, "Mail")
+    }
+
     func testForcedMoveSchedulesOnlyVisibleFloatingRelocations() throws {
         let fixture = try makeFixture()
         let controller = fixture.controller

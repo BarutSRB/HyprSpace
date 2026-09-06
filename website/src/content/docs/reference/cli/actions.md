@@ -31,14 +31,16 @@ Window IDs are session-scoped. They become stale after OmniWM restarts. Obtain I
 ```
 omniwmctl workspace focus-name <name>
 omniwmctl workspace move-to-monitor <workspace> <left|right|up|down> [--force]
+omniwmctl workspace rename <workspace> <display-name>
 ```
 
 | Action | Arguments | Description |
 |--------|-----------|-------------|
 | `focus-name` | `<name>` | Focus a workspace by raw workspace ID or unambiguous configured display name |
 | `move-to-monitor` | `<workspace> <left\|right\|up\|down> [--force]` | Move a workspace to an adjacent monitor |
+| `rename` | `<workspace> <display-name>` | Set or clear the workspace display name; an empty name restores the raw workspace ID. Returns `no_change` when the label already matches |
 
-Numeric inputs are resolved as raw workspace IDs first. Display-name lookup is a convenience path and fails when multiple workspaces share the same display name.
+Numeric inputs are resolved as raw workspace IDs first. Display-name lookup is a convenience path and fails when multiple workspaces share the same display name. A display name containing a newline is rejected with `invalid_arguments`, and a name starting with `--` cannot be set from the CLI.
 
 Monitor direction is resolved relative to the named workspace's current monitor. Moving a visible workspace transfers its visibility to the destination monitor, and the source monitor selects another eligible workspace. Moving an inactive workspace normally makes it visible on the destination while leaving the source monitor's visible workspace unchanged. If the destination's visible workspace is the current interaction workspace, the moved workspace is assigned there but remains inactive, preserving that interaction instead of replacing it. This action does not swap the two visible workspaces.
 

@@ -115,7 +115,19 @@ sidebar:
 }
 ```
 
-Workspace requests use this flat wire shape. For `move-to-monitor`, `force` is optional while decoding; omitting it is equivalent to `false`.
+**Workspace rename:**
+```json
+{
+  "name": "rename",
+  "workspaceTarget": {
+    "kind": "raw-id",
+    "value": "3"
+  },
+  "displayName": "🚨 Alerts"
+}
+```
+
+Workspace requests use this flat wire shape. For `move-to-monitor`, `force` is optional while decoding; omitting it is equivalent to `false`. For `rename`, `displayName` is required; an empty string clears the label so the workspace shows its raw ID.
 
 **Window:**
 ```json

@@ -518,6 +518,19 @@ enum CLIParser {
                         force: flags.contains("--force")
                     )
                 )
+            case .rename:
+                guard remaining.count == descriptor.arguments.count,
+                      !remaining.contains(where: { $0.hasPrefix("--") })
+                else {
+                    continue
+                }
+                return IPCRequest(
+                    id: id,
+                    workspace: .rename(
+                        target: WorkspaceTarget(resolvingInput: remaining[0]),
+                        displayName: remaining[1]
+                    )
+                )
             }
         }
 

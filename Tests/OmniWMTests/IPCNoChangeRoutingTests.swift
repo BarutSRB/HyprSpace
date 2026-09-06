@@ -24,6 +24,14 @@ final class IPCNoChangeRoutingTests: XCTestCase {
         XCTAssertEqual(fixture.router.handle(IPCCommandRequest.switchWorkspace(workspaceNumber: 1)), .noChange)
         XCTAssertEqual(fixture.router.handle(IPCWorkspaceRequest.focusName(target: .rawID("1"))), .noChange)
         XCTAssertEqual(fixture.router.handle(IPCWorkspaceRequest.focusName(target: .rawID("99"))), .notFound)
+        XCTAssertEqual(
+            fixture.router.handle(IPCWorkspaceRequest.rename(target: .rawID("1"), displayName: "")),
+            .noChange
+        )
+        XCTAssertEqual(
+            fixture.router.handle(IPCWorkspaceRequest.rename(target: .rawID("99"), displayName: "x")),
+            .notFound
+        )
         XCTAssertEqual(fixture.router.handle(IPCCommandRequest.switchWorkspace(workspaceNumber: 7)), .notFound)
         XCTAssertEqual(fixture.controller.activeWorkspace()?.id, fixture.workspace1)
 

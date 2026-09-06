@@ -962,6 +962,12 @@ public enum IPCAutomationManifest {
             summary: "Move a workspace to an adjacent monitor; --force temporarily overrides its configured assignment.",
             arguments: ["workspace", "left|right|up|down"],
             optionalFlags: ["--force"]
+        ),
+        .init(
+            actionWords: ["rename"],
+            name: .rename,
+            summary: "Set or clear a workspace display name; an empty name restores the raw workspace ID.",
+            arguments: ["workspace", "display-name"]
         )
     ]
 
