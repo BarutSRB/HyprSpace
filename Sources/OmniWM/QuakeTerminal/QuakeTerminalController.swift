@@ -95,11 +95,16 @@ final class QuakeTerminalController: NSObject, NSWindowDelegate, QuakeTerminalTa
     private func initializeGhosttyIfNeeded() {
         guard !Self.ghosttyInitialized else { return }
         let result = ghostty_init(0, nil)
+        Self.restoreCNumericLocale()
         if result == GHOSTTY_SUCCESS {
             Self.ghosttyInitialized = true
         } else {
             Log.terminal.error("ghostty_init failed with code \(result)")
         }
+    }
+
+    static func restoreCNumericLocale() {
+        _ = setlocale(LC_NUMERIC, "C")
     }
 
     func setup() {
