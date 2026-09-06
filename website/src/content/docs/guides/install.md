@@ -14,12 +14,20 @@ sidebar:
 
 ## Homebrew
 
+OmniWM is in the official Homebrew cask repository:
+
+```bash
+brew install --cask omniwm
+```
+
+The project tap also carries every release, if you prefer to track it directly:
+
 ```bash
 brew tap BarutSRB/tap
 brew install omniwm
 ```
 
-Then finish with the [first-launch setup](#first-launch-setup) below.
+Both paths install `OmniWM.app` and put `omniwmctl` on your `PATH`; upgrade with `brew upgrade omniwm`. Then finish with the [first-launch setup](#first-launch-setup) below.
 
 ## Nix
 

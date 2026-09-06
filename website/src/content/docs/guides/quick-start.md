@@ -10,8 +10,7 @@ sidebar:
 The fastest path is Homebrew:
 
 ```bash
-brew tap BarutSRB/tap
-brew install omniwm
+brew install --cask omniwm
 ```
 
 Prefer Nix or a plain zip? The [installation guide](/guides/install/) covers every method plus the full requirements (macOS 26+ Tahoe on Apple Silicon).

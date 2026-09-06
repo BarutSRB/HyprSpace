@@ -20,7 +20,7 @@ import { version } from '../../data/site';
       that feel native because they are.
     </p>
     <div class="brew mono">
-      <span>brew tap BarutSRB/tap && brew install omniwm</span>
+      <span>brew install --cask omniwm</span>
       <button class="copy" type="button" aria-label="Copy install command">⧉</button>
       <span class="copy-status visually-hidden" role="status"></span>
     </div>
@@ -211,7 +211,7 @@ import { version } from '../../data/site';
   const status = document.querySelector('.brew .copy-status');
   button?.addEventListener('click', async () => {
     try {
-      await navigator.clipboard.writeText('brew tap BarutSRB/tap && brew install omniwm');
+      await navigator.clipboard.writeText('brew install --cask omniwm');
       button.classList.add('copied');
       if (status) status.textContent = 'Copied';
     } catch {

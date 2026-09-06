@@ -497,10 +497,20 @@ OmniWM is built for high responsiveness and smooth, crisp animations.
 
 ### Homebrew
 
+OmniWM is in the official Homebrew cask repository:
+
+```bash
+brew install --cask omniwm
+```
+
+The project tap also carries every release:
+
 ```bash
 brew tap BarutSRB/tap
 brew install omniwm
 ```
+
+Both paths install `OmniWM.app` and put `omniwmctl` on your `PATH`; upgrade with `brew upgrade omniwm`. Already on the tap? Nothing changes for you.
 
 ### Nix
 
