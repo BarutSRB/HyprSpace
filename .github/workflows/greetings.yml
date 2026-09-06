@@ -19,3 +19,9 @@ jobs:
             Clear reproduction steps, OmniWM version, macOS version, and logs make reports much easier to investigate.
 
             OmniWM is free and open source. If you find it useful, starring the repo helps more people discover it. Totally optional; thanks either way.
+          pr_message: |
+            Thanks for opening your first OmniWM pull request, and welcome.
+
+            A short description of the problem, the resulting behavior, and how you verified the change makes review much easier.
+
+            OmniWM is free and open source. If you find it useful, starring the repo helps more people discover it. Totally optional; thanks either way.
