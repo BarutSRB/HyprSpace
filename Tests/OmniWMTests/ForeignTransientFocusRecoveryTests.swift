@@ -9,6 +9,77 @@ import XCTest
 
 @MainActor
 final class ForeignTransientFocusRecoveryTests: XCTestCase {
+    func testStatusPanelSuppressesRecoveryAfterManagedFocusConfirmation() throws {
+        let fixture = try makeFixture(prefix: "OmniWMStatusPanelRecoveryTests")
+        let controller = fixture.controller
+        let recoveryToken = WindowToken(pid: 646_010, windowId: 646_011)
+        _ = WindowAdmissionTestSupport.track(recoveryToken, in: fixture.workspaceId, controller: controller)
+        controller.focusPolicyEngine.beginLease(owner: .statusPanel, reason: "status_panel", duration: nil)
+        XCTAssertTrue(controller.workspaceManager.recordOwnedSurfaceFocus())
+        XCTAssertTrue(
+            controller.workspaceManager.confirmManagedFocus(
+                fixture.mainToken,
+                in: fixture.workspaceId,
+                activateWorkspaceOnMonitor: false
+            )
+        )
+
+        controller.ensureFocusedTokenValid(in: fixture.workspaceId, preferredRecoveryToken: recoveryToken)
+
+        XCTAssertEqual(controller.workspaceManager.nativeManagedFocusToken, fixture.mainToken)
+        XCTAssertTrue(controller.shouldSuppressManagedFocusRecovery)
+        assertNoAutomaticRecovery(fixture)
+
+        controller.focusPolicyEngine.endLease(owner: .statusPanel)
+
+        XCTAssertFalse(controller.shouldSuppressManagedFocusRecovery)
+    }
+
+    func testStatusPanelSuppressesLayoutActivationButAllowsExplicitFronting() throws {
+        let fixture = try makeFixture(prefix: "OmniWMStatusPanelLayoutFocusTests")
+        let controller = fixture.controller
+        let target = WindowToken(pid: 646_012, windowId: 646_013)
+        let targetRef = WindowAdmissionTestSupport.track(target, in: fixture.workspaceId, controller: controller)
+        let monitor = try XCTUnwrap(controller.workspaceManager.monitor(for: fixture.workspaceId))
+        controller.focusPolicyEngine.beginLease(owner: .statusPanel, reason: "status_panel", duration: nil)
+
+        let accepted = controller.layoutRefreshController.executeLayoutPlanReturningAcceptedSeq(
+            WorkspaceLayoutPlan(
+                workspaceId: fixture.workspaceId,
+                monitor: LayoutMonitorSnapshot(
+                    monitorId: monitor.id,
+                    displayId: monitor.displayId,
+                    frame: monitor.frame,
+                    visibleFrame: monitor.visibleFrame,
+                    workingFrame: monitor.visibleFrame,
+                    fullscreenLayoutFrame: monitor.visibleFrame,
+                    scale: 1,
+                    orientation: monitor.autoOrientation
+                ),
+                sessionPatch: WorkspaceSessionPatch(
+                    workspaceId: fixture.workspaceId,
+                    plannedSeq: controller.workspaceManager.worldSeq
+                ),
+                diff: WorkspaceLayoutDiff(),
+                animationDirectives: [.activateWindow(token: target)]
+            )
+        )
+
+        XCTAssertNotNil(accepted)
+        assertNoAutomaticRecovery(fixture)
+        XCTAssertTrue(
+            controller.performWindowFronting(
+                pid: target.pid,
+                windowId: target.windowId,
+                axRef: targetRef
+            )
+        )
+        XCTAssertEqual(
+            fixture.recorder.operations,
+            ["activate:\(target.pid)", "focus:\(target.pid):\(target.windowId)", "raise"]
+        )
+    }
+
     func testProvisionalTargetSuppressesAXWindowCreatedRelayout() async throws {
         try await assertConcreteTargetSuppressesAXWindowCreatedRelayout()
     }

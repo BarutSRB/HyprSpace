@@ -31,6 +31,7 @@ extension WMController {
     }
 
     var shouldSuppressManagedFocusRecovery: Bool {
+        guard focusPolicyEngine.evaluate(.managedFocusRecovery).allowsFocusChange else { return true }
         if isSystemModalFocusActive { return true }
         switch workspaceManager.nativeFocusOwner {
         case .external,

@@ -4,17 +4,6 @@
 import AppKit
 import SwiftUI
 
-@MainActor
-final class HiddenBarPanel: NSPanel {
-    override var canBecomeKey: Bool {
-        true
-    }
-
-    override var canBecomeMain: Bool {
-        false
-    }
-}
-
 struct HiddenBarPanelPlacement: Equatable {
     let anchor: CGPoint
     let visibleFrame: CGRect
@@ -33,9 +22,8 @@ final class HiddenBarPanelController {
     var isExemptWindow: ((NSWindow) -> Bool)?
 
     private let model = HiddenBarPanelModel()
-    private var panel: HiddenBarPanel?
-    private var eventMonitors: [Any] = []
-    private var screenObserver: NSObjectProtocol?
+    private var panel: NonactivatingPanel?
+    private let dismissalMonitor = PanelDismissalMonitor()
     private var lastPlacement: HiddenBarPanelPlacement?
     private weak var previousKeyWindow: NSWindow?
     private weak var previousFirstResponder: NSResponder?
@@ -57,8 +45,7 @@ final class HiddenBarPanelController {
         lastPlacement = nil
         previousKeyWindow = nil
         previousFirstResponder = nil
-        removeEventMonitors()
-        removeScreenObserver()
+        dismissalMonitor.stop()
         OwnedWindowRegistry.shared.unregister(surfaceId: Self.surfaceId)
         panel?.orderOut(nil)
         if let keyWindow, keyWindow.isVisible {
@@ -138,20 +125,7 @@ final class HiddenBarPanelController {
     }
 
     nonisolated static func panelFrame(anchor: CGPoint, size: CGSize, screenVisibleFrame: CGRect) -> CGRect {
-        var frame = CGRect(
-            x: anchor.x - size.width / 2,
-            y: anchor.y - 4 - size.height,
-            width: size.width,
-            height: size.height
-        )
-        let minX = screenVisibleFrame.minX + 8
-        let maxX = screenVisibleFrame.maxX - size.width - 8
-        frame.origin.x = maxX >= minX ? min(max(frame.origin.x, minX), maxX) : minX
-        frame.origin.y = min(
-            max(frame.origin.y, screenVisibleFrame.minY + 8),
-            screenVisibleFrame.maxY - size.height
-        )
-        return frame
+        NonactivatingPanel.frame(anchor: anchor, size: size, screenVisibleFrame: screenVisibleFrame)
     }
 
     private func show(placement: HiddenBarPanelPlacement, items: [HiddenBarGlyph]) {
@@ -174,8 +148,15 @@ final class HiddenBarPanelController {
         )
         panel.makeKeyAndOrderFront(nil)
         isVisible = true
-        installEventMonitors(panel: panel)
-        installScreenObserver()
+        dismissalMonitor.start(
+            panels: [panel],
+            isExemptWindow: { [weak self] window in
+                self?.isExemptWindow?(window) == true
+            },
+            onDismiss: { [weak self] in
+                self?.dismiss()
+            }
+        )
         Task { @MainActor [weak self] in
             self?.model.focusRequest &+= 1
         }
@@ -186,7 +167,7 @@ final class HiddenBarPanelController {
         applyContent(items: items, placement: lastPlacement, panel: panel)
     }
 
-    private func applyContent(items: [HiddenBarGlyph], placement: HiddenBarPanelPlacement, panel: HiddenBarPanel) {
+    private func applyContent(items: [HiddenBarGlyph], placement: HiddenBarPanelPlacement, panel: NonactivatingPanel) {
         let maxContentWidth = placement.visibleFrame.width - 16 - Self.padding * 2
         model.maxContentWidth = maxContentWidth
         model.items = items
@@ -204,8 +185,8 @@ final class HiddenBarPanelController {
         )
     }
 
-    private func makePanel() -> HiddenBarPanel {
-        let panel = HiddenBarPanel(
+    private func makePanel() -> NonactivatingPanel {
+        let panel = NonactivatingPanel(
             contentRect: CGRect(origin: .zero, size: CGSize(width: 200, height: 60)),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
@@ -233,85 +214,5 @@ final class HiddenBarPanelController {
             )
         )
         return panel
-    }
-
-    private func installEventMonitors(panel: HiddenBarPanel) {
-        let local = NSEvent.addLocalMonitorForEvents(
-            matching: [.leftMouseDown, .rightMouseDown, .keyDown]
-        ) { [weak self] event in
-            self?.handleLocalEvent(event) == true ? nil : event
-        }
-        let globalMouse = NSEvent.addGlobalMonitorForEvents(
-            matching: [.leftMouseDown, .rightMouseDown]
-        ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.dismissIfPointerOutsidePanel()
-            }
-        }
-        let globalKey = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            MainActor.assumeIsolated {
-                if event.keyCode == 53 {
-                    self?.dismiss()
-                }
-            }
-        }
-        eventMonitors = [local, globalMouse, globalKey].compactMap { $0 }
-    }
-
-    private func removeEventMonitors() {
-        for monitor in eventMonitors {
-            NSEvent.removeMonitor(monitor)
-        }
-        eventMonitors = []
-    }
-
-    private func installScreenObserver() {
-        guard screenObserver == nil else { return }
-        screenObserver = NotificationCenter.default.addObserver(
-            forName: NSApplication.didChangeScreenParametersNotification,
-            object: nil,
-            queue: nil
-        ) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.dismiss()
-            }
-        }
-    }
-
-    private func removeScreenObserver() {
-        if let screenObserver {
-            NotificationCenter.default.removeObserver(screenObserver)
-            self.screenObserver = nil
-        }
-    }
-
-    private func handleLocalEvent(_ event: NSEvent) -> Bool {
-        guard isVisible else { return false }
-        if event.type == .keyDown {
-            if event.keyCode == 53 {
-                dismiss()
-                return true
-            }
-            return false
-        }
-        guard let window = event.window else {
-            dismissIfPointerOutsidePanel()
-            return false
-        }
-        if window === panel {
-            return false
-        }
-        if isExemptWindow?(window) == true {
-            return false
-        }
-        dismiss()
-        return false
-    }
-
-    private func dismissIfPointerOutsidePanel() {
-        guard let panel, isVisible else { return }
-        if !panel.frame.contains(NSEvent.mouseLocation) {
-            dismiss()
-        }
     }
 }

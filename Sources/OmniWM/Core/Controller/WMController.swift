@@ -673,6 +673,7 @@ final class WMController {
     }
 
     func toggleHiddenBarPanel() {
+        statusBarController?.dismissPanel()
         hiddenBarController.togglePanel(placement: hiddenBarPanelPlacement())
     }
 

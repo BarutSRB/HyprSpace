@@ -85,15 +85,28 @@ struct MenuActionRow: View {
     var showChevron = false
     var isExternal = false
     var isDestructive = false
+    var dismissesMenu = true
+    var isExpanded: Bool?
     let action: @MainActor () -> Void
 
     @Environment(MotionPolicy.self) private var motionPolicy
     @Environment(\.statusMenuDismiss) private var dismissMenu
+    @Environment(\.statusMenuFocus) private var focus
+    @Environment(\.statusMenuControlHover) private var controlHover
+    @Environment(\.isEnabled) private var isEnabled
     @State private var isHovered = false
+
+    private var isFocused: Bool {
+        focus?.wrappedValue == .action(label)
+    }
+
+    private var isHighlighted: Bool {
+        isHovered || isExpanded == true
+    }
 
     var body: some View {
         Button {
-            dismissMenu(then: action)
+            activate()
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: icon)
@@ -120,31 +133,59 @@ struct MenuActionRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .focusable()
+        .focusEffectDisabled()
+        .modifier(StatusMenuFocusModifier(item: .action(label)))
         .background {
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .fill(backgroundColor)
                 .padding(.horizontal, 4)
                 .padding(.vertical, 2)
         }
-        .onHover { isHovered = $0 }
+        .overlay {
+            if isFocused {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(Color.accentColor, lineWidth: 2)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
+            }
+        }
+        .onKeyPress(keys: [.return, .space]) { press in
+            guard isEnabled, StatusMenuKeyboardPolicy.acceptsModifiers(press.modifiers) else { return .ignored }
+            activate()
+            return .handled
+        }
+        .onHover { hovered in
+            isHovered = hovered
+            controlHover(hovered)
+        }
         .animation(motionPolicy.animationsEnabled ? .easeOut(duration: 0.12) : nil, value: isHovered)
+        .accessibilityValue(isExpanded == true ? "Expanded" : "Collapsed", isEnabled: isExpanded != nil)
+    }
+
+    private func activate() {
+        if dismissesMenu {
+            dismissMenu(then: action)
+        } else {
+            action()
+        }
     }
 
     private var backgroundColor: Color {
-        guard isHovered else { return .clear }
+        guard isHighlighted else { return .clear }
         return isDestructive
             ? Color(nsColor: .systemRed).opacity(0.14)
             : Color(nsColor: .controlAccentColor).opacity(0.32)
     }
 
     private var iconColor: Color {
-        if isDestructive, isHovered { return Color(nsColor: .systemRed) }
-        return isHovered ? .white : Color(nsColor: .secondaryLabelColor)
+        if isDestructive, isHighlighted { return Color(nsColor: .systemRed) }
+        return isHighlighted ? .white : Color(nsColor: .secondaryLabelColor)
     }
 
     private var labelColor: Color {
-        if isDestructive, isHovered { return Color(nsColor: .systemRed) }
-        return isHovered ? .white : Color(nsColor: .labelColor)
+        if isDestructive, isHighlighted { return Color(nsColor: .systemRed) }
+        return isHighlighted ? .white : Color(nsColor: .labelColor)
     }
 }
 
@@ -155,8 +196,14 @@ struct MenuToggleTile: View {
     var onFocusChanged: (StatusMenuControl, Bool) -> Void = { _, _ in }
 
     @Environment(MotionPolicy.self) private var motionPolicy
+    @Environment(\.statusMenuFocus) private var focus
+    @Environment(\.statusMenuControlHover) private var controlHover
+    @Environment(\.isEnabled) private var isEnabled
     @State private var isHovered = false
-    @FocusState private var isFocused: Bool
+
+    private var isFocused: Bool {
+        focus?.wrappedValue == .control(control)
+    }
 
     var body: some View {
         Button {
@@ -179,13 +226,27 @@ struct MenuToggleTile: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .focusable()
+        .focusEffectDisabled()
+        .modifier(StatusMenuFocusModifier(item: .control(control)))
         .background {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(fillColor)
         }
-        .focused($isFocused)
+        .overlay {
+            if isFocused {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(Color.primary, lineWidth: 2)
+            }
+        }
+        .onKeyPress(keys: [.return, .space]) { press in
+            guard isEnabled, StatusMenuKeyboardPolicy.acceptsModifiers(press.modifiers) else { return .ignored }
+            isOn.toggle()
+            return .handled
+        }
         .onHover { hovered in
             isHovered = hovered
+            controlHover(hovered)
             onHoverChanged(control, hovered)
         }
         .onChange(of: isFocused) { _, focused in
@@ -278,7 +339,14 @@ struct MenuToggleRow: View {
     @Binding var isOn: Bool
 
     @Environment(MotionPolicy.self) private var motionPolicy
+    @Environment(\.statusMenuFocus) private var focus
+    @Environment(\.statusMenuControlHover) private var controlHover
+    @Environment(\.isEnabled) private var isEnabled
     @State private var isHovered = false
+
+    private var isFocused: Bool {
+        focus?.wrappedValue == .action(label)
+    }
 
     var body: some View {
         Button {
@@ -300,13 +368,32 @@ struct MenuToggleRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .focusable()
+        .focusEffectDisabled()
+        .modifier(StatusMenuFocusModifier(item: .action(label)))
         .background {
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .fill(isHovered ? Color(nsColor: .controlAccentColor).opacity(0.34) : .clear)
                 .padding(.horizontal, 4)
                 .padding(.vertical, 2)
         }
-        .onHover { isHovered = $0 }
+        .overlay {
+            if isFocused {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(Color.accentColor, lineWidth: 2)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
+            }
+        }
+        .onKeyPress(keys: [.return, .space]) { press in
+            guard isEnabled, StatusMenuKeyboardPolicy.acceptsModifiers(press.modifiers) else { return .ignored }
+            isOn.toggle()
+            return .handled
+        }
+        .onHover { hovered in
+            isHovered = hovered
+            controlHover(hovered)
+        }
         .animation(motionPolicy.animationsEnabled ? .easeOut(duration: 0.12) : nil, value: isHovered)
         .accessibilityLabel(label)
         .accessibilityValue(isOn ? "on" : "off")

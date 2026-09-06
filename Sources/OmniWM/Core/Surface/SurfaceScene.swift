@@ -18,6 +18,7 @@ enum SurfaceKind: String, CaseIterable, Hashable, Sendable {
     case secureInputIndicator
     case systemStats
     case hiddenBarPanel
+    case statusPanel
 }
 
 enum HitTestPolicy: Equatable {

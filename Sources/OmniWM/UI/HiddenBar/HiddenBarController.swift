@@ -136,9 +136,12 @@ final class HiddenBarController {
             self?.onFallbackIconClick?(event, anchor)
         }
         panel.isExemptWindow = { [weak self] window in
-            guard let self else { return false }
-            return window === omniButton?.window || fallbackIcon.owns(window: window)
+            self?.ownsStatusItemWindow(window) == true
         }
+    }
+
+    func ownsStatusItemWindow(_ window: NSWindow) -> Bool {
+        window === omniButton?.window || fallbackIcon.owns(window: window)
     }
 
     var isHidingAvailable: Bool {
