@@ -384,6 +384,26 @@ final class TrackpadWorkspaceGestureTests: XCTestCase {
         XCTAssertTrue(scrollVerdict(fixture, momentumPhase: 2, phase: 0))
     }
 
+    func testClaimedSessionConsumesPhaseLessScrollEvents() throws {
+        let fixture = try makeFixture()
+        let handler = fixture.controller.mouseEventHandler
+
+        sendFrame(fixture, phase: .began, fingers: 3, x: 0.5, y: 0.2, at: 100)
+
+        XCTAssertTrue(handler.isTrackpadSwipeSessionActive)
+        XCTAssertTrue(scrollVerdict(fixture, momentumPhase: 0, phase: 0))
+    }
+
+    func testCompletedWorkspaceSwipeConsumesPhaseLessScrollTail() throws {
+        let fixture = try makeFixture()
+        let handler = fixture.controller.mouseEventHandler
+
+        _ = performVerticalSwipe(fixture, totalUnits: 220, startTime: 100)
+
+        XCTAssertFalse(handler.isTrackpadSwipeSessionActive)
+        XCTAssertTrue(scrollVerdict(fixture, momentumPhase: 0, phase: 0))
+    }
+
     func testRapidSuccessiveSwipesRejectStaleFocusHandoff() throws {
         var focusedWindowIds: [UInt32] = []
         let fixture = try makeFixture(

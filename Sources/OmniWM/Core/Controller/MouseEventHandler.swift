@@ -11,6 +11,7 @@ private let niriTouchpadGestureRecognitionThreshold: CGFloat = 16.0
 private let macNormalizedTouchPositionToNiriGestureUnits: CGFloat = 500.0
 private let mouseWheelAxisEpsilon: CGFloat = 0.001
 private let niriWheelScrollTickAmount: CGFloat = 120.0
+private let trackpadGestureScrollTailSuppressionDuration: TimeInterval = 0.25
 private let mouseRelevantModifierFlags: CGEventFlags = [
     .maskAlternate,
     .maskShift,
@@ -243,6 +244,7 @@ final class MouseEventHandler {
         var suppressGestureStartUntilAllTouchesLift = false
         var consumeTrackpadScrollUntilAllTouchesLift = false
         var suppressTrackpadMomentumScroll = false
+        var suppressTrackpadScrollUntil: TimeInterval?
         var horizontalWheelTracker = NiriScrollTracker(tick: niriWheelScrollTickAmount)
         var verticalWheelTracker = NiriScrollTracker(tick: niriWheelScrollTickAmount)
     }
@@ -515,6 +517,23 @@ final class MouseEventHandler {
         state.consumeTrackpadScrollUntilAllTouchesLift = false
     }
 
+    private var isTrackpadGestureScrollSuppressed: Bool {
+        if isTrackpadSwipeSessionActive || state.consumeTrackpadScrollUntilAllTouchesLift {
+            return true
+        }
+        guard let deadline = state.suppressTrackpadScrollUntil else { return false }
+        guard CACurrentMediaTime() < deadline else {
+            state.suppressTrackpadScrollUntil = nil
+            return false
+        }
+        return true
+    }
+
+    private func armTrackpadScrollTailSuppression() {
+        state.suppressTrackpadScrollUntil =
+            CACurrentMediaTime() + trackpadGestureScrollTailSuppressionDuration
+    }
+
     func suspendMultitouchForSleep() {
         multitouchSource?.suspendForSleep()
     }
@@ -528,6 +547,7 @@ final class MouseEventHandler {
         state.workspaceSwipeTracker.reset()
         clearGestureLatches()
         state.suppressTrackpadMomentumScroll = false
+        state.suppressTrackpadScrollUntil = nil
     }
 
     func dispatchMouseMoved(
@@ -697,6 +717,7 @@ final class MouseEventHandler {
             state.suppressGestureStartUntilAllTouchesLift = true
             state.consumeTrackpadScrollUntilAllTouchesLift = true
             state.suppressTrackpadMomentumScroll = true
+            armTrackpadScrollTailSuppression()
         }
         resetGestureState(settleViewportGesture: false)
         return true
@@ -710,6 +731,7 @@ final class MouseEventHandler {
         resetMouseWheelTrackers()
         abortActiveGestureIfNeeded()
         clearGestureLatches()
+        state.suppressTrackpadScrollUntil = nil
     }
 
     func handleAppVisibilityChanged() {
@@ -720,6 +742,7 @@ final class MouseEventHandler {
         resetMouseWheelTrackers()
         abortActiveGestureIfNeeded()
         clearGestureLatches()
+        state.suppressTrackpadScrollUntil = nil
     }
 
     func receiveTapMouseMoved(
@@ -821,6 +844,14 @@ final class MouseEventHandler {
         if suppress, MouseTrace.shared.isActive {
             MouseTrace.record("tap: scroll suppressed loc=\(TraceFormat.point(location))")
         }
+        // A phase-less scroll event can be the tail of the same three-finger
+        // gesture. Do not enqueue it for OmniWM's ordinary mouse-wheel path:
+        // the event tap already consumed it, and re-routing it would let a
+        // stale gesture sample act after the workspace switch.
+        if isTrackpadGestureScrollSuppressed {
+            performanceCounters?.droppedTrackpadScrollEvents &+= 1
+            return true
+        }
         if momentumPhase == 0, phase == 0 {
             EventIntake.post(
                 .mouseScroll(
@@ -846,10 +877,14 @@ final class MouseEventHandler {
         phase: UInt32,
         modifiers: CGEventFlags
     ) -> Bool {
+        // Some trackpad scroll-wheel events have no phase or momentum bits.
+        // The raw multitouch session is still authoritative, so consume those
+        // events before falling through to the ordinary mouse-wheel path.
+        if isTrackpadGestureScrollSuppressed {
+            return true
+        }
         let isTrackpad = momentumPhase != 0 || phase != 0
         if isTrackpad {
-            if isTrackpadSwipeSessionActive { return true }
-            if state.consumeTrackpadScrollUntilAllTouchesLift { return true }
             if state.suppressTrackpadMomentumScroll {
                 if momentumPhase != 0 { return true }
                 if phase == CGScrollPhase.ended.rawValue || phase == CGScrollPhase.cancelled.rawValue {
@@ -2312,7 +2347,11 @@ final class MouseEventHandler {
         let activeTouchCount = Self.activeTouchCount(in: snapshot.touches)
 
         if phase == .ended || phase == .cancelled {
+            let hadGestureSession = state.gesturePhase != .idle
             defer {
+                if hadGestureSession {
+                    armTrackpadScrollTailSuppression()
+                }
                 clearGestureLatches()
                 resetGestureState()
             }
@@ -2834,6 +2873,7 @@ final class MouseEventHandler {
         finishCommittedGestureOnRelease(timestamp: timestamp, allowFlick: true)
         state.suppressGestureStartUntilAllTouchesLift = true
         state.consumeTrackpadScrollUntilAllTouchesLift = true
+        armTrackpadScrollTailSuppression()
         resetGestureState()
         state.suppressTrackpadMomentumScroll = true
     }
@@ -2875,6 +2915,7 @@ final class MouseEventHandler {
             }
             state.suppressGestureStartUntilAllTouchesLift = true
             state.consumeTrackpadScrollUntilAllTouchesLift = true
+            armTrackpadScrollTailSuppression()
         }
         resetGestureState()
     }
