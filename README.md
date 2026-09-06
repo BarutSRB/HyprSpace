@@ -496,33 +496,30 @@ brew install omniwm
 
 ### Nix
 
-OmniWM supports both community-maintained Nix packages below, alongside a real-world Home Manager
-configuration example. The packages install official OmniWM release artifacts, while their Nix
-expressions are maintained by DoomHammer and DavSanchez respectively.
+OmniWM is packaged in [nixpkgs](https://github.com/NixOS/nixpkgs/blob/master/pkgs/by-name/om/omniwm/package.nix), maintained by mmfallacy and samiser, and Home Manager ships an official
+[`programs.omniwm` module](https://github.com/nix-community/home-manager/blob/master/modules/programs/omniwm.nix), maintained by DavSanchez. The package installs the signed release artifact with `bsdtar`, so the Developer ID
+signature stays valid, and exposes `OmniWM` and `omniwmctl` on `PATH`. Both currently live on unstable branches
+only (the nixpkgs unstable channels and Home Manager `master`) and may trail the latest GitHub release.
 
-| Package or example | Best for | Packaging or configuration difference |
-| --- | --- | --- |
-| [DoomHammer NUR package](https://nur.nix-community.org/repos/doomhammer/) | Fast release tracking | Its current `unzip` extraction does not preserve the release's valid Developer ID signature, and it installs the app bundle without exposing `omniwmctl` on `PATH`. |
-| [DavSanchez package](https://github.com/DavSanchez/nix-dotfiles/blob/master/pkgs/omniwm.nix) and [Home Manager module](https://github.com/DavSanchez/nix-dotfiles/blob/master/modules/home/omniwm.nix) | Signature-preserving, declarative integration | It may trail the latest release, but its `bsdtar` extraction preserves code signing and it provides `omniwmctl`, Home Manager settings, and launchd integration. |
-| [ryoppippi Home Manager configuration](https://github.com/ryoppippi/dotfiles/tree/main/nix/modules/darwin/programs/omniwm) | Real-world declarative setup example | It builds on DavSanchez's module, enables launchd, and merges a tracked settings template while preserving GUI-managed, machine-specific monitor settings. |
-
-Install the fast-tracking DoomHammer package directly:
+Install the package directly:
 
 ```bash
-nix profile install github:DoomHammer/nur-packages#omniwm
+nix profile install nixpkgs#omniwm
 ```
 
-Existing NUR configurations can use `nur.repos.doomhammer.omniwm`.
+With nix-darwin or Home Manager, add `pkgs.omniwm` to `environment.systemPackages` or `home.packages`.
 
-Install the signature-preserving DavSanchez package directly:
+For a declarative setup, enable the Home Manager module. It installs the package, runs OmniWM as a launchd
+agent, and writes `~/.config/omniwm/settings.toml` from an attribute set or a tracked TOML file:
 
-```bash
-nix profile install github:DavSanchez/nix-dotfiles#omniwm
+```nix
+programs.omniwm = {
+  enable = true;
+  settings = ./omniwm-settings.toml;
+};
 ```
 
-For a declarative setup, use DavSanchez's exported
-[`homeModules.omniwm`](https://github.com/DavSanchez/nix-dotfiles/blob/master/modules/home/omniwm.nix)
-and `overlays.additions`. After either installation, complete the macOS setup in steps 3-6 below.
+After either installation, complete the macOS setup in steps 3-6 below.
 
 ### GitHub Releases
 
