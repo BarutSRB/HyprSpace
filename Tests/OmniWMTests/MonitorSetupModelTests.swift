@@ -20,7 +20,7 @@ final class MonitorSetupModelTests: XCTestCase {
         let draft = MonitorSetupDraft(
             monitors: monitors,
             routingMode: .custom,
-            routingSettings: routing,
+            arrangements: [MonitorArrangement(monitors: routing)],
             mouseWarpEnabled: false,
             workspaceConfigurations: []
         )
@@ -41,7 +41,7 @@ final class MonitorSetupModelTests: XCTestCase {
         let draft = MonitorSetupDraft(
             monitors: monitors,
             routingMode: .macOS,
-            routingSettings: inactiveRouting,
+            arrangements: [MonitorArrangement(monitors: inactiveRouting)],
             mouseWarpEnabled: true,
             workspaceConfigurations: []
         )
@@ -57,7 +57,7 @@ final class MonitorSetupModelTests: XCTestCase {
         let draft = MonitorSetupDraft(
             monitors: monitors,
             routingMode: .custom,
-            routingSettings: incompleteRouting,
+            arrangements: [MonitorArrangement(monitors: incompleteRouting)],
             mouseWarpEnabled: true,
             workspaceConfigurations: []
         )
@@ -83,7 +83,7 @@ final class MonitorSetupModelTests: XCTestCase {
         let draft = MonitorSetupDraft(
             monitors: [first, second],
             routingMode: .macOS,
-            routingSettings: [],
+            arrangements: [],
             mouseWarpEnabled: true,
             workspaceConfigurations: []
         )
@@ -98,7 +98,7 @@ final class MonitorSetupModelTests: XCTestCase {
         var draft = MonitorSetupDraft(
             monitors: monitors,
             routingMode: .macOS,
-            routingSettings: [],
+            arrangements: [],
             mouseWarpEnabled: true,
             workspaceConfigurations: []
         )
@@ -121,7 +121,7 @@ final class MonitorSetupModelTests: XCTestCase {
         var draft = MonitorSetupDraft(
             monitors: monitors,
             routingMode: .macOS,
-            routingSettings: [],
+            arrangements: [],
             mouseWarpEnabled: true,
             workspaceConfigurations: []
         )
@@ -158,14 +158,14 @@ final class MonitorSetupModelTests: XCTestCase {
         let connectedDraft = MonitorSetupDraft(
             monitors: horizontal,
             routingMode: .macOS,
-            routingSettings: [],
+            arrangements: [],
             mouseWarpEnabled: true,
             workspaceConfigurations: []
         )
         let disconnectedDraft = MonitorSetupDraft(
             monitors: diagonal,
             routingMode: .macOS,
-            routingSettings: [],
+            arrangements: [],
             mouseWarpEnabled: true,
             workspaceConfigurations: []
         )
@@ -186,14 +186,14 @@ final class MonitorSetupModelTests: XCTestCase {
         let draft = MonitorSetupDraft(
             monitors: monitors,
             routingMode: .macOS,
-            routingSettings: [],
+            arrangements: [],
             mouseWarpEnabled: true,
             workspaceConfigurations: []
         )
 
         XCTAssertEqual(draft.readiness(for: monitors.reversed()), .ready)
         XCTAssertEqual(draft.readiness(for: [monitors[0], replacement]), .monitorConfigurationChanged)
-        XCTAssertNil(draft.routingSettings(preserving: [], monitors: [monitors[0], replacement]))
+        XCTAssertNil(draft.routingSettings(monitors: [monitors[0], replacement]))
     }
 
     func testReadinessDetectsStableIdentityReplacementWithReusedRuntimeID() {
@@ -207,7 +207,7 @@ final class MonitorSetupModelTests: XCTestCase {
         let draft = MonitorSetupDraft(
             monitors: monitors,
             routingMode: .macOS,
-            routingSettings: [],
+            arrangements: [],
             mouseWarpEnabled: true,
             workspaceConfigurations: []
         )
@@ -218,40 +218,33 @@ final class MonitorSetupModelTests: XCTestCase {
         )
     }
 
-    func testRoutingSettingsUseStableIdentityAndPreserveDisconnectedRows() throws {
-        let monitors = sideBySideMonitors()
-        let legacy = MonitorRoutingSettings(
-            monitorName: monitors[0].name,
-            monitorDisplayId: monitors[0].displayId,
-            gridColumn: 7,
-            gridRow: 4
-        )
-        let disconnectedUUID = "CCCCCCCC-CCCC-4CCC-8CCC-CCCCCCCCCCCC"
-        let disconnected = MonitorRoutingSettings(
-            monitorName: "Disconnected",
-            monitorDisplayUUID: disconnectedUUID,
-            gridColumn: 9,
-            gridRow: 9
-        )
+    func testRoutingSettingsStampStableIdentityForConnectedSet() throws {
+        let monitors = threeSideBySideMonitors()
+        let connected = Array(monitors.prefix(2))
+        let arrangement = MonitorArrangement(monitors: MonitorRouting.seedLayout(from: monitors))
         let draft = MonitorSetupDraft(
-            monitors: monitors,
-            routingMode: .macOS,
-            routingSettings: [],
+            monitors: connected,
+            routingMode: .custom,
+            arrangements: [arrangement],
             mouseWarpEnabled: true,
             workspaceConfigurations: []
         )
 
-        let updated = try XCTUnwrap(
-            draft.routingSettings(preserving: [legacy, disconnected], monitors: monitors)
-        )
-        let first = try XCTUnwrap(MonitorSettingsStore.get(for: monitors[0], in: updated))
-        let second = try XCTUnwrap(MonitorSettingsStore.get(for: monitors[1], in: updated))
+        let updated = try XCTUnwrap(draft.routingSettings(monitors: connected))
+        let first = try XCTUnwrap(MonitorSettingsStore.get(for: connected[0], in: updated))
+        let second = try XCTUnwrap(MonitorSettingsStore.get(for: connected[1], in: updated))
 
+        XCTAssertEqual(first.monitorName, connected[0].name)
         XCTAssertEqual(first.monitorDisplayUUID, displayUUIDA)
+        XCTAssertEqual(first.monitorDisplayId, connected[0].displayId)
+        XCTAssertEqual(second.monitorName, connected[1].name)
         XCTAssertEqual(second.monitorDisplayUUID, displayUUIDB)
+        XCTAssertEqual(second.monitorDisplayId, connected[1].displayId)
         XCTAssertEqual(first.gridColumn, 0)
         XCTAssertEqual(second.gridColumn, 1)
-        XCTAssertTrue(updated.contains(where: { $0.monitorDisplayUUID == disconnectedUUID }))
+        XCTAssertEqual(updated.count, connected.count)
+        XCTAssertNil(MonitorSettingsStore.get(for: monitors[2], in: updated))
+        XCTAssertEqual(arrangement.monitors.count, 3)
     }
 
     func testWorkspaceCoverageUsesRuntimeMonitorAssignmentResolution() throws {
@@ -263,7 +256,7 @@ final class MonitorSetupModelTests: XCTestCase {
         var draft = MonitorSetupDraft(
             monitors: monitors,
             routingMode: .macOS,
-            routingSettings: [],
+            arrangements: [],
             mouseWarpEnabled: true,
             workspaceConfigurations: configurations
         )
@@ -290,7 +283,7 @@ final class MonitorSetupModelTests: XCTestCase {
         var draft = MonitorSetupDraft(
             monitors: monitors,
             routingMode: .macOS,
-            routingSettings: [],
+            arrangements: [],
             mouseWarpEnabled: true,
             workspaceConfigurations: configurations
         )
@@ -315,7 +308,7 @@ final class MonitorSetupModelTests: XCTestCase {
         var draft = MonitorSetupDraft(
             monitors: monitors,
             routingMode: .macOS,
-            routingSettings: [],
+            arrangements: [],
             mouseWarpEnabled: true,
             workspaceConfigurations: configurations
         )
@@ -349,7 +342,7 @@ final class MonitorSetupModelTests: XCTestCase {
         let draft = MonitorSetupDraft(
             monitors: [],
             routingMode: .macOS,
-            routingSettings: [],
+            arrangements: [],
             mouseWarpEnabled: true,
             workspaceConfigurations: [WorkspaceConfiguration(name: "1", monitorAssignment: .main)]
         )

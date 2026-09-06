@@ -69,9 +69,10 @@ final class CursorContainmentHandlerTests: XCTestCase {
 
         let bottom = makeMonitor(1, "Bottom", CGRect(x: 0, y: 0, width: 1920, height: 1080))
         let top = makeMonitor(2, "Top", CGRect(x: 0, y: 1080, width: 1920, height: 1080))
-        settings.monitorRoutingSettings = verticalRouting
+        let layout = verticalRouting
             ? [routing(2, "Top", 0, 0), routing(1, "Bottom", 0, 1)]
             : [routing(1, "Bottom", 0, 0), routing(2, "Top", 1, 0)]
+        settings.monitorArrangements = [MonitorArrangement(monitors: layout)]
 
         let controller = WMController(settings: settings)
         controller.workspaceManager.applyMonitorConfigurationChange([bottom, top])
@@ -89,10 +90,10 @@ final class CursorContainmentHandlerTests: XCTestCase {
 
         let source = makeMonitor(2, "Dell", CGRect(x: 0, y: 0, width: 3360, height: 1418))
         let target = makeMonitor(3, "espresso", CGRect(x: 3360, y: 1418, width: 1080, height: 1920))
-        settings.monitorRoutingSettings = [
+        settings.monitorArrangements = [MonitorArrangement(monitors: [
             routing(3, "espresso", 0, 0),
             routing(2, "Dell", 1, 0)
-        ]
+        ])]
 
         let controller = WMController(settings: settings)
         controller.workspaceManager.applyMonitorConfigurationChange([source, target])
@@ -163,6 +164,52 @@ final class CursorContainmentHandlerTests: XCTestCase {
         )
         XCTAssertEqual(warped.count, 1)
         assertPoint(warped[0], ScreenCoordinateSpace.toWindowServer(point: destination))
+        XCTAssertEqual(fixture.handler.state.lastMonitorId, fixture.top.id)
+    }
+
+    func testInheritedArrangementAndExactEditAgreeAcrossNavigationWarpAndContainment() {
+        let fixture = makeFixture()
+        let inherited = MonitorArrangement(monitors: [
+            routing(1, "Bottom", 0, 0), routing(2, "Top", 1, 0), routing(3, "Disconnected", 2, 0)
+        ])
+        fixture.settings.monitorArrangements = [inherited]
+        var warped: [CGPoint] = []
+        fixture.handler.warpCursor = {
+            warped.append($0)
+            return .success
+        }
+        fixture.handler.postMouseMovedEvent = { _ in }
+        defer { fixture.handler.resetTransientState() }
+        let manager = fixture.controller.workspaceManager
+
+        XCTAssertEqual(manager.adjacentMonitor(from: fixture.bottom.id, direction: .right), fixture.top)
+        fixture.handler.handleMouseWarpMoved(at: fixture.bottom.frame.center)
+        fixture.handler.handleMouseWarpMoved(at: fixture.top.frame.center)
+        XCTAssertEqual(warped.count, 1)
+        XCTAssertEqual(fixture.handler.state.lastMonitorId, fixture.bottom.id)
+
+        fixture.handler.resetTransientState()
+        warped.removeAll()
+        fixture.handler.handleMouseWarpMoved(at: CGPoint(
+            x: fixture.bottom.frame.maxX - 1,
+            y: fixture.bottom.frame.midY
+        ))
+        XCTAssertEqual(warped.count, 1)
+        XCTAssertEqual(fixture.handler.state.lastMonitorId, fixture.top.id)
+
+        fixture.handler.resetTransientState()
+        warped.removeAll()
+        fixture.settings.storeRoutingLayout(
+            [routing(1, "Bottom", 0, 1), routing(2, "Top", 0, 0)],
+            for: [fixture.bottom, fixture.top]
+        )
+        XCTAssertEqual(fixture.settings.monitorArrangements.count, 2)
+        XCTAssertEqual(fixture.settings.monitorArrangements[0], inherited)
+        XCTAssertEqual(manager.adjacentMonitor(from: fixture.bottom.id, direction: .up), fixture.top)
+        XCTAssertNil(manager.adjacentMonitor(from: fixture.bottom.id, direction: .right))
+        fixture.handler.handleMouseWarpMoved(at: fixture.bottom.frame.center)
+        fixture.handler.handleMouseWarpMoved(at: fixture.top.frame.center)
+        XCTAssertTrue(warped.isEmpty)
         XCTAssertEqual(fixture.handler.state.lastMonitorId, fixture.top.id)
     }
 }

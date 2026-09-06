@@ -18,6 +18,16 @@ OmniWM uses two display maps that do different work — the macOS arrangement ha
 
 The setup assistant opens automatically when OmniWM first sees multiple displays. To review or redo it later, choose **Run Monitor Setup…** in **Settings > Monitors**. The assistant's **Show Numbers on Screens** action helps match each physical display to its tile. Routing, workspace-home, and Mouse Warp changes remain drafts until you finish the assistant.
 
+## Remembered arrangements
+
+With **Custom Arrangement** selected, OmniWM remembers a routing grid for each set of connected displays. Your laptop can sit below an external display at home and beside another display at work; reconnecting either set restores its saved grid. Display resolution and macOS placement do not choose a different arrangement.
+
+An exact saved set takes priority. Otherwise, OmniWM inherits the smallest saved arrangement that includes every connected display, using only the connected displays' positions. The first saved arrangement wins a tie. If no arrangement covers the set, or the selected grid is invalid for the remaining displays, routing follows macOS.
+
+Editing or resetting the grid, or finishing the setup assistant, saves an arrangement for exactly the connected displays. Editing an inherited grid creates a separate arrangement for that subset and leaves its larger source unchanged. Connecting or disconnecting displays and opening Settings never save an arrangement. Explicitly selecting **Custom Arrangement** creates an initial arrangement only when no saved arrangement covers the connected set.
+
+Workspace homes and other per-monitor settings are separate from these saved routing arrangements. See [`routing` in the Settings Reference](/config/settings-reference/#routing) for the configuration format.
+
 ## Per-monitor behavior
 
 Layout behavior follows each display rather than one global setting: monitors using horizontal orientation show Niri columns that scroll left and right, while vertical orientation shows rows that scroll up and down. See [Layout Modes](/guides/layouts/).

@@ -38,7 +38,7 @@ struct MonitorSetupDraft {
     init(
         monitors: [Monitor],
         routingMode: MonitorRoutingMode,
-        routingSettings: [MonitorRoutingSettings],
+        arrangements: [MonitorArrangement],
         mouseWarpEnabled: Bool,
         workspaceConfigurations: [WorkspaceConfiguration]
     ) {
@@ -52,7 +52,10 @@ struct MonitorSetupDraft {
 
         let initialLayout: [MonitorRoutingSettings]
         if routingMode == .custom,
-           let customLayout = MonitorRouting.completeLayout(routingSettings, for: monitors)
+           let customLayout = MonitorRouting.completeLayout(
+               MonitorRouting.layout(for: monitors, in: arrangements),
+               for: monitors
+           )
         {
             initialLayout = customLayout
         } else {
@@ -120,16 +123,12 @@ struct MonitorSetupDraft {
         return isCardinallyConnected ? .ready : .disconnected
     }
 
-    func routingSettings(
-        preserving existing: [MonitorRoutingSettings],
-        monitors: [Monitor]
-    ) -> [MonitorRoutingSettings]? {
+    func routingSettings(monitors: [Monitor]) -> [MonitorRoutingSettings]? {
         guard readiness(for: monitors) == .ready else { return nil }
         let routingCells = cells.mapValues { cell in
             (column: cell.column, row: cell.row)
         }
         return MonitorSettingsTabModel.routingSettingsAfterEdit(
-            existing: existing,
             monitors: monitors,
             cells: routingCells
         )

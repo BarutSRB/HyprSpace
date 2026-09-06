@@ -10,6 +10,50 @@ enum MonitorRouting {
         case fallBackToMacOS
     }
 
+    static func arrangementIndex(for monitors: [Monitor], in arrangements: [MonitorArrangement]) -> Int? {
+        guard !monitors.isEmpty else { return nil }
+        var selectedIndex: Int?
+        var selectedCount = Int.max
+
+        for index in arrangements.indices {
+            let layout = arrangements[index].monitors
+            guard layout.count >= monitors.count,
+                  layout.count < selectedCount,
+                  monitors.allSatisfy({ MonitorSettingsStore.get(for: $0, in: layout) != nil })
+            else { continue }
+            if layout.count == monitors.count { return index }
+            selectedIndex = index
+            selectedCount = layout.count
+        }
+
+        return selectedIndex
+    }
+
+    static func exactArrangementIndex(for monitors: [Monitor], in arrangements: [MonitorArrangement]) -> Int? {
+        guard let index = arrangementIndex(for: monitors, in: arrangements),
+              arrangements[index].monitors.count == monitors.count
+        else { return nil }
+        return index
+    }
+
+    static func layout(for monitors: [Monitor], in arrangements: [MonitorArrangement]) -> [MonitorRoutingSettings] {
+        guard let index = arrangementIndex(for: monitors, in: arrangements) else { return [] }
+        return arrangements[index].monitors
+    }
+
+    static func store(
+        _ layout: [MonitorRoutingSettings],
+        for monitors: [Monitor],
+        in arrangements: inout [MonitorArrangement]
+    ) {
+        guard !monitors.isEmpty else { return }
+        if let index = exactArrangementIndex(for: monitors, in: arrangements) {
+            arrangements[index].monitors = layout
+        } else {
+            arrangements.append(MonitorArrangement(monitors: layout))
+        }
+    }
+
     static func gridAdjacent(
         from source: Monitor,
         direction: Direction,

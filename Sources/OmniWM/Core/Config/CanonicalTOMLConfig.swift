@@ -30,7 +30,6 @@ struct CanonicalTOMLConfig: Codable, Equatable {
     var monitorNiriOverrides: [MonitorNiriSettings]
     var monitorDwindleOverrides: [MonitorDwindleSettings]
     var monitorGapOverrides: [MonitorGapSettings]
-    var monitorRoutingOverrides: [MonitorRoutingSettings]
 
     struct General: Codable, Equatable {
         var hotkeysEnabled: Bool
@@ -65,6 +64,7 @@ struct CanonicalTOMLConfig: Codable, Equatable {
 
     struct Routing: Codable, Equatable {
         var mode: MonitorRoutingMode
+        var arrangements: [MonitorArrangement]
     }
 
     struct Gaps: Codable, Equatable {
@@ -282,7 +282,6 @@ extension CanonicalTOMLConfig {
         monitorNiriOverrides = try container.decode([MonitorNiriSettings].self, forKey: .monitorNiriOverrides)
         monitorDwindleOverrides = try container.decode([MonitorDwindleSettings].self, forKey: .monitorDwindleOverrides)
         monitorGapOverrides = try container.decode([MonitorGapSettings].self, forKey: .monitorGapOverrides)
-        monitorRoutingOverrides = try container.decode([MonitorRoutingSettings].self, forKey: .monitorRoutingOverrides)
     }
 }
 
@@ -313,7 +312,7 @@ extension CanonicalTOMLConfig {
             enabled: export.mouseWarpEnabled,
             constrainToArrangement: export.cursorContainmentEnabled
         )
-        routing = Routing(mode: export.monitorRoutingMode)
+        routing = Routing(mode: export.monitorRoutingMode, arrangements: export.monitorArrangements)
         gaps = Gaps(
             size: export.gapSize,
             fullscreenUsesOuterGaps: export.fullscreenUsesOuterGaps,
@@ -435,7 +434,6 @@ extension CanonicalTOMLConfig {
         monitorNiriOverrides = export.monitorNiriSettings
         monitorDwindleOverrides = export.monitorDwindleSettings
         monitorGapOverrides = export.monitorGapSettings
-        monitorRoutingOverrides = export.monitorRoutingSettings
     }
 
     func toSettingsExport() -> SettingsExport {
@@ -452,7 +450,7 @@ extension CanonicalTOMLConfig {
             mouseWarpEnabled: mouseWarp.enabled,
             cursorContainmentEnabled: mouseWarp.constrainToArrangement,
             monitorRoutingMode: routing.mode,
-            monitorRoutingSettings: monitorRoutingOverrides,
+            monitorArrangements: routing.arrangements,
             gapSize: gaps.size,
             outerGapLeft: gaps.outer.left,
             outerGapRight: gaps.outer.right,

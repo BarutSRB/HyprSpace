@@ -171,7 +171,7 @@ final class MouseWarpHandler: NSObject {
             location: location,
             source: source,
             destination: destination,
-            layout: controller.settings.monitorRoutingSettings,
+            layout: MonitorRouting.layout(for: monitors, in: controller.settings.monitorArrangements),
             monitors: monitors,
             margin: margin
         ) {

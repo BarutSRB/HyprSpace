@@ -35,7 +35,7 @@ extension WorkspaceManager {
             switch MonitorRouting.gridAdjacent(
                 from: current,
                 direction: direction,
-                layout: settings.monitorRoutingSettings,
+                layout: MonitorRouting.layout(for: monitors, in: settings.monitorArrangements),
                 monitors: monitors,
                 wrapAround: wrapAround
             ) {

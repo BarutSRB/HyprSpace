@@ -32,7 +32,7 @@ struct MonitorSettingsTab: View {
 
     private var routingEditorLayout: MonitorSettingsTabModel.RoutingEditorLayout {
         MonitorSettingsTabModel.routingEditorLayout(
-            existing: settings.monitorRoutingSettings,
+            arrangements: settings.monitorArrangements,
             monitors: sortedMonitors
         )
     }
@@ -171,19 +171,33 @@ struct MonitorSettingsTab: View {
                         RoutingAccessibleEditor(rows: routingRows, onMove: { moveRouting($0, $1) })
                     }
 
-                    if routingEditorLayout.usesMacOSFallback {
-                        SettingsCaption(
-                            "Saved custom routing is incomplete or invalid for the connected monitors. "
-                                + "The macOS arrangement is shown without changing your saved layout. "
-                                + "Dragging a monitor or using the arrow controls saves a complete custom arrangement."
-                        )
+                    if !sortedMonitors.isEmpty {
+                        switch routingEditorLayout.source {
+                        case .exact:
+                            SettingsCaption(
+                                "This arrangement is saved for the connected displays. "
+                                    + "Changes update only this arrangement."
+                            )
+                        case .inherited:
+                            SettingsCaption(
+                                "Using an arrangement saved with additional displays. "
+                                    + "Editing or resetting saves a separate arrangement for the displays connected now."
+                            )
+                        case .macOS:
+                            SettingsCaption(
+                                "No valid saved arrangement covers the connected displays. "
+                                    + "The macOS arrangement is shown without changing your saved arrangements. "
+                                    + "Dragging a monitor or using the arrow controls saves an arrangement for these displays."
+                            )
+                        }
                     }
 
                     Button("Reset Custom Arrangement to macOS Layout") { seedFromMacOS() }
 
                     SettingsCaption(
                         "Make this look like your real desk. Displays in the same row or column can exchange focus, "
-                            + "windows, and the pointer. This does not change where macOS places windows."
+                            + "windows, and the pointer. OmniWM remembers an arrangement for each set of connected displays. "
+                            + "This does not change where macOS places windows."
                     )
                 } else {
                     SettingsCaption(
@@ -292,14 +306,14 @@ struct MonitorSettingsTab: View {
     private func ensureRoutingSeeded() {
         guard settings.monitorRoutingMode == .custom else { return }
         guard MonitorSettingsTabModel.shouldSeedRouting(
-            existing: settings.monitorRoutingSettings,
-            connectedMonitorCount: connectedMonitors.count
+            arrangements: settings.monitorArrangements,
+            monitors: connectedMonitors
         ) else { return }
-        settings.monitorRoutingSettings = MonitorRouting.seedLayout(from: connectedMonitors)
+        seedFromMacOS()
     }
 
     private func seedFromMacOS() {
-        settings.monitorRoutingSettings = MonitorRouting.seedLayout(from: connectedMonitors)
+        settings.storeRoutingLayout(MonitorRouting.seedLayout(from: connectedMonitors), for: connectedMonitors)
     }
 
     private func placeRouting(_ monitorID: Monitor.ID, column: Int, row: Int) {
@@ -314,11 +328,11 @@ struct MonitorSettingsTab: View {
             at: .init(column: column, row: row),
             cells: &cells
         )
-        settings.monitorRoutingSettings = MonitorSettingsTabModel.routingSettingsAfterEdit(
-            existing: settings.monitorRoutingSettings,
+        let updated = MonitorSettingsTabModel.routingSettingsAfterEdit(
             monitors: monitors,
             cells: cells.mapValues { (column: $0.column, row: $0.row) }
         )
+        settings.storeRoutingLayout(updated, for: monitors)
     }
 
     private func moveRouting(_ monitorID: Monitor.ID, _ direction: Direction) {
@@ -463,50 +477,60 @@ struct MonitorDisplayLabel: Equatable {
 
 enum MonitorSettingsTabModel {
     struct RoutingEditorLayout {
+        enum Source: Equatable {
+            case exact
+            case inherited
+            case macOS
+        }
+
         let settings: [MonitorRoutingSettings]
-        let usesMacOSFallback: Bool
+        let source: Source
+
+        var usesMacOSFallback: Bool {
+            source == .macOS && !settings.isEmpty
+        }
     }
 
     static func routingEditorLayout(
-        existing: [MonitorRoutingSettings],
+        arrangements: [MonitorArrangement],
         monitors: [Monitor]
     ) -> RoutingEditorLayout {
-        if let completeLayout = MonitorRouting.completeLayout(existing, for: monitors) {
-            return RoutingEditorLayout(settings: completeLayout, usesMacOSFallback: false)
+        if let index = MonitorRouting.arrangementIndex(for: monitors, in: arrangements),
+           let completeLayout = MonitorRouting.completeLayout(arrangements[index].monitors, for: monitors)
+        {
+            return RoutingEditorLayout(
+                settings: completeLayout,
+                source: arrangements[index].monitors.count == monitors.count ? .exact : .inherited
+            )
         }
 
         return RoutingEditorLayout(
             settings: MonitorRouting.seedLayout(from: monitors),
-            usesMacOSFallback: !monitors.isEmpty
+            source: .macOS
         )
     }
 
     static func routingSettingsAfterEdit(
-        existing: [MonitorRoutingSettings],
         monitors: [Monitor],
         cells: [Monitor.ID: (column: Int, row: Int)]
     ) -> [MonitorRoutingSettings] {
-        var updated = existing
-        for monitor in monitors {
-            guard let cell = cells[monitor.id] else { continue }
-            MonitorSettingsStore.update(
-                MonitorRoutingSettings(
-                    monitorName: monitor.name,
-                    gridColumn: cell.column,
-                    gridRow: cell.row
-                ),
-                for: monitor,
-                in: &updated
+        monitors.compactMap { monitor in
+            guard let cell = cells[monitor.id] else { return nil }
+            return MonitorRoutingSettings(
+                monitorName: monitor.name,
+                monitorDisplayUUID: monitor.displayUUID,
+                monitorDisplayId: monitor.displayId,
+                gridColumn: cell.column,
+                gridRow: cell.row
             )
         }
-        return updated
     }
 
     static func shouldSeedRouting(
-        existing: [MonitorRoutingSettings],
-        connectedMonitorCount: Int
+        arrangements: [MonitorArrangement],
+        monitors: [Monitor]
     ) -> Bool {
-        existing.isEmpty && connectedMonitorCount > 0
+        !monitors.isEmpty && MonitorRouting.arrangementIndex(for: monitors, in: arrangements) == nil
     }
 
     static func sortedMonitors(_ monitors: [Monitor]) -> [Monitor] {

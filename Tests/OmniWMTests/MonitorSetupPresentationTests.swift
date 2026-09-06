@@ -56,20 +56,8 @@ final class MonitorSetupPresentationTests: XCTestCase {
         let root = temporaryRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         let settings = makeSettingsStore(root: root)
-        let routing = [
-            MonitorRoutingSettings(
-                monitorName: "Primary",
-                monitorDisplayId: 1,
-                gridColumn: 0,
-                gridRow: 0
-            ),
-            MonitorRoutingSettings(
-                monitorName: "Secondary",
-                monitorDisplayId: 2,
-                gridColumn: 1,
-                gridRow: 0
-            )
-        ]
+        let displays = monitors(count: 2)
+        let routing = MonitorRouting.seedLayout(from: displays)
         let workspaceConfigurations = [
             WorkspaceConfiguration(name: "1", monitorAssignment: .main),
             WorkspaceConfiguration(name: "2", monitorAssignment: .secondary)
@@ -79,14 +67,61 @@ final class MonitorSetupPresentationTests: XCTestCase {
 
         settings.applyMonitorSetup(
             routingSettings: routing,
+            monitors: displays,
             mouseWarpEnabled: false,
             workspaceConfigurations: workspaceConfigurations
         )
 
-        XCTAssertEqual(settings.monitorRoutingSettings, routing)
+        XCTAssertEqual(settings.monitorArrangements.map(\.monitors), [routing])
         XCTAssertEqual(settings.monitorRoutingMode, .custom)
         XCTAssertFalse(settings.mouseWarpEnabled)
         XCTAssertEqual(settings.workspaceConfigurations, workspaceConfigurations)
+    }
+
+    func testApplyMonitorSetupCreatesExactSubsetWithoutChangingLargerArrangement() throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let settings = makeSettingsStore(root: root)
+        let displays = monitors(count: 3)
+        let fullRouting = MonitorRouting.seedLayout(from: displays)
+        settings.applyMonitorSetup(
+            routingSettings: fullRouting,
+            monitors: displays,
+            mouseWarpEnabled: true,
+            workspaceConfigurations: []
+        )
+        let original = try XCTUnwrap(settings.monitorArrangements.first)
+        let connected = Array(displays.prefix(2))
+        var subsetRouting = MonitorRouting.seedLayout(from: connected)
+        subsetRouting[1].gridColumn = 0
+        subsetRouting[1].gridRow = 1
+
+        settings.applyMonitorSetup(
+            routingSettings: subsetRouting,
+            monitors: connected,
+            mouseWarpEnabled: true,
+            workspaceConfigurations: []
+        )
+
+        XCTAssertEqual(settings.monitorArrangements.count, 2)
+        XCTAssertEqual(settings.monitorArrangements[0], original)
+        XCTAssertEqual(settings.monitorArrangements[1].monitors, subsetRouting)
+        XCTAssertNotEqual(settings.monitorArrangements[1].id, original.id)
+
+        let subsetID = settings.monitorArrangements[1].id
+        let resetRouting = MonitorRouting.seedLayout(from: connected)
+        settings.applyMonitorSetup(
+            routingSettings: resetRouting,
+            monitors: connected,
+            mouseWarpEnabled: false,
+            workspaceConfigurations: []
+        )
+
+        XCTAssertEqual(settings.monitorArrangements.count, 2)
+        XCTAssertEqual(settings.monitorArrangements[0], original)
+        XCTAssertEqual(settings.monitorArrangements[1].id, subsetID)
+        XCTAssertEqual(settings.monitorArrangements[1].monitors, resetRouting)
+        XCTAssertFalse(settings.mouseWarpEnabled)
     }
 
     func testNavigationRequestIsConsumedOnceAndSelectsMonitors() {

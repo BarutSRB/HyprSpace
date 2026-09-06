@@ -102,16 +102,17 @@ final class SettingsStore {
         didSet { scheduleSave() }
     }
 
-    var monitorRoutingSettings = SettingsStore.defaultExport.monitorRoutingSettings {
+    var monitorArrangements = SettingsStore.defaultExport.monitorArrangements {
         didSet { scheduleSave() }
     }
 
     func applyMonitorSetup(
         routingSettings: [MonitorRoutingSettings],
+        monitors: [Monitor],
         mouseWarpEnabled: Bool,
         workspaceConfigurations: [WorkspaceConfiguration]
     ) {
-        monitorRoutingSettings = routingSettings
+        storeRoutingLayout(routingSettings, for: monitors)
         monitorRoutingMode = .custom
         self.mouseWarpEnabled = mouseWarpEnabled
         if self.workspaceConfigurations != workspaceConfigurations {
@@ -754,7 +755,7 @@ final class SettingsStore {
             mouseWarpEnabled: mouseWarpEnabled,
             cursorContainmentEnabled: cursorContainmentEnabled,
             monitorRoutingMode: monitorRoutingMode,
-            monitorRoutingSettings: monitorRoutingSettings,
+            monitorArrangements: monitorArrangements,
             gapSize: gapSize,
             outerGapLeft: outerGapLeft,
             outerGapRight: outerGapRight,
@@ -884,7 +885,7 @@ final class SettingsStore {
         mouseWarpEnabled = export.mouseWarpEnabled
         cursorContainmentEnabled = export.cursorContainmentEnabled
         monitorRoutingMode = export.monitorRoutingMode
-        monitorRoutingSettings = export.monitorRoutingSettings
+        monitorArrangements = export.monitorArrangements
         gapSize = export.gapSize
         outerGapLeft = export.outerGapLeft
         outerGapRight = export.outerGapRight
@@ -1256,8 +1257,8 @@ final class SettingsStore {
         MonitorSettingsStore.remove(for: monitor, from: &monitorOrientationSettings)
     }
 
-    func updateRoutingSettings(_ settings: MonitorRoutingSettings, for monitor: Monitor) {
-        MonitorSettingsStore.update(settings, for: monitor, in: &monitorRoutingSettings)
+    func storeRoutingLayout(_ layout: [MonitorRoutingSettings], for monitors: [Monitor]) {
+        MonitorRouting.store(layout, for: monitors, in: &monitorArrangements)
     }
 
     func niriSettings(for monitor: Monitor) -> MonitorNiriSettings? {

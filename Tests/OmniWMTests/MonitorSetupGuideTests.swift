@@ -59,14 +59,19 @@ final class MonitorSetupGuideTests: XCTestCase {
             monitor(id: 1, frame: CGRect(x: 0, y: 0, width: 1600, height: 900)),
             monitor(id: 2, frame: CGRect(x: 1600, y: 0, width: 1200, height: 700))
         ]
+        let disconnected = monitor(id: 3, frame: CGRect(x: 2800, y: 0, width: 1000, height: 700))
+        settings.monitorRoutingMode = .custom
+        settings.monitorArrangements = [
+            MonitorArrangement(monitors: MonitorRouting.seedLayout(from: monitors + [disconnected]))
+        ]
         let initialMode = settings.monitorRoutingMode
-        let initialRows = settings.monitorRoutingSettings
+        let initialArrangements = settings.monitorArrangements
         let initialMouseWarp = settings.mouseWarpEnabled
         let initialWorkspaceConfigurations = settings.workspaceConfigurations
         var draft = MonitorSetupDraft(
             monitors: monitors,
             routingMode: settings.monitorRoutingMode,
-            routingSettings: settings.monitorRoutingSettings,
+            arrangements: settings.monitorArrangements,
             mouseWarpEnabled: settings.mouseWarpEnabled,
             workspaceConfigurations: settings.workspaceConfigurations
         )
@@ -79,7 +84,7 @@ final class MonitorSetupGuideTests: XCTestCase {
         draft.addWorkspace(for: monitors[1])
 
         XCTAssertEqual(settings.monitorRoutingMode, initialMode)
-        XCTAssertEqual(settings.monitorRoutingSettings, initialRows)
+        XCTAssertEqual(settings.monitorArrangements, initialArrangements)
         XCTAssertEqual(settings.mouseWarpEnabled, initialMouseWarp)
         XCTAssertEqual(settings.workspaceConfigurations, initialWorkspaceConfigurations)
     }

@@ -2,10 +2,21 @@
 // Copyright (C) 2026 BarutSRB — https://github.com/BarutSRB/OmniWM
 
 import CoreGraphics
+import Foundation
 
 enum MonitorRoutingMode: String, Codable, CaseIterable {
     case macOS
     case custom
+}
+
+struct MonitorArrangement: Codable, Equatable, Identifiable {
+    var id: UUID
+    var monitors: [MonitorRoutingSettings]
+
+    init(id: UUID = UUID(), monitors: [MonitorRoutingSettings]) {
+        self.id = id
+        self.monitors = monitors
+    }
 }
 
 struct MonitorRoutingSettings: MonitorSettingsType {

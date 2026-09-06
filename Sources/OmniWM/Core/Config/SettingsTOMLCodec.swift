@@ -4,9 +4,8 @@
 import Foundation
 import TOML
 
-// Only file in OmniWM that imports TOML — keep this boundary so swift-toml stays swappable.
 enum SettingsTOMLCodec {
-    static let currentSchemaVersion = 2
+    static let currentSchemaVersion = 3
 
     private static let versionOneHotkeyIDs = [
         "toggleScratchpad.1",
@@ -134,12 +133,13 @@ enum SettingsTOMLCodec {
         }
 
         let versionOneReport = version == 0 ? try migrateVersionZero(&raw) : nil
-        let versionTwoAddedHotkeyIDs = migrateVersionOne(&raw)
+        let versionTwoAddedHotkeyIDs = version <= 1 ? migrateVersionOne(&raw) : []
+        let versionThreeDefaultedPaths = try migrateVersionTwo(&raw)
         canonicalizeMigratedHotkeys(in: &raw)
         let report = SettingsMigrationReport(
             fromVersion: version,
             toVersion: currentSchemaVersion,
-            defaultedPaths: versionOneReport?.defaultedPaths ?? [],
+            defaultedPaths: (versionOneReport?.defaultedPaths ?? []) + versionThreeDefaultedPaths,
             addedHotkeyIDs: (versionOneReport?.addedHotkeyIDs ?? []) + versionTwoAddedHotkeyIDs,
             mappedHotkeys: versionOneReport?.mappedHotkeys ?? [],
             retiredHotkeys: versionOneReport?.retiredHotkeys ?? []
@@ -324,6 +324,36 @@ enum SettingsTOMLCodec {
         let addedIDs = appendMissingUnassignedHotkeys(versionTwoHotkeyIDs, to: &entries)
         raw["hotkeys"] = .array(entries)
         return addedIDs
+    }
+
+    private static func migrateVersionTwo(_ raw: inout [String: TOMLNode]) throws -> [String] {
+        struct PersistedRouting: Decodable {
+            let monitorRoutingOverrides: [MonitorRoutingSettings]
+        }
+
+        let validationData = try TOMLEncoder().encode(raw)
+        _ = try TOMLDecoder().decode(PersistedRouting.self, from: validationData)
+        if case let .table(routing) = raw["routing"], routing["arrangements"] != nil {
+            throw DecodingError.dataCorrupted(DecodingError.Context(
+                codingPath: [DynamicCodingKey("routing"), DynamicCodingKey("arrangements")],
+                debugDescription: "Cannot migrate monitorRoutingOverrides while routing.arrangements already exists."
+            ))
+        }
+        guard case let .array(rows) = raw.removeValue(forKey: "monitorRoutingOverrides") else {
+            throw SettingsTOMLCodecError.migrationInvariant("Validated monitor routing rows are unavailable.")
+        }
+        let arrangements: [TOMLNode] = rows.isEmpty ? [] : [.table([
+            "id": .string(UUID().uuidString),
+            "monitors": .array(rows)
+        ])]
+        let added = addMissingValue(
+            in: &raw,
+            table: "routing",
+            key: "arrangements",
+            value: .array(arrangements)
+        )
+        raw["schemaVersion"] = .integer(3)
+        return added ? ["routing.arrangements"] : []
     }
 
     private static func appendMissingUnassignedHotkeys(

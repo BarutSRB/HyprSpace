@@ -33,7 +33,8 @@ final class SettingsMigrationTests: XCTestCase {
                     "focus.raiseOnMouseFocus",
                     "gaps.fullscreenUsesOuterGaps",
                     "workspaceBar.hideInNativeFullscreen",
-                    "scratchpads.labels"
+                    "scratchpads.labels",
+                    "routing.arrangements"
                 ],
                 ["consumeOrExpelWindowLeft", "consumeOrExpelWindowRight"]
             ),
@@ -41,7 +42,7 @@ final class SettingsMigrationTests: XCTestCase {
                 "v0.6.3-custom",
                 false,
                 true,
-                ["workspaceBar.hideInNativeFullscreen", "scratchpads.labels"],
+                ["workspaceBar.hideInNativeFullscreen", "scratchpads.labels", "routing.arrangements"],
                 []
             )
         ]
@@ -53,7 +54,7 @@ final class SettingsMigrationTests: XCTestCase {
             let export = result.export
 
             XCTAssertEqual(migration.fromVersion, 0, testCase.name)
-            XCTAssertEqual(migration.toVersion, 2, testCase.name)
+            XCTAssertEqual(migration.toVersion, 3, testCase.name)
             XCTAssertEqual(Set(migration.defaultedPaths), testCase.defaultedPaths, testCase.name)
             XCTAssertEqual(Set(migration.addedHotkeyIDs), expectedAddedHotkeyIDs, testCase.name)
             XCTAssertEqual(
@@ -130,11 +131,228 @@ final class SettingsMigrationTests: XCTestCase {
                 testCase.name
             )
             let migratedText = String(decoding: migratedData, as: UTF8.self)
-            XCTAssertTrue(migratedText.contains("schemaVersion = 2"), testCase.name)
+            XCTAssertTrue(migratedText.contains("schemaVersion = 3"), testCase.name)
             let unknownPaths = Set(SettingsTOMLCodec.unknownKeyPaths(in: migratedData))
             XCTAssertTrue(unknownPaths.contains("general.futureSetting"), testCase.name)
             XCTAssertTrue(unknownPaths.contains("futureExtension"), testCase.name)
         }
+    }
+
+    func testVersionTwoMigrationMovesRoutingRowsAndTheirExtensionsIntoOneArrangement() throws {
+        let data = try versionTwoData(routingRows: """
+        [[monitorRoutingOverrides]]
+        monitorName = "Laptop"
+        monitorDisplayUUID = "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA"
+        gridColumn = 0
+        gridRow = 1
+        futureRoutingSetting = "keep"
+
+        [[monitorRoutingOverrides]]
+        monitorName = "External"
+        monitorDisplayUUID = "BBBBBBBB-BBBB-4BBB-8BBB-BBBBBBBBBBBB"
+        gridColumn = 0
+        gridRow = 0
+        """)
+        let result = try SettingsTOMLCodec.decodeForLoad(data)
+        let report = try XCTUnwrap(result.migration)
+        let migratedData = try XCTUnwrap(result.migratedData)
+        let arrangement = try XCTUnwrap(result.export.monitorArrangements.only)
+
+        XCTAssertEqual(report.fromVersion, 2)
+        XCTAssertEqual(report.toVersion, 3)
+        XCTAssertEqual(report.defaultedPaths, ["routing.arrangements"])
+        XCTAssertTrue(report.addedHotkeyIDs.isEmpty)
+        XCTAssertTrue(report.mappedHotkeys.isEmpty)
+        XCTAssertTrue(report.retiredHotkeys.isEmpty)
+        XCTAssertEqual(result.export.monitorRoutingMode, .custom)
+        XCTAssertEqual(result.export.gapSize, 27)
+        XCTAssertEqual(arrangement.monitors, [
+            MonitorRoutingSettings(
+                monitorName: "Laptop",
+                monitorDisplayUUID: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA",
+                gridColumn: 0,
+                gridRow: 1
+            ),
+            MonitorRoutingSettings(
+                monitorName: "External",
+                monitorDisplayUUID: "BBBBBBBB-BBBB-4BBB-8BBB-BBBBBBBBBBBB",
+                gridColumn: 0,
+                gridRow: 0
+            )
+        ])
+        XCTAssertEqual(
+            SettingsTOMLCodec.unknownKeyPaths(in: migratedData),
+            ["routing.arrangements[0].monitors[0].futureRoutingSetting"]
+        )
+        XCTAssertFalse(String(decoding: migratedData, as: UTF8.self).contains("monitorRoutingOverrides"))
+
+        let reloaded = try SettingsTOMLCodec.decodeForLoad(migratedData)
+        XCTAssertNil(reloaded.migration)
+        XCTAssertNil(reloaded.migratedData)
+        XCTAssertEqual(reloaded.export, result.export)
+        XCTAssertEqual(reloaded.export.monitorArrangements.only?.id, arrangement.id)
+    }
+
+    func testVersionTwoMigrationPreservesRoutingWithDisconnectedRows() throws {
+        let data = try versionTwoData(routingRows: """
+        [[monitorRoutingOverrides]]
+        monitorName = "Laptop"
+        monitorDisplayId = 1
+        gridColumn = 0
+        gridRow = 1
+
+        [[monitorRoutingOverrides]]
+        monitorName = "Home"
+        monitorDisplayId = 2
+        gridColumn = 0
+        gridRow = 0
+
+        [[monitorRoutingOverrides]]
+        monitorName = "Work"
+        monitorDisplayId = 3
+        gridColumn = 0
+        gridRow = 0
+        """)
+        let result = try SettingsTOMLCodec.decodeForLoad(data)
+        let frame = CGRect(x: 0, y: 0, width: 1000, height: 800)
+        let monitors = [(UInt32(1), "Laptop"), (UInt32(2), "Home")].map { id, name in
+            Monitor(
+                id: Monitor.ID(displayId: id),
+                displayId: id,
+                frame: frame,
+                visibleFrame: frame,
+                hasNotch: false,
+                name: name
+            )
+        }
+        let layout = MonitorRouting.layout(for: monitors, in: result.export.monitorArrangements)
+
+        XCTAssertEqual(result.export.monitorArrangements.only?.monitors.count, 3)
+        XCTAssertEqual(MonitorRouting.completeLayout(layout, for: monitors)?.count, 2)
+        XCTAssertEqual(
+            MonitorRouting.gridAdjacent(
+                from: monitors[0],
+                direction: .up,
+                layout: layout,
+                monitors: monitors,
+                wrapAround: false
+            ),
+            .monitor(monitors[1])
+        )
+    }
+
+    func testVersionTwoMigrationKeepsEmptyRoutingEmpty() throws {
+        let result = try SettingsTOMLCodec.decodeForLoad(versionTwoData())
+
+        XCTAssertTrue(result.export.monitorArrangements.isEmpty)
+        XCTAssertEqual(result.migration?.fromVersion, 2)
+        XCTAssertEqual(result.migration?.toVersion, 3)
+        XCTAssertEqual(result.migration?.defaultedPaths, ["routing.arrangements"])
+        XCTAssertEqual(result.export.monitorRoutingMode, .custom)
+    }
+
+    @MainActor
+    func testVersionTwoRoutingMigrationRejectsMissingMalformedArraysAndRowsWithoutChangingBytes() throws {
+        let valid = String(decoding: try versionTwoData(), as: UTF8.self)
+        let inputs = [
+            valid.replacingOccurrences(of: "monitorRoutingOverrides = []\n", with: ""),
+            valid.replacingOccurrences(of: "monitorRoutingOverrides = []", with: "monitorRoutingOverrides = 3"),
+            valid.replacingOccurrences(of: "monitorRoutingOverrides = []", with: "monitorRoutingOverrides = {}"),
+            valid.replacingOccurrences(of: "monitorRoutingOverrides = []", with: "monitorRoutingOverrides = [3]"),
+            valid.replacingOccurrences(
+                of: "monitorRoutingOverrides = []",
+                with: "monitorRoutingOverrides = [{ monitorName = \"Laptop\", gridColumn = 0 }]"
+            ),
+            valid.replacingOccurrences(
+                of: "monitorRoutingOverrides = []",
+                with: "monitorRoutingOverrides = [{ monitorName = \"Laptop\", gridColumn = 0, gridRow = 0, monitorDisplayUUID = \"bad\" }]"
+            )
+        ]
+        for (index, input) in inputs.enumerated() {
+            let data = Data(input.utf8)
+            XCTAssertThrowsError(try SettingsTOMLCodec.decodeForLoad(data), "case \(index)")
+            let fixture = try makeFixture("invalid-routing-\(index)")
+            defer { fixture.remove() }
+            try data.write(to: settingsURL(in: fixture))
+
+            let result = makePersistence(in: fixture).loadOutcome()
+
+            XCTAssertNil(result.export)
+            guard let notice = result.notice, case .invalidRejected = notice else {
+                return XCTFail("Expected invalid routing to reject the original file")
+            }
+            XCTAssertEqual(try Data(contentsOf: settingsURL(in: fixture)), data)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: migrationBackupURL(in: fixture).path))
+        }
+    }
+
+    @MainActor
+    func testVersionTwoRoutingMigrationRejectsExistingArrangementsWithoutChangingBytes() throws {
+        let fixture = try makeFixture("conflicting-routing-arrangements")
+        defer { fixture.remove() }
+        let original = String(decoding: try versionTwoData(routingRows: """
+        [[monitorRoutingOverrides]]
+        monitorName = "Laptop"
+        monitorDisplayId = 7
+        gridColumn = 0
+        gridRow = 0
+        """), as: UTF8.self)
+        let conflicting = original.replacingOccurrences(
+            of: "[routing]\n",
+            with: "[routing]\narrangements = []\n"
+        )
+        XCTAssertNotEqual(conflicting, original)
+        let data = Data(conflicting.utf8)
+        XCTAssertThrowsError(try SettingsTOMLCodec.decodeForLoad(data)) { error in
+            XCTAssertTrue(SettingsTOMLCodec.diagnosticDescription(for: error).contains("routing.arrangements"))
+        }
+        try data.write(to: settingsURL(in: fixture))
+
+        let result = makePersistence(in: fixture).loadOutcome()
+
+        XCTAssertNil(result.export)
+        guard let notice = result.notice, case .invalidRejected = notice else {
+            return XCTFail("Expected conflicting routing arrangements to reject the original file")
+        }
+        XCTAssertEqual(try Data(contentsOf: settingsURL(in: fixture)), data)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: migrationBackupURL(in: fixture).path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: migrationBackupURL(in: fixture, index: 1).path))
+    }
+
+    @MainActor
+    func testVersionTwoRoutingMigrationBacksUpOriginalBytesAndReloadsStableArrangement() throws {
+        let fixture = try makeFixture("version-two-routing")
+        defer { fixture.remove() }
+        let data = try versionTwoData(routingRows: """
+        [[monitorRoutingOverrides]]
+        monitorName = "Laptop"
+        monitorDisplayId = 7
+        gridColumn = 0
+        gridRow = 0
+        futureRoutingSetting = "keep"
+        """)
+        try data.write(to: settingsURL(in: fixture))
+
+        let result = makePersistence(in: fixture).loadOutcome()
+        let export = try XCTUnwrap(result.export)
+        guard let notice = result.notice, case let .migrated(report, backupURL) = notice else {
+            return XCTFail("Expected routing migration")
+        }
+        XCTAssertEqual(report.fromVersion, 2)
+        XCTAssertEqual(report.toVersion, 3)
+        XCTAssertEqual(backupURL, migrationBackupURL(in: fixture))
+        XCTAssertEqual(try Data(contentsOf: backupURL), data)
+        let rewritten = try Data(contentsOf: settingsURL(in: fixture))
+        XCTAssertEqual(try SettingsTOMLCodec.decode(rewritten), export)
+        XCTAssertEqual(
+            SettingsTOMLCodec.unknownKeyPaths(in: rewritten),
+            ["routing.arrangements[0].monitors[0].futureRoutingSetting"]
+        )
+
+        let restarted = makePersistence(in: fixture).loadOutcome()
+        XCTAssertNil(restarted.notice)
+        XCTAssertEqual(restarted.export, export)
+        XCTAssertEqual(try Data(contentsOf: settingsURL(in: fixture)), rewritten)
     }
 
     func testExplicitSlotOneBindingsWinOverLegacyAliases() throws {
@@ -176,10 +394,10 @@ final class SettingsMigrationTests: XCTestCase {
         let migratedData = try XCTUnwrap(result.migratedData)
 
         XCTAssertEqual(migration.fromVersion, 1)
-        XCTAssertEqual(migration.toVersion, 2)
+        XCTAssertEqual(migration.toVersion, 3)
         XCTAssertEqual(migration.addedHotkeyIDs.count, 19)
         XCTAssertEqual(Set(migration.addedHotkeyIDs), expectedVersionTwoHotkeyIDs)
-        XCTAssertTrue(migration.defaultedPaths.isEmpty)
+        XCTAssertEqual(migration.defaultedPaths, ["routing.arrangements"])
         XCTAssertTrue(migration.mappedHotkeys.isEmpty)
         XCTAssertTrue(migration.retiredHotkeys.isEmpty)
         XCTAssertEqual(
@@ -325,14 +543,14 @@ final class SettingsMigrationTests: XCTestCase {
 
     func testCurrentSchemaIsEncodedAndFutureSchemaIsRejectedExplicitly() throws {
         let canonical = String(decoding: try SettingsTOMLCodec.encode(.defaults()), as: UTF8.self)
-        XCTAssertTrue(canonical.contains("schemaVersion = 2"))
-        let future = canonical.replacingOccurrences(of: "schemaVersion = 2", with: "schemaVersion = 3")
+        XCTAssertTrue(canonical.contains("schemaVersion = 3"))
+        let future = canonical.replacingOccurrences(of: "schemaVersion = 3", with: "schemaVersion = 4")
         XCTAssertNotEqual(future, canonical)
 
         XCTAssertThrowsError(try SettingsTOMLCodec.decodeForLoad(Data(future.utf8))) { error in
             XCTAssertEqual(
                 error as? SettingsTOMLCodecError,
-                .unsupportedSchemaVersion(found: 3, supported: 2)
+                .unsupportedSchemaVersion(found: 4, supported: 3)
             )
         }
     }
@@ -422,7 +640,7 @@ final class SettingsMigrationTests: XCTestCase {
     }
 
     @MainActor
-    func testStartupMigrationBacksUpExactBytesAndRewritesCanonicalVersionTwo() throws {
+    func testStartupMigrationBacksUpExactBytesAndRewritesCanonicalVersionThree() throws {
         for name in ["v0.6.2-custom", "v0.6.3-custom"] {
             let fixture = try makeFixture(name)
             defer { fixture.remove() }
@@ -444,7 +662,7 @@ final class SettingsMigrationTests: XCTestCase {
             let rewritten = try Data(contentsOf: settingsURL(in: fixture))
             XCTAssertNotEqual(rewritten, original, name)
             XCTAssertEqual(try SettingsTOMLCodec.decode(rewritten), export, name)
-            XCTAssertTrue(String(decoding: rewritten, as: UTF8.self).contains("schemaVersion = 2"), name)
+            XCTAssertTrue(String(decoding: rewritten, as: UTF8.self).contains("schemaVersion = 3"), name)
             let unknownPaths = Set(SettingsTOMLCodec.unknownKeyPaths(in: rewritten))
             XCTAssertTrue(unknownPaths.contains("general.futureSetting"), name)
             XCTAssertTrue(unknownPaths.contains("futureExtension"), name)
@@ -454,7 +672,7 @@ final class SettingsMigrationTests: XCTestCase {
     }
 
     @MainActor
-    func testVersionOneStartupUsesPreVersionTwoBackupAndLeavesHistoricalBackupUntouched() throws {
+    func testVersionOneStartupUsesPreVersionThreeBackupAndLeavesHistoricalBackupUntouched() throws {
         let fixture = try makeFixture("version-one-startup")
         defer { fixture.remove() }
         let original = try legacyFixtureData(named: "v0.6.4-custom")
@@ -480,14 +698,14 @@ final class SettingsMigrationTests: XCTestCase {
         }
 
         XCTAssertEqual(report.fromVersion, 1)
-        XCTAssertEqual(report.toVersion, 2)
+        XCTAssertEqual(report.toVersion, 3)
         XCTAssertEqual(backupURL, migrationBackupURL(in: fixture))
         XCTAssertEqual(try Data(contentsOf: backupURL), original)
         XCTAssertEqual(try Data(contentsOf: historicalBackupURL), historicalBackup)
         let rewritten = try Data(contentsOf: settingsURL(in: fixture))
         let rewrittenInode = try fileInode(at: settingsURL(in: fixture))
         XCTAssertEqual(try SettingsTOMLCodec.decode(rewritten), export)
-        XCTAssertTrue(String(decoding: rewritten, as: UTF8.self).contains("schemaVersion = 2"))
+        XCTAssertTrue(String(decoding: rewritten, as: UTF8.self).contains("schemaVersion = 3"))
         XCTAssertTrue(
             try hotkeySection(id: "swapSplit", in: rewritten).contains("futureHotkeySetting = \"keep-by-id\"")
         )
@@ -524,7 +742,7 @@ final class SettingsMigrationTests: XCTestCase {
         }
 
         XCTAssertEqual(report.fromVersion, 1)
-        XCTAssertEqual(report.toVersion, 2)
+        XCTAssertEqual(report.toVersion, 3)
         XCTAssertEqual(backupURL, migrationBackupURL(in: fixture))
         XCTAssertEqual(try Data(contentsOf: backupURL), original)
         XCTAssertEqual(
@@ -775,7 +993,7 @@ final class SettingsMigrationTests: XCTestCase {
             }
             XCTAssertEqual(report.fromVersion, 0)
             XCTAssertNil(backupURL)
-            XCTAssertTrue(reason.contains("Both pre-version-2 settings backup slots are occupied"))
+            XCTAssertTrue(reason.contains("Both pre-version-3 settings backup slots are occupied"))
             XCTAssertTrue(persistence.settingsWritesBlocked)
             XCTAssertEqual(try Data(contentsOf: settingsURL(in: fixture)), original)
             XCTAssertThrowsError(try persistence.saveImmediately(export)) { error in
@@ -794,7 +1012,7 @@ final class SettingsMigrationTests: XCTestCase {
         let fixture = try makeFixture("future")
         defer { fixture.remove() }
         let canonical = String(decoding: try SettingsTOMLCodec.encode(.defaults()), as: UTF8.self)
-        let future = Data(canonical.replacingOccurrences(of: "schemaVersion = 2", with: "schemaVersion = 3").utf8)
+        let future = Data(canonical.replacingOccurrences(of: "schemaVersion = 3", with: "schemaVersion = 4").utf8)
         try future.write(to: settingsURL(in: fixture))
         let persistence = makePersistence(in: fixture)
 
@@ -805,8 +1023,8 @@ final class SettingsMigrationTests: XCTestCase {
             return XCTFail("Expected unsupported version notice")
         }
 
-        XCTAssertEqual(found, 3)
-        XCTAssertEqual(supported, 2)
+        XCTAssertEqual(found, 4)
+        XCTAssertEqual(supported, 3)
         XCTAssertEqual(outcome.export, SettingsExport.defaults())
         XCTAssertTrue(persistence.settingsWritesBlocked)
         XCTAssertEqual(try Data(contentsOf: settingsURL(in: fixture)), future)
@@ -836,8 +1054,8 @@ final class SettingsMigrationTests: XCTestCase {
         XCTAssertEqual(noticeChanges, 0)
         let canonical = String(decoding: try Data(contentsOf: settingsURL(in: fixture)), as: UTF8.self)
         let future = Data(canonical.replacingOccurrences(
-            of: "schemaVersion = 2",
-            with: "schemaVersion = 3"
+            of: "schemaVersion = 3",
+            with: "schemaVersion = 4"
         ).utf8)
         try future.write(to: settingsURL(in: fixture), options: .atomic)
 
@@ -848,8 +1066,8 @@ final class SettingsMigrationTests: XCTestCase {
         else {
             return XCTFail("Expected unsupported-version save notice")
         }
-        XCTAssertEqual(found, 3)
-        XCTAssertEqual(supported, 2)
+        XCTAssertEqual(found, 4)
+        XCTAssertEqual(supported, 3)
         XCTAssertTrue(settings.settingsWritesBlocked)
         XCTAssertEqual(noticeChanges, 1)
         XCTAssertEqual(try Data(contentsOf: settingsURL(in: fixture)), future)
@@ -885,7 +1103,7 @@ final class SettingsMigrationTests: XCTestCase {
         }
         XCTAssertEqual(report.fromVersion, 0)
         XCTAssertNil(backupURL)
-        XCTAssertTrue(reason.contains("Both pre-version-2 settings backup slots are occupied"))
+        XCTAssertTrue(reason.contains("Both pre-version-3 settings backup slots are occupied"))
         XCTAssertTrue(settings.settingsWritesBlocked)
         XCTAssertEqual(noticeChanges, 1)
         XCTAssertEqual(try Data(contentsOf: settingsURL(in: fixture)), legacy)
@@ -931,8 +1149,8 @@ final class SettingsMigrationTests: XCTestCase {
             noticeChanges += 1
         }
         let future = Data(canonical.replacingOccurrences(
-            of: "schemaVersion = 2",
-            with: "schemaVersion = 3"
+            of: "schemaVersion = 3",
+            with: "schemaVersion = 4"
         ).utf8)
 
         try future.write(to: settingsURL(in: fixture), options: .atomic)
@@ -1007,7 +1225,7 @@ final class SettingsMigrationTests: XCTestCase {
         XCTAssertEqual(backupURL, migrationBackupURL(in: fixture))
         XCTAssertEqual(try Data(contentsOf: backupURL), original)
         let targetData = try Data(contentsOf: targetURL)
-        XCTAssertTrue(String(decoding: targetData, as: UTF8.self).contains("schemaVersion = 2"))
+        XCTAssertTrue(String(decoding: targetData, as: UTF8.self).contains("schemaVersion = 3"))
         XCTAssertEqual(try SettingsTOMLCodec.decode(targetData), try XCTUnwrap(outcome.export))
         XCTAssertNotEqual(try fileInode(at: targetURL), originalTargetInode)
         let attributes = try FileManager.default.attributesOfItem(atPath: targetURL.path)
@@ -1092,6 +1310,19 @@ final class SettingsMigrationTests: XCTestCase {
         return Data(text.utf8)
     }
 
+    private func versionTwoData(routingRows: String = "") throws -> Data {
+        var export = SettingsExport.defaults()
+        export.monitorRoutingMode = .custom
+        export.gapSize = 27
+        let canonical = String(decoding: try SettingsTOMLCodec.encode(export), as: UTF8.self)
+            .replacingOccurrences(of: "schemaVersion = 3", with: "schemaVersion = 2")
+            .replacingOccurrences(of: "arrangements = []\n", with: "")
+        if routingRows.isEmpty {
+            return Data(("monitorRoutingOverrides = []\n" + canonical).utf8)
+        }
+        return Data((canonical + "\n" + routingRows + "\n").utf8)
+    }
+
     private func legacyFixtureData(named name: String) throws -> Data {
         let resources = try XCTUnwrap(Bundle.module.resourceURL)
         return try Data(contentsOf: resources
@@ -1161,7 +1392,7 @@ final class SettingsMigrationTests: XCTestCase {
 
     private func migrationBackupURL(in fixture: Fixture, index: Int = 0) -> URL {
         fixture.configDirectory.appendingPathComponent(
-            SettingsFilePersistence.migrationBackupFileNames(for: 2)[index],
+            SettingsFilePersistence.migrationBackupFileNames(for: 3)[index],
             isDirectory: false
         )
     }

@@ -69,7 +69,7 @@ struct MonitorSetupGuide: View {
         _draft = State(initialValue: MonitorSetupDraft(
             monitors: sortedMonitors,
             routingMode: settings.monitorRoutingMode,
-            routingSettings: settings.monitorRoutingSettings,
+            arrangements: settings.monitorArrangements,
             mouseWarpEnabled: settings.mouseWarpEnabled,
             workspaceConfigurations: settings.workspaceConfigurations
         ))
@@ -585,7 +585,7 @@ struct MonitorSetupGuide: View {
         draft = MonitorSetupDraft(
             monitors: monitors,
             routingMode: settings.monitorRoutingMode,
-            routingSettings: settings.monitorRoutingSettings,
+            arrangements: settings.monitorArrangements,
             mouseWarpEnabled: draft.mouseWarpEnabled,
             workspaceConfigurations: settings.workspaceConfigurations
         )
@@ -598,15 +598,13 @@ struct MonitorSetupGuide: View {
     private func finish() {
         guard routingReadiness == .ready,
               hasWorkspaceCoverage,
-              let routingSettings = draft.routingSettings(
-                  preserving: settings.monitorRoutingSettings,
-                  monitors: liveMonitors
-              )
+              let routingSettings = draft.routingSettings(monitors: liveMonitors)
         else { return }
 
         let workspaceConfigurationsChanged = settings.workspaceConfigurations != draft.workspaceConfigurations
         settings.applyMonitorSetup(
             routingSettings: routingSettings,
+            monitors: liveMonitors,
             mouseWarpEnabled: draft.mouseWarpEnabled,
             workspaceConfigurations: draft.workspaceConfigurations
         )

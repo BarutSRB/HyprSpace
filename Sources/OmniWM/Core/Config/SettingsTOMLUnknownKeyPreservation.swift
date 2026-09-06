@@ -184,7 +184,8 @@ extension TOMLNode {
     }
 
     private static func isMonitorIdentityArray(_ path: String) -> Bool {
-        path == "monitorOrientationOverrides" || path == "monitorRoutingOverrides"
+        path == "monitorOrientationOverrides" ||
+            (path.hasPrefix("routing.arrangements[") && path.hasSuffix("].monitors"))
     }
 
     private static func hasMonitorIdentity(_ table: [String: TOMLNode]) -> Bool {
