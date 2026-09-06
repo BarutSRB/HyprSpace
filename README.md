@@ -963,6 +963,7 @@ make run
 
 ## Community Integrations
 
+- **[omacosy](https://github.com/paulsp94/omacosy)** is an Omarchy-inspired macOS desktop setup that supports OmniWM as a tiling window manager, with a custom status bar and coordinated desktop themes.
 - **[OmniWM Computer Use](https://github.com/nick-s5/omniwm-computer-use)** is a community-maintained Codex skill for focus-safe Computer Use, browser automation, and app testing through `omniwmctl` across OmniWM workspaces and displays.
 - **[OmniCast](https://github.com/imprisonedmind/omni-cast)** is a community-maintained Raycast extension for controlling OmniWM with plain-English search and commands through `omniwmctl`.
 

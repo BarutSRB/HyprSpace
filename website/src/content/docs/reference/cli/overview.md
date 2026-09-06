@@ -114,6 +114,7 @@ Turning **Enable IPC** on starts the server immediately and creates the Unix soc
 
 ## Community Integrations
 
+- **[omacosy](https://github.com/paulsp94/omacosy)** is an Omarchy-inspired macOS desktop setup that supports OmniWM through its IPC interface for workspace and window navigation.
 - **[OmniWM Computer Use](https://github.com/nick-s5/omniwm-computer-use)** is a community-maintained Codex skill that uses `omniwmctl` to preserve and restore the active window while Computer Use, browser automation, and app testing operate across OmniWM workspaces and displays. Installation, verification, requirements, and support are maintained in its repository.
 
 ---
