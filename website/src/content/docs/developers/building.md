@@ -32,4 +32,4 @@ Use `make run` for day-to-day development. It builds, packages, development-sign
 
 ## Formatting and Linting
 
-`make format` and `make lint` pin exact tool versions (SwiftFormat 0.63.0, SwiftLint 0.65.1) and fail on any other version, so install those exact versions. SwiftFormat's `fileHeader` rule also enforces the two-line SPDX/GPL-2.0 header that every Swift source and test file under `Sources/` and `Tests/` must start with — never strip or reword it. (`Package.swift` is the exception; its `swift-tools-version` directive stays on line one.)
+`make format` and `make lint` pin exact tool versions (SwiftFormat 0.63.0, SwiftLint 0.65.1) and fail on any other version, so install those exact versions. SwiftFormat's `fileHeader` rule also enforces the two-line SPDX/GPL-2.0-only header that every Swift source and test file under `Sources/` and `Tests/` must start with — never strip or reword it. (`Package.swift` is the exception; its `swift-tools-version` directive stays on line one.)

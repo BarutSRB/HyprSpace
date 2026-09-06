@@ -125,7 +125,7 @@ swift test                   # Default suite; live/private integration and measu
 `make build` first runs `Scripts/ghostty-preflight.sh`, which fails the build unless the GhosttyKit archive named in
 `Scripts/build-metadata.env` exists, is arm64-only, and matches the pinned SHA-256. `make format`/`make lint` pin exact
 tool versions (SwiftFormat 0.63.0, SwiftLint 0.65.1) and fail fast on any other version. SwiftFormat's `fileHeader`
-rule also inserts and enforces the two-line SPDX/GPL-2.0 header that every Swift source and test file under
+rule also inserts and enforces the two-line SPDX/GPL-2.0-only header that every Swift source and test file under
 `Sources/` and `Tests/` must carry; `Package.swift` is the exception, because its `swift-tools-version` directive
 must stay on line one.
 
@@ -562,7 +562,7 @@ The focus session (`FocusSessionSnapshot`) and per-monitor visible-workspace sta
 
 **Directory:** `Sources/OmniWM/Core/Layout/Niri/` (33 files)
 
-Niri arranges containers along the monitor's primary axis, inspired by the [Niri](https://github.com/YaLTeR/niri) Wayland compositor. In horizontal orientation, vertical columns scroll left and right and their windows stack vertically. In vertical orientation, horizontal rows scroll up and down and their windows span left to right.
+Niri arranges containers along the monitor's primary axis, inspired by the [Niri](https://github.com/niri-wm/niri) Wayland compositor. In horizontal orientation, vertical columns scroll left and right and their windows stack vertically. In vertical orientation, horizontal rows scroll up and down and their windows span left to right.
 
 ```
 NiriRoot (per workspace)
