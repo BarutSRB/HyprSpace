@@ -1153,14 +1153,15 @@ final class QuakeTerminalController: NSObject, NSWindowDelegate, QuakeTerminalTa
         return customFrame
     }
 
-    private func targetScreen() -> NSScreen {
-        let monitors = Monitor.current()
-
+    func targetScreen(
+        screens: [NSScreen] = NSScreen.screens,
+        mainScreen: NSScreen? = NSScreen.main
+    ) -> NSScreen {
         switch settings.quakeTerminalMonitorMode {
         case .mouseCursor:
             let mouseLocation = NSEvent.mouseLocation
-            if let monitor = mouseLocation.monitorApproximation(in: monitors),
-               let screen = NSScreen.screens.first(where: { $0.displayId == monitor.displayId })
+            if let monitor = mouseLocation.monitorApproximation(in: Monitor.current()),
+               let screen = screens.first(where: { $0.displayId == monitor.displayId })
             {
                 return screen
             }
@@ -1169,18 +1170,18 @@ final class QuakeTerminalController: NSObject, NSWindowDelegate, QuakeTerminalTa
             if let screen = focusedWindowScreenProvider() {
                 return screen
             }
-            if let screen = screenOfFocusedWindow(monitors: monitors) {
+            if let screen = screenOfFocusedWindow(monitors: Monitor.current(), screens: screens) {
                 return screen
             }
 
         case .mainMonitor:
-            break
+            return screens.first ?? mainScreen!
         }
 
-        return NSScreen.main ?? NSScreen.screens.first!
+        return mainScreen ?? screens.first!
     }
 
-    private func screenOfFocusedWindow(monitors: [Monitor]) -> NSScreen? {
+    private func screenOfFocusedWindow(monitors: [Monitor], screens: [NSScreen]) -> NSScreen? {
         guard let windowList = CGWindowListCopyWindowInfo(
             [.optionOnScreenOnly, .excludeDesktopElements],
             kCGNullWindowID
@@ -1193,7 +1194,7 @@ final class QuakeTerminalController: NSObject, NSWindowDelegate, QuakeTerminalTa
             windowList: windowList,
             ownPID: ProcessInfo.processInfo.processIdentifier
         ) {
-            return NSScreen.screens.first(where: { $0.displayId == displayId })
+            return screens.first(where: { $0.displayId == displayId })
         }
 
         return nil

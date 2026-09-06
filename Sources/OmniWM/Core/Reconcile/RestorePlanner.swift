@@ -605,7 +605,8 @@ struct RestorePlanner {
             validMonitorIds.contains($0) ? $0 : nil
         } ?? focusedWorkspaceMonitorId.flatMap {
             validMonitorIds.contains($0) ? $0 : nil
-        } ?? Monitor.sortedByPosition(monitors).first?.id
+        } ?? monitors.first(where: \.isMain)?.id
+            ?? Monitor.sortedByPosition(monitors).first?.id
 
         let resolvedPreviousInteractionMonitorId = previousInteractionMonitorId.flatMap {
             validMonitorIds.contains($0) ? $0 : nil
