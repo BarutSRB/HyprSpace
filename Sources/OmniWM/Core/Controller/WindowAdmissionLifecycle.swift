@@ -214,6 +214,7 @@ struct AdmissionRetryState {
     var attempt: Int
     var generation: UInt64
     var trigger: AdmissionRetryTrigger
+    var identityRebindSource: ManagedWindowIdentityRebindSource? = nil
     var focusedAdmissionContinuation: FocusedAdmissionRetryContinuation? = nil
     var exhausted: Bool
     var executionPhase: AdmissionRetryExecutionPhase = .waiting
@@ -225,7 +226,18 @@ struct AdmissionRetryState {
 
 enum AdmissionRetryExecutionPhase: Equatable {
     case waiting
+    case queued
     case running(UInt64)
+}
+
+struct ManagedReplacementFocusKey: Hashable, Equatable {
+    let pid: pid_t
+    let workspaceId: WorkspaceDescriptor.ID
+}
+
+struct ManagedWindowIdentityRebindSource {
+    let handle: WindowHandle
+    let requestOrder: UInt64
 }
 
 struct AdmissionRetrySchedule {
@@ -233,6 +245,7 @@ struct AdmissionRetrySchedule {
     let axRef: AXWindowRef?
     let reason: WindowAdmissionPendingReason
     let trigger: AdmissionRetryTrigger
+    var identityRebindSource: ManagedWindowIdentityRebindSource? = nil
     let focusedAdmissionContinuation: FocusedAdmissionRetryContinuation?
     let preparedSubscriptionRetainCount: Int
 }

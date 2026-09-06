@@ -100,12 +100,16 @@ extension AXEventHandler {
               !state.identityRebindTargetDestroyed,
               case let .identityRebind(oldWindow, newWindow, _, _, _) = state.trigger,
               newWindow.token == targetToken,
-              sameAXWindowIdentity(newWindow.axRef, axRef),
-              let sourceEntry = controller.workspaceManager.entry(for: oldWindow.token),
-              sameAXWindowIdentity(sourceEntry.axRef, oldWindow.axRef)
+              sameAXWindowIdentity(newWindow.axRef, axRef)
         else {
             return nil
         }
+        if let source = state.identityRebindSource {
+            return controller.workspaceManager.entry(for: source.handle)?.token
+        }
+        guard let sourceEntry = controller.workspaceManager.entry(for: oldWindow.token),
+              sameAXWindowIdentity(sourceEntry.axRef, oldWindow.axRef)
+        else { return nil }
         return oldWindow.token
     }
 
@@ -202,7 +206,8 @@ extension AXEventHandler {
            CFEqual(newWindow.axRef.element, axRef.element)
         {
             switch state.executionPhase {
-            case .waiting:
+            case .waiting,
+                 .queued:
                 return .waitingIdentityRebindTarget(
                     retryGeneration: state.generation,
                     oldWindow: oldWindow,
@@ -230,7 +235,7 @@ extension AXEventHandler {
         guard let state = admissionRetryStateByWindowId[windowId],
               !state.exhausted,
               state.generation == retryGeneration,
-              state.executionPhase == .waiting,
+              state.executionPhase == .waiting || state.executionPhase == .queued,
               case let .identityRebind(retryOld, retryNew, _, _, _) = state.trigger,
               retryOld.token == oldWindow.token,
               retryNew.token == newWindow.token,

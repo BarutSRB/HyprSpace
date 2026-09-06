@@ -4,11 +4,6 @@
 import AppKit
 import Foundation
 
-struct ManagedReplacementFocusKey: Hashable, Equatable {
-    let pid: pid_t
-    let workspaceId: WorkspaceDescriptor.ID
-}
-
 enum ActivationCallOrigin: String {
     case appTerminationProbe
     case external
@@ -350,6 +345,7 @@ final class AXEventHandler {
     var deferredCreatedWindowIds: Set<UInt32> = []
     private var deferredCreatedWindowOrder: [UInt32] = []
     var deferredReplacementProtectionsByWindowId: [UInt32: DeferredReplacementProtection] = [:]
+    var activeIdentityRebindsByHandle: [WindowHandle: UInt64] = [:]
     var createPlacementContextsByWindowId: [UInt32: WindowCreatePlacementContext] = [:]
     private var pendingManagedReplacementBursts: [ManagedReplacementKey: PendingManagedReplacementBurst] = [:]
     private var pendingManagedReplacementTasks: [ManagedReplacementKey: Task<Void, Never>] = [:]
