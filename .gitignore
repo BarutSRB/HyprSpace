@@ -1,5 +1,6 @@
 # Build artifacts
 .build/
+__pycache__/
 
 # SwiftPM
 .swiftpm/xcode/xcuserdata/
