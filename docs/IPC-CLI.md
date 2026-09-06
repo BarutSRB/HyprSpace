@@ -1,5 +1,6 @@
 ---
 title: OmniWM IPC & CLI Reference
+redirect_to: https://omniwm.app/reference/cli/overview/
 ---
 
 # OmniWM IPC & CLI Reference

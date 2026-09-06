@@ -1,5 +1,6 @@
 ---
 title: OmniWM Contribution Guide
+redirect_to: https://omniwm.app/developers/contributing/
 ---
 
 # OmniWM Contribution Guide

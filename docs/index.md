@@ -1,5 +1,6 @@
 ---
 title: OmniWM Documentation
+redirect_to: https://omniwm.app/
 ---
 
 # OmniWM Documentation

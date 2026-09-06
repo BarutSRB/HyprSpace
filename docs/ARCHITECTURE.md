@@ -1,5 +1,6 @@
 ---
 title: OmniWM Architecture Guide
+redirect_to: https://omniwm.app/developers/architecture/
 ---
 
 # OmniWM Architecture Guide
