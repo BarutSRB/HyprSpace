@@ -1,3 +1,9 @@
+# OmniWM
+
+OmniWM is a free, open-source, Developer ID-signed and Apple-notarized tiling window manager for Apple Silicon Macs running macOS 26 or later. It combines Niri-style orientation-aware scrolling containers and Hyprland-style Dwindle BSP layouts, selectable per workspace, with multi-monitor routing and optional local CLI/IPC automation.
+
+**[Website](https://omniwm.app)** · **[Documentation](https://omniwm.app/guides/quick-start/)** · **[Install](https://omniwm.app/guides/install/)** · **[Compatibility](https://omniwm.app/help/known-limitations/)**
+
 <p align="center">
   <a href="https://omniwm.app">
     <img src=".github/social-preview.png" alt="OmniWM — Do what you love easier, faster, better." width="100%">
@@ -434,8 +440,6 @@
 </table>
 <!-- contributors:end -->
 
-
-
 <p align="center">
   <img src="https://img.shields.io/badge/macOS-26.0%2B-green?logo=apple&logoColor=white" alt="macOS">
   <img src="https://img.shields.io/badge/Apple%20Silicon-supported-green?logo=apple&logoColor=white" alt="Apple Silicon">
@@ -449,34 +453,38 @@
   <a href="https://trendshift.io/repositories/16758?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-16758" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/16758/monthly?language=Swift" alt="BarutSRB%2FOmniWM | Trendshift" width="250" height="55"/></a>
 </p>
 
+## Highlights
 
-- Real quake/sticky terminal using ghostty's libghostty
-- macOS native tab support
-- IPC/CLI
-- Scratchpads/sticky windows for any app
-- Niri Overview
+- Ghostty-powered quake/sticky terminal
+- Native macOS window-tab support
+- Local IPC and `omniwmctl` automation
+- Scratchpads and sticky windows for any app
+- Overview
 - Unified command palette for windows and app menus
-- App menu anywhere
-- Niri tabbed columns and Dwindle tile groups
-- Niri and Dwindle layout
-- Hide/unhide status bar icons (Similar to Ice Bar)
-- Keep awake (Similar to Caffeine)
-- Interactive workspace/app icon bar
+- Menu Anywhere
+- Niri-style tabbed containers and Dwindle tile groups
+- Niri-style scrolling and Hyprland-style Dwindle BSP layouts
+- Status-bar icon concealment (similar to Ice)
+- Keep Awake (similar to Caffeine)
+- Interactive workspace and app-icon bar
 - Many more features not shown in the video.
 
-## Known Limitations
+## Compatibility and Limitations
 
-- **Dwindle group restore** - Group membership and tab order are runtime layout state and are not restored after OmniWM restarts.
+OmniWM requires Apple Silicon, macOS 26 or later, Accessibility, Input Monitoring, and `Displays have separate Spaces`. Screen Recording is optional. Read the complete [Compatibility, Requirements & Limitations](https://omniwm.app/help/known-limitations/) page before installing.
+
+- **Dwindle restore scope** — After a restart OmniWM rebuilds each Dwindle workspace from the persisted placements: split orientation and ratio, tab-group membership, tab order, and the active tab. Fullscreen state and the selected window are not restored, and once a window without a persisted placement is present, later windows insert normally instead of being placed from the catalog.
+- **Scratchpad membership** — Window membership lasts for the current OmniWM process. Scratchpad labels persist, but memberships do not.
 
 ## Performance & Trust
 
 OmniWM is built for high responsiveness and smooth, crisp animations.
 
-- **Private APIs** - OmniWM leverages Apple's private APIs wherever technically possible in order to reduce latency and improve window management responsiveness.
-- **Refresh rate aware animations** - OmniWM targets true display refresh pacing (for example 60/120/144Hz) for animations.
-- **No SIP disable required** - OmniWM does not require System Integrity Protection (SIP) to be disabled and never will.
-- **Always notarized official releases** - Official OmniWM release builds are developer signed and notarized by Apple and will stay that way.
-- **Forever free, no limitations** - OmniWM is and will remain free to use forever, with no subscriptions, feature paywalls, trial limits, or usage caps.
+- **Direct macOS integration** — OmniWM uses public frameworks and selected Apple private APIs for window management and visual surfaces.
+- **Refresh-rate-aware animations** — Animation pacing follows the active display refresh rate, including 60, 120, and 144 Hz displays.
+- **SIP stays enabled** — Official OmniWM releases do not require disabling System Integrity Protection.
+- **Signed and notarized releases** — Official release builds are Developer ID signed and Apple-notarized.
+- **Free and open source** — OmniWM has no subscriptions, feature paywalls, trial limits, or usage caps and is licensed GPL-2.0-only.
 
 ## Requirements
 
@@ -541,12 +549,14 @@ OmniWM checks for updates by default.
 
 ## Documentation
 
-The documentation hub lives in [`docs/index.md`](docs/index.md).
+The canonical documentation hub lives at [omniwm.app](https://omniwm.app).
 
-- [Documentation Home](docs/index.md)
-- [Architecture Guide](docs/ARCHITECTURE.md)
-- [IPC & CLI Reference](docs/IPC-CLI.md)
-- [Contribution Docs](docs/CONTRIBUTING.md)
+- [Documentation Home](https://omniwm.app/guides/quick-start/)
+- [Layout Modes](https://omniwm.app/guides/layouts/)
+- [Keyboard Shortcuts](https://omniwm.app/guides/keyboard-shortcuts/)
+- [Architecture Guide](https://omniwm.app/developers/architecture/)
+- [IPC & CLI Reference](https://omniwm.app/reference/cli/overview/)
+- [Contribution Docs](https://omniwm.app/developers/contributing/)
 - [Canonical Contributing Guide](CONTRIBUTING.md)
 
 ## IPC and CLI
@@ -557,7 +567,7 @@ IPC is disabled by default. Enable `Enable IPC` from the menu bar before using t
 
 Diagnostics can be scripted with `omniwmctl capture start trace`, `omniwmctl capture start performance`, `omniwmctl capture stop`, and `omniwmctl capture status`.
 
-For setup, installation options, commands, queries, rules, subscriptions, and security details, see [docs/IPC-CLI.md](docs/IPC-CLI.md).
+For setup, installation options, commands, queries, rules, subscriptions, and security details, see the [IPC & CLI Reference](https://omniwm.app/reference/cli/overview/).
 
 ## Quick Start
 
@@ -970,14 +980,16 @@ Issues and pull requests are welcome on [GitHub](https://github.com/BarutSRB/Omn
 
 Start with [CONTRIBUTING.md](CONTRIBUTING.md) for the actual project guidelines, expectations, and preferred direction.
 
-For deeper technical context, the docs pages that back the documentation site are here:
+For deeper technical context, edit the source pages used by the documentation site:
 
-- [Architecture Guide](docs/ARCHITECTURE.md)
-- [IPC & CLI Reference](docs/IPC-CLI.md)
-- [Contribution Docs](docs/CONTRIBUTING.md)
+- [Architecture Guide](website/src/content/docs/developers/architecture.md)
+- [IPC & CLI Reference](website/src/content/docs/reference/cli/overview.md)
+- [Contribution Docs](website/src/content/docs/developers/contributing.md)
+
+The similarly named files under `docs/` are compatibility stubs that direct old links to `omniwm.app`.
 
 ## License
 
 OmniWM is licensed under the [GNU General Public License v2.0-only](LICENSE). Copyright (C) 2026 BarutSRB — https://github.com/BarutSRB/OmniWM.
 
-Every source file carries an SPDX license header. Forks and redistributions must retain these notices and the `LICENSE` file, and remain GPL-2.0 with source available.
+Every source file carries an SPDX license header. Forks and redistributions must retain these notices and the `LICENSE` file, and remain GPL-2.0-only with source available.

@@ -1,8 +1,8 @@
 ---
 const pillars = [
   {
-    title: 'Low-latency by design',
-    detail: 'Uses Apple private APIs where possible for direct, low-latency window management.',
+    title: 'Mac-native control',
+    detail: 'Accessibility, AppKit, and selected Apple private APIs work together as one purpose-built system.',
   },
   {
     title: 'Refresh-rate-aware',
@@ -10,15 +10,15 @@ const pillars = [
   },
   {
     title: 'SIP stays on',
-    detail: 'Never requires disabling System Integrity Protection — and never will.',
+    detail: 'Official OmniWM releases do not require disabling System Integrity Protection.',
   },
   {
     title: 'Signed & notarized',
-    detail: 'Every official release is Developer-ID signed and Apple-notarized.',
+    detail: 'Current official releases are Developer ID signed and Apple-notarized.',
   },
   {
-    title: 'Forever free',
-    detail: 'No subscriptions, paywalls, trials, or usage caps. GPL-2.0, source available.',
+    title: 'Free and open source',
+    detail: 'No subscriptions, paywalls, trials, or usage caps. Licensed GPL-2.0-only.',
   },
 ];
 ---
@@ -39,6 +39,7 @@ const pillars = [
         ))
       }
     </div>
+    <p class="compat-link"><a href="/help/known-limitations/">Compatibility, requirements, and known limitations →</a></p>
   </div>
 </section>
 
@@ -66,5 +67,14 @@ const pillars = [
     color: var(--page-muted);
     font-size: 13.5px;
     line-height: 1.5;
+  }
+
+  .compat-link {
+    margin: 24px 0 0;
+    text-align: center;
+  }
+
+  .compat-link a {
+    font-weight: 600;
   }
 </style>

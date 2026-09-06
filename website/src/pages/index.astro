@@ -25,11 +25,18 @@ import HiddenBarDemo from '../components/demos/HiddenBarDemo.astro';
 import { features } from '../data/features';
 
 const byId = Object.fromEntries(features.map((feature) => [feature.id, feature]));
+const structuredData = {
+  '@type': 'WebSite',
+  '@id': 'https://omniwm.app/#website',
+  name: 'OmniWM',
+  url: 'https://omniwm.app/',
+};
 ---
 
 <LandingLayout
   title="OmniWM — macOS tiling window manager, Niri & Hyprland style"
   description="Free, open-source tiling window manager for macOS — Niri scrolling columns, Hyprland tiling, quake terminal, command palette, CLI. A yabai & AeroSpace alternative."
+  {structuredData}
 >
   <Hero />
   <div id="features">

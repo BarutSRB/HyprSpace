@@ -8,26 +8,29 @@ import { version } from '../../data/site';
 interface Props {
   title: string;
   description: string;
+  structuredData?: Record<string, unknown> | Record<string, unknown>[];
 }
 
-const { title, description } = Astro.props;
+const { title, description, structuredData } = Astro.props;
 const canonical = new URL(Astro.url.pathname, Astro.site).href;
-const jsonLd = JSON.stringify({
-  '@context': 'https://schema.org',
+const applicationSchema = {
   '@type': 'SoftwareApplication',
+  '@id': 'https://omniwm.app/#software',
   name: 'OmniWM',
-  url: canonical,
+  url: 'https://omniwm.app/',
   image: 'https://omniwm.app/og.png',
   description,
   operatingSystem: 'macOS 26 or later',
   applicationCategory: 'UtilitiesApplication',
   offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
-  license: 'https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html',
+  license: 'https://spdx.org/licenses/GPL-2.0-only.html',
   softwareVersion: version,
   downloadUrl: 'https://github.com/BarutSRB/OmniWM/releases/latest',
   author: { '@type': 'Person', name: 'BarutSRB', url: 'https://github.com/BarutSRB' },
   sameAs: ['https://github.com/BarutSRB/OmniWM'],
-});
+};
+const additionalSchemas = structuredData ? (Array.isArray(structuredData) ? structuredData : [structuredData]) : [];
+const jsonLd = JSON.stringify({ '@context': 'https://schema.org', '@graph': [applicationSchema, ...additionalSchemas] });
 ---
 
 <html lang="en">
