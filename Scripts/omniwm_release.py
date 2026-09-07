@@ -11,30 +11,23 @@ import subprocess
 import sys
 import tempfile
 import time
-import uuid
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 
 
 DEFAULT_MAIN_REPO = Path("/Users/barut/OmniWM/OmniWM")
-DEFAULT_TAP_REPO = Path("/opt/homebrew/Library/Taps/barutsrb/homebrew-tap")
 DEFAULT_GITHUB_REPO = "BarutSRB/OmniWM"
-DEFAULT_TAP_GITHUB_REPO = "BarutSRB/homebrew-tap"
 SIGNING_IDENTITY = "Developer ID Application: Oliver Nikolic (VF8LDJRGFM)"
 NOTARIZE_PROFILE = "OmniWM-Notarize"
-TAP_CHECKOUT_ID_FILE = "omniwm-release-checkout-id"
-PUBLIC_STAGES = ("main", "tag", "release", "tap")
+MANIFEST_SCHEMA = 3
+PUBLIC_STAGES = ("main", "tag", "release")
+LEGACY_PUBLIC_STAGES = (*PUBLIC_STAGES, "tap")
+DESTINATIONS = ("main_remote", "github_repo")
+LEGACY_DESTINATIONS = (*DESTINATIONS, "tap_remote", "tap_github_repo")
 LOCAL_RELEASE_STATES = {"preparing", "recovered-local-checkpoint", "prepared"}
-SEALED_RELEASE_STATES = {
-    "sealed",
-    "published-main",
-    "published-tag",
-    "published-release",
-    "published-tap",
-    "published",
-}
+SEALED_RELEASE_STATES = {"sealed", "published-main", "published-tag", "published"}
 RELEASE_STATES = LOCAL_RELEASE_STATES | SEALED_RELEASE_STATES
-MANIFEST_V1_KEYS = {
+MANIFEST_KEYS = {
     "schema",
     "version",
     "tag",
@@ -44,21 +37,22 @@ MANIFEST_V1_KEYS = {
     "state",
     "sealed",
     "original_main_head",
-    "original_tap_head",
     "release_commit",
-    "tap_commit",
     "embedded_git_hash",
     "signing_identity",
     "notarize_profile",
     "notarization",
     "destinations",
     "assets",
-    "cask_sha256",
     "notes_sha256",
     "published",
     "release_url",
 }
-MANIFEST_V2_KEYS = MANIFEST_V1_KEYS | {"tap_checkout"}
+LEGACY_TAP_KEYS = {"original_tap_head", "tap_commit", "cask_sha256"}
+LEGACY_MANIFEST_KEYS = {
+    1: MANIFEST_KEYS | LEGACY_TAP_KEYS,
+    2: MANIFEST_KEYS | LEGACY_TAP_KEYS | {"tap_checkout"},
+}
 
 
 class ReleaseError(Exception):
@@ -68,9 +62,7 @@ class ReleaseError(Exception):
 @dataclass(frozen=True)
 class Config:
     main_repo: Path
-    tap_repo: Path
     github_repo: str
-    tap_github_repo: str = DEFAULT_TAP_GITHUB_REPO
     signing_identity: str = SIGNING_IDENTITY
     notarize_profile: str = NOTARIZE_PROFILE
 
@@ -78,12 +70,7 @@ class Config:
     def from_environment(cls) -> "Config":
         return cls(
             main_repo=Path(os.environ.get("OMNIWM_RELEASE_MAIN_REPO", DEFAULT_MAIN_REPO)),
-            tap_repo=Path(os.environ.get("OMNIWM_RELEASE_TAP_REPO", DEFAULT_TAP_REPO)),
             github_repo=os.environ.get("OMNIWM_RELEASE_GITHUB_REPO", DEFAULT_GITHUB_REPO),
-            tap_github_repo=os.environ.get(
-                "OMNIWM_RELEASE_TAP_GITHUB_REPO",
-                DEFAULT_TAP_GITHUB_REPO,
-            ),
             signing_identity=os.environ.get("OMNIWM_RELEASE_SIGNING_IDENTITY", SIGNING_IDENTITY),
             notarize_profile=os.environ.get("OMNIWM_RELEASE_NOTARIZE_PROFILE", NOTARIZE_PROFILE),
         )
@@ -164,6 +151,10 @@ def parse_version(version):
     return tuple(int(part) for part in version.split("."))
 
 
+def manifest_stages(manifest):
+    return PUBLIC_STAGES if manifest["schema"] == MANIFEST_SCHEMA else LEGACY_PUBLIC_STAGES
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -188,21 +179,6 @@ def atomic_json(path: Path, value: dict) -> None:
             temp.unlink()
 
 
-def atomic_text(path: Path, value: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, raw_temp = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    temp = Path(raw_temp)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(value)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temp, path)
-    finally:
-        if temp.exists():
-            temp.unlink()
-
-
 class ReleaseManager:
     def __init__(self, config=None, runner=None):
         self.config = config or Config.from_environment()
@@ -213,112 +189,12 @@ class ReleaseManager:
         return self.config.main_repo
 
     @property
-    def tap(self):
-        return self.config.tap_repo
-
-    @property
     def info_plist(self):
         return self.main / "Info.plist"
 
     @property
     def website_version_file(self):
         return self.main / "website" / "src" / "data" / "site.ts"
-
-    @property
-    def tap_cask(self):
-        return self.tap / "Casks" / "omniwm.rb"
-
-    def tap_cask_token(self):
-        parts = self.config.tap_github_repo.split("/", 1)
-        require(len(parts) == 2 and all(parts), "tap GitHub repo must look like owner/repository")
-        owner, repository = parts
-        tap = repository.removeprefix("homebrew-")
-        return f"{owner}/{tap}/omniwm"
-
-    def require_registered_tap_checkout(self):
-        raw_registered = self.runner.output(["brew", "--repo", self.config.tap_github_repo])
-        require(raw_registered, f"Homebrew tap is not registered: {self.config.tap_github_repo}")
-        registered = Path(raw_registered)
-        require(registered.is_dir(), f"Homebrew tap is not registered: {self.config.tap_github_repo}")
-        require(
-            self.tap.is_dir() and self.tap.samefile(registered),
-            f"configured tap checkout {self.tap} differs from Homebrew's registered checkout {registered}; "
-            f"set OMNIWM_RELEASE_TAP_REPO={registered} or deliberately register the configured checkout",
-        )
-        return registered.resolve()
-
-    def homebrew_registration_advisory(self):
-        try:
-            result = self.runner.run(
-                ["brew", "--repo", self.config.tap_github_repo],
-                check=False,
-                quiet=True,
-            )
-            if result.returncode != 0 or not result.stdout.strip():
-                detail = (result.stderr or result.stdout).strip()
-                return "Homebrew registration unavailable" + (f": {detail}" if detail else "")
-            registered = Path(result.stdout.strip())
-            if not registered.is_dir():
-                return f"Homebrew registered tap path is unavailable: {registered}"
-            if not self.tap.is_dir() or not self.tap.samefile(registered):
-                return f"Homebrew currently registers {registered}, not the manifest-bound checkout {self.tap}"
-            return None
-        except (OSError, ReleaseError, ValueError) as error:
-            return f"Homebrew registration unavailable: {error}"
-
-    def with_tap(self, tap):
-        return ReleaseManager(replace(self.config, tap_repo=Path(tap)), self.runner)
-
-    def tap_checkout_id_path(self):
-        git_dir = Path(self.git(self.tap, "rev-parse", "--absolute-git-dir"))
-        require(git_dir.is_absolute(), f"tap Git directory is not absolute: {git_dir}")
-        require(git_dir.is_dir(), f"tap Git directory is unavailable: {git_dir}")
-        return git_dir / TAP_CHECKOUT_ID_FILE
-
-    def validate_checkout_id(self, value, label="tap checkout ID"):
-        require(isinstance(value, str), f"{label} is invalid")
-        try:
-            parsed = uuid.UUID(value)
-        except ValueError as error:
-            raise ReleaseError(f"{label} is invalid") from error
-        require(str(parsed) == value, f"{label} is invalid")
-        return value
-
-    def read_tap_checkout_id(self):
-        path = self.tap_checkout_id_path()
-        require(path.is_file(), f"tap checkout identity is missing: {path}")
-        return self.validate_checkout_id(path.read_text(encoding="utf-8").strip())
-
-    def ensure_tap_checkout_id(self):
-        path = self.tap_checkout_id_path()
-        if path.exists():
-            return self.read_tap_checkout_id()
-        checkout_id = str(uuid.uuid4())
-        atomic_text(path, f"{checkout_id}\n")
-        require(self.read_tap_checkout_id() == checkout_id, "unable to persist tap checkout identity")
-        return checkout_id
-
-    def create_tap_checkout_descriptor(self, expected_remote):
-        registered = self.require_registered_tap_checkout()
-        manager = self.with_tap(registered)
-        remote = manager.remote_url(manager.tap)
-        require(remote == expected_remote, "registered tap origin changed during release planning")
-        manager.verify_remote_identity(remote, self.config.tap_github_repo, "tap")
-        return {
-            "path": str(registered),
-            "id": manager.ensure_tap_checkout_id(),
-        }
-
-    def audit_tap_cask(self):
-        self.require_registered_tap_checkout()
-        environment = os.environ.copy()
-        environment["HOMEBREW_NO_AUTO_UPDATE"] = "1"
-        self.runner.run(
-            ["brew", "audit", "--cask", self.tap_cask_token()],
-            cwd=self.tap,
-            capture=False,
-            env=environment,
-        )
 
     def git(self, repo, *args, check=True):
         return self.runner.output(["git", *args], cwd=repo, check=check)
@@ -328,7 +204,6 @@ class ReleaseManager:
 
     def fetch(self):
         self.runner.run(["git", "fetch", "origin", "--tags", "--prune"], cwd=self.main, capture=False)
-        self.runner.run(["git", "fetch", "origin", "--prune"], cwd=self.tap, capture=False)
 
     def repo_state(self, repo):
         branch = self.git(repo, "branch", "--show-current")
@@ -403,25 +278,14 @@ class ReleaseManager:
         require(isinstance(value, dict), "release manifest root must be an object")
         require(isinstance(version, str), "manifest version must be a string")
         validate_version(version)
+        schema = value.get("schema")
         require(
-            type(value.get("schema")) is int and value["schema"] in {1, 2},
+            type(schema) is int and (schema == MANIFEST_SCHEMA or schema in LEGACY_MANIFEST_KEYS),
             "unsupported release manifest schema",
         )
-        expected_keys = MANIFEST_V1_KEYS if value["schema"] == 1 else MANIFEST_V2_KEYS
+        legacy = schema != MANIFEST_SCHEMA
+        expected_keys = LEGACY_MANIFEST_KEYS[schema] if legacy else MANIFEST_KEYS
         require(set(value) == expected_keys, "release manifest fields are incomplete or unsupported")
-        if value["schema"] == 2:
-            checkout = value["tap_checkout"]
-            require(
-                isinstance(checkout, dict) and set(checkout) == {"path", "id"},
-                "manifest tap checkout is invalid",
-            )
-            require(
-                isinstance(checkout["path"], str)
-                and checkout["path"]
-                and Path(checkout["path"]).is_absolute(),
-                "manifest tap checkout path is invalid",
-            )
-            self.validate_checkout_id(checkout["id"], "manifest tap checkout ID")
         require(value.get("version") == version, "manifest version mismatch")
         require(value["tag"] == self.tag(version), "manifest tag does not match version")
         for field in ("previous_tag", "previous_version", "signing_identity", "notarize_profile"):
@@ -439,27 +303,21 @@ class ReleaseManager:
             isinstance(value["state"], str) and value["state"] in RELEASE_STATES,
             "manifest state is invalid",
         )
-        for field in ("original_main_head", "original_tap_head"):
-            require(
-                isinstance(value[field], str)
-                and re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", value[field]) is not None,
-                f"manifest {field} is not a full Git object ID",
-            )
-        for field in (
-            "release_commit",
-            "tap_commit",
-            "release_url",
-        ):
+        require(
+            isinstance(value["original_main_head"], str)
+            and re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", value["original_main_head"]) is not None,
+            "manifest original_main_head is not a full Git object ID",
+        )
+        for field in ("release_commit", "release_url"):
             require(
                 value[field] is None or isinstance(value[field], str),
                 f"manifest {field} must be a string or null",
             )
-        for field in ("release_commit", "tap_commit"):
-            require(
-                value[field] is None
-                or re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", value[field]) is not None,
-                f"manifest {field} is not a full Git object ID",
-            )
+        require(
+            value["release_commit"] is None
+            or re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", value["release_commit"]) is not None,
+            "manifest release_commit is not a full Git object ID",
+        )
         require(
             value["embedded_git_hash"] is None
             or (
@@ -468,15 +326,14 @@ class ReleaseManager:
             ),
             "manifest embedded_git_hash is invalid",
         )
-        for field in ("cask_sha256", "notes_sha256"):
-            require(
-                value[field] is None
-                or (
-                    isinstance(value[field], str)
-                    and re.fullmatch(r"[0-9a-f]{64}", value[field]) is not None
-                ),
-                f"manifest {field} is not a SHA-256 digest",
-            )
+        require(
+            value["notes_sha256"] is None
+            or (
+                isinstance(value["notes_sha256"], str)
+                and re.fullmatch(r"[0-9a-f]{64}", value["notes_sha256"]) is not None
+            ),
+            "manifest notes_sha256 is not a SHA-256 digest",
+        )
         require(isinstance(value["sealed"], bool), "manifest sealed must be boolean")
         require(
             type(value["build"]) is int and value["build"] > 0,
@@ -491,8 +348,7 @@ class ReleaseManager:
         )
         require(
             isinstance(value["destinations"], dict)
-            and set(value["destinations"])
-            == {"main_remote", "tap_remote", "github_repo", "tap_github_repo"}
+            and set(value["destinations"]) == set(LEGACY_DESTINATIONS if legacy else DESTINATIONS)
             and all(
                 isinstance(destination, str) and destination
                 for destination in value["destinations"].values()
@@ -501,7 +357,7 @@ class ReleaseManager:
         )
         require(
             isinstance(value["published"], dict)
-            and set(value["published"]) == set(PUBLIC_STAGES)
+            and set(value["published"]) == set(manifest_stages(value))
             and all(isinstance(flag, bool) for flag in value["published"].values()),
             "manifest published state is invalid",
         )
@@ -517,6 +373,8 @@ class ReleaseManager:
                 and re.fullmatch(r"[0-9a-f]{64}", asset["sha256"]) is not None,
                 f"manifest asset {name} is invalid",
             )
+        if legacy:
+            return
         state = value["state"]
         published_prefix = {
             "preparing": 0,
@@ -525,9 +383,7 @@ class ReleaseManager:
             "sealed": 0,
             "published-main": 1,
             "published-tag": 2,
-            "published-release": 3,
-            "published-tap": 4,
-            "published": 4,
+            "published": 3,
         }[state]
         expected_published = {
             stage: index < published_prefix
@@ -541,16 +397,11 @@ class ReleaseManager:
             require(not value["sealed"], "incomplete release manifest cannot be sealed")
             require(value["assets"] == {}, "incomplete release manifest cannot contain assets")
             require(value["embedded_git_hash"] is None, "incomplete release manifest has an embedded hash")
-            require(value["cask_sha256"] is None, "incomplete release manifest has a cask hash")
             require(value["notes_sha256"] is None, "incomplete release manifest has a notes hash")
             require(value["release_url"] is None, "incomplete release manifest has a release URL")
             require(
                 value["notarization"] == {"status": "pending", "stapled": False},
                 "incomplete release manifest has inconsistent notarization state",
-            )
-            require(
-                value["tap_commit"] is None or value["release_commit"] is not None,
-                "tap commit cannot precede the release commit",
             )
             return
         require(
@@ -564,9 +415,7 @@ class ReleaseManager:
                 f"manifest {name} asset path is not canonical",
             )
         require(value["release_commit"] is not None, "prepared release manifest lacks release commit")
-        require(value["tap_commit"] is not None, "prepared release manifest lacks tap commit")
         require(value["embedded_git_hash"] is not None, "prepared release manifest lacks embedded hash")
-        require(value["cask_sha256"] is not None, "prepared release manifest lacks cask hash")
         require(
             value["notarization"] == {"status": "verified", "stapled": True},
             "prepared release manifest has inconsistent notarization state",
@@ -577,7 +426,7 @@ class ReleaseManager:
         else:
             require(value["sealed"], "published release manifest must be sealed")
             require(value["notes_sha256"] is not None, "sealed release manifest lacks notes hash")
-        if published_prefix < 3:
+        if published_prefix < len(PUBLIC_STAGES):
             require(value["release_url"] is None, "release URL exists before GitHub publication")
         else:
             expected_url = (
@@ -587,62 +436,15 @@ class ReleaseManager:
             require(value["release_url"] == expected_url, "manifest release URL is not canonical")
 
     def save_manifest(self, manifest):
-        require(manifest.get("schema") == 2, "only schema 2 release manifests may be updated")
+        self.require_current_schema(manifest, "manifest update")
         self.validate_manifest_data(manifest, manifest.get("version"))
         atomic_json(self.manifest_path(manifest["version"]), manifest)
 
-    def require_schema2(self, manifest, operation):
+    def require_current_schema(self, manifest, operation):
         require(
-            manifest.get("schema") == 2,
-            f"{operation} requires a schema 2 manifest with an exact tap checkout identity",
+            manifest.get("schema") == MANIFEST_SCHEMA,
+            f"{operation} requires a schema {MANIFEST_SCHEMA} manifest; historical manifests are read-only",
         )
-
-    def require_bound_tap_checkout(self, manifest):
-        self.require_schema2(manifest, "release operation")
-        require(
-            self.read_tap_checkout_id() == manifest["tap_checkout"]["id"],
-            "current tap checkout does not match the release manifest identity",
-        )
-        remote = self.remote_url(self.tap)
-        destinations = manifest["destinations"]
-        require(remote == destinations["tap_remote"], "tap origin differs from the sealed manifest")
-        self.verify_remote_identity(remote, destinations["tap_github_repo"], "tap")
-
-    def resolve_manifest_tap_checkout(self, manifest):
-        self.require_schema2(manifest, "release operation")
-        checkout = manifest["tap_checkout"]
-        candidates = [Path(checkout["path"])]
-        configured = self.tap
-        if configured not in candidates:
-            candidates.append(configured)
-        failures = []
-        for candidate in candidates:
-            if not candidate.is_dir():
-                failures.append(f"{candidate}: path is unavailable")
-                continue
-            manager = self.with_tap(candidate.resolve())
-            try:
-                checkout_id = manager.read_tap_checkout_id()
-                require(
-                    checkout_id == checkout["id"],
-                    "checkout ID differs from the manifest",
-                )
-                manager.require_bound_tap_checkout(manifest)
-                return manager
-            except (OSError, ReleaseError, ValueError) as error:
-                failures.append(f"{candidate}: {error}")
-        detail = "; ".join(failures) if failures else "no checkout candidates"
-        raise ReleaseError(
-            "manifest-bound tap checkout is unavailable; move the original checkout back or set "
-            f"OMNIWM_RELEASE_TAP_REPO to its new path ({detail})"
-        )
-
-    def bind_registered_manifest(self, manifest, operation):
-        self.require_schema2(manifest, operation)
-        manager = self.resolve_manifest_tap_checkout(manifest)
-        manager.verify_destinations(manifest)
-        manager.require_registered_tap_checkout()
-        return manager
 
     def owned_commit_after(self, repo, original_head, expected_subject):
         head = self.git(repo, "rev-parse", "HEAD")
@@ -656,8 +458,7 @@ class ReleaseManager:
         )
         return head
 
-    def recover_local_checkpoints(self, manifest, persist=True):
-        changed = False
+    def recover_local_checkpoints(self, manifest):
         if not manifest.get("release_commit"):
             release_commit = self.owned_commit_after(
                 self.main,
@@ -666,20 +467,7 @@ class ReleaseManager:
             )
             if release_commit:
                 manifest["release_commit"] = release_commit
-                changed = True
-        if not manifest.get("tap_commit"):
-            tap_commit = self.owned_commit_after(
-                self.tap,
-                manifest["original_tap_head"],
-                f"Update OmniWM cask to {manifest['version']}",
-            )
-            if tap_commit:
-                manifest["tap_commit"] = tap_commit
-                changed = True
-        if changed:
-            manifest["state"] = "recovered-local-checkpoint"
-            if persist:
-                self.save_manifest(manifest)
+                manifest["state"] = "recovered-local-checkpoint"
         return manifest
 
     def local_tag_commit(self, tag):
@@ -795,7 +583,6 @@ class ReleaseManager:
             "syspolicy_check",
             "ditto",
             "xattr",
-            "brew",
             "security",
         ]
         return [name for name in names if shutil.which(name) is None]
@@ -864,27 +651,20 @@ class ReleaseManager:
         require(isinstance(destinations, dict), "manifest is missing sealed publish destinations")
         expected = {
             "main_remote": self.remote_url(self.main),
-            "tap_remote": self.remote_url(self.tap),
             "github_repo": self.config.github_repo,
-            "tap_github_repo": self.config.tap_github_repo,
         }
         require(destinations == expected, "current publish destinations differ from the sealed manifest")
         self.verify_remote_identity(destinations["main_remote"], destinations["github_repo"], "main")
-        self.verify_remote_identity(destinations["tap_remote"], destinations["tap_github_repo"], "tap")
 
-    def plan_data(self, version, fetch=True):
+    def plan_data(self, version):
         validate_version(version)
-        if fetch:
-            self.require_registered_tap_checkout()
-            self.fetch()
+        self.fetch()
         previous_tag, previous_version = self.previous_release(version)
         plist = self.plist()
         main_state = self.repo_state(self.main)
-        tap_state = self.repo_state(self.tap)
         tag = self.tag(version)
         missing_tools = self.required_tools()
         main_remote = self.remote_url(self.main)
-        tap_remote = self.remote_url(self.tap)
         return {
             "version": version,
             "tag": tag,
@@ -895,7 +675,6 @@ class ReleaseManager:
             "current_build": int(plist["CFBundleVersion"]),
             "next_build": int(plist["CFBundleVersion"]) + 1,
             "main": main_state,
-            "tap": tap_state,
             "local_tag": self.local_tag_commit(tag),
             "remote_tag": self.remote_tag_commit(tag),
             "github_release": self.github_release(tag),
@@ -907,18 +686,12 @@ class ReleaseManager:
                 if "gh" in missing_tools
                 else self.github_write_access(self.config.github_repo)
             ),
-            "tap_github_write_access": (
-                {"ok": False, "detail": "gh is missing"}
-                if "gh" in missing_tools
-                else self.github_write_access(self.config.tap_github_repo)
-            ),
             "notary_profile_access": (
                 {"ok": False, "detail": "xcrun is missing"}
                 if "xcrun" in missing_tools
                 else self.notary_profile_access()
             ),
             "main_remote": main_remote,
-            "tap_remote": tap_remote,
         }
 
     def print_plan(self, plan):
@@ -930,21 +703,18 @@ class ReleaseManager:
             f"-> {plan['version']} build {plan['next_build']}"
         )
         print(f"Website: {plan['website_version']} -> {plan['version']}")
-        for label in ("main", "tap"):
-            state = plan[label]
-            print(
-                f"{label}: branch={state.branch} clean={state.clean} "
-                f"ahead={state.ahead} behind={state.behind} head={state.head[:12]}"
-            )
+        state = plan["main"]
+        print(
+            f"main: branch={state.branch} clean={state.clean} "
+            f"ahead={state.ahead} behind={state.behind} head={state.head[:12]}"
+        )
         print(f"Local tag: {plan['local_tag'] or 'absent'}")
         print(f"Remote tag: {plan['remote_tag'] or 'absent'}")
         print(f"GitHub release: {'present' if plan['github_release'] else 'absent'}")
         print(f"Signing identity: {'found' if plan['signing_identity_found'] else 'missing'}")
         print(f"GitHub write access: {'ok' if plan['github_write_access']['ok'] else 'failed'}")
-        print(f"Tap GitHub write access: {'ok' if plan['tap_github_write_access']['ok'] else 'failed'}")
         print(f"Notary profile access: {'ok' if plan['notary_profile_access']['ok'] else 'failed'}")
         print(f"Main origin: {plan['main_remote']}")
-        print(f"Tap origin: {plan['tap_remote']}")
         print("Missing tools: " + (", ".join(plan["missing_tools"]) if plan["missing_tools"] else "none"))
         print("Commits:")
         for commit in plan["commits"] or ["none"]:
@@ -956,7 +726,6 @@ class ReleaseManager:
             "website version differs from Info.plist",
         )
         require(not plan["missing_tools"], f"missing tools: {', '.join(plan['missing_tools'])}")
-        self.require_registered_tap_checkout()
         require(plan["signing_identity_found"], f"missing signing identity: {self.config.signing_identity}")
         require(
             plan["github_write_access"]["ok"],
@@ -964,22 +733,13 @@ class ReleaseManager:
             + plan["github_write_access"]["detail"],
         )
         require(
-            plan["tap_github_write_access"]["ok"],
-            "GitHub authentication lacks tap push access: "
-            + plan["tap_github_write_access"]["detail"],
-        )
-        require(
             plan["notary_profile_access"]["ok"],
             "notary profile is unavailable: " + plan["notary_profile_access"]["detail"],
         )
         self.verify_remote_identity(plan["main_remote"], self.config.github_repo, "main")
-        self.verify_remote_identity(plan["tap_remote"], self.config.tap_github_repo, "tap")
         require(plan["main"].branch == "main", "main repo must be on main")
-        require(plan["tap"].branch == "main", "tap repo must be on main")
         require(plan["main"].clean, f"main repo is dirty:\n{plan['main'].status}")
-        require(plan["tap"].clean, f"tap repo is dirty:\n{plan['tap'].status}")
         require(plan["main"].behind == 0, "main repo is behind origin/main")
-        require(plan["tap"].ahead == 0 and plan["tap"].behind == 0, "tap repo must match origin/main")
         require(plan["local_tag"] is None, f"local tag already exists: {plan['tag']}")
         require(plan["remote_tag"] is None, f"remote tag already exists: {plan['tag']}")
         require(plan["github_release"] is None, f"GitHub release already exists: {plan['tag']}")
@@ -1127,28 +887,13 @@ class ReleaseManager:
             self.check_distribution(app, verbose=True)
             self.smoke_test(app)
 
-    def canonical_cask_text(self, version, app_sha):
-        text = self.tap_cask.read_text(encoding="utf-8")
-        text, count_version = re.subn(r'version "[^"]+"', f'version "{version}"', text, count=1)
-        text, count_sha = re.subn(r'sha256 "[0-9a-f]{64}"', f'sha256 "{app_sha}"', text, count=1)
-        text, count_url = re.subn(
-            r'url "https://github\.com/[^"]+/releases/download/',
-            'url "https://github.com/BarutSRB/OmniWM/releases/download/',
-            text,
-            count=1,
-        )
-        text, count_homepage = re.subn(r'homepage "[^"]+"', 'homepage "https://omniwm.app/"', text, count=1)
-        require(count_version == count_sha == count_url == count_homepage == 1, "unable to update cask fields")
-        return text
-
     def prepare(self, version):
         require(not self.manifest_path(version).exists(), "release manifest already exists; use status or abort")
         plan = self.plan_data(version)
         self.print_plan(plan)
         self.enforce_new_release_plan(plan)
-        tap_checkout = self.create_tap_checkout_descriptor(plan["tap_remote"])
         manifest = {
-            "schema": 2,
+            "schema": MANIFEST_SCHEMA,
             "version": version,
             "tag": plan["tag"],
             "previous_tag": plan["previous_tag"],
@@ -1157,22 +902,16 @@ class ReleaseManager:
             "state": "preparing",
             "sealed": False,
             "original_main_head": plan["main"].head,
-            "original_tap_head": plan["tap"].head,
             "release_commit": None,
-            "tap_commit": None,
             "embedded_git_hash": None,
             "signing_identity": self.config.signing_identity,
             "notarize_profile": self.config.notarize_profile,
             "notarization": {"status": "pending", "stapled": False},
             "destinations": {
                 "main_remote": plan["main_remote"],
-                "tap_remote": plan["tap_remote"],
                 "github_repo": self.config.github_repo,
-                "tap_github_repo": self.config.tap_github_repo,
             },
-            "tap_checkout": tap_checkout,
             "assets": {},
-            "cask_sha256": None,
             "notes_sha256": None,
             "published": {stage: False for stage in PUBLIC_STAGES},
             "release_url": None,
@@ -1230,20 +969,12 @@ class ReleaseManager:
         self.run_git(self.main, "tag", "-a", plan["tag"], "-m", f"OmniWM v{version}")
         app_sha = sha256_file(paths["app"])
         ghostty_sha = sha256_file(paths["ghostty"])
-        self.tap_cask.write_text(self.canonical_cask_text(version, app_sha), encoding="utf-8")
-        self.audit_tap_cask()
-        self.run_git(self.tap, "add", "Casks/omniwm.rb")
-        self.run_git(self.tap, "commit", "-m", f"Update OmniWM cask to {version}")
-        tap_commit = self.git(self.tap, "rev-parse", "HEAD")
-        cask_sha = sha256_file(self.tap_cask)
         manifest.update(
             {
                 "state": "prepared",
                 "release_commit": release_commit,
-                "tap_commit": tap_commit,
                 "embedded_git_hash": embedded,
                 "notarization": {"status": "verified", "stapled": True},
-                "cask_sha256": cask_sha,
                 "assets": {
                     "app": {"path": str(paths["app"]), "sha256": app_sha},
                     "ghostty": {"path": str(paths["ghostty"]), "sha256": ghostty_sha},
@@ -1256,14 +987,11 @@ class ReleaseManager:
     def verify_manifest(self, manifest, seal):
         require(isinstance(manifest, dict), "release manifest root must be an object")
         self.validate_manifest_data(manifest, manifest.get("version"))
-        self.require_bound_tap_checkout(manifest)
         version = manifest["version"]
         self.verify_destinations(manifest)
         paths = self.asset_paths(version)
         require(self.repo_state(self.main).branch == "main", "main repo must remain on main")
-        require(self.repo_state(self.tap).branch == "main", "tap repo must remain on main")
         require(self.git(self.main, "rev-parse", "HEAD") == manifest["release_commit"], "main HEAD differs from release commit")
-        require(self.git(self.tap, "rev-parse", "HEAD") == manifest["tap_commit"], "tap HEAD differs from prepared tap commit")
         require(self.local_tag_commit(manifest["tag"]) == manifest["release_commit"], "local tag does not match release commit")
         expected_embedded = self.git(
             self.main,
@@ -1280,12 +1008,6 @@ class ReleaseManager:
             require(path.exists(), f"missing {key} asset: {path}")
             require(sha256_file(path) == manifest["assets"][key]["sha256"], f"{key} asset hash drift")
         require(paths["notes"].exists(), f"missing notes: {paths['notes']}")
-        expected_cask = self.canonical_cask_text(version, manifest["assets"]["app"]["sha256"])
-        require(self.tap_cask.read_text(encoding="utf-8") == expected_cask, "prepared cask drift")
-        require(
-            sha256_file(self.tap_cask) == manifest["cask_sha256"],
-            "prepared cask hash drift",
-        )
         self.verify_app_zip(
             Path(manifest["assets"]["app"]["path"]),
             version=version,
@@ -1293,7 +1015,6 @@ class ReleaseManager:
             embedded_hash=manifest["embedded_git_hash"],
             signing_identity=manifest["signing_identity"],
         )
-        self.audit_tap_cask()
         notes_sha = sha256_file(paths["notes"])
         if seal:
             manifest["notes_sha256"] = notes_sha
@@ -1307,12 +1028,12 @@ class ReleaseManager:
 
     def verify(self, version):
         manifest = self.load_manifest(version)
-        self.require_schema2(manifest, "verify")
+        self.require_current_schema(manifest, "verify")
         require(manifest["state"] in {"prepared", "sealed"}, "release is not ready for verification")
-        manager = self.bind_registered_manifest(manifest, "verify")
-        manager.fetch()
-        manager.verify_manifest(manifest, seal=True)
-        manager.print_status(manifest)
+        self.verify_destinations(manifest)
+        self.fetch()
+        self.verify_manifest(manifest, seal=True)
+        self.print_status(manifest)
 
     def ensure_main_published(self, manifest):
         remote = self.git(self.main, "rev-parse", "origin/main")
@@ -1416,66 +1137,17 @@ class ReleaseManager:
         self.verify_existing_release_assets(manifest)
         manifest["release_url"] = release["url"]
 
-    def ensure_tap_published(self, manifest):
-        remote = self.git(self.tap, "rev-parse", "origin/main")
-        if remote == manifest["tap_commit"]:
-            remote_cask = self.runner.run(
-                ["git", "show", "origin/main:Casks/omniwm.rb"],
-                cwd=self.tap,
-                quiet=True,
-            ).stdout
-            require(
-                hashlib.sha256(remote_cask.encode("utf-8")).hexdigest()
-                == manifest["cask_sha256"],
-                "remote tap contains a different cask than the sealed manifest",
-            )
-            return
-        if self.runner.run(
-            ["git", "merge-base", "--is-ancestor", manifest["tap_commit"], remote],
-            cwd=self.tap,
-            check=False,
-            quiet=True,
-        ).returncode == 0:
-            raise ReleaseError("tap origin/main advanced beyond the sealed tap commit")
-        require(
-            self.runner.run(
-                ["git", "merge-base", "--is-ancestor", remote, manifest["tap_commit"]],
-                cwd=self.tap,
-                check=False,
-                quiet=True,
-            ).returncode
-            == 0,
-            "tap origin/main has diverged from the prepared tap commit",
-        )
-        self.runner.run(["git", "push", "origin", "main"], cwd=self.tap, capture=False)
-        self.runner.run(["git", "fetch", "origin"], cwd=self.tap)
-        require(
-            self.git(self.tap, "rev-parse", "origin/main") == manifest["tap_commit"],
-            "tap push did not publish the exact sealed commit",
-        )
-        remote_cask = self.runner.run(
-            ["git", "show", "origin/main:Casks/omniwm.rb"],
-            cwd=self.tap,
-            quiet=True,
-        ).stdout
-        require(
-            hashlib.sha256(remote_cask.encode("utf-8")).hexdigest()
-            == manifest["cask_sha256"],
-            "remote tap cask does not match the sealed manifest",
-        )
-
     def publish(self, version, yes):
         require(yes, "publishing requires --yes after explicit user confirmation")
         manifest = self.load_manifest(version)
-        self.require_schema2(manifest, "publish")
-        manager = self.bind_registered_manifest(manifest, "publish")
-        manager.fetch()
-        manager.verify_manifest(manifest, seal=False)
+        self.require_current_schema(manifest, "publish")
+        self.verify_destinations(manifest)
+        self.fetch()
+        self.verify_manifest(manifest, seal=False)
         handlers = {
-            "main": manager.ensure_main_published,
-            "tag": manager.ensure_tag_published,
-            "release": manager.ensure_release_published,
-            "tap": manager.ensure_tap_published,
+            "main": self.ensure_main_published,
+            "tag": self.ensure_tag_published,
+            "release": self.ensure_release_published,
         }
         for stage in PUBLIC_STAGES:
             handlers[stage](manifest)
@@ -1488,32 +1160,27 @@ class ReleaseManager:
                 if published_count == len(PUBLIC_STAGES)
                 else f"published-{PUBLIC_STAGES[published_count - 1]}"
             )
-            manager.save_manifest(manifest)
+            self.save_manifest(manifest)
         manifest["state"] = "published"
-        manager.save_manifest(manifest)
-        manager.print_status(manifest)
-        print("User update command: brew upgrade omniwm")
+        self.save_manifest(manifest)
+        self.print_status(manifest)
+        print("Homebrew: the official homebrew/cask omniwm cask is updated by autobump from this GitHub release")
 
     def print_status(self, manifest):
         print(f"Release {manifest['version']}: {manifest['state']}")
         print(f"- manifest: {self.manifest_path(manifest['version'])}")
-        if manifest.get("schema") == 2:
-            checkout = manifest["tap_checkout"]
-            print(f"- tap checkout: {checkout['path']} ({checkout['id']})")
         print(f"- release commit: {manifest.get('release_commit') or 'pending'}")
         print(f"- tag: {manifest['tag']}")
-        print(f"- tap commit: {manifest.get('tap_commit') or 'pending'}")
         print(f"- sealed: {manifest.get('sealed', False)}")
         for name, data in manifest.get("assets", {}).items():
             print(f"- {name}: {data['path']} ({data['sha256']})")
-        for stage in PUBLIC_STAGES:
+        for stage in manifest_stages(manifest):
             print(f"- published {stage}: {manifest['published'].get(stage, False)}")
         if manifest.get("release_url"):
             print(f"- release URL: {manifest['release_url']}")
 
     def public_presence(self, manifest):
         main_remote = self.git(self.main, "rev-parse", "origin/main")
-        tap_remote = self.git(self.tap, "rev-parse", "origin/main")
         main_present = main_remote == manifest.get("release_commit")
         if (
             manifest.get("release_commit")
@@ -1527,30 +1194,6 @@ class ReleaseManager:
             == 0
         ):
             raise ReleaseError("public main branch advanced beyond the sealed release commit")
-        tap_present = tap_remote == manifest.get("tap_commit")
-        if (
-            manifest.get("tap_commit")
-            and not tap_present
-            and self.runner.run(
-                ["git", "merge-base", "--is-ancestor", manifest["tap_commit"], tap_remote],
-                cwd=self.tap,
-                check=False,
-                quiet=True,
-            ).returncode
-            == 0
-        ):
-            raise ReleaseError("public tap branch advanced beyond the sealed tap commit")
-        if tap_present and manifest.get("cask_sha256"):
-            remote_cask = self.runner.run(
-                ["git", "show", "origin/main:Casks/omniwm.rb"],
-                cwd=self.tap,
-                quiet=True,
-            ).stdout
-            require(
-                hashlib.sha256(remote_cask.encode("utf-8")).hexdigest()
-                == manifest["cask_sha256"],
-                "public tap cask differs from the sealed manifest",
-            )
         remote_tag = self.remote_tag_commit(manifest["tag"])
         if remote_tag is not None and remote_tag != manifest.get("release_commit"):
             raise ReleaseError("public tag exists but does not match the prepared release commit")
@@ -1561,51 +1204,46 @@ class ReleaseManager:
             "main": main_present,
             "tag": remote_tag is not None,
             "release": release is not None,
-            "tap": tap_present,
         }
 
     def status(self, version):
         manifest = self.load_manifest(version)
-        if manifest["schema"] == 1:
+        if manifest["schema"] != MANIFEST_SCHEMA:
             self.print_status(manifest)
-            if manifest["state"] == "published" and all(manifest["published"].values()):
-                print("- live status: unavailable for historical schema 1 manifest")
-                return True
-            print("- live status unavailable: incomplete schema 1 manifests are unsupported")
-            return False
+            complete = manifest["state"] == "published" and all(manifest["published"].values())
+            if complete:
+                print(f"- live status: unavailable for historical schema {manifest['schema']} manifest")
+            else:
+                print("- live status unavailable: incomplete historical manifests are unsupported")
+            return complete
         try:
-            manager = self.resolve_manifest_tap_checkout(manifest)
-            manager.verify_destinations(manifest)
-            recovered = manager.recover_local_checkpoints(manifest.copy(), persist=False)
-            manager.fetch()
-            actual = manager.public_presence(recovered)
+            self.verify_destinations(manifest)
+            recovered = self.recover_local_checkpoints(manifest.copy())
+            self.fetch()
+            actual = self.public_presence(recovered)
             manifest = recovered
         except (OSError, ReleaseError, ValueError) as error:
             self.print_status(manifest)
             print(f"- live status unavailable: {error}")
             return False
-        manager.print_status(manifest)
+        self.print_status(manifest)
         for stage in PUBLIC_STAGES:
             print(f"- observed public {stage}: {actual[stage]}")
-        advisory = manager.homebrew_registration_advisory()
-        if advisory:
-            print(f"- Homebrew advisory: {advisory}")
         return True
 
     def abort(self, version):
         manifest = self.load_manifest(version)
-        self.require_schema2(manifest, "abort")
-        manager = self.resolve_manifest_tap_checkout(manifest)
-        manager.verify_destinations(manifest)
-        manifest = manager.recover_local_checkpoints(manifest, persist=False)
-        manager.fetch()
-        actual = manager.public_presence(manifest)
+        self.require_current_schema(manifest, "abort")
+        self.verify_destinations(manifest)
+        manifest = self.recover_local_checkpoints(manifest)
+        self.fetch()
+        actual = self.public_presence(manifest)
         require(
             not any(manifest["published"].values()) and not any(actual.values()),
             "cannot abort after any public stage",
         )
         tag = manifest["tag"]
-        local_tag = manager.local_tag_commit(tag)
+        local_tag = self.local_tag_commit(tag)
         require(
             local_tag is None
             or (
@@ -1614,47 +1252,31 @@ class ReleaseManager:
             ),
             "local release tag does not match the prepared release commit",
         )
-        tap_branch = manager.git(manager.tap, "branch", "--show-current")
-        require(
-            tap_branch == "main",
-            "tap repo must be on main before abort",
-        )
-        main_branch = manager.git(manager.main, "branch", "--show-current")
+        main_branch = self.git(self.main, "branch", "--show-current")
         require(
             main_branch == "main",
             "main repo must be on main before abort",
         )
-        tap_head = manager.git(manager.tap, "rev-parse", "HEAD")
-        require(
-            tap_head in {manifest["original_tap_head"], manifest.get("tap_commit")},
-            "tap HEAD moved after preparation; abort refuses to rewrite it",
-        )
-        main_head = manager.git(manager.main, "rev-parse", "HEAD")
+        main_head = self.git(self.main, "rev-parse", "HEAD")
         require(
             main_head in {manifest["original_main_head"], manifest.get("release_commit")},
             "main HEAD moved after preparation; abort refuses to rewrite it",
         )
-        advisory = manager.homebrew_registration_advisory()
         if local_tag:
-            manager.run_git(manager.main, "tag", "-d", tag)
-        if manifest.get("tap_commit") and tap_head == manifest["tap_commit"]:
-            manager.run_git(manager.tap, "reset", "--mixed", manifest["original_tap_head"])
-        manager.run_git(manager.tap, "restore", "--staged", "--worktree", "Casks/omniwm.rb")
+            self.run_git(self.main, "tag", "-d", tag)
         if manifest.get("release_commit") and main_head == manifest["release_commit"]:
-            manager.run_git(manager.main, "reset", "--mixed", manifest["original_main_head"])
-        manager.run_git(
-            manager.main,
+            self.run_git(self.main, "reset", "--mixed", manifest["original_main_head"])
+        self.run_git(
+            self.main,
             "restore",
             "--staged",
             "--worktree",
             "Info.plist",
             "website/src/data/site.ts",
         )
-        for path in manager.asset_paths(version).values():
+        for path in self.asset_paths(version).values():
             path.unlink(missing_ok=True)
-        manager.manifest_path(version).unlink(missing_ok=True)
-        if advisory:
-            print(f"Homebrew advisory: {advisory}")
+        self.manifest_path(version).unlink(missing_ok=True)
         print(f"Aborted local release {version}; no public state was changed")
 
 
