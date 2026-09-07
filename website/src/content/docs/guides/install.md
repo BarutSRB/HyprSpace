@@ -20,14 +20,23 @@ OmniWM is in the official Homebrew cask repository:
 brew install --cask omniwm
 ```
 
-The project tap also carries every release, if you prefer to track it directly:
+This installs `OmniWM.app` and puts `omniwmctl` on your `PATH`. Then finish with the [first-launch setup](#first-launch-setup) below.
+
+### Upgrading
+
+Quit OmniWM first, then run `brew upgrade omniwm` and relaunch it. Homebrew replaces the app bundle underneath a running OmniWM.
+
+### Migrating from the project tap
+
+`BarutSRB/tap` is retired: 0.6.7 was its final release, and every later version ships only through the official cask. If you installed from the tap, quit OmniWM and run these commands in this order:
 
 ```bash
-brew tap BarutSRB/tap
-brew install omniwm
+brew update
+brew upgrade omniwm
+brew untap BarutSRB/tap
 ```
 
-Both paths install `OmniWM.app` and put `omniwmctl` on your `PATH`; upgrade with `brew upgrade omniwm`. Then finish with the [first-launch setup](#first-launch-setup) below.
+`brew update` has to come first: it fetches the retired tap's redirect to the official cask and moves your install over. Untapping before that would offer to uninstall OmniWM. `brew reinstall --cask homebrew/cask/omniwm` is optional and only switches the install record to the official cask right away.
 
 ## Nix
 
