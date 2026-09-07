@@ -4,70 +4,54 @@
 import AppKit
 
 private enum TabRailMetrics {
-    static let barThickness: CGFloat = 10
-    static let spacing: CGFloat = 2
-    static let totalWidth: CGFloat = barThickness + spacing
-    static let hitWidth: CGFloat = 20
-    static let cornerRadius: CGFloat = 3
-    static let preferredSegmentHeight: CGFloat = 32
+    static let trackWidth: CGFloat = 10
+    static let totalWidth: CGFloat = trackWidth
+    static let hitWidth: CGFloat = 22
+    static let trackCornerRadius: CGFloat = 5
+    static let segmentCornerRadius: CGFloat = 2.5
+    static let preferredSegmentHeight: CGFloat = 28
     static let minimumSegmentHeight: CGFloat = 2
-    static let preferredSegmentGap: CGFloat = 6
+    static let preferredSegmentGap: CGFloat = 4
     static let minimumSegmentGap: CGFloat = 0
     static let minVisibleIntersection: CGFloat = 10
     static let minimumRailHeight: CGFloat = 8
-    static let activeSegmentWidth: CGFloat = 8
-    static let inactiveSegmentWidth: CGFloat = 5
-    static let hoveredSegmentWidth: CGFloat = 7
-    static let segmentVerticalInset: CGFloat = 1
-    static let edgeLineWidth: CGFloat = 1
-
-    static var backgroundColor: NSColor {
-        if NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency {
-            return .windowBackgroundColor
-        }
-        let alpha = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast ? 0.72 : 0.44
-        return .black.withAlphaComponent(alpha)
-    }
+    static let segmentWidth: CGFloat = 3
+    static let segmentVerticalInset: CGFloat = 2
+    static let trackEndInset: CGFloat = 6
+    static let trackBorderWidth: CGFloat = 0.5
+    static let hoverCardSize = CGSize(width: 260, height: 52)
+    static let hoverCardGap: CGFloat = 8
 
     static func selectedColor(hovered: Bool) -> NSColor {
-        let alpha = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency ? 1.0 : 0.92
-        return NSColor.controlAccentColor.withAlphaComponent(min(1.0, alpha + (hovered ? 0.06 : 0)))
+        let baseAlpha: CGFloat = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency ? 1 : 0.86
+        return NSColor.controlAccentColor.withAlphaComponent(min(1, baseAlpha + (hovered ? 0.1 : 0)))
     }
 
     static func unselectedColor(hovered: Bool, railHovered: Bool) -> NSColor {
-        let baseAlpha = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast ? 0.7 : 0.45
-        let hoverAlpha: CGFloat = if hovered {
-            0.2
-        } else if railHovered {
-            0.08
-        } else {
-            0
-        }
-        let alpha = min(0.9, baseAlpha + hoverAlpha)
-        return NSColor.labelColor.withAlphaComponent(alpha)
+        let baseAlpha: CGFloat = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast ? 0.82 : 0.58
+        let hoverAlpha: CGFloat = hovered ? 0.24 : (railHovered ? 0.08 : 0)
+        return NSColor.labelColor.withAlphaComponent(min(0.92, baseAlpha + hoverAlpha))
     }
 
     static var hoverColor: NSColor {
-        let alpha = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast ? 0.22 : 0.14
+        let alpha: CGFloat = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast ? 0.2 : 0.1
         return NSColor.controlAccentColor.withAlphaComponent(alpha)
     }
 
-    static var gutterColor: NSColor {
-        if NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency {
-            return NSColor.separatorColor.withAlphaComponent(0.55)
-        }
-        let alpha = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast ? 0.34 : 0.18
-        return NSColor.black.withAlphaComponent(alpha)
-    }
-
-    static var edgeColor: NSColor {
-        let alpha = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast ? 0.86 : 0.42
+    static var trackBorderColor: NSColor {
+        let alpha: CGFloat = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast ? 0.72 : 0.28
         return NSColor.separatorColor.withAlphaComponent(alpha)
     }
+}
 
-    static var selectedStrokeColor: NSColor {
-        let alpha = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast ? 1.0 : 0.9
-        return NSColor.keyboardFocusIndicatorColor.withAlphaComponent(alpha)
+enum TabRailOrderingPolicy {
+    static func shouldOrderFront(
+        forceOrdering: Bool,
+        wasVisible: Bool,
+        lastActiveWindowId: Int?,
+        activeWindowId: Int?
+    ) -> Bool {
+        forceOrdering || !wasVisible || lastActiveWindowId != activeWindowId
     }
 }
 
@@ -114,13 +98,10 @@ struct TabRailInfo: Equatable {
     let plannedSeq: UInt64
     let tileFrame: CGRect
     let visibleTileFrame: CGRect
+    let tabCount: Int
     let activeVisualIndex: Int
     let activeWindowId: Int?
     let tabs: [TabRailTabInfo]
-
-    var tabCount: Int {
-        tabs.count
-    }
 
     var key: TabRailKey {
         TabRailKey(workspaceId: workspaceId, owner: owner)
@@ -142,9 +123,23 @@ struct TabRailInfo: Equatable {
         self.plannedSeq = plannedSeq
         self.tileFrame = tileFrame
         self.visibleTileFrame = visibleTileFrame ?? tileFrame
+        self.tabCount = max(0, tabCount)
         self.activeVisualIndex = activeVisualIndex
         self.activeWindowId = activeWindowId
         self.tabs = tabs ?? Self.defaultTabs(tabCount: tabCount, activeVisualIndex: activeVisualIndex)
+    }
+
+    var normalizedTabs: [TabRailTabInfo] {
+        let metadataByIndex = Dictionary(
+            tabs.map { ($0.visualIndex, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        return Self.defaultTabs(
+            tabCount: tabCount,
+            activeVisualIndex: activeVisualIndex
+        ).map { fallback in
+            metadataByIndex[fallback.visualIndex] ?? fallback
+        }
     }
 
     private static func defaultTabs(tabCount: Int, activeVisualIndex: Int) -> [TabRailTabInfo] {
@@ -175,13 +170,15 @@ struct TabRailLayout: Equatable {
         let pillRect: CGRect
     }
 
-    static let empty = TabRailLayout(railRect: .zero, items: [])
+    static let empty = TabRailLayout(railRect: .zero, barRect: .zero, items: [])
 
     let railRect: CGRect
+    let barRect: CGRect
     let items: [Item]
 
-    private init(railRect: CGRect, items: [Item]) {
+    private init(railRect: CGRect, barRect: CGRect, items: [Item]) {
         self.railRect = railRect
+        self.barRect = barRect
         self.items = items
     }
 
@@ -209,6 +206,12 @@ struct TabRailLayout: Equatable {
         let railY = bounds.minY + max(0, (bounds.height - totalHeight) / 2)
         let railRect = CGRect(x: bounds.minX, y: railY, width: bounds.width, height: min(bounds.height, totalHeight))
         let visualRailRect = Self.visualRailRect(in: railRect)
+        let barRect = CGRect(
+            x: visualRailRect.minX,
+            y: visualRailRect.minY,
+            width: TabRailMetrics.trackWidth,
+            height: visualRailRect.height
+        )
 
         var items: [Item] = []
         items.reserveCapacity(tabCount)
@@ -224,9 +227,9 @@ struct TabRailLayout: Equatable {
                 height: segmentHeight
             ).intersection(railRect)
             let pillRect = CGRect(
-                x: visualRailRect.minX,
+                x: barRect.minX,
                 y: hitRect.minY + TabRailMetrics.segmentVerticalInset,
-                width: visualRailRect.width,
+                width: barRect.width,
                 height: max(0, hitRect.height - TabRailMetrics.segmentVerticalInset * 2)
             )
             guard !hitRect.isNull, hitRect.width > 0, hitRect.height > 0 else { continue }
@@ -234,6 +237,7 @@ struct TabRailLayout: Equatable {
         }
 
         self.railRect = railRect
+        self.barRect = barRect
         self.items = items
     }
 
@@ -292,6 +296,158 @@ struct TabRailLayout: Equatable {
         let fitHeight = availableForSegments / CGFloat(tabCount)
         guard fitHeight >= TabRailMetrics.minimumSegmentHeight else { return 0 }
         return min(TabRailMetrics.preferredSegmentHeight, fitHeight)
+    }
+}
+
+enum TabRailSegmentGeometry {
+    static let inactiveHeightRatio: CGFloat = 0.67
+
+    static func rect(
+        sourceRect: CGRect,
+        trackBounds: CGRect,
+        width: CGFloat,
+        selected: Bool,
+        scale: CGFloat
+    ) -> CGRect {
+        let height = aligned(
+            sourceRect.height * (selected ? 1 : inactiveHeightRatio),
+            scale: scale
+        )
+        let horizontalGeometry = pixelAlignedHorizontalGeometry(
+            trackBounds: trackBounds,
+            width: width,
+            scale: scale
+        )
+        return CGRect(
+            x: horizontalGeometry.x,
+            y: aligned(sourceRect.midY - height / 2, scale: scale),
+            width: horizontalGeometry.width,
+            height: height
+        )
+    }
+
+    static func packedHeight(
+        sourceRects: [Int: CGRect],
+        selectedVisualIndex: Int,
+        verticalMargin: CGFloat,
+        endInset: CGFloat,
+        scale: CGFloat
+    ) -> CGFloat {
+        let orderedRects = sourceRects.sorted { $0.value.midY < $1.value.midY }
+        guard !orderedRects.isEmpty else { return 0 }
+
+        let sourceGaps = zip(orderedRects, orderedRects.dropFirst()).map { lower, upper in
+            max(0, upper.value.minY - lower.value.maxY - verticalMargin * 2)
+        }
+        let slotGap = sourceGaps.min() ?? 0
+        let markerHeight = orderedRects.reduce(CGFloat.zero) { result, item in
+            result + aligned(
+                item.value.height * (item.key == selectedVisualIndex ? 1 : inactiveHeightRatio),
+                scale: scale
+            )
+        }
+        return markerHeight
+            + CGFloat(max(0, orderedRects.count - 1)) * (verticalMargin * 2 + slotGap)
+            + endInset * 2
+    }
+
+    static func equallyPaddedRects(
+        sourceRects: [Int: CGRect],
+        trackBounds: CGRect,
+        width: CGFloat,
+        selectedVisualIndex: Int,
+        verticalMargin: CGFloat,
+        scale: CGFloat
+    ) -> [Int: CGRect] {
+        let orderedRects = sourceRects.sorted { $0.value.midY < $1.value.midY }
+        guard !orderedRects.isEmpty else { return [:] }
+
+        let sourceGaps = zip(orderedRects, orderedRects.dropFirst()).map { lower, upper in
+            max(0, upper.value.minY - lower.value.maxY - verticalMargin * 2)
+        }
+        let slotGap = sourceGaps.min() ?? 0
+        let markerHeights = orderedRects.map { visualIndex, sourceRect in
+            aligned(
+                sourceRect.height * (visualIndex == selectedVisualIndex ? 1 : inactiveHeightRatio),
+                scale: scale
+            )
+        }
+        let totalHeight = markerHeights.reduce(0, +)
+            + CGFloat(orderedRects.count) * verticalMargin * 2
+            + CGFloat(max(0, orderedRects.count - 1)) * slotGap
+        var cursorY = trackBounds.midY - totalHeight / 2
+        let horizontalGeometry = pixelAlignedHorizontalGeometry(
+            trackBounds: trackBounds,
+            width: width,
+            scale: scale
+        )
+        var result: [Int: CGRect] = [:]
+        result.reserveCapacity(orderedRects.count)
+
+        for ((visualIndex, _), markerHeight) in zip(orderedRects, markerHeights) {
+            result[visualIndex] = CGRect(
+                x: horizontalGeometry.x,
+                y: aligned(cursorY + verticalMargin, scale: scale),
+                width: horizontalGeometry.width,
+                height: markerHeight
+            )
+            cursorY += markerHeight + verticalMargin * 2 + slotGap
+        }
+        return result
+    }
+
+    private static func pixelAlignedHorizontalGeometry(
+        trackBounds: CGRect,
+        width: CGFloat,
+        scale: CGFloat
+    ) -> (x: CGFloat, width: CGFloat) {
+        guard scale > 0 else {
+            return (trackBounds.midX - width / 2, width)
+        }
+
+        let trackPixelWidth = Int((trackBounds.width * scale).rounded())
+        var segmentPixelWidth = max(1, Int((width * scale).rounded()))
+        // Matching pixel-width parity keeps both edges crisp without shifting the segment off-center.
+        if trackPixelWidth.isMultiple(of: 2) != segmentPixelWidth.isMultiple(of: 2) {
+            if segmentPixelWidth < trackPixelWidth {
+                segmentPixelWidth += 1
+            } else if segmentPixelWidth > 1 {
+                segmentPixelWidth -= 1
+            }
+        }
+
+        let alignedWidth = CGFloat(segmentPixelWidth) / scale
+        let alignedX = (trackBounds.midX * scale - CGFloat(segmentPixelWidth) / 2).rounded() / scale
+        return (alignedX, alignedWidth)
+    }
+
+    private static func aligned(_ value: CGFloat, scale: CGFloat) -> CGFloat {
+        guard scale > 0 else { return value }
+        return (value * scale).rounded() / scale
+    }
+}
+
+enum TabRailHoverCardPlacement {
+    static func frame(
+        railFrame: CGRect,
+        itemRect: CGRect,
+        cardSize: CGSize,
+        visibleFrame: CGRect,
+        gap: CGFloat
+    ) -> CGRect {
+        let itemCenterY = railFrame.minY + itemRect.midY
+        let leftX = railFrame.minX - gap - cardSize.width
+        let rightX = railFrame.maxX + gap
+        let x = leftX >= visibleFrame.minX ? leftX : min(rightX, visibleFrame.maxX - cardSize.width)
+        let unclampedY = itemCenterY - cardSize.height / 2
+        let y = min(
+            max(unclampedY, visibleFrame.minY),
+            max(visibleFrame.minY, visibleFrame.maxY - cardSize.height)
+        )
+        return CGRect(
+            origin: CGPoint(x: max(visibleFrame.minX, x), y: y),
+            size: cardSize
+        )
     }
 }
 
@@ -395,6 +551,7 @@ final class TabRailManager {
 @MainActor
 private final class TabRailWindow: NSPanel {
     private let railView: TabRailView
+    private let hoverCard: TabRailHoverCardWindow
     private let surfaceID: String
     private let surfaceCoordinator = SurfaceCoordinator.shared
     private var lastFrame: CGRect?
@@ -409,6 +566,7 @@ private final class TabRailWindow: NSPanel {
     init(owner: TabRailOwner, workspaceId: WorkspaceDescriptor.ID) {
         surfaceID = Self.surfaceID(workspaceId: workspaceId, owner: owner)
         railView = TabRailView(frame: .zero)
+        hoverCard = TabRailHoverCardWindow()
 
         super.init(
             contentRect: .zero,
@@ -435,20 +593,25 @@ private final class TabRailWindow: NSPanel {
             let token = currentInfo.tabs.first(where: { $0.visualIndex == visualIndex })?.token
             self.onSelect?(currentInfo, visualIndex, token)
         }
+        railView.onHoverChange = { [weak self] tab, itemRect in
+            self?.updateHoverCard(tab: tab, itemRect: itemRect)
+        }
         contentView = railView
 
         accessibilityDisplayObserver = NotificationCenter.default.addObserver(
             forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
             object: nil,
             queue: .main
-        ) { [weak railView] _ in
-            Task { @MainActor [weak railView] in
-                railView?.needsDisplay = true
+        ) { [weak railView, weak hoverCard] _ in
+            Task { @MainActor [weak railView, weak hoverCard] in
+                railView?.refreshAppearance()
+                hoverCard?.refreshAppearance()
             }
         }
     }
 
     override func close() {
+        hoverCard.hide()
         if let accessibilityDisplayObserver {
             NotificationCenter.default.removeObserver(accessibilityDisplayObserver)
             self.accessibilityDisplayObserver = nil
@@ -469,10 +632,11 @@ private final class TabRailWindow: NSPanel {
     func update(info: TabRailInfo, forceOrdering: Bool) {
         currentInfo = info
         let clampedActiveVisualIndex = min(max(0, info.activeVisualIndex), max(0, info.tabCount - 1))
-        railView.update(tabs: info.tabs, activeVisualIndex: clampedActiveVisualIndex)
+        railView.update(tabs: info.normalizedTabs, activeVisualIndex: clampedActiveVisualIndex)
 
         let frame = Self.railFrame(for: info.visibleTileFrame, tabCount: info.tabCount)
         guard frame.width > 1, frame.height > 1 else {
+            hoverCard.hide()
             orderOut(nil)
             lastFrame = nil
             surfaceCoordinator.unregister(id: surfaceID)
@@ -493,17 +657,15 @@ private final class TabRailWindow: NSPanel {
         animationGeometryNeedsAccessibilityRefresh = false
 
         let wasVisible = isVisible
-        if forceOrdering || !wasVisible {
+        if TabRailOrderingPolicy.shouldOrderFront(
+            forceOrdering: forceOrdering,
+            wasVisible: wasVisible,
+            lastActiveWindowId: lastActiveWindowId,
+            activeWindowId: info.activeWindowId
+        ) {
             orderFront(nil)
         }
         syncSurfaceRegistration()
-
-        if let targetWid = info.activeWindowId,
-           forceOrdering || lastActiveWindowId != targetWid || !wasVisible
-        {
-            let wid = UInt32(windowNumber)
-            SkyLight.shared.orderWindow(wid, relativeTo: UInt32(targetWid))
-        }
         lastActiveWindowId = info.activeWindowId
     }
 
@@ -544,6 +706,28 @@ private final class TabRailWindow: NSPanel {
         if let targetWid = currentInfo.activeWindowId {
             SkyLight.shared.orderWindow(UInt32(windowNumber), relativeTo: UInt32(targetWid))
         }
+    }
+
+    private func updateHoverCard(tab: TabRailTabInfo?, itemRect: CGRect?) {
+        guard let tab, let itemRect, let currentInfo, isVisible else {
+            hoverCard.hide()
+            return
+        }
+        let screenFrame = screen?.visibleFrame
+            ?? NSScreen.screens.first(where: { $0.frame.intersects(frame) })?.visibleFrame
+            ?? NSScreen.main?.visibleFrame
+        guard let screenFrame else {
+            hoverCard.hide()
+            return
+        }
+        let cardFrame = TabRailHoverCardPlacement.frame(
+            railFrame: frame,
+            itemRect: itemRect,
+            cardSize: TabRailMetrics.hoverCardSize,
+            visibleFrame: screenFrame,
+            gap: TabRailMetrics.hoverCardGap
+        )
+        hoverCard.show(tab: tab, tabCount: currentInfo.tabCount, frame: cardFrame)
     }
 
     private static func railFrame(for visibleTileFrame: CGRect, tabCount: Int) -> CGRect {
@@ -593,22 +777,375 @@ private final class TabRailWindow: NSPanel {
     }
 }
 
+@MainActor
+private final class TabRailHoverCardWindow: NSPanel {
+    private let effectView = NSVisualEffectView(frame: .zero)
+    private let iconView = NSImageView(frame: .zero)
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let detailLabel = NSTextField(labelWithString: "")
+
+    init() {
+        super.init(
+            contentRect: CGRect(origin: .zero, size: TabRailMetrics.hoverCardSize),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        isOpaque = false
+        backgroundColor = .clear
+        level = .floating
+        ignoresMouseEvents = true
+        hasShadow = true
+        hidesOnDeactivate = false
+        collectionBehavior = [.transient, .ignoresCycle, .fullScreenAuxiliary]
+        isReleasedWhenClosed = false
+
+        effectView.state = .active
+        effectView.wantsLayer = true
+        effectView.layer?.cornerRadius = 10
+        effectView.layer?.masksToBounds = true
+        contentView = effectView
+
+        iconView.imageScaling = .scaleProportionallyUpOrDown
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.font = .systemFont(ofSize: 12.5, weight: .medium)
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.maximumNumberOfLines = 1
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        detailLabel.font = .systemFont(ofSize: 10.5, weight: .regular)
+        detailLabel.lineBreakMode = .byTruncatingTail
+        detailLabel.maximumNumberOfLines = 1
+        detailLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        effectView.addSubview(iconView)
+        effectView.addSubview(titleLabel)
+        effectView.addSubview(detailLabel)
+        NSLayoutConstraint.activate([
+            iconView.leadingAnchor.constraint(equalTo: effectView.leadingAnchor, constant: 10),
+            iconView.centerYAnchor.constraint(equalTo: effectView.centerYAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: 24),
+            iconView.heightAnchor.constraint(equalToConstant: 24),
+            titleLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 10),
+            titleLabel.trailingAnchor.constraint(equalTo: effectView.trailingAnchor, constant: -10),
+            titleLabel.topAnchor.constraint(equalTo: effectView.topAnchor, constant: 9),
+            detailLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            detailLabel.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
+            detailLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 2)
+        ])
+        refreshAppearance()
+    }
+
+    override var canBecomeKey: Bool {
+        false
+    }
+
+    override var canBecomeMain: Bool {
+        false
+    }
+
+    func show(tab: TabRailTabInfo, tabCount: Int, frame: CGRect) {
+        let app = tab.token.flatMap { NSRunningApplication(processIdentifier: $0.pid) }
+        iconView.image = app?.icon ?? NSImage(named: NSImage.applicationIconName)
+        titleLabel.stringValue = tab.title?.nilIfEmpty
+            ?? tab.appName?.nilIfEmpty
+            ?? "Untitled window"
+        let appName = tab.appName?.nilIfEmpty ?? app?.localizedName?.nilIfEmpty ?? "Window"
+        detailLabel.stringValue = "\(appName) · Tab \(tab.visualIndex + 1) of \(tabCount)"
+        setFrame(frame, display: false)
+        orderFront(nil)
+    }
+
+    func hide() {
+        orderOut(nil)
+    }
+
+    func refreshAppearance() {
+        let reduceTransparency = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
+        effectView.material = reduceTransparency ? .windowBackground : .hudWindow
+        effectView.blendingMode = reduceTransparency ? .withinWindow : .behindWindow
+        effectView.layer?.backgroundColor = reduceTransparency
+            ? NSColor.windowBackgroundColor.cgColor
+            : NSColor.clear.cgColor
+        effectView.layer?.borderWidth = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast ? 1 : 0.5
+        effectView.layer?.borderColor = TabRailMetrics.trackBorderColor.cgColor
+        titleLabel.textColor = .labelColor
+        detailLabel.textColor = .secondaryLabelColor
+    }
+}
+
+private final class TabRailTrackView: NSVisualEffectView {
+    private let overlayView = TabRailTrackOverlayView(frame: .zero)
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        state = .active
+        wantsLayer = true
+        layer?.cornerRadius = TabRailMetrics.trackCornerRadius
+        layer?.masksToBounds = true
+        overlayView.frame = bounds
+        overlayView.autoresizingMask = [.width, .height]
+        addSubview(overlayView)
+        refreshAppearance()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func hitTest(_: NSPoint) -> NSView? {
+        nil
+    }
+
+    func update(
+        layout: TabRailLayout,
+        activeVisualIndex: Int,
+        hoveredVisualIndex: Int?,
+        railHovered: Bool
+    ) {
+        overlayView.update(
+            layout: layout,
+            activeVisualIndex: activeVisualIndex,
+            hoveredVisualIndex: hoveredVisualIndex,
+            railHovered: railHovered
+        )
+    }
+
+    func refreshAppearance() {
+        let reduceTransparency = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
+        material = reduceTransparency ? .windowBackground : .hudWindow
+        blendingMode = reduceTransparency ? .withinWindow : .behindWindow
+        layer?.backgroundColor = reduceTransparency
+            ? NSColor.windowBackgroundColor.cgColor
+            : NSColor.clear.cgColor
+        overlayView.refreshAppearance()
+    }
+}
+
+private final class TabRailTrackOverlayView: NSView {
+    private static let selectionAnimationDuration: CFTimeInterval = 0.25
+
+    private var railLayout = TabRailLayout.empty
+    private var activeVisualIndex = 0
+    private var hoveredVisualIndex: Int?
+    private var railHovered = false
+    private var segmentLayers: [Int: CAShapeLayer] = [:]
+    private var hasRenderedSegments = false
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func hitTest(_: NSPoint) -> NSView? {
+        nil
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        updateSegmentLayers(
+            animateSelectionChange: false,
+            preserveRunningPathAnimation: false,
+            preserveRunningColorAnimation: false
+        )
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        refreshAppearance()
+    }
+
+    func update(
+        layout: TabRailLayout,
+        activeVisualIndex: Int,
+        hoveredVisualIndex: Int?,
+        railHovered: Bool
+    ) {
+        let activeChanged = hasRenderedSegments && self.activeVisualIndex != activeVisualIndex
+        let hoverChanged = self.hoveredVisualIndex != hoveredVisualIndex || self.railHovered != railHovered
+        let layoutChanged = railLayout != layout
+        let previousIndices = Set(railLayout.items.map(\.visualIndex))
+        let nextIndices = Set(layout.items.map(\.visualIndex))
+
+        railLayout = layout
+        self.activeVisualIndex = activeVisualIndex
+        self.hoveredVisualIndex = hoveredVisualIndex
+        self.railHovered = railHovered
+
+        let layersChanged = previousIndices != nextIndices
+        if layersChanged {
+            rebuildSegmentLayers()
+        }
+        let geometryStable = !layoutChanged && !layersChanged
+        updateSegmentLayers(
+            animateSelectionChange: activeChanged
+                && geometryStable
+                && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+            preserveRunningPathAnimation: !activeChanged && geometryStable,
+            preserveRunningColorAnimation: !activeChanged && !hoverChanged && geometryStable
+        )
+        hasRenderedSegments = !layout.items.isEmpty
+        needsDisplay = true
+    }
+
+    func refreshAppearance() {
+        updateSegmentLayers(
+            animateSelectionChange: false,
+            preserveRunningPathAnimation: false,
+            preserveRunningColorAnimation: false
+        )
+        needsDisplay = true
+    }
+
+    override func draw(_: NSRect) {
+        let localBounds = bounds.insetBy(
+            dx: TabRailMetrics.trackBorderWidth / 2,
+            dy: TabRailMetrics.trackBorderWidth / 2
+        )
+        if railHovered {
+            TabRailMetrics.hoverColor.setFill()
+            NSBezierPath(
+                roundedRect: localBounds,
+                xRadius: TabRailMetrics.trackCornerRadius,
+                yRadius: TabRailMetrics.trackCornerRadius
+            ).fill()
+        }
+
+        TabRailMetrics.trackBorderColor.setStroke()
+        let border = NSBezierPath(
+            roundedRect: localBounds,
+            xRadius: TabRailMetrics.trackCornerRadius,
+            yRadius: TabRailMetrics.trackCornerRadius
+        )
+        border.lineWidth = TabRailMetrics.trackBorderWidth
+        border.stroke()
+    }
+
+    private func rebuildSegmentLayers() {
+        for segmentLayer in segmentLayers.values {
+            segmentLayer.removeAllAnimations()
+            segmentLayer.removeFromSuperlayer()
+        }
+        segmentLayers.removeAll(keepingCapacity: true)
+
+        for item in railLayout.items {
+            let segmentLayer = CAShapeLayer()
+            segmentLayer.actions = [
+                "path": NSNull(),
+                "fillColor": NSNull(),
+                "bounds": NSNull(),
+                "position": NSNull()
+            ]
+            layer?.addSublayer(segmentLayer)
+            segmentLayers[item.visualIndex] = segmentLayer
+        }
+    }
+
+    private func updateSegmentLayers(
+        animateSelectionChange: Bool,
+        preserveRunningPathAnimation: Bool,
+        preserveRunningColorAnimation: Bool
+    ) {
+        guard !railLayout.items.isEmpty else { return }
+        let clampedActiveIndex = min(max(0, activeVisualIndex), railLayout.items.count - 1)
+        let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+        let sourceRects = Dictionary(
+            uniqueKeysWithValues: railLayout.items.map { item in
+                (
+                    item.visualIndex,
+                    item.pillRect.offsetBy(
+                        dx: -railLayout.barRect.minX,
+                        dy: -railLayout.barRect.minY
+                    )
+                )
+            }
+        )
+        let targetRects = TabRailSegmentGeometry.equallyPaddedRects(
+            sourceRects: sourceRects,
+            trackBounds: bounds,
+            width: TabRailMetrics.segmentWidth,
+            selectedVisualIndex: clampedActiveIndex,
+            verticalMargin: TabRailMetrics.segmentVerticalInset,
+            scale: scale
+        )
+        let startTime = CACurrentMediaTime()
+
+        for item in railLayout.items {
+            guard let segmentLayer = segmentLayers[item.visualIndex],
+                  let rect = targetRects[item.visualIndex]
+            else { continue }
+            let selected = item.visualIndex == clampedActiveIndex
+            let hovered = hoveredVisualIndex == item.visualIndex
+            let targetPath = CGPath(
+                roundedRect: rect,
+                cornerWidth: TabRailMetrics.segmentCornerRadius,
+                cornerHeight: TabRailMetrics.segmentCornerRadius,
+                transform: nil
+            )
+            let color = selected
+                ? TabRailMetrics.selectedColor(hovered: hovered)
+                : TabRailMetrics.unselectedColor(hovered: hovered, railHovered: railHovered)
+            let targetColor = color.usingColorSpace(.deviceRGB)?.cgColor ?? color.cgColor
+            let presentation = segmentLayer.presentation()
+            let fromPath = presentation?.path ?? segmentLayer.path
+            let fromColor = presentation?.fillColor ?? segmentLayer.fillColor
+
+            if !preserveRunningPathAnimation {
+                segmentLayer.removeAnimation(forKey: "selection.path")
+            }
+            if !preserveRunningColorAnimation {
+                segmentLayer.removeAnimation(forKey: "selection.color")
+            }
+            segmentLayer.frame = bounds
+            segmentLayer.contentsScale = scale
+            segmentLayer.path = targetPath
+            segmentLayer.fillColor = targetColor
+
+            guard animateSelectionChange, let fromPath, let fromColor else { continue }
+            let timing = CAMediaTimingFunction(name: .easeInEaseOut)
+            let pathAnimation = CABasicAnimation(keyPath: "path")
+            pathAnimation.fromValue = fromPath
+            pathAnimation.toValue = targetPath
+            pathAnimation.duration = Self.selectionAnimationDuration
+            pathAnimation.beginTime = segmentLayer.convertTime(startTime, from: nil)
+            pathAnimation.timingFunction = timing
+            segmentLayer.add(pathAnimation, forKey: "selection.path")
+
+            let colorAnimation = CABasicAnimation(keyPath: "fillColor")
+            colorAnimation.fromValue = fromColor
+            colorAnimation.toValue = targetColor
+            colorAnimation.duration = Self.selectionAnimationDuration
+            colorAnimation.beginTime = segmentLayer.convertTime(startTime, from: nil)
+            colorAnimation.timingFunction = timing
+            segmentLayer.add(colorAnimation, forKey: "selection.color")
+        }
+    }
+}
+
 private final class TabRailView: NSView {
     private var tabs: [TabRailTabInfo] = []
+    private let trackView = TabRailTrackView(frame: .zero)
 
     private var isHovered = false {
         didSet {
-            if oldValue != isHovered {
-                needsDisplay = true
+            guard oldValue != isHovered else { return }
+            updateTrackView()
+            if !isHovered {
+                onHoverChange?(nil, nil)
             }
         }
     }
 
     private var hoveredVisualIndex: Int? {
         didSet {
-            if oldValue != hoveredVisualIndex {
-                needsDisplay = true
-            }
+            guard oldValue != hoveredVisualIndex else { return }
+            updateTrackView()
+            notifyHoverChange()
         }
     }
 
@@ -623,6 +1160,17 @@ private final class TabRailView: NSView {
     private var activeVisualIndex = 0
 
     var onSelect: ((Int) -> Void)?
+    var onHoverChange: ((TabRailTabInfo?, CGRect?) -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        addSubview(trackView)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
 
     func update(tabs: [TabRailTabInfo], activeVisualIndex: Int) {
         let metadataChanged = !Self.hasSameAccessibilityMetadata(self.tabs, tabs)
@@ -630,15 +1178,15 @@ private final class TabRailView: NSView {
         let activeChanged = self.activeVisualIndex != activeVisualIndex
         self.tabs = tabs
         self.activeVisualIndex = activeVisualIndex
-
-        if tabsChanged || activeChanged {
-            needsDisplay = true
-        }
+        updateTrackView()
 
         if metadataChanged {
             refreshAccessibilityElements()
         } else if activeChanged {
             updateAccessibilitySelection(postNotification: true)
+        }
+        if tabsChanged || activeChanged {
+            notifyHoverChange()
         }
     }
 
@@ -648,6 +1196,7 @@ private final class TabRailView: NSView {
 
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
+        updateTrackView()
         if !suppressAccessibilityGeometryUpdates {
             refreshAccessibilityElements()
         }
@@ -657,6 +1206,11 @@ private final class TabRailView: NSView {
         suppressAccessibilityGeometryUpdates = true
         body()
         suppressAccessibilityGeometryUpdates = false
+    }
+
+    func refreshAppearance() {
+        trackView.refreshAppearance()
+        updateTrackView()
     }
 
     func refreshAccessibilityFrames() {
@@ -705,34 +1259,6 @@ private final class TabRailView: NSView {
         hoveredVisualIndex = nil
     }
 
-    override func draw(_: NSRect) {
-        guard tabCount > 0 else { return }
-
-        let layout = currentLayout()
-        guard !layout.items.isEmpty else { return }
-        let visualRailRect = TabRailLayout.visualRailRect(in: layout.railRect)
-
-        fillRoundedRect(visualBarRect(in: visualRailRect), color: TabRailMetrics.backgroundColor)
-        fillRect(gutterRect(in: visualRailRect), color: TabRailMetrics.gutterColor)
-        fillRect(edgeRect(in: visualRailRect), color: TabRailMetrics.edgeColor)
-
-        if isHovered {
-            fillRoundedRect(visualRailRect, color: TabRailMetrics.hoverColor)
-        }
-
-        let clampedActiveVisualIndex = min(max(0, activeVisualIndex), tabCount - 1)
-
-        for item in layout.items {
-            if item.visualIndex != clampedActiveVisualIndex {
-                drawSegment(item, selected: false)
-            }
-        }
-
-        if let selectedItem = layout.items.first(where: { $0.visualIndex == clampedActiveVisualIndex }) {
-            drawSegment(selectedItem, selected: true)
-        }
-    }
-
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         guard let visualIndex = visualIndex(at: point) else { return }
@@ -779,92 +1305,57 @@ private final class TabRailView: NSView {
         "Click a segment to select that tab."
     }
 
-    private func visualBarRect(in railRect: CGRect) -> CGRect {
-        CGRect(
-            x: railRect.minX,
-            y: railRect.minY,
-            width: TabRailMetrics.barThickness,
-            height: railRect.height
-        )
-    }
-
-    private func gutterRect(in railRect: CGRect) -> CGRect {
-        CGRect(
-            x: railRect.minX + TabRailMetrics.barThickness,
-            y: railRect.minY,
-            width: TabRailMetrics.spacing,
-            height: railRect.height
-        )
-    }
-
-    private func edgeRect(in railRect: CGRect) -> CGRect {
-        CGRect(
-            x: railRect.minX + TabRailMetrics.barThickness,
-            y: railRect.minY + 1,
-            width: TabRailMetrics.edgeLineWidth,
-            height: max(0, railRect.height - 2)
-        )
-    }
-
-    private func visualRectForSegment(_ item: TabRailLayout.Item, selected: Bool, hovered: Bool) -> CGRect {
-        let segmentRect = item.pillRect
-        let width = if selected {
-            TabRailMetrics.activeSegmentWidth
-        } else if hovered {
-            TabRailMetrics.hoveredSegmentWidth
-        } else {
-            TabRailMetrics.inactiveSegmentWidth
-        }
-        let x = segmentRect.midX - width / 2
-        return CGRect(
-            x: x,
-            y: segmentRect.origin.y,
-            width: width,
-            height: segmentRect.height
-        )
-    }
-
-    private func drawSegment(_ item: TabRailLayout.Item, selected: Bool) {
-        let hovered = hoveredVisualIndex == item.visualIndex
-        let segmentRect = visualRectForSegment(item, selected: selected, hovered: hovered)
-        guard segmentRect.width > 0, segmentRect.height > 0 else { return }
-        let path = NSBezierPath(
-            roundedRect: segmentRect,
-            xRadius: TabRailMetrics.cornerRadius,
-            yRadius: TabRailMetrics.cornerRadius
-        )
-        if selected {
-            TabRailMetrics.selectedColor(hovered: hovered).setFill()
-        } else {
-            TabRailMetrics.unselectedColor(hovered: hovered, railHovered: isHovered).setFill()
-        }
-        path.fill()
-
-        if selected {
-            TabRailMetrics.selectedStrokeColor.setStroke()
-            path.lineWidth = 1
-            path.stroke()
-        }
-    }
-
-    private func fillRoundedRect(_ rect: CGRect, color: NSColor) {
-        color.setFill()
-        NSBezierPath(
-            roundedRect: rect,
-            xRadius: TabRailMetrics.cornerRadius,
-            yRadius: TabRailMetrics.cornerRadius
-        ).fill()
-    }
-
-    private func fillRect(_ rect: CGRect, color: NSColor) {
-        guard rect.width > 0, rect.height > 0 else { return }
-        color.setFill()
-        NSBezierPath(rect: rect).fill()
+    private func hoverVisualIndex(at point: CGPoint) -> Int? {
+        let layout = currentLayout()
+        guard tabCount > 0, layout.railRect.contains(point) else { return nil }
+        return layout.items.min {
+            abs($0.hitRect.midY - point.y) < abs($1.hitRect.midY - point.y)
+        }?.visualIndex
     }
 
     private func updateHoveredVisualIndex(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        hoveredVisualIndex = visualIndex(at: point)
+        hoveredVisualIndex = hoverVisualIndex(at: point)
+    }
+
+    private func updateTrackView() {
+        let layout = currentLayout()
+        let sourceRects = Dictionary(
+            uniqueKeysWithValues: layout.items.map { ($0.visualIndex, $0.pillRect) }
+        )
+        let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+        let packedHeight = TabRailSegmentGeometry.packedHeight(
+            sourceRects: sourceRects,
+            selectedVisualIndex: activeVisualIndex,
+            verticalMargin: TabRailMetrics.segmentVerticalInset,
+            endInset: TabRailMetrics.trackEndInset,
+            scale: scale
+        )
+        let trackHeight = min(layout.barRect.height, packedHeight)
+        trackView.frame = CGRect(
+            x: layout.barRect.minX,
+            y: layout.barRect.midY - trackHeight / 2,
+            width: layout.barRect.width,
+            height: trackHeight
+        )
+        trackView.update(
+            layout: layout,
+            activeVisualIndex: activeVisualIndex,
+            hoveredVisualIndex: hoveredVisualIndex,
+            railHovered: isHovered
+        )
+    }
+
+    private func notifyHoverChange() {
+        guard isHovered,
+              let hoveredVisualIndex,
+              let tab = tabs.first(where: { $0.visualIndex == hoveredVisualIndex }),
+              let item = currentLayout().items.first(where: { $0.visualIndex == hoveredVisualIndex })
+        else {
+            onHoverChange?(nil, nil)
+            return
+        }
+        onHoverChange?(tab, item.hitRect)
     }
 
     private func currentLayout() -> TabRailLayout {

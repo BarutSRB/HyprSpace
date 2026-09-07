@@ -261,6 +261,45 @@ final class NiriWorkspaceIsolationTests: XCTestCase {
         assertIndexMatchesTree(engine, in: workspaceB)
     }
 
+    func testActivateWindowReconcilesTabbedVisibility() throws {
+        let engine = NiriLayoutEngine()
+        let workspace = WorkspaceDescriptor.ID()
+        let first = engine.addWindow(
+            token: WindowToken(pid: 940, windowId: 11),
+            to: workspace,
+            afterSelection: nil
+        )
+        let second = engine.addWindow(
+            token: WindowToken(pid: 940, windowId: 12),
+            to: workspace,
+            afterSelection: first.id
+        )
+        let column = try XCTUnwrap(engine.findColumn(containing: first, in: workspace))
+        let secondColumn = try XCTUnwrap(engine.findColumn(containing: second, in: workspace))
+        second.detach()
+        secondColumn.remove()
+        column.appendChild(second)
+        column.displayMode = .tabbed
+        column.setActiveTileIdx(0)
+        engine.updateTabbedColumnVisibility(column: column)
+
+        XCTAssertFalse(first.isHiddenInTabbedMode)
+        XCTAssertTrue(second.isHiddenInTabbedMode)
+
+        engine.activateWindow(second.id, in: workspace)
+
+        XCTAssertEqual(column.activeTileIdx, 1)
+        XCTAssertTrue(first.isHiddenInTabbedMode)
+        XCTAssertFalse(second.isHiddenInTabbedMode)
+
+        column.displayMode = .normal
+        first.isHiddenInTabbedMode = true
+        engine.activateWindow(first.id, in: workspace)
+
+        XCTAssertFalse(first.isHiddenInTabbedMode)
+        XCTAssertFalse(second.isHiddenInTabbedMode)
+    }
+
     func testFullscreenToggleCannotMutateAnotherRoot() {
         let engine = NiriLayoutEngine()
         let workspaceA = WorkspaceDescriptor.ID()

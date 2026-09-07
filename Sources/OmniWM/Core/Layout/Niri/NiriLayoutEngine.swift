@@ -449,10 +449,11 @@ final class NiriLayoutEngine {
     func activateWindow(_ nodeId: NodeId, in workspaceId: WorkspaceDescriptor.ID) {
         assertSanctionedMutation()
         guard let node = findNode(by: nodeId, in: workspaceId),
-              let col = column(of: node) else { return }
-        let windowNodes = col.windowNodes
-        let idx = windowNodes.firstIndex(where: { $0.id == nodeId }) ?? 0
+              let col = column(of: node),
+              let idx = col.windowNodes.firstIndex(where: { $0.id == nodeId })
+        else { return }
         col.setActiveTileIdx(idx)
+        updateTabbedColumnVisibility(column: col)
     }
 
     func columnX(at index: Int, columns: [NiriContainer], gaps: CGFloat) -> CGFloat {
